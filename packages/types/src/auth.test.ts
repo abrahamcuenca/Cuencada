@@ -5,6 +5,7 @@ import {
   inviteAcceptInputSchema,
   loginInputSchema,
   magicLinkConsumeInputSchema,
+  maskEmail,
   passwordSchema
 } from "./auth.js";
 import { emailSchema } from "./common.js";
@@ -116,5 +117,43 @@ describe("adminInviteCreateInputSchema", () => {
   it("rejects open or multi-use admin invites", () => {
     expect(adminInviteCreateInputSchema.safeParse({ role: "admin", sendEmail: false }).success).toBe(false);
     expect(adminInviteCreateInputSchema.safeParse({ role: "admin", email: "a@b.mx", maxUses: 2 }).success).toBe(false);
+  });
+
+  it("requires admin invites to be delivered by email (no copy-link)", () => {
+    const result = adminInviteCreateInputSchema.safeParse({ role: "admin", email: "a@b.mx", sendEmail: false });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.some((issue) => issue.path[0] === "sendEmail")).toBe(true);
+    expect(adminInviteCreateInputSchema.safeParse({ role: "admin", email: "a@b.mx" }).success).toBe(true);
+  });
+
+  it("caps open member invites at 20 uses and 14 days", () => {
+    expect(adminInviteCreateInputSchema.safeParse({ sendEmail: false, maxUses: 20, expiresInDays: 14 }).success).toBe(true);
+    expect(adminInviteCreateInputSchema.safeParse({ sendEmail: false, maxUses: 21 }).success).toBe(false);
+    expect(adminInviteCreateInputSchema.safeParse({ sendEmail: false, expiresInDays: 15 }).success).toBe(false);
+  });
+});
+
+describe("maskEmail", () => {
+  it("keeps only the first characters and the TLD", () => {
+    expect(maskEmail("tia.lupe@example.com")).toBe("t***@e***.com");
+    expect(maskEmail("ab@gmail.com.mx")).toBe("a***@g***.mx");
+  });
+
+  it("never returns the full address, even for short ones", () => {
+    expect(maskEmail("a@b.co")).toBe("a***@b***.co");
+    expect(maskEmail("a@b.co")).not.toContain("a@b");
+  });
+
+  it("handles malformed input without throwing", () => {
+    expect(maskEmail("nope")).toBe("***");
+    expect(maskEmail("x@localhost")).toBe("x***@l***");
+  });
+});
+
+describe("displayNameSchema via inviteAcceptInputSchema", () => {
+  it("rejects RTL-override and invisible display names", () => {
+    const base = { token: validToken, email: "a@b.mx", password: "contraseña-segura" };
+    expect(inviteAcceptInputSchema.safeParse({ ...base, displayName: "\u202E" }).success).toBe(false);
+    expect(inviteAcceptInputSchema.safeParse({ ...base, displayName: "Admin\u200B" }).success).toBe(false);
   });
 });

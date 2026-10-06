@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { directoryEntrySchema, updateProfileInputSchema } from "./profile.js";
+import { directoryEntrySchema, toDirectoryEntry, updateProfileInputSchema } from "./profile.js";
 import { upsertRsvpInputSchema } from "./rsvp.js";
 
 const userId = "1b2c3d4e-5f60-4b7c-9d8e-0f1a2b3c4d5e";
@@ -33,6 +33,47 @@ describe("directoryEntrySchema", () => {
     const base = { userId, personId: null, displayName: "Ana", fullName: "Ana", familyBranch: null, avatarUrl: null, bio: null };
     expect(directoryEntrySchema.safeParse({ ...base, phone: null }).success).toBe(false);
     expect(directoryEntrySchema.safeParse({ ...base, phone: "+52 999 123 4567" }).success).toBe(true);
+  });
+});
+
+describe("toDirectoryEntry", () => {
+  const source = {
+    userId,
+    personId: null,
+    displayName: "Ana",
+    fullName: "Ana Cuenca",
+    familyBranch: null,
+    avatarUrl: null,
+    bio: null,
+    email: "ana@familia.mx",
+    phone: "+52 999 123 4567",
+    city: null,
+    visibility: { showEmail: false, showPhone: true, showCity: true }
+  };
+
+  it("omits hidden and empty contact fields entirely", () => {
+    const entry = toDirectoryEntry(source);
+    expect(entry).toEqual({
+      userId,
+      personId: null,
+      displayName: "Ana",
+      fullName: "Ana Cuenca",
+      familyBranch: null,
+      avatarUrl: null,
+      bio: null,
+      phone: "+52 999 123 4567"
+    });
+    expect("email" in entry).toBe(false);
+    expect("city" in entry).toBe(false);
+  });
+
+  it("produces output the response schema accepts", () => {
+    expect(directoryEntrySchema.safeParse(toDirectoryEntry(source)).success).toBe(true);
+  });
+
+  it("fails closed when a hand-rolled mapper emits undefined", () => {
+    const { visibility: _visibility, ...rest } = source;
+    expect(directoryEntrySchema.safeParse({ ...rest, email: undefined, city: undefined }).success).toBe(false);
   });
 });
 

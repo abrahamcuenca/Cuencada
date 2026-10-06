@@ -3,7 +3,7 @@
  * account. Tree data is PII: member-only, never public.
  */
 import { z } from "zod";
-import { cursorQuerySchema, idSchema, nullableTextSchema, requiredTextSchema } from "./common.js";
+import { cursorQuerySchema, displayTextSchema, idSchema, nullableDisplayTextSchema, nullableTextSchema } from "./common.js";
 
 /**
  * Directed edge between two people. `parent_of`: from is a parent of to.
@@ -106,15 +106,17 @@ export const familyTreeViewSchema = z.object({
 /** `GET /api/family/tree` query. Without `personId` the caller's own person is the focus. */
 export const familyTreeQuerySchema = z.object({
   personId: idSchema.exactOptional(),
-  depth: z.coerce.number().int().min(1).max(FAMILY_TREE_MAX_DEPTH).default(1)
+  depth: z.coerce.number<number | string>().int().min(1).max(FAMILY_TREE_MAX_DEPTH).default(1)
 });
 export type FamilyTreeQuery = z.infer<typeof familyTreeQuerySchema>;
+export type FamilyTreeQueryRequest = z.input<typeof familyTreeQuerySchema>;
 
 /** `GET /api/family/people` query (search). */
 export const peopleQuerySchema = cursorQuerySchema.extend({
   q: z.string().trim().max(100).exactOptional()
 });
 export type PeopleQuery = z.infer<typeof peopleQuerySchema>;
+export type PeopleQueryRequest = z.input<typeof peopleQuerySchema>;
 
 /* -------------------------------------------------------------------------- */
 /* Inputs                                                                      */
@@ -123,8 +125,8 @@ export type PeopleQuery = z.infer<typeof peopleQuerySchema>;
 const yearValue = z.number().int().min(1800).max(2200);
 
 const personFields = {
-  fullName: requiredTextSchema(200),
-  nickname: nullableTextSchema(80),
+  fullName: displayTextSchema(200),
+  nickname: nullableDisplayTextSchema(80),
   familyBranch: nullableTextSchema(120),
   birthYear: yearValue.nullable(),
   deathYear: yearValue.nullable(),
@@ -144,7 +146,7 @@ const yearsIssue = { error: "El año de fallecimiento no puede ser anterior al d
 export const createPersonInputSchema = z
   .object({
     ...personFields,
-    nickname: nullableTextSchema(80).default(null),
+    nickname: nullableDisplayTextSchema(80).default(null),
     familyBranch: nullableTextSchema(120).default(null),
     birthYear: yearValue.nullable().default(null),
     deathYear: yearValue.nullable().default(null),
@@ -153,6 +155,7 @@ export const createPersonInputSchema = z
   })
   .refine(yearsConsistent, yearsIssue);
 export type CreatePersonInput = z.infer<typeof createPersonInputSchema>;
+export type CreatePersonRequest = z.input<typeof createPersonInputSchema>;
 
 /** `PATCH /api/admin/people/:id`. `userId` links/unlinks an account (unique). */
 export const updatePersonInputSchema = z
@@ -161,6 +164,7 @@ export const updatePersonInputSchema = z
   .refine(yearsConsistent, yearsIssue)
   .refine((value) => Object.keys(value).length > 0, { error: "No hay cambios que guardar." });
 export type UpdatePersonInput = z.infer<typeof updatePersonInputSchema>;
+export type UpdatePersonRequest = z.input<typeof updatePersonInputSchema>;
 
 /**
  * `POST /api/admin/relationships`. The server rejects self-references,
@@ -177,6 +181,7 @@ export const createRelationshipInputSchema = z
     path: ["toPersonId"]
   });
 export type CreateRelationshipInput = z.infer<typeof createRelationshipInputSchema>;
+export type CreateRelationshipRequest = z.input<typeof createRelationshipInputSchema>;
 
 /**
  * `PATCH /api/family/me`: a member edits limited fields of their *own* linked
@@ -184,10 +189,11 @@ export type CreateRelationshipInput = z.infer<typeof createRelationshipInputSche
  */
 export const selfEditPersonInputSchema = z
   .object({
-    nickname: nullableTextSchema(80),
+    nickname: nullableDisplayTextSchema(80),
     familyBranch: nullableTextSchema(120),
     birthYear: yearValue.nullable()
   })
   .partial()
   .refine((value) => Object.keys(value).length > 0, { error: "No hay cambios que guardar." });
 export type SelfEditPersonInput = z.infer<typeof selfEditPersonInputSchema>;
+export type SelfEditPersonRequest = z.input<typeof selfEditPersonInputSchema>;

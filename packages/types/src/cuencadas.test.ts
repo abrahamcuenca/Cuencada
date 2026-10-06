@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { API_ERROR_DETAILS_MAX, apiErrorSchema } from "./common.js";
 import {
   createCuencadaInputSchema,
   createItineraryItemInputSchema,
+  createLocationInputSchema,
   dailyMessageLineSchema,
   parseDailyMessagesText,
   reorderInputSchema,
-  updateCuencadaInputSchema
+  updateCuencadaInputSchema,
+  updateLocationInputSchema
 } from "./cuencadas.js";
 
 describe("dailyMessageLineSchema", () => {
@@ -38,8 +41,9 @@ describe("dailyMessageLineSchema", () => {
 
 describe("parseDailyMessagesText", () => {
   it("parses a file with BOM, CRLF, blank lines and comments", () => {
-    const text = "﻿# mensajes\r\n2026-09-10|uno\r\n\r\n2026-09-11|dos\n";
+    const text = "\uFEFF# mensajes\r\n2026-09-10|uno\r\n\r\n2026-09-11|dos\n";
     expect(parseDailyMessagesText(text)).toEqual({
+      errorCount: 0,
       entries: [
         { date: "2026-09-10", message: "uno" },
         { date: "2026-09-11", message: "dos" }
@@ -62,7 +66,7 @@ describe("parseDailyMessagesText", () => {
   });
 
   it("returns nothing for an empty file", () => {
-    expect(parseDailyMessagesText("")).toEqual({ entries: [], errors: [] });
+    expect(parseDailyMessagesText("")).toEqual({ entries: [], errors: [], errorCount: 0 });
   });
 });
 
@@ -117,6 +121,59 @@ describe("createItineraryItemInputSchema", () => {
 
   it("rejects 12h time strings", () => {
     expect(createItineraryItemInputSchema.safeParse({ date: "2028-07-01", title: "Cena", startTime: "7:30 PM" }).success).toBe(false);
+  });
+});
+
+describe("parseDailyMessagesText error cap", () => {
+  it("never returns more than API_ERROR_DETAILS_MAX details and ends with a summary", () => {
+    const text = Array.from({ length: 150 }, (_, index) => `basura ${index}`).join("\n");
+    const result = parseDailyMessagesText(text);
+    expect(result.errorCount).toBe(150);
+    expect(result.errors).toHaveLength(API_ERROR_DETAILS_MAX);
+    expect(result.errors[98]?.path).toBe("lines.99");
+    expect(result.errors[99]).toEqual({ path: "lines", message: expect.stringContaining("51 más") });
+    expect(apiErrorSchema.safeParse({ error: { code: "VALIDATION", message: "x", details: result.errors } }).success).toBe(true);
+  });
+
+  it("does not add a summary at exactly 100 errors", () => {
+    const text = Array.from({ length: 100 }, (_, index) => `basura ${index}`).join("\n");
+    const result = parseDailyMessagesText(text);
+    expect(result.errors).toHaveLength(100);
+    expect(result.errors[99]?.path).toBe("lines.100");
+  });
+});
+
+describe("location coordinates", () => {
+  it("rejects a patch that sets or clears only one coordinate", () => {
+    expect(updateLocationInputSchema.safeParse({ lat: null }).success).toBe(false);
+    expect(updateLocationInputSchema.safeParse({ lng: -89.6 }).success).toBe(false);
+    expect(updateLocationInputSchema.safeParse({ lat: 20.97, lng: null }).success).toBe(false);
+  });
+
+  it("accepts setting or clearing both together", () => {
+    expect(updateLocationInputSchema.safeParse({ lat: 20.97, lng: -89.62 }).success).toBe(true);
+    expect(updateLocationInputSchema.safeParse({ lat: null, lng: null }).success).toBe(true);
+    expect(createLocationInputSchema.safeParse({ name: "Izamal", lat: 20.93 }).success).toBe(false);
+  });
+});
+
+describe("createCuencadaInputSchema timezone and links", () => {
+  const base = {
+    year: 2028,
+    title: "Cuencada 2028",
+    startsAt: "2028-07-01T00:00:00-06:00",
+    endsAt: "2028-07-05T23:59:59-06:00",
+    city: "Oaxaca",
+    state: "Oaxaca",
+    description: "Próxima reunión."
+  };
+
+  it("rejects an unknown timezone", () => {
+    expect(createCuencadaInputSchema.safeParse({ ...base, timezone: "Foo/Bar" }).success).toBe(false);
+  });
+
+  it("stores the canonical link", () => {
+    expect(createCuencadaInputSchema.parse({ ...base, whatsappUrl: "https://Chat.WhatsApp.com/x" }).whatsappUrl).toBe("https://chat.whatsapp.com/x");
   });
 });
 

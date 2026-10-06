@@ -7,7 +7,14 @@
  * All URLs in responses are presigned GETs valid for 1 hour.
  */
 import { z } from "zod";
-import { cursorQuerySchema, dateTimeSchema, idSchema, nullableTextSchema, queryBooleanSchema } from "./common.js";
+import {
+  cursorQuerySchema,
+  dateTimeSchema,
+  hasUnsafeChars,
+  idSchema,
+  nullableTextSchema,
+  queryBooleanSchema
+} from "./common.js";
 
 const MB = 1024 * 1024;
 
@@ -15,13 +22,19 @@ const MB = 1024 * 1024;
 /* MIME types and limits                                                       */
 /* -------------------------------------------------------------------------- */
 
-/** Allowlist of upload MIME types. Anything else is rejected with `UPLOAD_INVALID`. */
+/**
+ * Allowlist of upload MIME types. Anything else is rejected with `UPLOAD_INVALID`.
+ * - No HEIC: iOS Safari converts HEIC→JPEG for `<input accept="image/*">`, and
+ *   sharp's prebuilt libvips cannot decode HEIC.
+ * - `video/quicktime` (.mov) is what iPhones produce; videos are stored as
+ *   uploaded (no transcoding), so their `thumbUrl` may be `null`.
+ */
 export const MediaMimeType = {
   Jpeg: "image/jpeg",
   Png: "image/png",
   Webp: "image/webp",
-  Heic: "image/heic",
-  Mp4: "video/mp4"
+  Mp4: "video/mp4",
+  Quicktime: "video/quicktime"
 } as const;
 export type MediaMimeType = (typeof MediaMimeType)[keyof typeof MediaMimeType];
 export const mediaMimeTypeSchema = z.enum(MediaMimeType, { error: "Tipo de archivo no permitido." });
@@ -44,7 +57,7 @@ export const AVATAR_MAX_BYTES = 10 * MB;
 
 /** Maps an allowed MIME type to its kind. */
 export function mediaKindOfMime(mimeType: MediaMimeType): MediaKind {
-  return mimeType === MediaMimeType.Mp4 ? MediaKind.Video : MediaKind.Image;
+  return mimeType.startsWith("video/") ? MediaKind.Video : MediaKind.Image;
 }
 
 /** Maximum allowed byte size for an allowed MIME type. */
@@ -102,7 +115,8 @@ export const fileNameSchema = z
   .trim()
   .min(1)
   .max(255)
-  .refine((value) => !hasPathOrControlChars(value), { error: "Nombre de archivo inválido." });
+  .normalize("NFC")
+  .refine((value) => !hasPathOrControlChars(value) && !hasUnsafeChars(value), { error: "Nombre de archivo inválido." });
 
 function hasPathOrControlChars(value: string): boolean {
   for (const char of value) {
@@ -133,6 +147,7 @@ export const createUploadInputSchema = z
     }
   });
 export type CreateUploadInput = z.infer<typeof createUploadInputSchema>;
+export type CreateUploadRequest = z.input<typeof createUploadInputSchema>;
 
 /**
  * Presigned PUT. The client must send exactly `headers` (Content-Type and
@@ -152,9 +167,13 @@ export const createUploadResponseSchema = z.object({
   expiresAt: dateTimeSchema
 }) satisfies z.ZodType<CreateUploadResponse>;
 
-/** `POST /api/media/:id/confirm` body (empty; reserved for future checksum). */
-export const confirmUploadInputSchema = z.object({}).strict();
+/**
+ * `POST /api/media/:id/confirm` body. Send no body or `{}`; any key is rejected
+ * (reserved for a future checksum). Fastify passes `undefined` when absent.
+ */
+export const confirmUploadInputSchema = z.strictObject({}).optional();
 export type ConfirmUploadInput = z.infer<typeof confirmUploadInputSchema>;
+export type ConfirmUploadRequest = z.input<typeof confirmUploadInputSchema>;
 
 /* -------------------------------------------------------------------------- */
 /* Items                                                                       */
@@ -207,10 +226,12 @@ export const mediaListQuerySchema = cursorQuerySchema.extend({
   kind: mediaKindSchema.exactOptional()
 });
 export type MediaListQuery = z.infer<typeof mediaListQuerySchema>;
+export type MediaListQueryRequest = z.input<typeof mediaListQuerySchema>;
 
 /** `PATCH /api/media/:id` body (uploader or admin). */
 export const updateMediaInputSchema = z.object({ caption: mediaCaptionSchema });
 export type UpdateMediaInput = z.infer<typeof updateMediaInputSchema>;
+export type UpdateMediaRequest = z.input<typeof updateMediaInputSchema>;
 
 /** `POST /api/media/:id/report` body. One open report per user per item. */
 export const reportMediaInputSchema = z.object({
@@ -218,6 +239,7 @@ export const reportMediaInputSchema = z.object({
   details: nullableTextSchema(500).default(null)
 });
 export type ReportMediaInput = z.infer<typeof reportMediaInputSchema>;
+export type ReportMediaRequest = z.input<typeof reportMediaInputSchema>;
 
 /* -------------------------------------------------------------------------- */
 /* Admin moderation                                                            */
@@ -269,6 +291,7 @@ export const adminMediaQuerySchema = cursorQuerySchema.extend({
   reported: queryBooleanSchema.exactOptional()
 });
 export type AdminMediaQuery = z.infer<typeof adminMediaQuerySchema>;
+export type AdminMediaQueryRequest = z.input<typeof adminMediaQuerySchema>;
 
 /** `POST /api/admin/media/:id/moderate` body. `delete` is a soft delete. */
 export const moderateMediaInputSchema = z.object({
@@ -276,3 +299,4 @@ export const moderateMediaInputSchema = z.object({
   note: nullableTextSchema(500).default(null)
 });
 export type ModerateMediaInput = z.infer<typeof moderateMediaInputSchema>;
+export type ModerateMediaRequest = z.input<typeof moderateMediaInputSchema>;

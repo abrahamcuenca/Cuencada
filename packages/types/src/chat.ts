@@ -3,12 +3,25 @@
  *
  * WebSocket handshake: `POST /api/chat/ticket` → connect to
  * `wss://<host>/api/chat/ws?ticket=<ticket>`. The ticket is single-use,
- * expires in 30s, and must be redacted from request logs. The server checks
- * `Origin` on upgrade and closes sockets whose session is revoked.
+ * expires in 30s, is bound to the issuing session (revoking the session
+ * invalidates unused tickets), and must be redacted from app *and* reverse-proxy
+ * logs. The server checks `Origin` on upgrade and closes sockets whose session
+ * is revoked.
+ *
+ * Rooms: the global room is created by the seed; a Cuencada room is created
+ * automatically the first time that Cuencada is published.
  * Every frame is JSON, validated with the discriminated unions below.
  */
 import { z } from "zod";
-import { cursorSchema, dateTimeSchema, errorCodeSchema, idSchema } from "./common.js";
+import {
+  cursorSchema,
+  dateTimeSchema,
+  errorCodeSchema,
+  hasVisibleChars,
+  idSchema,
+  opaqueTokenSchema,
+  stripUnsafeChars
+} from "./common.js";
 
 export const ChatRoomKind = {
   Global: "global",
@@ -92,20 +105,34 @@ export const chatMessageSchema = z.object({
   deletedAt: dateTimeSchema.nullable()
 }) satisfies z.ZodType<ChatMessage>;
 
-/** Outgoing message body: trimmed, 1–2000 chars. */
+/**
+ * Outgoing message body: NFC, bidi controls and invisible marks stripped
+ * (ZWJ kept for emoji), trimmed, 1–2000 chars, at least one visible character.
+ */
 export const chatBodySchema = z
   .string()
-  .trim()
-  .min(1, { error: "El mensaje está vacío." })
-  .max(CHAT_BODY_MAX_LENGTH, { error: `Máximo ${CHAT_BODY_MAX_LENGTH} caracteres.` });
+  .max(CHAT_BODY_MAX_LENGTH * 2, { error: `Máximo ${CHAT_BODY_MAX_LENGTH} caracteres.` })
+  .transform((value) => stripUnsafeChars(value.normalize("NFC")).trim())
+  .pipe(
+    z
+      .string()
+      .min(1, { error: "El mensaje está vacío." })
+      .max(CHAT_BODY_MAX_LENGTH, { error: `Máximo ${CHAT_BODY_MAX_LENGTH} caracteres.` })
+      .refine(hasVisibleChars, { error: "El mensaje está vacío." })
+  );
 
-/** `GET /api/chat/rooms/:id/messages` query (keyset, newest pages first). */
+/** `:id` path parameter of `/api/chat/rooms/:id/…`. */
+export const roomIdParamSchema = z.object({ id: idSchema });
+export type RoomIdParam = z.infer<typeof roomIdParamSchema>;
+
+/** `GET /api/chat/rooms/:id/messages` query (keyset, newest pages first). Params: `roomIdParamSchema`. */
 export const chatHistoryQuerySchema = z.object({
   /** Opaque cursor from a previous page's `nextBefore`. Omit for the latest page. */
   before: cursorSchema.exactOptional(),
-  limit: z.coerce.number().int().min(1).max(100).default(50)
+  limit: z.coerce.number<number | string>().int().min(1).max(100).default(50)
 });
 export type ChatHistoryQuery = z.infer<typeof chatHistoryQuerySchema>;
+export type ChatHistoryQueryRequest = z.input<typeof chatHistoryQuerySchema>;
 
 /** One history page. `messages` are oldest → newest within the page. */
 export interface ChatHistoryPage {
@@ -119,9 +146,10 @@ export const chatHistoryPageSchema = z.object({
   nextBefore: z.string().nullable()
 }) satisfies z.ZodType<ChatHistoryPage>;
 
-/** `POST /api/chat/rooms/:id/read` body. */
+/** `POST /api/chat/rooms/:id/read` body. Params: `roomIdParamSchema`. */
 export const markReadInputSchema = z.object({ messageId: idSchema });
 export type MarkReadInput = z.infer<typeof markReadInputSchema>;
+export type MarkReadRequest = z.input<typeof markReadInputSchema>;
 
 /** `POST /api/chat/ticket` response. */
 export interface ChatTicketResponse {
@@ -139,9 +167,10 @@ export const chatTicketResponseSchema = z.object({
 
 /** WS connect query. */
 export const chatWsQuerySchema = z.object({
-  ticket: z.string().trim().min(32).max(256).regex(/^[A-Za-z0-9_-]+$/)
+  ticket: opaqueTokenSchema
 });
 export type ChatWsQuery = z.infer<typeof chatWsQuerySchema>;
+export type ChatWsQueryRequest = z.input<typeof chatWsQuerySchema>;
 
 /* -------------------------------------------------------------------------- */
 /* WebSocket: client → server                                                  */
@@ -178,6 +207,7 @@ export const wsClientMessageSchema = z.discriminatedUnion("type", [
   wsClientPingSchema
 ]);
 export type WsClientMessage = z.infer<typeof wsClientMessageSchema>;
+export type WsClientMessageRequest = z.input<typeof wsClientMessageSchema>;
 
 /* -------------------------------------------------------------------------- */
 /* WebSocket: server → client                                                  */
@@ -187,7 +217,7 @@ export const wsServerMessageEventSchema = z.object({
   type: z.literal("message"),
   message: chatMessageSchema,
   /** Echo of the sender's `clientMessageId`; `null` for other recipients. */
-  clientMessageId: z.string().max(64).nullable()
+  clientMessageId: clientMessageIdSchema.nullable()
 });
 export const wsServerMessageDeletedSchema = z.object({
   type: z.literal("message_deleted"),
@@ -208,7 +238,7 @@ export const wsServerErrorSchema = z.object({
   type: z.literal("error"),
   code: errorCodeSchema,
   message: z.string().max(500),
-  clientMessageId: z.string().max(64).nullable()
+  clientMessageId: clientMessageIdSchema.nullable()
 });
 export const wsServerPongSchema = z.object({
   type: z.literal("pong"),

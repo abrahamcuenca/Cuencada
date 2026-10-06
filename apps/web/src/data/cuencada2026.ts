@@ -47,8 +47,7 @@ export const cuencada2026: PublicCuencada = {
   ],
   publicLocations: [
     location("hotel-chariot", "Hotel Chariot Mérida", "hotel", "https://www.hotelchariotmerida.com/", 0),
-    location("hotel-conquistador", "Hotel El Conquistador", "hotel", "https://www.elconquistador.com.mx/", 1),
-    location("whatsapp", "Grupo WhatsApp Cuencada", "other", "https://chat.whatsapp.com/IvI6oayIIoEJ8Wn7EWQxO0?s=cl&p=i&mlu=0", 2)
+    location("hotel-conquistador", "Hotel El Conquistador", "hotel", "https://www.elconquistador.com.mx/", 1)
   ],
   publicAnnouncements: [],
   todayMessage: null
