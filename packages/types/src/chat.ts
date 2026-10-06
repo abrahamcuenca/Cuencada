@@ -31,8 +31,18 @@ export type ChatRoomKind = (typeof ChatRoomKind)[keyof typeof ChatRoomKind];
 export const chatRoomKindSchema = z.enum(ChatRoomKind);
 
 export const CHAT_BODY_MAX_LENGTH = 2000;
-/** Hard cap on an inbound WS frame, enforced before JSON.parse. */
-export const WS_MAX_FRAME_BYTES = 16 * 1024;
+/**
+ * Hard cap on an inbound WS frame, enforced before JSON.parse (the server's
+ * `maxPayload`; a larger frame closes the socket with 1009). A maximal `send`
+ * (2000 UTF-16 units, at most 6000 UTF-8 bytes) plus the envelope fits.
+ */
+export const WS_MAX_FRAME_BYTES = 8 * 1024;
+/** Lifetime of a chat ticket from `POST /api/chat/ticket`. */
+export const CHAT_TICKET_TTL_SECONDS = 30;
+/** Most messages per history page (also the default). */
+export const CHAT_HISTORY_LIMIT_MAX = 50;
+/** Longest last-message preview in `GET /api/chat/rooms`. */
+export const CHAT_PREVIEW_MAX_LENGTH = 140;
 /** Server ping/keepalive interval. */
 export const WS_PING_INTERVAL_MS = 25_000;
 
@@ -50,17 +60,43 @@ export type WsCloseCode = (typeof WsCloseCode)[keyof typeof WsCloseCode];
 /* REST models                                                                 */
 /* -------------------------------------------------------------------------- */
 
-/** A room the caller can read (`GET /api/chat/rooms`). */
+/** The newest live (not deleted) message of a room, truncated for the room list. */
+export interface ChatRoomLastMessage {
+  id: string;
+  /** `null` if the sender's account was removed. */
+  senderDisplayName: string | null;
+  /** At most `CHAT_PREVIEW_MAX_LENGTH` characters; a trailing `…` marks truncation. */
+  preview: string;
+  createdAt: string;
+}
+
+export const chatRoomLastMessageSchema = z.object({
+  id: idSchema,
+  senderDisplayName: z.string().max(80).nullable(),
+  preview: z.string().max(CHAT_PREVIEW_MAX_LENGTH),
+  createdAt: dateTimeSchema
+}) satisfies z.ZodType<ChatRoomLastMessage>;
+
+/**
+ * A room the caller can read (`GET /api/chat/rooms`): the global room plus the
+ * rooms of published editions, most recent activity first.
+ */
 export interface ChatRoom {
   id: string;
   kind: ChatRoomKind;
   cuencadaId: string | null;
   year: number | null;
   title: string;
+  /** Live messages from other members after `lastReadMessageId` (capped at `CHAT_UNREAD_COUNT_MAX`). */
   unreadCount: number;
+  /** `createdAt` of the newest live message. */
   lastMessageAt: string | null;
   lastReadMessageId: string | null;
+  lastMessage: ChatRoomLastMessage | null;
 }
+
+/** Unread counts stop at this value (the UI shows "999+"). */
+export const CHAT_UNREAD_COUNT_MAX = 999;
 
 export const chatRoomSchema = z.object({
   id: idSchema,
@@ -68,9 +104,10 @@ export const chatRoomSchema = z.object({
   cuencadaId: idSchema.nullable(),
   year: z.number().int().nullable(),
   title: z.string().max(200),
-  unreadCount: z.number().int().min(0),
+  unreadCount: z.number().int().min(0).max(CHAT_UNREAD_COUNT_MAX),
   lastMessageAt: dateTimeSchema.nullable(),
-  lastReadMessageId: idSchema.nullable()
+  lastReadMessageId: idSchema.nullable(),
+  lastMessage: chatRoomLastMessageSchema.nullable()
 }) satisfies z.ZodType<ChatRoom>;
 
 export interface ChatSender {
@@ -129,7 +166,12 @@ export type RoomIdParam = z.infer<typeof roomIdParamSchema>;
 export const chatHistoryQuerySchema = z.object({
   /** Opaque cursor from a previous page's `nextBefore`. Omit for the latest page. */
   before: cursorSchema.exactOptional(),
-  limit: z.coerce.number<number | string>().int().min(1).max(100).default(50)
+  limit: z.coerce
+    .number<number | string>()
+    .int()
+    .min(1)
+    .max(CHAT_HISTORY_LIMIT_MAX)
+    .default(CHAT_HISTORY_LIMIT_MAX)
 });
 export type ChatHistoryQuery = z.infer<typeof chatHistoryQuerySchema>;
 export type ChatHistoryQueryRequest = z.input<typeof chatHistoryQuerySchema>;
