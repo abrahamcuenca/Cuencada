@@ -21,6 +21,12 @@ describe("auditLogQuerySchema", () => {
     expect(auditActionSchema.safeParse(AuditAction.CuencadaPublished).success).toBe(true);
     expect(auditActionSchema.safeParse("Publish").success).toBe(false);
   });
+
+  it("accepts every well-known audit action", () => {
+    for (const action of Object.values(AuditAction)) {
+      expect(auditActionSchema.safeParse(action).success, action).toBe(true);
+    }
+  });
 });
 
 describe("adminUserPatchInputSchema", () => {

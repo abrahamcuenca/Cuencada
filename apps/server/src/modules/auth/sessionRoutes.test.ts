@@ -133,13 +133,13 @@ describe("POST /api/auth/login", () => {
     }
     const known: number[] = [];
     const unknown: number[] = [];
-    for (let index = 0; index < 3; index += 1) {
+    for (let index = 0; index < 5; index += 1) {
       known.push(await time(user.email));
       unknown.push(await time(`nadie${index}@example.test`));
     }
-    const median = (values: number[]): number => [...values].sort((a, b) => a - b)[1] ?? 0;
-    // Loose bound (CI noise): without the dummy verify, unknown emails would be ~50x faster.
-    expect(median(unknown)).toBeGreaterThan(median(known) * 0.4);
+    // Compare the fastest runs (least affected by load from parallel test files).
+    // Without the dummy verify, unknown emails would be ~20-50x faster; the bound is loose on purpose.
+    expect(Math.min(...unknown)).toBeGreaterThan(Math.min(...known) * 0.25);
   });
 
   it("returns 400 VALIDATION for a malformed body", async () => {

@@ -283,7 +283,7 @@ const adminInviteRoutes: FastifyPluginAsyncZod = async (app) => {
         await tx.update(invites).set({ tokenHash: hashToken(token) }).where(eq(invites.id, row.id));
         await recordAudit(tx, {
           actorUserId: admin.id,
-          action: "invite.resent",
+          action: AuditAction.InviteResent,
           entityType: "invite",
           entityId: row.id,
           ip: request.ip

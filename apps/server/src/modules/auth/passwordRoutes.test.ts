@@ -6,6 +6,7 @@ import { getTestDb } from "../../../test/helpers/db.js";
 import { createUser } from "../../../test/helpers/factories.js";
 import { FakeMailer } from "../../../test/helpers/fakes.js";
 import type { App } from "../../app.js";
+import { mailQueue } from "./mailQueue.js";
 import { auditLogs, magicLinks, sessions, users } from "../../db/schema/index.js";
 import { verifyPassword } from "../../lib/passwords.js";
 
@@ -69,7 +70,7 @@ describe("POST /api/auth/change-password", () => {
     expect(audits).toHaveLength(1);
     expect(JSON.stringify(audits[0]?.metadata)).not.toContain(NEW_PASSWORD);
 
-    await app.jobs.onIdle();
+    await mailQueue(app).onIdle();
     const notice = mailer.lastTo(user.email);
     expect(notice?.tags).toEqual({ category: "password-changed" });
     expect(notice?.text).toContain("admin@cuencada.com");
@@ -147,7 +148,7 @@ describe("password reset", () => {
       await requestReset(app, "nadie@example.test"),
       await requestReset(app, disabled.email)
     ];
-    await app.jobs.onIdle();
+    await mailQueue(app).onIdle();
 
     expect(results).toEqual(Array(3).fill({ statusCode: 202, body: JSON.stringify({ ok: true }) }));
     expect(mailer.outbox).toHaveLength(1);
@@ -166,7 +167,7 @@ describe("password reset", () => {
     const user = await createUser({ mustChangePassword: true });
     const login = await loginFull(app, user);
     await requestReset(app, user.email);
-    await app.jobs.onIdle();
+    await mailQueue(app).onIdle();
     const token = linkToken(mailer.lastTo(user.email));
 
     const response = await app.inject({
@@ -184,7 +185,7 @@ describe("password reset", () => {
     const rows = await getTestDb().select().from(sessions).where(eq(sessions.userId, user.id));
     expect(rows.map((session) => session.revokedReason)).toEqual(["password_reset"]);
     expect((await app.inject({ method: "GET", url: "/api/me", ...login.auth })).statusCode).toBe(401);
-    await app.jobs.onIdle();
+    await mailQueue(app).onIdle();
     expect(mailer.lastTo(user.email)?.tags).toEqual({ category: "password-changed" });
     const audits = await getTestDb().select().from(auditLogs).where(eq(auditLogs.action, "auth.password_reset"));
     expect(audits).toHaveLength(1);
@@ -205,7 +206,7 @@ describe("password reset", () => {
     const user = await createUser();
     await requestReset(app, user.email);
     await app.inject({ method: "POST", url: "/api/auth/magic-link/request", payload: { email: user.email } });
-    await app.jobs.onIdle();
+    await mailQueue(app).onIdle();
     const [resetMail, loginMail] = mailer.outbox;
     clock.advance(31 * 60_000);
 

@@ -25,7 +25,7 @@ Based on `origin/main` (2363af2, WP-0.4 merged).
 **Consumed** (all frozen, none edited):
 - WP-0.4 guard (`config.auth`, `allowPendingPasswordChange`, CSRF on `"cookie"` routes)
 - `lib/tokens`, `lib/passwords`, `lib/rateLimit` (`credentialRateLimits`, `extraRateLimitHook`, `rateLimitByIp`), `lib/audit`, `lib/mailer` (`sendTemplate`, `appLink`), `lib/errors`
-- `app.jobs`, `app.clock`, `app.storage`
+- `app.jobs` (only to key the mail queue), `app.clock`, `app.storage`
 - schema tables `users`, `sessions`, `refresh_tokens`, `invites`, `magic_links`, `profiles`, `people`
 
 **Exposed:** every T1 row of the WP-0.2 table, plus the amendments.
@@ -73,7 +73,7 @@ No web code consumed the changed shapes (checked with grep), so `apps/web` needs
 - **No `pending_verification` user status exists** (`UserStatus` = `active | disabled`). Login rejects only `disabled`. Unverified users can log in; T5/T6 gate PII with `requireVerifiedEmail`.
 - **Change-password starts a new session.** It revokes **every** session, including the caller's (`password_changed`), and starts a new one for this device. So any copy of the old access token or refresh token dies immediately, which satisfies "revoke others and rotate current" (WP-0.4 T1 item: "new session + new access token + refresh cookie"). It also burns outstanding reset links.
 - **Change-password rate limit.** I did not use `credentialRateLimits` here. Its email keys come from the body, which has no `email`, so the "per email across IPs" cap would become one global bucket shared by all users. Instead: 20/15 min per IP (`config.rateLimit`) plus 10/15 min per user (`extraRateLimitHook` keyed on `request.user.id`). Reset confirm uses a per-IP limit for the same reason; its tokens carry 256 bits.
-- **Email sends on the request endpoints** (magic link, reset, verify, password-changed notice) run on `app.jobs`, off the request path. Known and unknown emails therefore answer in the same time. The known path adds one small insert; a test asserts similar timing. Trade-off: the queue is serial and shared with T4 media processing, so an email can wait behind an image job; that's fine at family scale. Invite emails are awaited instead, so the admin sees a failure: 503 `SERVICE_UNAVAILABLE`, the invite stays pending with `last_sent_at = null`, and Resend can retry it.
+- **Email sends on the request endpoints** (magic link, reset, verify, password-changed notice) run off the request path on the auth module's **own serial mail queue** (`modules/auth/mailQueue.ts`: a second `createJobQueue` instance, closed `onClose`; `lib/jobs.ts` untouched), so T4 media jobs on `app.jobs` can never delay them. Known and unknown emails therefore answer the same way and in the same time, whatever the provider latency. Tests: a held mail queue still lets the 202 through with an empty outbox, and an email goes out while a media job blocks `app.jobs`. Invite emails are awaited instead, so the admin sees a failure: 503 `SERVICE_UNAVAILABLE`, the invite stays pending with `last_sent_at = null`, and Resend can retry it.
 - **Idempotency keys** come from row ids, never from tokens: `magic-link:<id>`, `password-reset:<id>`, `verify-email:<id>`, `password-changed:<sessionId|magicLinkId>`, `invite:<id>:<sentAtMs>`.
 - **Refresh token rows** expire with the session's idle expiry at issue time. The idle expiry slides on refresh and is capped at the absolute expiry. Cookie `Max-Age` = seconds until that expiry. Tokens are locked `FOR UPDATE` together with their session row.
 - **Logout** finds the session from any of its refresh tokens, including one already rotated by another tab, so logging out from a stale tab still works.
@@ -110,13 +110,15 @@ No web code consumed the changed shapes (checked with grep), so `apps/web` needs
 3. **Magic-link consume and invite accept ignore any `Authorization` header** (they are `auth: "public"`, so the guard never loads a user). The previous user's session is not read, extended or revoked, and the response is built only from the link's user. Tests send user A's bearer while consuming user B's link or accepting an invite: the response contains nothing from A. The magic-link test also checks that A's session row is unchanged, and the invite test that A's token still resolves to A.
 
 ## Requests (→ orchestrator)
-- **Audit actions in the contract:** add the `auth.*`/`invite.resent` actions above to `AuditAction` in `packages/types/src/admin.ts` (owned by T8/Phase 0) so the admin audit view can label them. They already pass `auditActionSchema`.
 - **`SessionRevokedReason` has no "logout all" value:** `logout-all` uses `user_revoked`. If T8 wants to tell "user revoked one session" from "user logged out everywhere", add `logout_all` in a future WP-2.1 migration.
-- **Mail queue isolation (optional):** a separate job queue (or priority) for emails in `lib/jobs.ts`, so a long sharp job (T4) can't delay a magic-link email.
 - **WP-2.4:** `/api/auth/*` responses carry `Set-Cookie`. nginx must not cache them and must forward `Origin` unchanged (the CSRF check compares it exactly).
 
 ## Verification
-`pnpm lint`, `pnpm typecheck`, `pnpm test` (546 tests; server 232, two extra server runs also green), `pnpm build`, `pnpm audit --prod` (no known vulnerabilities).
+After merging `origin/main` (T2-FE #11, T4-FE #9): `pnpm lint`, `pnpm typecheck`, `pnpm test` (665 tests, 4 consecutive green full runs), `pnpm build`, `pnpm audit --prod` (no known vulnerabilities). One earlier full run under load flaked in the login timing test (now compares the fastest of 5 runs with a 0.25 ratio) and in three web tests from main (T2-FE/T4-FE, not touched here).
 
 ## Review log
-- (none yet)
+- **Orchestrator round 1:** every decision and all 7 contract amendments signed off. Follow-ups done:
+  - merged `origin/main` (T2-FE #11, T4-FE #9; no conflicts)
+  - **authorized:** the `auth.*` actions and `invite.resent` are now in `AuditAction` (`packages/types/src/admin.ts`, with a test that every action passes `auditActionSchema`); `AuthAuditAction` and the invite resend use them
+  - **authorized:** a separate mail queue (see Decisions), done without touching frozen files
+  - noted: PR #10 (T1-FE) will switch "cerrar en todos los dispositivos" to `POST /api/auth/logout-all`

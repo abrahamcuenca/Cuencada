@@ -10,6 +10,7 @@ import type { FastifyInstance } from "fastify";
 import { type MagicLinkPurpose, magicLinks, users } from "../../db/schema/index.js";
 import type { Transaction } from "../../lib/audit.js";
 import { createOpaqueToken, hashToken } from "../../lib/tokens.js";
+import { mailQueue } from "./mailQueue.js";
 
 /** Lifetimes per purpose, in minutes. */
 export const EMAIL_TOKEN_TTL_MINUTES = {
@@ -18,20 +19,20 @@ export const EMAIL_TOKEN_TTL_MINUTES = {
   email_verify: 24 * 60
 } as const satisfies Record<MagicLinkPurpose, number>;
 
-/** Audit actions written by the auth module (`entity.verb_past`). */
+/** Audit actions written by the auth module (all from the contract's `AuditAction`). */
 export const AuthAuditAction = {
-  LoggedIn: "auth.logged_in",
-  LoginFailed: "auth.login_failed",
-  LoggedOut: "auth.logged_out",
-  SessionRevoked: "auth.session_revoked",
-  SessionsRevoked: "auth.sessions_revoked",
+  LoggedIn: AuditAction.LoggedIn,
+  LoginFailed: AuditAction.LoginFailed,
+  LoggedOut: AuditAction.LoggedOut,
+  SessionRevoked: AuditAction.SessionRevoked,
+  SessionsRevoked: AuditAction.SessionsRevoked,
   RefreshReuseDetected: AuditAction.RefreshReuseDetected,
   PasswordChanged: AuditAction.PasswordChanged,
   PasswordReset: AuditAction.PasswordReset,
-  PasswordResetRequested: "auth.password_reset_requested",
-  MagicLinkRequested: "auth.magic_link_requested",
-  EmailVerificationRequested: "auth.email_verification_requested",
-  EmailVerified: "auth.email_verified"
+  PasswordResetRequested: AuditAction.PasswordResetRequested,
+  MagicLinkRequested: AuditAction.MagicLinkRequested,
+  EmailVerificationRequested: AuditAction.EmailVerificationRequested,
+  EmailVerified: AuditAction.EmailVerified
 } as const;
 
 /** A newly created email token. */
@@ -150,17 +151,17 @@ export async function markEmailVerified(tx: Transaction, consumed: ConsumedEmail
 }
 
 /**
- * Run a mail send off the request path, on the app's serial job queue, so
- * request-for-token endpoints answer in the same time whether or not an email
- * goes out (no account enumeration by timing). Failures are logged by the
- * queue (never with the body or token).
+ * Run a mail send off the request path, on the auth module's own serial mail
+ * queue, so request-for-token endpoints answer in the same time whether or
+ * not an email goes out (no account enumeration by timing). Failures are
+ * logged by the queue (never with the body or token).
  *
- * @param app - Needs `jobs`.
+ * @param app - Needs `jobs` (identifies the app's mail queue).
  * @param name - Job label for logs (no PII, no token).
  * @param send - The send.
  */
 export function sendInBackground(app: Pick<FastifyInstance, "jobs">, name: string, send: () => Promise<unknown>): void {
-  app.jobs.enqueue(name, async () => {
+  mailQueue(app).enqueue(name, async () => {
     await send();
   });
 }

@@ -7,6 +7,7 @@ import { getTestDb } from "../../../test/helpers/db.js";
 import { createUser } from "../../../test/helpers/factories.js";
 import { FakeMailer } from "../../../test/helpers/fakes.js";
 import type { App } from "../../app.js";
+import { mailQueue } from "./mailQueue.js";
 import { auditLogs, magicLinks, sessions, users } from "../../db/schema/index.js";
 
 let app: App | undefined;
@@ -20,10 +21,9 @@ function code(response: { json: <T>() => T }): string {
   return response.json<{ error: { code: string } }>().error.code;
 }
 
-async function requestLink(instance: App, email: string): Promise<{ statusCode: number; body: string; ms: number }> {
-  const started = performance.now();
+async function requestLink(instance: App, email: string): Promise<{ statusCode: number; body: string }> {
   const response = await instance.inject({ method: "POST", url: "/api/auth/magic-link/request", payload: { email } });
-  return { statusCode: response.statusCode, body: response.body, ms: performance.now() - started };
+  return { statusCode: response.statusCode, body: response.body };
 }
 
 function consume(instance: App, token: string, headers: Record<string, string> = {}): Promise<LightMyRequestResponse> {
@@ -40,7 +40,7 @@ describe("POST /api/auth/magic-link/request", () => {
     const known = await requestLink(app, user.email);
     const unknown = await requestLink(app, "nadie@example.test");
     const inactive = await requestLink(app, disabled.email);
-    await app.jobs.onIdle();
+    await mailQueue(app).onIdle();
 
     for (const result of [known, unknown, inactive]) {
       expect(result.statusCode).toBe(202);
@@ -58,18 +58,49 @@ describe("POST /api/auth/magic-link/request", () => {
     expect(audits.map((audit) => audit.entityId)).toEqual([user.id]);
   });
 
-  it("takes similar time for known and unknown emails (the email is sent off the request path)", async () => {
-    app = await createTestApp();
+  it("sends the email on its own queue, even while a media job blocks app.jobs", async () => {
+    const mailer = new FakeMailer();
+    app = await createTestApp({ mailer });
     const user = await createUser();
-    const known: number[] = [];
-    const unknown: number[] = [];
-    for (let index = 0; index < 5; index += 1) {
-      known.push((await requestLink(app, user.email)).ms);
-      unknown.push((await requestLink(app, `nadie${index}@example.test`)).ms);
-    }
-    const median = (values: number[]): number => [...values].sort((a, b) => a - b)[2] ?? 0;
-    // Generous bound for CI noise; the known path only adds one small insert.
-    expect(median(known)).toBeLessThan(median(unknown) * 4 + 25);
+    let release: () => void = () => {};
+    const blocker = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let mediaDone = false;
+    app.jobs.enqueue("media.process", async () => {
+      await blocker;
+      mediaDone = true;
+    });
+
+    await requestLink(app, user.email);
+    await mailQueue(app).onIdle();
+
+    expect(mailer.lastTo(user.email)).toBeDefined();
+    expect(mediaDone).toBe(false);
+    release();
+    await app.jobs.onIdle();
+  });
+
+  it("answers before the email is sent, so a slow provider cannot reveal known emails by timing", async () => {
+    const mailer = new FakeMailer();
+    app = await createTestApp({ mailer });
+    const user = await createUser();
+    // Hold the mail queue, as a slow provider would.
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mailQueue(app).enqueue("test.hold", () => held);
+
+    const known = await requestLink(app, user.email);
+    const unknown = await requestLink(app, "nadie@example.test");
+
+    expect(known.statusCode).toBe(202);
+    expect(known.body).toBe(unknown.body);
+    expect(mailer.outbox).toHaveLength(0);
+    release();
+    await mailQueue(app).onIdle();
+    expect(mailer.outbox.map((mail) => mail.to)).toEqual([user.email]);
   });
 
   it("answers 400 VALIDATION for a malformed email and 429 after 10 requests", async () => {
@@ -88,7 +119,7 @@ describe("POST /api/auth/magic-link/consume", () => {
     app = await createTestApp({ mailer });
     const user = await createUser();
     await requestLink(app, user.email);
-    await app.jobs.onIdle();
+    await mailQueue(app).onIdle();
     const token = linkToken(mailer.lastTo(user.email));
 
     const first = await consume(app, token);
@@ -116,7 +147,7 @@ describe("POST /api/auth/magic-link/consume", () => {
     const later = await createUser();
     await requestLink(app, user.email);
     await requestLink(app, later.email);
-    await app.jobs.onIdle();
+    await mailQueue(app).onIdle();
     clock.advance(15 * 60_000 + 1000);
 
     const expired = await consume(app, linkToken(mailer.lastTo(user.email)));
@@ -136,7 +167,7 @@ describe("POST /api/auth/magic-link/consume", () => {
     const previous = await loginFull(app, signedIn);
     const [before] = await getTestDb().select().from(sessions).where(eq(sessions.userId, signedIn.id));
     await requestLink(app, linkOwner.email);
-    await app.jobs.onIdle();
+    await mailQueue(app).onIdle();
 
     const response = await consume(app, linkToken(mailer.lastTo(linkOwner.email)), previous.auth.headers);
 
@@ -165,7 +196,7 @@ describe("email verification", () => {
     const login = await loginFull(app, user);
 
     const requested = await app.inject({ method: "POST", url: "/api/auth/email/verify-request", ...login.auth });
-    await app.jobs.onIdle();
+    await mailQueue(app).onIdle();
     const mail = mailer.lastTo(user.email);
     const token = linkToken(mail);
     const verified = await app.inject({ method: "POST", url: "/api/auth/email/verify", payload: { token } });
@@ -190,7 +221,7 @@ describe("email verification", () => {
     const login = await loginFull(app, user);
 
     const response = await app.inject({ method: "POST", url: "/api/auth/email/verify-request", ...login.auth });
-    await app.jobs.onIdle();
+    await mailQueue(app).onIdle();
 
     expect(response.statusCode).toBe(202);
     expect(mailer.outbox).toHaveLength(0);
@@ -202,7 +233,7 @@ describe("email verification", () => {
     const user = await createUser();
     const login = await loginFull(app, user);
     await app.inject({ method: "POST", url: "/api/auth/email/verify-request", ...login.auth });
-    await app.jobs.onIdle();
+    await mailQueue(app).onIdle();
     await getTestDb().update(users).set({ email: "nueva@example.test" }).where(eq(users.id, user.id));
 
     const response = await app.inject({

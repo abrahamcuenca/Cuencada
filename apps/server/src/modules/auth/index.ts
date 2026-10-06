@@ -7,11 +7,13 @@
  */
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import emailRoutes from "./emailRoutes.js";
+import { registerMailQueue } from "./mailQueue.js";
 import passwordRoutes from "./passwordRoutes.js";
 import sessionRoutes from "./sessionRoutes.js";
 
 /** Auth routes under `/api`. */
 const authModule: FastifyPluginAsyncZod = async (app) => {
+  registerMailQueue(app);
   await app.register(sessionRoutes);
   await app.register(passwordRoutes);
   await app.register(emailRoutes);

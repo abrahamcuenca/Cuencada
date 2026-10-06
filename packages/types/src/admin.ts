@@ -38,8 +38,23 @@ export const AuditAction = {
   RefreshReuseDetected: "auth.refresh_reuse_detected",
   PasswordChanged: "auth.password_changed",
   PasswordReset: "auth.password_reset",
+  /** Password or magic-link login (`metadata.method`). */
+  LoggedIn: "auth.logged_in",
+  /** Failed login for an existing account (`metadata.reason`: `bad_password` | `inactive`). */
+  LoginFailed: "auth.login_failed",
+  LoggedOut: "auth.logged_out",
+  /** The user revoked one of their own sessions. */
+  SessionRevoked: "auth.session_revoked",
+  /** The user revoked several sessions (`metadata.scope`: `all` | `others`). */
+  SessionsRevoked: "auth.sessions_revoked",
+  PasswordResetRequested: "auth.password_reset_requested",
+  MagicLinkRequested: "auth.magic_link_requested",
+  EmailVerificationRequested: "auth.email_verification_requested",
+  EmailVerified: "auth.email_verified",
   InviteCreated: "invite.created",
   InviteRevoked: "invite.revoked",
+  /** A new token was issued and emailed. */
+  InviteResent: "invite.resent",
   InviteAccepted: "invite.accepted",
   CuencadaCreated: "cuencada.created",
   CuencadaUpdated: "cuencada.updated",

@@ -7,6 +7,7 @@ import { getTestDb } from "../../../test/helpers/db.js";
 import { createUser, type TestUser } from "../../../test/helpers/factories.js";
 import { FakeMailer } from "../../../test/helpers/fakes.js";
 import type { App } from "../../app.js";
+import { mailQueue } from "../auth/mailQueue.js";
 import { auditLogs, invites, people, profiles, users } from "../../db/schema/index.js";
 import { hashToken } from "../../lib/tokens.js";
 import { INVITE_ACCEPT_PER_TOKEN } from "./publicRoutes.js";
@@ -493,7 +494,7 @@ describe("auth and invite logs", () => {
     await inspect(app, inviteToken);
     await accept(app, inviteToken, "secreto@familia.mx");
     await app.inject({ method: "POST", url: "/api/auth/magic-link/request", payload: { email: "jefa@familia.mx" } });
-    await app.jobs.onIdle();
+    await mailQueue(app).onIdle();
     const magicToken = linkToken(mailer.lastTo("jefa@familia.mx"));
     await app.inject({ method: "POST", url: "/api/auth/magic-link/consume", payload: { token: magicToken } });
     await app.inject({
