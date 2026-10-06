@@ -22,13 +22,15 @@ function matches(href: string, method = "GET"): boolean {
 }
 
 describe("isPublicCuencadaRead", () => {
-  it.each(["/api/cuencadas/home", "/api/cuencadas/2026", "/api/cuencadas/1998"])("caches the public read %s", (path) => {
+  it.each(["/api/cuencadas", "/api/cuencadas/home", "/api/cuencadas/2026", "/api/cuencadas/1998"])("caches the public read %s", (path) => {
     expect(matches(path)).toBe(true);
   });
 
   it.each([
     "/api/cuencadas/2026/members",
-    "/api/cuencadas",
+    "/api/cuencadas?x",
+    "/api/cuencadas?year=2026",
+    "/api/cuencadas/",
     "/api/cuencadas/home/",
     "/api/cuencadas/20261",
     "/api/cuencadas/home?debug=1",
@@ -79,8 +81,26 @@ describe("NAVIGATE_FALLBACK_DENYLIST", () => {
     for (const path of ["/chat?ticket=abc123", "/?a=1&ticket=abc123"]) expect(denied(path)).toBe(true);
   });
 
+  it("never answers real files with the shell", () => {
+    for (const path of [
+      "/canciones/Cancion_Oficial.mp3",
+      "/canciones/",
+      "/images/logo-96.webp",
+      "/images/fotos/missing.jpg",
+      "/icons/icon-192.png",
+      "/sw.js",
+      "/manifest.webmanifest",
+      "/robots.txt",
+      "/favicon.ico?v=2"
+    ]) {
+      expect(denied(path)).toBe(true);
+    }
+  });
+
   it("lets app routes fall back to the shell", () => {
-    for (const path of ["/", "/cuencada/2026", "/entrar", "/galeria", "/apiary"]) expect(denied(path)).toBe(false);
+    for (const path of ["/", "/cuencada/2026", "/entrar", "/entrar/enlace", "/galeria", "/apiary", "/perfil/sesiones", "/arbol/6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b"]) {
+      expect(denied(path)).toBe(false);
+    }
   });
 });
 

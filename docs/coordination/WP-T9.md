@@ -11,14 +11,17 @@ Built on `origin/main` (885b4e9). Inputs: docs/plan.md (Frontend → PWA), WP-0.
   - **Manifest** (`/manifest.webmanifest`, linked by the plugin at build): name and short_name "Cuencada", `lang: es-MX`, `start_url: /`, `scope: /`, `id: /`, `display: standalone`, `orientation: portrait`, `theme_color #0b5e55`, `background_color #fffaf0`, and the four WP-0.7 icons (any and maskable, 192 and 512).
 - **Caching policy** (`src/features/pwa/swRules.ts`; matchers and plugin are self-contained because Workbox serializes them):
   - **Precache** (105 entries, about 1.1 MB): the app shell (`index.html`), every JS and CSS chunk, icons, `images/*.webp`, the manifest and `sw-purge.js`. Glob `**/*.{js,css,html,svg,png,webp,ico,webmanifest}`. Ignored: `**/canciones/**`, `**/api/**`, `**/*.map`. JPEG photos are not precached.
-  - **Runtime, NetworkFirst** (`cuencada-public-api`, 6 s network timeout, only 200s cached, 12 entries, 30 days): only same-origin `GET /api/cuencadas/home` and `GET /api/cuencadas/{4-digit year}`, with no query string.
-    - I checked `packages/types/src/cuencadas.ts` and the server's `public-routes.ts`. `publicCuencadaSchema` and `cuencadaHomeSchema` carry only public items, and the server builds them from `ContentScope.Public` and strips extra fields through the response schema. `heroImageUrl` and `songUrl` are stored values, not presigned URLs.
+  - **Runtime, NetworkFirst** (`cuencada-public-api`, 6 s network timeout, only 200s cached, 12 entries, 30 days): only same-origin `GET /api/cuencadas` (the public edition list, exactly `^/api/cuencadas$`), `GET /api/cuencadas/home` and `GET /api/cuencadas/{4-digit year}`, with no query string and no trailing slash.
+    - I checked `packages/types/src/cuencadas.ts` and the server's `public-routes.ts`. `cuencadaSummarySchema` (the list), `publicCuencadaSchema` and `cuencadaHomeSchema` carry only public items, and the server builds them from `ContentScope.Public` and strips extra fields through the response schema. `heroImageUrl` and `songUrl` are stored values, not presigned URLs.
     - `authorName` on public announcements is public by design.
   - **Not routed at all**, so the browser handles them natively (network only, nothing cached by the SW):
-    - every other `/api/**` route, including `/api/cuencadas/:year/members`, `/api/cuencadas` (the list), `/me`, directory, profile, media, admin and all of `/api/chat/*` (the ticket POST; the `/api/chat/ws` WebSocket upgrade never reaches a SW `fetch` handler anyway)
+    - every other `/api/**` route, including `/api/cuencadas/:year/members`, `/api/cuencadas?…` and `/api/cuencadas/`, `/me`, directory, profile, media, admin and all of `/api/chat/*` (the ticket POST; the `/api/chat/ws` WebSocket upgrade never reaches a SW `fetch` handler anyway)
     - presigned S3 URLs and every other cross-origin request (the weatherwidget iframe, Google Maps), because the matcher requires `sameOrigin`
     - `/canciones/*`
-  - **Navigation fallback** `index.html`. The denylist (tested against `pathname + search`) is `^/api(/|$)` plus any URL carrying `?ticket=` / `&ticket=` (chat WebSocket tickets).
+  - **Navigation fallback** `index.html`. The denylist (tested against `pathname + search`):
+    - `^/api(/|$)`
+    - any URL carrying `?ticket=` / `&ticket=` (chat WebSocket tickets)
+    - real files: `^/canciones/`, `^/images/`, `^/icons/`, and any path whose last segment has a 2–12 character extension (12 so `.webmanifest` counts) (`/sw.js`, `/robots.txt`, `/foo.webmanifest`), so a missing file 404s from the server instead of returning the HTML shell. App routes such as `/cuencada/2026` and `/arbol/:uuid` still fall back.
 - **Song decision: network only.** `Cancion_Oficial.mp3` (4.2 MB) is neither precached nor runtime-cached.
   - `<audio>` always fetches with `Range` headers and gets 206 partial responses. Workbox cannot build a cache entry from those; it needs a full 200 response first plus `RangeRequestsPlugin`, which only precaching provides.
   - A CacheFirst rule would therefore never populate, and precaching 4 MB on every install is too heavy for phones on the trip.
@@ -108,12 +111,18 @@ location /assets/            { add_header Cache-Control "public, max-age=3153600
 - **Screenshots** in `docs/ux/screenshots/t9/`: `update-banner-375`, `update-confirm-375`, `offline-programa-375`, `offline-home-375`, `install-ios-375`, `install-android-375` (webp).
 
 ## Requests
-1. **TL / CI:** add `pnpm --filter @cuencada/web check:sw` after the `size` step in `.github/workflows/ci.yml`. It needs the build output.
+1. **TL / CI:** done (approved): `pnpm --filter @cuencada/web check:sw` runs after the `size` step in `.github/workflows/ci.yml`.
 2. **T4-FE (gallery):** expose a non-creating `hasUploadsInFlight(store): boolean` from `features/gallery/index.ts`. It would wrap the existing `UploadManager.hasInFlight()` without instantiating the manager. The update prompt could then skip the "¿Recargar ahora?" step when idle and refuse to reload mid-upload. Until then it always confirms, and `beforeunload` is the backstop.
-3. **Orchestrator:** approve the one-line `MorePage.tsx` mount of `<InstallAppCard />`. `/mas` is app-owned; item 4 of the brief places the card there.
+3. **Orchestrator:** approved: the one-line `MorePage.tsx` mount of `<InstallAppCard />`.
 4. **WP-2.4:** the nginx headers above.
 5. **UX / WP-0.6 owner (optional):** offline, WP-0.6's top `OFFLINE_NOTICE` ("Sin conexión. Reintentaremos…") and T9's bottom "mostrando la última versión guardada" both show. They don't conflict, but one combined banner may read better.
 
 ## Open questions
-1. **`GET /api/cuencadas` (the public edition list)** is PII-free but not cached, per the plan (home and `:year` only). Offline, anything that lists editions will show its error state. Should it join the NetworkFirst rule?
-2. If public assets (`heroImageUrl`, `songUrl`) ever move to presigned URLs, the cached JSON would hold expiring URLs. Keep public assets on stable public URLs.
+- Decided: `GET /api/cuencadas` (the PII-free edition list) is cached too, in the same NetworkFirst rule (orchestrator, after the TL review of PR #29).
+- Backlog for WP-2.4: if public assets (`heroImageUrl`, `songUrl`) ever move to presigned URLs, the cached JSON would hold expiring URLs. Keep public assets on stable public URLs.
+
+## Review log
+- PR #29, TL approved. Follow-up before merge (orchestrator):
+  - The navigation fallback no longer answers real files (`/canciones/`, `/images/`, `/icons/`, any path ending in a file extension).
+  - `GET /api/cuencadas` (exact, no query) joins the public NetworkFirst rule.
+  - Unit tests and `check:sw` cover both, positive and negative cases.

@@ -5,10 +5,10 @@
  * Policy (docs/plan.md → PWA, docs/coordination/WP-T9.md):
  * - Precache: the app shell (HTML, JS, CSS) and small static assets (icons,
  *   webp images, the manifest). Never the 4 MB song, never `/api`.
- * - Runtime, NetworkFirst: only the public, PII-free
- *   `GET /api/cuencadas/home` and `GET /api/cuencadas/:year` (no query
- *   string), so the programa still works offline on the trip. Never
- *   `/members` or any other API route.
+ * - Runtime, NetworkFirst: only the public, PII-free `GET /api/cuencadas`
+ *   (edition list), `GET /api/cuencadas/home` and `GET /api/cuencadas/:year`
+ *   (no query string), so the programa still works offline on the trip.
+ *   Never `/members` or any other API route.
  * - Everything else is **not routed** by the service worker, so the browser
  *   handles it natively (network only, no SW cache): every other `/api/**`
  *   route (including all of `/api/chat/*`: the ticket POST and the
@@ -46,9 +46,10 @@ export interface RouteMatchInput {
 
 /**
  * Matches the public, PII-free Cuencada reads cached NetworkFirst:
- * `GET /api/cuencadas/home` and `GET /api/cuencadas/{4-digit year}` on our
- * own origin, without a query string. `/api/cuencadas/:year/members` (member
- * links), the edition list and every other API route never match.
+ * `GET /api/cuencadas` (edition list), `GET /api/cuencadas/home` and
+ * `GET /api/cuencadas/{4-digit year}` on our own origin, exactly, without a
+ * query string or trailing slash. `/api/cuencadas/:year/members` (member
+ * links) and every other API route never match.
  *
  * Self-contained: serialized into `sw.js`.
  *
@@ -61,7 +62,7 @@ export const isPublicCuencadaRead = (options: RouteMatchInput): boolean =>
   options.sameOrigin === true &&
   options.request.method === "GET" &&
   options.url.search === "" &&
-  /^\/api\/cuencadas\/(?:home|\d{4})$/.test(options.url.pathname);
+  /^\/api\/cuencadas(?:\/(?:home|\d{4}))?$/.test(options.url.pathname);
 
 /**
  * Navigations the SPA fallback (`index.html`) must never answer. Workbox tests
@@ -69,9 +70,19 @@ export const isPublicCuencadaRead = (options: RouteMatchInput): boolean =>
  * - the API: a navigation to `/api/...` must reach the server, never get the shell;
  * - any URL carrying a `ticket=` parameter (chat WebSocket tickets): it goes to
  *   the network untouched. (WebSocket upgrades such as `/api/chat/ws` never
- *   reach a service worker `fetch` handler anyway.)
+ *   reach a service worker `fetch` handler anyway.);
+ * - real files: `/canciones/`, `/images/`, `/icons/`, and any path whose last
+ *   segment has a file extension (`/sw.js`, `/foo.webmanifest`): a missing
+ *   file must 404 from the server, never come back as the HTML shell.
  */
-export const NAVIGATE_FALLBACK_DENYLIST: RegExp[] = [/^\/api(?:\/|$)/, /[?&]ticket=/];
+export const NAVIGATE_FALLBACK_DENYLIST: RegExp[] = [
+  /^\/api(?:\/|$)/,
+  /[?&]ticket=/,
+  /^\/canciones\//,
+  /^\/images\//,
+  /^\/icons\//,
+  /\/[^/?]+\.[a-z0-9]{2,12}(?:\?|$)/i
+];
 
 /** Precache globs (relative to `dist`). Audio, video, JPEG photos and the VTT are left out on purpose. */
 export const PRECACHE_GLOBS: string[] = ["**/*.{js,css,html,svg,png,webp,ico,webmanifest}"];

@@ -137,10 +137,10 @@ const nav = navigation[0]?.matcher;
 check(nav?.handler?.boundTo === "index.html", "navigation fallback must be index.html");
 const denylist = nav?.options?.denylist ?? [];
 const denied = (path) => denylist.some((pattern) => pattern.test(path));
-for (const path of ["/api", "/api/", "/api/me", "/api/cuencadas/2026", "/api/auth/magic-link", "/api/chat/ws?ticket=abc123", "/api/chat/ticket", "/chat?ticket=abc123"]) {
+for (const path of ["/api", "/api/", "/api/me", "/api/cuencadas/2026", "/api/auth/magic-link", "/api/chat/ws?ticket=abc123", "/api/chat/ticket", "/chat?ticket=abc123", "/canciones/Cancion_Oficial.mp3", "/images/logo-96.webp", "/icons/icon-192.png", "/sw.js", "/manifest.webmanifest", "/robots.txt"]) {
   check(denied(path), `navigation fallback must not answer ${path}`);
 }
-for (const path of ["/", "/cuencada/2026", "/entrar", "/galeria", "/apiary"]) {
+for (const path of ["/", "/cuencada/2026", "/entrar", "/entrar/enlace", "/galeria", "/apiary", "/perfil/sesiones"]) {
   check(!denied(path), `navigation fallback should answer ${path}`);
 }
 
@@ -160,12 +160,14 @@ function matches(href, { method = "GET" } = {}) {
   const url = new URL(href, ORIGIN);
   return publicRoute?.matcher({ url, request: { method }, sameOrigin: url.origin === ORIGIN, event: {} }) === true;
 }
-for (const path of ["/api/cuencadas/home", "/api/cuencadas/2026", "/api/cuencadas/1998"]) {
+for (const path of ["/api/cuencadas", "/api/cuencadas/home", "/api/cuencadas/2026", "/api/cuencadas/1998"]) {
   check(matches(path), `public read must be cached: ${path}`);
 }
 const neverCached = [
   "/api/cuencadas/2026/members",
-  "/api/cuencadas",
+  "/api/cuencadas?x",
+  "/api/cuencadas?year=2026",
+  "/api/cuencadas/",
   "/api/cuencadas/home?debug=1",
   "/api/cuencadas/20261",
   "/api/me",
