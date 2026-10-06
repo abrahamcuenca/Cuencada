@@ -27,8 +27,20 @@ interface ActionCopy {
   tone: "danger" | "primary";
 }
 
-/** Spanish confirmation copy: what happens to the person if the admin goes ahead. */
+/** Told when the change touches an administrator account (T8-BE emails every other active admin). */
+export const ADMIN_ALERT_NOTE = " Los demás administradores recibirán un aviso por correo.";
+
+/**
+ * Spanish confirmation copy: what happens to the person if the admin goes ahead.
+ * Changes to an administrator account (or a promotion) add {@link ADMIN_ALERT_NOTE}.
+ */
 function actionCopy(action: ConfirmableAction, user: AdminUserListItem): ActionCopy {
+  const copy = baseActionCopy(action, user);
+  const alertsAdmins = action === "promote" || (user.role === "admin" && action !== "revoke");
+  return alertsAdmins ? { ...copy, description: copy.description + ADMIN_ALERT_NOTE } : copy;
+}
+
+function baseActionCopy(action: ConfirmableAction, user: AdminUserListItem): ActionCopy {
   const name = user.displayName;
   switch (action) {
     case "promote":
@@ -188,8 +200,8 @@ export function UserSheet({ user, isSelf, onClose, onUpdated }: UserSheetProps):
 
           {isSelf ? (
             <p className={styles.selfNote}>
-              Esta es tu cuenta: no puedes cambiar tu propio rol, deshabilitarte ni forzar tu contraseña desde aquí. Para cerrar tus sesiones o
-              cambiar tu contraseña ve a <Link to="/perfil/sesiones">Mis sesiones</Link>.
+              Esta es tu cuenta: no puedes cambiar tu propio rol, deshabilitarte, forzar tu contraseña ni verificar tu correo desde aquí. Para
+              cerrar tus sesiones o cambiar tu contraseña ve a <Link to="/perfil/sesiones">Mis sesiones</Link>.
             </p>
           ) : null}
 
@@ -204,7 +216,7 @@ export function UserSheet({ user, isSelf, onClose, onUpdated }: UserSheetProps):
               Forzar cambio de contraseña
             </Button>
             {user.emailVerified ? null : (
-              <Button variant="secondary" fullWidth disabled={busy} loading={verifyState.isLoading} onClick={() => void markVerified()}>
+              <Button variant="secondary" fullWidth disabled={isSelf || busy} loading={verifyState.isLoading} onClick={() => void markVerified()}>
                 Marcar correo como verificado
               </Button>
             )}

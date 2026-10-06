@@ -1,7 +1,7 @@
 # WP-T8-FE Admin console [SEC]
 Owner: Frontend · Reviewers: TL, Sec · Branch: wp/t8-fe-admin · PR: # (not opened)
 
-Based on `origin/main` (2bcb7a0) with `origin/wp/t8-be-admin` (PR #24) merged in for the contract types. **Merge after #24.**
+Based on `origin/main` (2bcb7a0) with `origin/wp/t8-be-admin` merged in for the contract types; `origin/main` (885b4e9, includes #23 T3-FE and #24 T8-BE) merged in before finishing.
 
 ## Scope
 `apps/web/src/features/admin/**`:
@@ -28,14 +28,15 @@ Based on `origin/main` (2bcb7a0) with `origin/wp/t8-be-admin` (PR #24) merged in
 
 ## Decisions
 - **Guardrails:** branch on the code. 409 → "Debe quedar al menos un administrador activo."; 403 → the server's Spanish message (covers both the self-change and "Tu cuenta ya no tiene permisos de administración."), with a fallback; 404 / 429 have their own copy.
-- **Own row:** "(tú)" in the list; in the sheet the role, sessions, force-reset and disable buttons are disabled with an explanation and a link to `/perfil/sesiones`. "Marcar correo como verificado" stays enabled on self because T8-BE allows it.
+- **Own row:** "(tú)" in the list; in the sheet every action (role, sessions, force reset, verify email, disable) is disabled with an explanation and a link to `/perfil/sesiones`. Verify-on-self is disabled too because T8-BE now answers 403 for it (PR #24 review).
+- **Admin alerts:** T8-BE emails every other active admin when an administrator account changes. The confirmation for a promotion, and for any change to an admin account except "Cerrar sesiones", adds "Los demás administradores recibirán un aviso por correo."
 - **`emailQueued`:** `true` → success "…le enviamos un correo para elegir una contraseña nueva."; `false` → an info notice that the account must still change its password but no email went out (disabled account or mail budget) and "Avísale por otro medio."
 - **Enable has a light confirmation** ("Sus sesiones anteriores siguen cerradas…") so a mis-tap can't re-open a disabled account. Promote also confirms.
 - **Invite form delivery:** two modes, "Por correo" (bound, sent, single use) and "Enlace para compartir" (open). The contract's third case, a bound copy-link member invite (`email` + `sendEmail: false`), isn't offered: it loses the "delivered by email ⇒ verified" guarantee and adds a confusing choice. The form validates with the contract schema, so client and server rules can't drift.
 - **"Sin verificar correo" card** links to the active users list: `GET /admin/users` has no verified filter; rows carry a "Sin verificar" badge.
 - **Dates:** `PORTAL_TIME_ZONE` (`America/Merida`, from T1) for every admin timestamp and for the audit day range (`desde` = local midnight, `hasta` = end of that local day). `zonedMidnight` handles any offset/DST (tested with Europe/Madrid).
 - **Cache tags:** `Invite LIST`, `AdminUser LIST` (shared with T6's account picker, so it refreshes too), `AdminUser SUMMARY` for the dashboard, `AuditLog LIST`. Each write invalidates what it changes, plus the audit log. No new tag types.
-- **Asistencia** has no index page of its own (it's per edition): the nav row opens Cuencadas, and the dashboard's RSVP card deep-links to the next edition's asistencia. Until T3-FE (#23) merges, that deep link lands on the admin not-found state.
+- **Asistencia** has no index page of its own (it's per edition): the nav row opens Cuencadas, and the dashboard's RSVP card deep-links to the next edition's asistencia (T3-FE, merged in #23).
 
 ### Changes outside my folders
 - `apps/web/src/features/auth/guards.test.tsx` (T1): the "renders /admin/* for an admin" test asserted the old placeholder heading "Panel de la Cuencada". It now renders `/admin/no-existe` and expects the T8 admin not-found heading (no API call needed). One assertion, same intent.
@@ -43,13 +44,12 @@ Based on `origin/main` (2bcb7a0) with `origin/wp/t8-be-admin` (PR #24) merged in
 ## Verification (2026-10-06)
 - `pnpm lint`: biome, 0 diagnostics.
 - `pnpm turbo run typecheck --force`: 6/6.
-- `pnpm test`: 107 files, 1148 tests passed. T8-FE adds 53: `AdminDashboard.test.tsx` (7), `AdminInvites.test.tsx` (10), `AdminUsers.test.tsx` (10), `AdminAudit.test.tsx` (6), `lib/lib.test.ts` (20).
-- `pnpm build`: OK. `pnpm --filter @cuencada/web size`: initial JS **170.66 KB gzip** (budget 190 KB); all T8 code is lazy. Chunks (gzip): AdminLayout 0.9 KB, admin api 0.75 KB, DashboardPage 1.2 KB, AuditLogPage 2.6 KB, UsersPage 3.6 KB, InvitesPage 4.0 KB, admin CSS 1.8 KB.
+- `pnpm test` (after merging `origin/main` 885b4e9): 121 files, 1360 tests passed. T8-FE adds 53: `AdminDashboard.test.tsx` (7), `AdminInvites.test.tsx` (10), `AdminUsers.test.tsx` (10), `AdminAudit.test.tsx` (6), `lib/lib.test.ts` (20).
+- `pnpm build`: OK. `pnpm --filter @cuencada/web size`: initial JS **170.95 KB gzip** (budget 190 KB); all T8 code is lazy. Chunks (gzip): AdminLayout 0.9 KB, admin api 0.75 KB, DashboardPage 1.2 KB, AuditLogPage 2.6 KB, UsersPage 3.7 KB, InvitesPage 4.0 KB, admin CSS 1.8 KB.
 - **Screenshots** in `docs/ux/screenshots/t8/`: `admin`, `invitaciones` (with a one-time URL), `usuarios` (detail sheet open) and `bitacora` (including the XSS string shown as text), each at 375 and 1280. Headless Chromium against `vite preview` with `/api/**` stubbed with fictional data. Horizontal overflow at 320px: 0 px on all four.
 
 ## Requests (→ orchestrator)
 - **T6-FE:** `searchUsersForPersonLink` can switch to `GET /admin/users` as it already does; T8-FE's `listAdminUsers` (infinite, same `AdminUser LIST` tag) is available if T6 wants paging. No change required.
 - **T8-BE (optional):** an `emailVerified=false` filter on `GET /admin/users` would let the "Sin verificar correo" card open an exact list.
-- **T3-FE (#23):** the dashboard links to `/admin/cuencadas/:id/asistencia`; it works once #23 merges.
 - **T4-FE (optional):** reading `?cola=reported` on `/admin/media` would let the "Fotos reportadas" card open that tab directly.
 - **Coordination board:** please mark T8-FE as in review (README not edited to avoid conflicts).

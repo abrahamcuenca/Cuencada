@@ -50,6 +50,7 @@ describe("UsersPage", { timeout: 15_000 }, () => {
     await user.click(within(sheet).getByRole("button", { name: "Deshabilitar cuenta" }));
     const confirm = await screen.findByRole("alertdialog", { name: "¿Deshabilitar la cuenta de Lucía Ramírez Soto?" });
     expect(confirm).toHaveTextContent("Se cerrarán todas sus sesiones");
+    expect(confirm).not.toHaveTextContent("Los demás administradores");
     await user.click(within(confirm).getByRole("button", { name: "Cancelar" }));
     expect(writes(db)).toHaveLength(0);
 
@@ -69,7 +70,9 @@ describe("UsersPage", { timeout: 15_000 }, () => {
     const sheet = await openSheet(user, "Lucía Ramírez Soto");
 
     await user.click(within(sheet).getByRole("button", { name: "Hacer administrador" }));
-    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Hacer administrador" }));
+    const confirm = await screen.findByRole("alertdialog");
+    expect(confirm).toHaveTextContent("Los demás administradores recibirán un aviso por correo.");
+    await user.click(within(confirm).getByRole("button", { name: "Hacer administrador" }));
 
     expect(await within(sheet).findByRole("alert")).toHaveTextContent("Debe quedar al menos un administrador activo.");
   });
@@ -92,13 +95,20 @@ describe("UsersPage", { timeout: 15_000 }, () => {
 
   it("disables the actions on the admin's own row and explains why", async () => {
     const user = userEvent.setup();
+    db.users = db.users.map((row) => (row.id === IDS.admin ? { ...row, emailVerified: false } : row));
     renderApp("/admin/usuarios", authenticatedState(ADMIN_USER));
 
     expect(await screen.findByRole("button", { name: /^Elena Duarte Páez \(tú\)/ })).toBeInTheDocument();
     const sheet = await openSheet(user, "Elena Duarte Páez");
     expect(within(sheet).getByText(/Esta es tu cuenta/)).toBeInTheDocument();
     expect(within(sheet).getByRole("link", { name: "Mis sesiones" })).toHaveAttribute("href", "/perfil/sesiones");
-    for (const name of ["Quitar rol de administrador", "Cerrar sesiones", "Forzar cambio de contraseña", "Deshabilitar cuenta"]) {
+    for (const name of [
+      "Quitar rol de administrador",
+      "Cerrar sesiones",
+      "Forzar cambio de contraseña",
+      "Marcar correo como verificado",
+      "Deshabilitar cuenta"
+    ]) {
       expect(within(sheet).getByRole("button", { name })).toBeDisabled();
     }
   });
