@@ -52,7 +52,7 @@ A member sees a non-deleted item when it is `ready` + `approved`, **or** it is t
 Every 15 min (unref'd interval, cleared on close; a pass never overlaps another). Deletes `pending_upload` rows with `upload_expires_at IS NOT NULL AND upload_expires_at < now − 6 h` in batches of 200 (max 20 batches), then their objects. **NULL expiry is never stale.** The row is claimed first (`DELETE … WHERE id IN (…) AND <stale> RETURNING`), so a concurrent confirm that already moved it to `processing` cannot lose its file. Soft-deleted (cancelled) pending rows are purged the same way, which also catches a PUT that landed after the cancel. Idempotent, tested with an injected clock. The 6 h grace covers a 300 MB PUT that started before the 5-minute URL expired.
 
 ### FE requests answered
-1. **Years with media (Request 1):** no `/api/media/years`. T2 adds `hasMedia` to `CuencadaSummary`; to keep one visibility rule, T2 should compute it with `countVisibleMediaByCuencada(db, ids)` exported from `modules/media/index.ts` (`ready` + `approved`, not deleted). The FE drops its probing once `hasMedia` lands.
+1. **Years with media (Request 1, orchestrator: accepted):** no `/api/media/years`. T2 adds `hasMedia` to `CuencadaSummary`. **The rule is: an edition has media when at least one `media_items` row has `upload_status = 'ready' AND moderation_status = 'approved' AND deleted_at IS NULL`.** `countVisibleMediaByCuencada(db, ids)` (exported from `modules/media/index.ts`, built on `publicVisibleSql()` in `service.ts`) implements exactly that. T2-BE (PR #12) uses its own `EXISTS`; it must use the same three predicates (the orchestrator reconciles after both merge, ideally by switching T2 to the shared helper). Own `processing`/`pending_review` items deliberately do not count.
 2. **Signed headers (Request 3):** the contract field is `headers` (not `requiredHeaders`); the contract is authoritative. It is exactly `{ "Content-Type": <mimeType> }` (plus any `x-amz-*` the signer adds, none today). `Content-Length` is signed from `byteSize` but never listed. JSDoc amended.
 3. **Bucket CORS (Request 4):** see the WP-2.4 note below.
 4. **Cancel (Request 5 + orchestrator note 1):** the uploader may `DELETE` their own item in any status; it is idempotent.
@@ -101,13 +101,22 @@ Not amended (contract kept authoritative over the brief): admin moderation stays
 ## Requests (→ orchestrator)
 1. **Streaming read in `StorageService` (lib, frozen):** the job reads the whole original via `getRange(0, size-1)` (≤ 25 MB, serial, so ≤ 1 buffer at a time). A `getStream(key)` would let sharp stream; not needed at current limits.
 2. **Pending-upload prefix (lib + bucket):** for a bucket-level orphan backstop, uploads could go to `incoming/{id}` (lifecycle-expire after 2 days) and be server-side copied to `originals/` on confirm. Needs a `copy()` in `StorageService`. Current design relies on the cleanup job instead.
-3. **T2:** compute `CuencadaSummary.hasMedia` with `countVisibleMediaByCuencada` (exported from `modules/media/index.ts`).
-4. **T4-FE:** add `canEdit`/`canDelete` to fixtures; set `VITE_MEDIA_UPLOAD_ORIGIN` as above; confirm sends no body or `{}` (both work now).
+3. **T2:** `hasMedia` must match the rule in "FE requests answered" 1 (ready + approved + not deleted); prefer `countVisibleMediaByCuencada`.
+4. **Deploy:** set `VITE_MEDIA_UPLOAD_ORIGIN` as above.
 5. **Linode PUT enforcement (WP-0.4 open question):** at integration, verify on the real bucket that a PUT with a different `Content-Length` or `Content-Type` is rejected (403 `SignatureDoesNotMatch`). The confirm HEAD check is the backstop either way.
 6. **Original download (FE Request 9):** not built. If wanted, add `GET /api/media/:id/original` → a presigned GET with `Content-Disposition: attachment` (members who can see the item). Note originals keep EXIF/GPS, so this would expose location data; recommend not offering it, or offering a metadata-stripped full-size WebP instead.
 
+## Merge with main (T4-FE #9, T2-FE #11)
+- `origin/main` merged cleanly (no lockfile conflict).
+- **FE alignment (authorized by the orchestrator):**
+  - `features/gallery/testUtils.ts`: `makeMedia` sets `canEdit`/`canDelete` (default: the `isMine` override, like the server for a member); the MSW intent handler now returns only `{ "Content-Type" }` in `headers`, matching the real server.
+  - `components/GalleryLightbox.tsx`: "Editar descripción" and "Eliminar" now follow the server's `canEdit` / `canDelete` instead of `isMine || isAdmin` computed client-side (the store's admin flag is no longer read there). "Reportar" still hides on `isMine`. The FE never compared uploader ids.
+  - `GalleryPage.test.tsx`: the admin case gets `canEdit`/`canDelete: true` from the "server" fixture.
+- **Confirm:** the FE sends `POST /media/:id/confirm` with body `{}`, which `z.strictObject({}).nullish()` accepts (a body-less call is accepted too).
+- **Cancel:** the FE's upload manager calls `DELETE /media/:id` after a user cancel when it has a `mediaId`; the server allows the uploader to delete in any status (including `pending_upload`), answers 204 and is idempotent, so a retry or double cancel is harmless.
+
 ## Verification (2026-10-06)
-- `scripts/test-db.sh up && pnpm lint && pnpm typecheck && pnpm test && pnpm build`: all green. 55 files, 547 tests (media: 6 files, 70 tests).
+- `scripts/test-db.sh up && pnpm lint && pnpm typecheck && pnpm test && pnpm build`: all green. 55 files, 547 tests (media: 6 files, 70 tests). After merging main and the FE alignment: 66 files, 664 tests, all green.
 - Coverage of the brief's list: happy/400/401/403/404 per route; magic-byte mismatch (PNG as JPEG, text renamed `.jpg`, QuickTime declared as MP4); size mismatch; wrong stored Content-Type; object not uploaded yet; decompression bomb (a 100-byte PNG claiming 10000×10000: `failed`/`pixel_limit_exceeded`, no derivatives); JPEG with GPS EXIF + orientation 6 → outputs have no EXIF, no orientation, no camera string, rotated dimensions; derivative sizes and `Cache-Control`; video duration (MP4 and QuickTime); re-queue on startup (deleted rows skipped); deletion mid-processing discards derivatives; cleanup (NULL expiry kept, grace, injected clock, idempotent, storage failure counted); visibility (others' processing/failed/pending_review/hidden hidden; own visible); pagination across tied timestamps; presigned URL shape (origin, 1 h expiry, no keys/bucket in the JSON); report idempotency (409) and audit without details; moderation with the flag on and off; audit rows; rate limit (31st intent → 429, other users unaffected); logs contain no keys, presigned URLs, captions, report details or file names.
 
 ## Open questions (→ orchestrator)

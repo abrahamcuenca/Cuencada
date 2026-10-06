@@ -1,9 +1,7 @@
 import type { MediaItem } from "@cuencada/types";
 import { useMemo, useState } from "react";
-import { useAppSelector } from "../../../app/hooks";
 import { IconButton } from "../../../shared/ui/IconButton";
 import { Lightbox, type LightboxItem } from "../../../shared/ui/Lightbox";
-import { selectIsAdmin } from "../../auth/authSlice";
 import styles from "../gallery.module.css";
 import { mediaAlt, uploadedByLine } from "../lib/mediaText";
 import { DeleteMediaDialog, EditCaptionDialog, ReportDialog } from "./ItemDialogs";
@@ -36,26 +34,25 @@ function toLightboxItem(item: MediaItem): LightboxItem {
 }
 
 /**
- * The shared `Lightbox` plus item actions: the owner (or an admin) edits the
- * caption and deletes; anyone else reports. Server rules still apply: these
+ * The shared `Lightbox` plus item actions: edit and delete follow the
+ * server-computed `canEdit`/`canDelete` (uploader or admin); anyone but the
+ * uploader reports. Server rules still apply: these
  * buttons are UX only.
  */
 export function GalleryLightbox({ items, openId, onOpenIdChange, onMediaError }: GalleryLightboxProps): React.ReactNode {
-  const isAdmin = useAppSelector(selectIsAdmin);
   const [dialog, setDialog] = useState<OpenDialog>(null);
   const lightboxItems = useMemo(() => items.map(toLightboxItem), [items]);
   const found = openId === null ? -1 : items.findIndex((item) => item.id === openId);
   const index = found === -1 ? null : found;
   const current = index === null ? undefined : items[index];
-  const canManage = current !== undefined && (current.isMine || isAdmin);
 
   const actions = current ? (
     <>
-      {canManage ? (
-        <>
-          <IconButton label="Editar descripción" icon="✏️" variant="inverse" onClick={() => setDialog("caption")} />
-          <IconButton label="Eliminar" icon="🗑️" variant="inverse" onClick={() => setDialog("delete")} />
-        </>
+      {current.canEdit ? (
+        <IconButton label="Editar descripción" icon="✏️" variant="inverse" onClick={() => setDialog("caption")} />
+      ) : null}
+      {current.canDelete ? (
+        <IconButton label="Eliminar" icon="🗑️" variant="inverse" onClick={() => setDialog("delete")} />
       ) : null}
       {current.isMine ? null : <IconButton label="Reportar" icon="⚑" variant="inverse" onClick={() => setDialog("report")} />}
     </>
