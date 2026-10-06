@@ -23,6 +23,8 @@ const chromiumMobile = (name: "iPhone 13" | "Pixel 7") => {
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  // Only Playwright specs; tests/e2e/harness/*.test.ts are Vitest unit tests.
+  testMatch: "**/*.spec.ts",
   outputDir: "./test-results/e2e",
   timeout: 60_000,
   expect: { timeout: 15_000 },

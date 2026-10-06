@@ -4,9 +4,10 @@
  * rooms) and then add fictional e2e fixtures (one cast per Playwright
  * project, a future 2027 edition with RSVP open, small family trees).
  *
- * Guarded: it only ever touches a database on a loopback host whose name
- * ends in `_e2e`.
+ * Guarded (`dbGuard.ts`): loopback host, `*_e2e` name, the test container's
+ * port and the test-cluster marker, all checked before any DROP/CREATE.
  */
+import { assertE2eDatabaseUrl, assertTestClusterMarker } from "./dbGuard.js";
 import { createDatabase, type Database } from "../../../apps/server/dist/db/client.js";
 import { runMigrations } from "../../../apps/server/dist/db/migrate.js";
 import { hashPassword } from "../../../apps/server/dist/lib/passwords.js";
@@ -22,8 +23,6 @@ import {
   TEMP_ADMIN_PASSWORD
 } from "./people.js";
 
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
-
 /** Fake https links for the seeded edition, so no real (legacy) link reaches the e2e UI or screenshots. */
 const FAKE_LINKS = {
   SEED_WHATSAPP_URL: "https://chat.example.test/grupo-e2e",
@@ -33,26 +32,17 @@ const FAKE_LINKS = {
 };
 
 /**
- * Refuse anything but a loopback `*_e2e` database: this module drops it.
- *
- * @param databaseUrl - Target URL.
- * @returns The database name.
+ * Drop and recreate the e2e database. Static URL checks first, then a live
+ * check of the test-cluster marker on the cluster's `postgres` database,
+ * both before any DROP/CREATE (see `dbGuard.ts`).
  */
-export function assertE2eDatabase(databaseUrl: string): string {
-  const url = new URL(databaseUrl);
-  const name = decodeURIComponent(url.pathname.slice(1));
-  if (!LOOPBACK_HOSTS.has(url.hostname)) throw new Error("e2e: the e2e database must be on a loopback host");
-  if (!/^[a-z0-9_]+_e2e$/.test(name)) throw new Error("e2e: the e2e database name must match /^[a-z0-9_]+_e2e$/");
-  return name;
-}
-
-/** Drop and recreate the e2e database (connects to the cluster's `postgres` DB). */
 async function recreateDatabase(databaseUrl: string): Promise<void> {
-  const name = assertE2eDatabase(databaseUrl);
+  const name = assertE2eDatabaseUrl(databaseUrl);
   const adminUrl = new URL(databaseUrl);
   adminUrl.pathname = "/postgres";
   const admin = createDatabase({ DATABASE_URL: adminUrl.href }, { max: 1 });
   try {
+    await assertTestClusterMarker((sql) => admin.$client.unsafe(sql));
     // `name` matched /^[a-z0-9_]+_e2e$/ above, so quoting it is safe.
     await admin.$client.unsafe(`drop database if exists "${name}" with (force)`);
     await admin.$client.unsafe(`create database "${name}"`);

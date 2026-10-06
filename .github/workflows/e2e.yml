@@ -70,6 +70,13 @@ jobs:
       - name: Typecheck e2e sources
         run: pnpm typecheck:e2e
 
+      - name: Mark the Postgres service as the disposable test cluster
+        # The harness refuses to DROP/CREATE on a cluster without this marker
+        # (tests/e2e/harness/dbGuard.ts); scripts/test-db.sh sets it locally.
+        run: >-
+          psql "postgresql://cuencada:cuencada@127.0.0.1:55432/postgres" -v ON_ERROR_STOP=1 -qc
+          "ALTER DATABASE postgres SET cuencada.test_cluster = 'cuencada-test'"
+
       - name: Journeys and mobile quality gates
         run: pnpm e2e:run
 

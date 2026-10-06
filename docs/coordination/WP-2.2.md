@@ -62,7 +62,14 @@ Both live in `tests/e2e/harness/`, **outside `apps/server/src`**. They aren't co
 | Data at rest | one JSON file per message (tokens included), file mode 0600, directory mode 0700, under `$TMP/cuencada-e2e/mail`, wiped at every start | bodies named by `sha256(key)`, so a key can't escape the directory |
 | Network | none (specs read the files) | loopback only. Presigned URLs carry an HMAC (per-process random secret) over method, key, expiry, content type and length. A PUT must match the signed `Content-Type` and the exact size. Expired or tampered URLs get 403. CORS is open only to the e2e origin. |
 
-- The database helper refuses any URL that isn't on a loopback host or whose name doesn't match `/^[a-z0-9_]+_e2e$/`, because it runs `DROP DATABASE`.
+- **Database guard** (`harness/dbGuard.ts`, Security L2). The harness runs `DROP DATABASE`, `CREATE DATABASE` and migrations, and an SSH tunnel to production Postgres may also listen on loopback. Every check runs **before** any DROP or CREATE:
+  1. The URL must be on a loopback host, the name must match `/^[a-z0-9_]+_e2e$/`, and the port must be the test container's **55432**. A different port is allowed only when `E2E_ALLOW_DB_PORT` names that exact port.
+  2. A **live check** on the cluster's `postgres` database: `current_setting('cuencada.test_cluster', true)` must equal `'cuencada-test'`.
+  - The marker is a database-level setting (`ALTER DATABASE postgres SET cuencada.test_cluster = 'cuencada-test'`).
+    - `scripts/test-db.sh up` sets it idempotently, including on a container that is already running. It doesn't recreate anything, so it stays backward compatible.
+    - CI's e2e job sets it on its service container.
+    - An older container gets the marker on its next `scripts/test-db.sh up`. Until then the harness refuses and says to run it. There is deliberately no weaker fallback such as a port or version heuristic.
+  - Unit tests: `harness/dbGuard.test.ts` (Vitest project `e2e-harness`, part of `pnpm test`) covers a wrong port refused, the override, a missing marker refused and a wrong marker refused.
 - TLS: `openssl` makes self-signed certificates per run, outside the repo. Only the test Chromium runs with `--ignore-certificate-errors` and `ignoreHTTPSErrors`.
 - `X-Forwarded-For` spoofing works here only because the client is on loopback. Production depends on nginx overwriting `X-Forwarded-For` (already on the cutover checklist). The e2e setup demonstrates why that item matters.
 - The JWT secret is a fixed, non-secret e2e value, used only for the throwaway database.
