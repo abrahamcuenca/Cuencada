@@ -2,7 +2,7 @@ import { screen, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { apiUrl, statusState } from "../../../../test/auth";
+import { apiUrl, authenticatedState, makeUser, statusState } from "../../../../test/auth";
 import { renderApp } from "../../../../test/renderApp";
 import {
   makeDailyMessage,
@@ -104,6 +104,43 @@ describe("HomePage", () => {
 
     expect(await screen.findByText("¡YA LLEGÓ LA CUENCADA!")).toBeInTheDocument();
     expect(screen.queryByRole("timer")).not.toBeInTheDocument();
+  });
+
+  it("shows visitors no family photos, only the brand art and a login teaser", async () => {
+    renderApp("/", statusState("anonymous"));
+
+    const memories = await screen.findByRole("region", { name: /Últimos momentos/ });
+    expect(within(memories).getByText("Inicia sesión para ver las fotos de la familia")).toBeInTheDocument();
+    expect(within(memories).getByRole("link", { name: "Entrar" })).toHaveAttribute("href", "/entrar");
+    const sources = Array.from(document.querySelectorAll("img")).map((img) => img.getAttribute("src") ?? "");
+    expect(sources.some((src) => src.includes("/images/fotos") || src.includes("bucket"))).toBe(false);
+  });
+
+  it("asks members with an unverified email to verify before showing photos", async () => {
+    server.use(http.get(apiUrl("/announcements"), () => HttpResponse.json({ items: [], nextCursor: null })));
+    renderApp("/", authenticatedState(makeUser({ emailVerified: false })));
+
+    const memories = await screen.findByRole("region", { name: /Últimos momentos/ });
+    expect(within(memories).getByText("Verifica tu correo para ver las fotos de la familia")).toBeInTheDocument();
+    expect(within(memories).getByRole("button", { name: "Reenviar enlace" })).toBeInTheDocument();
+  });
+
+  it("shows verified members the latest past edition's photos through the gallery preview", async () => {
+    let mediaRequests = 0;
+    server.use(
+      http.get(apiUrl("/announcements"), () => HttpResponse.json({ items: [], nextCursor: null })),
+      http.get(apiUrl("/cuencadas/2026/media"), () => {
+        mediaRequests += 1;
+        return HttpResponse.json({ items: [], nextCursor: null });
+      })
+    );
+    renderApp("/", authenticatedState(makeUser()));
+
+    const memories = await screen.findByRole("region", { name: /Últimos momentos/ });
+    expect(await within(memories).findByRole("heading", { name: /Álbum vivo/ })).toBeInTheDocument();
+    expect(within(memories).getByRole("link", { name: /Subir fotos|Ver álbum/ })).toHaveAttribute("href", "/galeria/2026");
+    expect(mediaRequests).toBe(1);
+    expect(within(memories).queryByText(/Inicia sesión para ver/)).not.toBeInTheDocument();
   });
 
   it("shows a coming-soon hero when there is no edition at all", async () => {

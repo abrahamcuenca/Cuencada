@@ -6,6 +6,8 @@ import { Button } from "../../../shared/ui/Button";
 import { Card } from "../../../shared/ui/Card";
 import { Countdown } from "../../../shared/ui/Countdown";
 import { selectAuthStatus, selectCurrentUser, selectPasswordChangeRequired } from "../../auth/authSlice";
+import { ResendVerificationButton } from "../../auth/components/VerifyEmailBanner";
+import { GalleryPreview } from "../../gallery/components/GalleryPreview";
 import { useGetCuencadaHomeQuery, useListCuencadasQuery, useListMemberAnnouncementsQuery } from "../api";
 import { AnnouncementList } from "../components/AnnouncementList";
 import { CuencadaHero } from "../components/CuencadaHero";
@@ -152,24 +154,49 @@ function HomeAnnouncements({ home }: { home: CuencadaHome }): ReactNode {
   );
 }
 
-const MEMORY_PHOTOS = ["foto01", "foto02", "foto03", "foto04"] as const;
+/** Teaser copy for visitors (family photos are members-only). */
+export const PHOTOS_LOGIN_TEASER = "Inicia sesión para ver las fotos de la familia";
+/** Teaser copy for members whose email isn't verified yet. */
+export const PHOTOS_VERIFY_TEASER = "Verifica tu correo para ver las fotos de la familia";
+
+/**
+ * "Últimos momentos" [privacy]: family photos are members-only (owner
+ * decision). Visitors get the brand art and a login teaser; members with an
+ * unverified email a verify teaser; verified members the latest past
+ * edition's photos through T4's `GalleryPreview` (presigned thumbnails).
+ */
+function MemoriesPhotos({ latestPast }: { latestPast: CuencadaSummary | null }): ReactNode {
+  const status = useAppSelector(selectAuthStatus);
+  const user = useAppSelector(selectCurrentUser);
+  const mustChange = useAppSelector(selectPasswordChangeRequired);
+  const isMember = status === "authenticated" && user !== null && !mustChange;
+
+  if (isMember && user.emailVerified) {
+    return latestPast ? <GalleryPreview year={latestPast.year} headingLevel={3} /> : null;
+  }
+  return (
+    <Card tone="sunken" padding="md" className={styles.photosTeaser}>
+      <img src="/images/logo-96.webp" alt="" width={96} height={96} className={styles.teaserArt} loading="lazy" decoding="async" />
+      <div className={styles.teaserText}>
+        <p className={styles.teaserTitle}>{isMember ? PHOTOS_VERIFY_TEASER : PHOTOS_LOGIN_TEASER}</p>
+        <p>Las fotos y videos de la Cuencada son privados: solo los ve la familia con cuenta.</p>
+        {isMember ? (
+          <ResendVerificationButton />
+        ) : (
+          <Button to="/entrar" variant="secondary" size="sm">
+            Entrar
+          </Button>
+        )}
+      </div>
+    </Card>
+  );
+}
 
 function Memories({ latestPast }: { latestPast: CuencadaSummary | null }): ReactNode {
   return (
     <>
-      <Section id="recuerdos" icon="📸" title="Últimos momentos" intro="Una pequeña muestra de las fotografías de la Cuencada.">
-        <ul className={styles.mosaic}>
-          {MEMORY_PHOTOS.map((photo) => (
-            <li key={photo}>
-              <img src={`/images/fotos/${photo}.jpg`} alt="Familia Cuenca en la Cuencada" width={960} height={720} loading="lazy" decoding="async" />
-            </li>
-          ))}
-        </ul>
-        {latestPast ? (
-          <Button to={`/galeria/${latestPast.year}`} variant="secondary" className={styles.mosaicAction}>
-            Ver álbum completo
-          </Button>
-        ) : null}
+      <Section id="recuerdos" icon="📸" title="Últimos momentos" intro="Los recuerdos de la última Cuencada, solo para la familia.">
+        <MemoriesPhotos latestPast={latestPast} />
       </Section>
       <div className="cu-container">
         <Card tone="accent" icon="🗓️" title="La próxima Cuencada" className={styles.next}>
