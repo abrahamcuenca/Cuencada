@@ -5,7 +5,7 @@
  * - `GET /chat/rooms`: visible rooms with unread counts and a preview.
  * - `GET /chat/rooms/:id/messages?before=&limit=`: keyset history (tombstones for deleted messages).
  * - `POST /chat/rooms/:id/read`: monotonic read marker.
- * - `DELETE /chat/messages/:id`: soft delete by the sender or an admin (admin deletes of others' messages are audited); broadcasts `message_deleted`.
+ * - `DELETE /chat/messages/:id`: soft delete by the sender or an admin (admin deletes of others' messages are audited); broadcasts `message_deleted`, and `room_preview` when the deleted message was the room's preview.
  * - `POST /chat/ticket`: single-use WebSocket ticket (10/min per user).
  *
  * There is deliberately **no** room deletion: an edition room's existence is
@@ -35,7 +35,7 @@ import { ipKey, type RateLimitWindow } from "../../lib/rateLimit.js";
 import { authUser } from "../../plugins/auth.js";
 import { encodeChatCursor } from "./cursor.js";
 import type { ChatHub } from "./hub.js";
-import { toChatMessages, toChatRooms } from "./mappers.js";
+import { toChatMessages, toChatRooms, toLastMessage } from "./mappers.js";
 import {
   findMessage,
   findVisibleRoom,
@@ -190,7 +190,9 @@ const chatRoutes: FastifyPluginAsyncZod<ChatRoutesOptions> = async (app, { hub }
       }
       if (message.deletedAt !== null) return reply.code(204).send(null);
 
-      const roomId = await app.db.transaction(async (tx) => {
+      const deleted = await app.db.transaction(async (tx) => {
+        // Was this the room's preview (its newest live message)? Read before the delete.
+        const [previewBefore] = await lastMessagesFor(tx, [message.roomId]);
         const deletedRoomId = await softDeleteMessage(tx, {
           messageId: message.id,
           actorUserId: user.id,
@@ -209,14 +211,29 @@ const chatRoutes: FastifyPluginAsyncZod<ChatRoutesOptions> = async (app, { hub }
             ip: request.ip
           });
         }
-        return deletedRoomId;
+        return deletedRoomId === null ? null : { roomId: deletedRoomId, wasPreview: previewBefore?.id === message.id };
       });
-      if (roomId !== null) {
+      if (deleted !== null) {
+        const { roomId } = deleted;
         hub.fanOut(() => ({
           type: "message_deleted",
           roomId,
           messageId: message.id
         }));
+        if (deleted.wasPreview) {
+          // Best effort after commit: the delete succeeded either way; clients refetch rooms on reconnect.
+          try {
+            const [previewAfter] = await lastMessagesFor(app.db, [roomId]);
+            hub.fanOut(() => ({
+              type: "room_preview",
+              roomId,
+              lastMessageAt: previewAfter?.createdAt.toISOString() ?? null,
+              lastMessage: previewAfter === undefined ? null : toLastMessage(previewAfter)
+            }));
+          } catch (error) {
+            request.log.warn({ err: error }, "chat room preview broadcast failed");
+          }
+        }
       }
       return reply.code(204).send(null);
     }

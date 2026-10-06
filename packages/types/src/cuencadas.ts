@@ -125,6 +125,9 @@ function dedupeTags(tags: string[]): string[] {
  */
 export const itineraryTagsSchema = z
   .array(itineraryTagSchema)
+  // Raw bound before de-duplication: ×4 leaves room for case-insensitive
+  // repeats (`Comida`, `comida`, …) that collapse below the real limit, while
+  // still capping the work `dedupeTags` does on a hostile payload (24 items).
   .max(ITINERARY_TAGS_MAX * 4, { error: `Máximo ${ITINERARY_TAGS_MAX} etiquetas.` })
   .transform(dedupeTags)
   .pipe(z.array(z.string()).max(ITINERARY_TAGS_MAX, { error: `Máximo ${ITINERARY_TAGS_MAX} etiquetas.` }));

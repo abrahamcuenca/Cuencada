@@ -3,6 +3,7 @@
  * and every test seeds its rows into its own time window and only queries
  * inside it, so rows left by any other test can never change the results.
  */
+import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestApp } from "../../../test/helpers/app.js";
 import { getTestDb } from "../../../test/helpers/db.js";
@@ -119,7 +120,27 @@ describe("GET /api/admin/audit-logs", () => {
       ...fixture.admin.auth
     });
     expect(narrow.statusCode).toBe(200);
-    expect(indexes(narrow.json<AuditPage>())).toEqual([3, 2, 1]);
+    // `from` is inclusive, `to` exclusive: the row at exactly `to` (index 3) is out.
+    expect(indexes(narrow.json<AuditPage>())).toEqual([2, 1]);
+  });
+
+  it("treats `to` as an exclusive bound with microsecond precision (hasta + 1 day semantics)", async () => {
+    const fixture = await seed();
+    const dayAfter = fixture.base + 2 * MINUTE_MS;
+    // A row 1 µs before the bound (not representable in a JS Date) and one exactly on it.
+    await getTestDb().execute(
+      sql`insert into ${auditLogs} (action, entity_type, metadata, created_at) values
+        ('media.moderated', 'media', '{"index": "last-microsecond"}'::jsonb, ${new Date(dayAfter).toISOString()}::timestamptz - interval '1 microsecond'),
+        ('media.moderated', 'media', '{"index": "on-bound"}'::jsonb, ${new Date(dayAfter).toISOString()}::timestamptz)`
+    );
+    const from = new Date(fixture.base).toISOString();
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/admin/audit-logs?from=${encodeURIComponent(from)}&to=${encodeURIComponent(new Date(dayAfter).toISOString())}&entityType=media`,
+      ...fixture.admin.auth
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json<AuditPage>().items.map((item) => item.metadata.index)).toEqual(["last-microsecond"]);
   });
 
   it("pages with a keyset cursor across identical timestamps without gaps or duplicates", async () => {

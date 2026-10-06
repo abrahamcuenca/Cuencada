@@ -169,7 +169,7 @@ export function openChatSocket(app: FastifyInstance, hub: ChatHub, socket: WebSo
     sessionId: grant.sessionId,
     userId: grant.userId,
     now: app.clock.now()
-  }).then((principal) => {
+  }).then(async (principal) => {
     if (closed) return null;
     if (principal === null) {
       request.log.info("chat socket rejected: session");
@@ -183,6 +183,7 @@ export function openChatSocket(app: FastifyInstance, hub: ChatHub, socket: WebSo
     const registered = wrap(socket, hub.allocateId(), principal, request.log);
     if (!hub.add(registered)) return null;
     connection = registered;
+    if (hub.hooks.afterRegister !== undefined) await hub.hooks.afterRegister(registered);
     // A revocation or disable may have committed between the first check and
     // registration without seeing this socket: check once more now that the
     // hub would see it.

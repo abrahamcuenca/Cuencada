@@ -19,12 +19,15 @@ import type { App } from "../../app.js";
 import { auditLogs, avatarUploads, profiles } from "../../db/schema/index.js";
 import {
   avatarKeys,
+  avatarProcessingSlots,
   avatarSignatureMatches,
   avatarUrlFor,
   derivativeKeysFor,
   normalizeContentType,
+  processAvatar,
   sniffAvatarType
 } from "./avatar.js";
+import { AVATAR_MAX_INPUT_PIXELS, AVATAR_PROCESSING_CONCURRENCY } from "./constants.js";
 
 let app: App;
 let storage: FakeStorage;
@@ -228,6 +231,41 @@ describe("avatar helpers", () => {
     expect(sniffAvatarType(new Uint8Array())).toBeNull();
     expect(avatarSignatureMatches("image/png", await jpegWithGps())).toBe(false);
     expect(normalizeContentType("Image/JPEG; charset=binary")).toBe("image/jpeg");
+  });
+
+  it("refuses images above ~24 MP before decoding them, and decodes those just below", async () => {
+    expect(AVATAR_MAX_INPUT_PIXELS).toBe(24_000_000);
+    // 5000² = 25 MP: refused from the header alone.
+    expect(await processAvatar(decompressionBombPng(5_000), "image/png")).toEqual({
+      ok: false,
+      failure: "pixel_limit_exceeded"
+    });
+    // 4800² = 23 MP: passes the limit, then fails as a truncated image (not the pixel limit).
+    expect(await processAvatar(decompressionBombPng(4_800), "image/png")).toEqual({
+      ok: false,
+      failure: "decode_failed"
+    });
+  });
+
+  it("encodes both sizes from one decode as square WebPs without metadata", async () => {
+    const result = await processAvatar(await jpegWithGps(), "image/jpeg");
+    if (!result.ok) throw new Error(`processing failed: ${result.failure}`);
+    const large = await sharp(result.avatar.large).metadata();
+    const small = await sharp(result.avatar.small).metadata();
+    expect([large.format, large.width, large.height, large.exif]).toEqual(["webp", 256, 256, undefined]);
+    expect([small.format, small.width, small.height, small.exif]).toEqual(["webp", 64, 64, undefined]);
+  });
+
+  it("processes at most two avatars at a time and queues the rest", async () => {
+    const input = await png(64, 64);
+    expect(AVATAR_PROCESSING_CONCURRENCY).toBe(2);
+    const runs = Array.from({ length: 5 }, () => processAvatar(input, "image/png"));
+    expect(avatarProcessingSlots.active).toBe(2);
+    expect(avatarProcessingSlots.waiting).toBe(3);
+    const results = await Promise.all(runs);
+    expect(results.every((result) => result.ok)).toBe(true);
+    expect(avatarProcessingSlots.active).toBe(0);
+    expect(avatarProcessingSlots.waiting).toBe(0);
   });
 
   it("presigns a 1 h GET and degrades to null when storage fails", async () => {

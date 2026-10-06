@@ -3,7 +3,7 @@
  * API writes an audit entry via `recordAudit(tx, …)` in the same transaction.
  */
 import { z } from "zod";
-import { cursorQuerySchema, dateTimeSchema, idSchema } from "./common.js";
+import { cursorQuerySchema, dateTimeSchema, idSchema, queryBooleanSchema } from "./common.js";
 import { type UserRole, type UserStatus, userRoleSchema, userStatusSchema } from "./auth.js";
 
 /** Entity types that appear in the audit log. */
@@ -59,6 +59,14 @@ export const AuditAction = {
   MagicLinkRequested: "auth.magic_link_requested",
   EmailVerificationRequested: "auth.email_verification_requested",
   EmailVerified: "auth.email_verified",
+  /** T5: a member edited their own profile (metadata: changed field names only). */
+  ProfileUpdated: "profile.updated",
+  /** T5: a confirmed avatar upload replaced the member's avatar. */
+  ProfileAvatarUpdated: "profile.avatar_updated",
+  /** T5: the member removed their avatar. */
+  ProfileAvatarRemoved: "profile.avatar_removed",
+  /** T5: an avatar upload was refused at confirm (`metadata.reason`). */
+  ProfileAvatarRejected: "profile.avatar_rejected",
   InviteCreated: "invite.created",
   InviteRevoked: "invite.revoked",
   /** A new token was issued and emailed. */
@@ -151,7 +159,9 @@ export const adminUserListItemSchema = z.object({
 export const adminUserListQuerySchema = cursorQuerySchema.extend({
   q: z.string().trim().max(100).exactOptional(),
   role: userRoleSchema.exactOptional(),
-  status: userStatusSchema.exactOptional()
+  status: userStatusSchema.exactOptional(),
+  /** `false`: only accounts whose email is not verified yet (`true`: only verified ones). */
+  emailVerified: queryBooleanSchema.exactOptional()
 });
 export type AdminUserListQuery = z.infer<typeof adminUserListQuerySchema>;
 export type AdminUserListQueryRequest = z.input<typeof adminUserListQuerySchema>;
@@ -276,7 +286,15 @@ export const auditLogEntrySchema = z.object({
   createdAt: dateTimeSchema
 }) satisfies z.ZodType<AuditLogEntry>;
 
-/** `GET /api/admin/audit-logs` query (newest first). */
+/**
+ * `GET /api/admin/audit-logs` query (newest first).
+ *
+ * The time range is **half-open**: `from` is inclusive (`created_at >= from`)
+ * and `to` is **exclusive** (`created_at < to`). For a "hasta" day filter,
+ * send the start of the following day in the portal timezone (i.e.
+ * `< hasta + 1 day`), not 23:59:59.999, so rows in the last millisecond
+ * (timestamps have microsecond precision) are not lost.
+ */
 export const auditLogQuerySchema = cursorQuerySchema
   .extend({
     actorUserId: idSchema.exactOptional(),

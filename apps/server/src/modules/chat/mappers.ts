@@ -62,9 +62,11 @@ export async function toChatMessages(deps: AvatarDeps, records: readonly Message
   return records.map((record) => toChatMessage(record, avatars));
 }
 
-function toLastMessage(record: LastMessageRecord): ChatRoomLastMessage {
+/** Map a room's newest live message to its list preview. */
+export function toLastMessage(record: LastMessageRecord): ChatRoomLastMessage {
   return {
     id: record.id,
+    senderUserId: record.senderUserId,
     senderDisplayName: record.senderDisplayName,
     preview: previewOf(record.body),
     createdAt: record.createdAt.toISOString()

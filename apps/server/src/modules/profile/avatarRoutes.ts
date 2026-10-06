@@ -9,6 +9,7 @@
  */
 import { randomUUID } from "node:crypto";
 import {
+  AuditAction,
   avatarConfirmInputSchema,
   avatarUploadInputSchema,
   avatarUploadResponseSchema,
@@ -44,9 +45,9 @@ import { errorName, rateLimitByUser, t5ErrorResponses } from "./shared.js";
 
 /** Audit actions written by the avatar routes. */
 export const AvatarAuditAction = {
-  Updated: "profile.avatar_updated",
-  Removed: "profile.avatar_removed",
-  Rejected: "profile.avatar_rejected"
+  Updated: AuditAction.ProfileAvatarUpdated,
+  Removed: AuditAction.ProfileAvatarRemoved,
+  Rejected: AuditAction.ProfileAvatarRejected
 } as const;
 
 const UPLOAD_NOT_FOUND = "No encontramos esa subida.";
