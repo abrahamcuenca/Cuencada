@@ -35,7 +35,9 @@ export const SessionRevokedReason = {
   PasswordReset: "password_reset",
   UserDisabled: "user_disabled",
   AdminRevoked: "admin_revoked",
-  RefreshReuse: "refresh_reuse"
+  RefreshReuse: "refresh_reuse",
+  /** `POST /api/auth/logout-all` (added in migration 0002). */
+  LogoutAll: "logout_all"
 } as const;
 export type SessionRevokedReason = (typeof SessionRevokedReason)[keyof typeof SessionRevokedReason];
 

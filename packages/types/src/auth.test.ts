@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   adminInviteCreateInputSchema,
   changePasswordInputSchema,
+  displayNameSchema,
+  hasVisibleNameChars,
   inviteAcceptInputSchema,
   loginInputSchema,
   magicLinkConsumeInputSchema,
@@ -130,6 +132,38 @@ describe("adminInviteCreateInputSchema", () => {
     expect(adminInviteCreateInputSchema.safeParse({ sendEmail: false, maxUses: 20, expiresInDays: 14 }).success).toBe(true);
     expect(adminInviteCreateInputSchema.safeParse({ sendEmail: false, maxUses: 21 }).success).toBe(false);
     expect(adminInviteCreateInputSchema.safeParse({ sendEmail: false, expiresInDays: 15 }).success).toBe(false);
+  });
+
+  it("forces email-bound member invites to a single use", () => {
+    const result = adminInviteCreateInputSchema.safeParse({ email: "tio@familia.mx", maxUses: 2 });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.some((issue) => issue.path[0] === "maxUses")).toBe(true);
+    expect(adminInviteCreateInputSchema.safeParse({ email: "tio@familia.mx", sendEmail: false, maxUses: 1 }).success).toBe(
+      true
+    );
+  });
+});
+
+describe("displayNameSchema invisible-only names", () => {
+  it.each([
+    ["Hangul filler", "\u3164"],
+    ["word joiner", "\u2060\u2060"],
+    ["soft hyphen", "\u00AD"],
+    ["Hangul filler and spaces", "\u3164 \u3164"],
+    ["braille blank", "\u2800"],
+    ["combining grapheme joiner", "\u034F"]
+  ])("rejects a name made only of %s", (_label, name) => {
+    expect(displayNameSchema.safeParse(name).success).toBe(false);
+  });
+
+  it("accepts normal names, including accents and a soft hyphen inside a word", () => {
+    expect(displayNameSchema.parse("José Cuenca")).toBe("José Cuenca");
+    expect(displayNameSchema.safeParse("Ana\u00ADMaría").success).toBe(true);
+  });
+
+  it("hasVisibleNameChars is false only when nothing visible remains", () => {
+    expect(hasVisibleNameChars("\u3164\u2060 ")).toBe(false);
+    expect(hasVisibleNameChars("\u3164a")).toBe(true);
   });
 });
 

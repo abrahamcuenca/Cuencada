@@ -36,10 +36,27 @@ export const AuditAction = {
   UserDisabled: "user.disabled",
   UserSessionsRevoked: "user.sessions_revoked",
   RefreshReuseDetected: "auth.refresh_reuse_detected",
+  /** A used refresh token was presented again inside the grace window (409, nothing revoked). */
+  RefreshRace: "auth.refresh_race",
   PasswordChanged: "auth.password_changed",
   PasswordReset: "auth.password_reset",
+  /** Password or magic-link login (`metadata.method`). */
+  LoggedIn: "auth.logged_in",
+  /** Failed login for an existing account (`metadata.reason`: `bad_password` | `inactive`). */
+  LoginFailed: "auth.login_failed",
+  LoggedOut: "auth.logged_out",
+  /** The user revoked one of their own sessions. */
+  SessionRevoked: "auth.session_revoked",
+  /** The user revoked several sessions (`metadata.scope`: `all` | `others`). */
+  SessionsRevoked: "auth.sessions_revoked",
+  PasswordResetRequested: "auth.password_reset_requested",
+  MagicLinkRequested: "auth.magic_link_requested",
+  EmailVerificationRequested: "auth.email_verification_requested",
+  EmailVerified: "auth.email_verified",
   InviteCreated: "invite.created",
   InviteRevoked: "invite.revoked",
+  /** A new token was issued and emailed. */
+  InviteResent: "invite.resent",
   InviteAccepted: "invite.accepted",
   CuencadaCreated: "cuencada.created",
   CuencadaUpdated: "cuencada.updated",
@@ -63,8 +80,18 @@ export const AuditAction = {
   AnnouncementCreated: "announcement.created",
   AnnouncementUpdated: "announcement.updated",
   AnnouncementDeleted: "announcement.deleted",
+  /** `entityType: cuencada`; metadata holds counts only (`added`, `removed`, `total`, `mode`). */
   AttendanceUpdated: "attendance.updated",
+  /** `entityType: rsvp`; a member created or changed their own RSVP (metadata: `status`, `guestCount`, `created`). */
+  RsvpSaved: "rsvp.saved",
+  /** `entityType: cuencada`; an admin downloaded the RSVP CSV (metadata: `rows`). */
+  RsvpExported: "rsvp.exported",
   MediaModerated: "media.moderated",
+  MediaUploaded: "media.uploaded",
+  MediaUploadRejected: "media.upload_rejected",
+  MediaUpdated: "media.updated",
+  MediaDeleted: "media.deleted",
+  MediaReported: "media.reported",
   PersonCreated: "person.created",
   PersonUpdated: "person.updated",
   PersonDeleted: "person.deleted",

@@ -150,8 +150,10 @@ export type CreateUploadInput = z.infer<typeof createUploadInputSchema>;
 export type CreateUploadRequest = z.input<typeof createUploadInputSchema>;
 
 /**
- * Presigned PUT. The client must send exactly `headers` (Content-Type and
- * Content-Length are part of the signature) before `expiresAt`.
+ * Presigned PUT. The client must send exactly `headers` before `expiresAt`.
+ * `headers` holds only browser-settable headers (`Content-Type`, plus any
+ * `x-amz-*` the server signs). `Content-Length` is also part of the signature
+ * (from `byteSize`) but is never listed: browsers set it from the `File`.
  */
 export interface CreateUploadResponse {
   mediaId: string;
@@ -169,9 +171,10 @@ export const createUploadResponseSchema = z.object({
 
 /**
  * `POST /api/media/:id/confirm` body. Send no body or `{}`; any key is rejected
- * (reserved for a future checksum). Fastify passes `undefined` when absent.
+ * (reserved for a future checksum). Fastify validates a missing body as
+ * `null`, so both `null` and `undefined` are accepted.
  */
-export const confirmUploadInputSchema = z.strictObject({}).optional();
+export const confirmUploadInputSchema = z.strictObject({}).nullish();
 export type ConfirmUploadInput = z.infer<typeof confirmUploadInputSchema>;
 export type ConfirmUploadRequest = z.input<typeof confirmUploadInputSchema>;
 
@@ -195,8 +198,12 @@ export interface MediaItem {
   durationSeconds: number | null;
   caption: string | null;
   uploaderName: string | null;
-  /** True when the caller uploaded it (may edit caption / delete). */
+  /** True when the caller uploaded it. */
   isMine: boolean;
+  /** Server-computed: the caller may edit the caption (uploader or admin). */
+  canEdit: boolean;
+  /** Server-computed: the caller may delete the item (uploader or admin). */
+  canDelete: boolean;
   uploadStatus: MediaUploadStatus;
   moderationStatus: ModerationStatus;
   createdAt: string;
@@ -216,6 +223,8 @@ export const mediaItemSchema = z.object({
   caption: z.string().max(500).nullable(),
   uploaderName: z.string().max(80).nullable(),
   isMine: z.boolean(),
+  canEdit: z.boolean(),
+  canDelete: z.boolean(),
   uploadStatus: mediaUploadStatusSchema,
   moderationStatus: moderationStatusSchema,
   createdAt: dateTimeSchema

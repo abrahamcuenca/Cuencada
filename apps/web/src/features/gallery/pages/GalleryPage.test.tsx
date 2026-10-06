@@ -592,7 +592,7 @@ describe("GalleryPage item actions", () => {
   });
 
   it("lets an admin edit and delete someone else's item", async () => {
-    db.media = [makeMedia(1, { isMine: false })];
+    db.media = [makeMedia(1, { isMine: false, canEdit: true, canDelete: true })];
     const user = userEvent.setup();
     renderApp("/galeria/2026", authenticatedState(makeUser({ role: "admin" })));
 
