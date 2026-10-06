@@ -50,9 +50,15 @@ server:
     NODE_ENV: production
     HOST: 127.0.0.1
     PORT: "3104"
+    APP_BASE_URL: https://cuencada.com
     CORS_ORIGIN: https://cuencada.com
+    TRUST_PROXY: loopback
     DATABASE_URL: "{{ vault_cuencada_database_url }}"
     JWT_SECRET: "{{ vault_cuencada_jwt_secret }}"
+    RESEND_API_KEY: "{{ vault_cuencada_resend_api_key }}"
+    MAIL_FROM: "Cuencada <no-reply@cuencada.com>"
+    SUPPORT_EMAIL: admin@cuencada.com
+    MEDIA_REQUIRE_APPROVAL: "false"
     SEED_ADMIN_EMAIL: admin@cuencada.com
     SEED_ADMIN_TEMP_PASSWORD: "{{ vault_cuencada_seed_admin_temp_password }}"
     S3_ENDPOINT: "{{ vault_cuencada_s3_endpoint }}"

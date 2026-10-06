@@ -109,7 +109,9 @@ export async function registerSecurity(app: FastifyInstance): Promise<void> {
     contentSecurityPolicy: { useDefaults: false, directives: contentSecurityPolicyDirectives(app.config) },
     // Media is served from the bucket, not the API; keep the API same-origin only.
     crossOriginResourcePolicy: { policy: "same-origin" },
-    referrerPolicy: { policy: "no-referrer" }
+    referrerPolicy: { policy: "no-referrer" },
+    // Matches CSP frame-ancestors 'none' for browsers that only honour X-Frame-Options.
+    frameguard: { action: "deny" }
   });
   await app.register(cors, {
     origin: allowedOrigins(app.config),
