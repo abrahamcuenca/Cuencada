@@ -8,6 +8,7 @@ import {
   type WithAuthState
 } from "../features/auth/authSlice";
 import { logout } from "../features/auth/session";
+import { type ChatUnreadBadge, useChatUnreadBadge } from "../features/chat/unread";
 import { useGetCuencadaHomeQuery } from "../features/cuencadas/api";
 import { wantsMinimalChrome } from "../shared/lib/featureRoutes";
 import { reportUnexpected } from "../shared/lib/reportUnexpected";
@@ -53,25 +54,32 @@ const VerifyEmailBanner = lazy(() =>
  * Mobile tab bar destinations (Inicio, Programa, Fotos, Chat, Más).
  *
  * @param programaPath - `/cuencada/{year}` of the current or latest edition.
+ * @param chatBadge - Unread chat messages for the "Chat" tab (T7).
  * @returns The five BottomNav items.
  */
-export function bottomNavItems(programaPath: string): readonly NavItem[] {
+export function bottomNavItems(programaPath: string, chatBadge?: ChatUnreadBadge): readonly NavItem[] {
   return [
     { key: "inicio", label: "Inicio", href: "/", icon: "🏠", end: true },
     { key: "programa", label: "Programa", href: programaPath, icon: "📅" },
     { key: "fotos", label: "Fotos", href: "/galeria", icon: "📸" },
-    { key: "chat", label: "Chat", href: "/chat", icon: "💬" },
+    { key: "chat", label: "Chat", href: "/chat", icon: "💬", ...chatBadgeProps(chatBadge) },
     { key: "mas", label: "Más", href: MORE_PATH, icon: "☰" }
   ];
 }
 
-function topNavItems(programaPath: string): NavItem[] {
+/** The `badge`/`badgeLabel` of the Chat nav item, or nothing when there is no unread message. */
+function chatBadgeProps(chatBadge: ChatUnreadBadge | undefined): Pick<NavItem, "badge" | "badgeLabel"> {
+  if (chatBadge === undefined || chatBadge.count === 0 || chatBadge.label === undefined) return {};
+  return { badge: chatBadge.count, badgeLabel: chatBadge.label };
+}
+
+function topNavItems(programaPath: string, chatBadge?: ChatUnreadBadge): NavItem[] {
   return [
     { key: "programa", label: "Programa", href: programaPath },
     { key: "galeria", label: "Galería", href: "/galeria" },
     { key: "directorio", label: "Directorio", href: "/directorio" },
     { key: "arbol", label: "Árbol", href: "/arbol" },
-    { key: "chat", label: "Chat", href: "/chat" }
+    { key: "chat", label: "Chat", href: "/chat", ...chatBadgeProps(chatBadge) }
   ];
 }
 
@@ -153,7 +161,8 @@ export function AppLayout(): ReactNode {
   // Auth screens (route handle MINIMAL_CHROME) get no BottomNav; it is hidden at ≥900px anyway.
   const minimalChrome = useMatches().some((match) => wantsMinimalChrome(match.handle));
   const programaPath = useProgramaPath();
-  const topItems = isAdmin ? [...topNavItems(programaPath), ADMIN_NAV_ITEM] : topNavItems(programaPath);
+  const chatBadge = useChatUnreadBadge();
+  const topItems = isAdmin ? [...topNavItems(programaPath, chatBadge), ADMIN_NAV_ITEM] : topNavItems(programaPath, chatBadge);
 
   return (
     <PageShell
@@ -181,7 +190,7 @@ export function AppLayout(): ReactNode {
       }
       bottomNav={
         minimalChrome ? undefined : (
-          <BottomNav items={bottomNavItems(programaPath)} currentPath={pathname} renderLink={renderRouterLink} label="Navegación inferior" />
+          <BottomNav items={bottomNavItems(programaPath, chatBadge)} currentPath={pathname} renderLink={renderRouterLink} label="Navegación inferior" />
         )
       }
     >

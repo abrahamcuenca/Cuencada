@@ -1,8 +1,9 @@
 /**
  * Shared MSW setup for web tests that render the app layout.
  *
- * `AppLayout` asks `GET /cuencadas/home` for the "Programa" link (T2), so
- * every test that goes through `renderApp` needs a handler for it. Build the
+ * `AppLayout` asks `GET /cuencadas/home` for the "Programa" link (T2) and,
+ * for a signed-in member, `GET /chat/rooms` for the Chat badge (T7), so every
+ * test that goes through `renderApp` needs handlers for them. Build the
  * per-file server with {@link createTestServer} and keep
  * `server.listen({ onUnhandledRequest: "error" })`: anything else a test
  * triggers must still be handled explicitly.
@@ -21,7 +22,9 @@ export const defaultHandlers: readonly HttpHandler[] = [
   http.get(apiUrl("/announcements"), () => HttpResponse.json({ items: [], nextCursor: null })),
   // `/perfil` and `/directorio` (T5), rendered by guard and redirect tests.
   http.get(apiUrl("/profile/me"), () => HttpResponse.json(makeProfile())),
-  http.get(apiUrl("/directory"), () => HttpResponse.json({ items: [], nextCursor: null }))
+  http.get(apiUrl("/directory"), () => HttpResponse.json({ items: [], nextCursor: null })),
+  // The "Chat" tab's unread badge (T7) loads the room list for signed-in members.
+  http.get(apiUrl("/chat/rooms"), () => HttpResponse.json([]))
 ];
 
 /**
