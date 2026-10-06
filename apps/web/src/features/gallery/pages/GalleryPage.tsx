@@ -17,6 +17,7 @@ import { UploadPanel } from "../components/UploadPanel";
 import { Uploader, type UploaderHandle } from "../components/Uploader";
 import styles from "../gallery.module.css";
 import { parseYearParam } from "../lib/mediaText";
+import { LARGE_PHOTO_NOTE } from "../lib/resizeImage";
 import { uploadsConfigured } from "../lib/uploadOrigin";
 import { UPLOAD_LOCATION_NOTE, UPLOAD_RULES_TEXT } from "../lib/validateFile";
 import { useExpiredUrlRefetch } from "../lib/useExpiredUrlRefetch";
@@ -191,7 +192,7 @@ function GalleryYear({ year }: { year: number }): React.ReactNode {
       </header>
       <Uploader ref={uploader} year={year} />
       <p className={styles.hint}>
-        {UPLOAD_RULES_TEXT} {UPLOAD_LOCATION_NOTE}
+        {UPLOAD_RULES_TEXT} {LARGE_PHOTO_NOTE} {UPLOAD_LOCATION_NOTE}
       </p>
       {content}
       <UploadPanel year={year} />

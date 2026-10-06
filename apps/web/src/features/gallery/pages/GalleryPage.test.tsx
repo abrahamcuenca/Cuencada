@@ -9,6 +9,7 @@ import type { AppStore } from "../../../app/store";
 import { env } from "../../../shared/lib/env";
 import { loggedOut } from "../../auth/authSlice";
 import { BUCKET_ORIGIN, type FakeGalleryDb, FakeXhr, galleryHandlers, makeDb, makeEdition, makeGate, makeMedia, SIGNED_PUT_URL, uuid } from "../testUtils";
+import { pngOfSize, stubImagePipeline } from "../testing/imageFixtures";
 import { getUploadManager } from "../upload/uploadManager";
 
 const MB = 1024 * 1024;
@@ -275,6 +276,46 @@ describe("GalleryPage uploads", () => {
     await user.click(within(sheet).getByRole("button", { name: "Entendido" }));
     expect(db.log.some((line) => line.includes("/media/uploads"))).toBe(false);
     expect(FakeXhr.instances).toHaveLength(0);
+  });
+
+  it("downscales a photo above 40 MP to a ≤ 24 MP JPEG before the intent", async () => {
+    const fake = stubImagePipeline({ width: 16320, height: 12240 }, 4321);
+    const user = userEvent.setup();
+    renderApp("/galeria/2026", authenticatedState());
+    expect(await screen.findByText(/Reducimos fotos muy grandes para subirlas más rápido\./)).toBeInTheDocument();
+
+    await pickAndUpload(user, [pngOfSize(16320, 12240, "IMG_200MP.png")]);
+
+    const xhr = await waitForXhr(1);
+    expect(db.bodies["POST uploads IMG_200MP.jpg"]).toEqual({ fileName: "IMG_200MP.jpg", mimeType: "image/jpeg", byteSize: 4321, caption: null });
+    expect(xhr.body).toBeInstanceOf(File);
+    expect((xhr.body as File).type).toBe("image/jpeg"); // The PUT body is the File the manager prepared.
+    expect(fake.closed).toBe(1);
+  });
+
+  it("leaves a photo within 40 MP untouched", async () => {
+    stubImagePipeline({ width: 6000, height: 4000 });
+    const user = userEvent.setup();
+    const file = pngOfSize(6000, 4000, "IMG_24MP.png");
+    renderApp("/galeria/2026", authenticatedState());
+
+    await pickAndUpload(user, [file]);
+
+    const xhr = await waitForXhr(1);
+    expect(db.bodies["POST uploads IMG_24MP.png"]).toMatchObject({ mimeType: "image/png", byteSize: file.size });
+    expect(xhr.body).toBe(file);
+    expect(createImageBitmap).not.toHaveBeenCalled();
+  });
+
+  it("fails the row with a Spanish message when a huge photo can't be decoded, without an intent", async () => {
+    stubImagePipeline("fail");
+    const user = userEvent.setup();
+    renderApp("/galeria/2026", authenticatedState());
+
+    await pickAndUpload(user, [pngOfSize(16000, 12000, "rota.png")]);
+
+    expect(await screen.findByText(/No pudimos leer esta foto/)).toBeInTheDocument();
+    expect(db.log.some((line) => line.includes("/media/uploads"))).toBe(false);
   });
 
   it("creates an intent, PUTs only the signed headers with progress, then confirms", async () => {
