@@ -233,7 +233,7 @@ describe("POST /api/media/:id/confirm and processing", () => {
     expect([...storage.objects.keys()].sort()).toEqual([row.displayKey, row.thumbKey].sort());
   });
 
-  it("stores derivatives with immutable private caching and bounded widths", async () => {
+  it("stores derivatives with private caching no longer than the presigned URL, and bounded widths", async () => {
     const storage = new FakeStorage();
     const puts: Array<{ key: string; cacheControl: string | undefined }> = [];
     const original = storage.put.bind(storage);
@@ -250,6 +250,7 @@ describe("POST /api/media/:id/confirm and processing", () => {
     const derivativePuts = puts.filter((put) => !put.key.includes("/originals/"));
     expect(derivativePuts).toHaveLength(2);
     expect(derivativePuts.every((put) => put.cacheControl === DERIVATIVE_CACHE_CONTROL)).toBe(true);
+    expect(DERIVATIVE_CACHE_CONTROL).toBe("private, max-age=3600");
     const row = await mediaRow(result.mediaId);
     const thumb = await sharp(storage.objects.get(row.thumbKey ?? "")?.body).metadata();
     const display = await sharp(storage.objects.get(row.displayKey ?? "")?.body).metadata();

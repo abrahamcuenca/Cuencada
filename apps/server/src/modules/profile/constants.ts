@@ -53,8 +53,12 @@ export const AVATAR_WEBP_QUALITY = 82;
 /** Presigned GET lifetime for avatar URLs in responses (seconds). */
 export const AVATAR_URL_TTL_SECONDS = 60 * 60;
 
-/** `Cache-Control` on the derivatives (keys are unique per upload). */
-export const AVATAR_CACHE_CONTROL = "private, max-age=31536000, immutable";
+/**
+ * `Cache-Control` stored on the derivatives: private, and no longer than the
+ * presigned GET ({@link AVATAR_URL_TTL_SECONDS}) so avatars do not outlive a
+ * logout in the browser's disk cache (WP-2.3 N1; it was a year).
+ */
+export const AVATAR_CACHE_CONTROL = `private, max-age=${AVATAR_URL_TTL_SECONDS}`;
 
 /** Bytes read for the magic-byte check. */
 export const MAGIC_BYTES_LENGTH = 32;

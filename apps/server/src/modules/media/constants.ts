@@ -82,8 +82,13 @@ export const DISPLAY_WIDTH = 1600;
 export const SNIFF_BYTES = 32;
 
 
-/** `Cache-Control` for derivatives: their keys never change, and the bucket is private. */
-export const DERIVATIVE_CACHE_CONTROL = "private, max-age=31536000, immutable";
+/**
+ * `Cache-Control` stored on derivatives (bucket object metadata). Private, and
+ * no longer than the presigned GET that hands them out ({@link VIEW_URL_SECONDS}),
+ * so family photos do not linger in a shared browser's disk cache after logout
+ * (WP-2.3 N1; it was a year).
+ */
+export const DERIVATIVE_CACHE_CONTROL = `private, max-age=${VIEW_URL_SECONDS}`;
 
 /** Job name used in logs. */
 export const MEDIA_PROCESS_JOB = "media.process";

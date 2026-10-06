@@ -147,4 +147,41 @@ describe("CuencadaYearPage", () => {
     // The public content stays on screen.
     expect(screen.getByRole("heading", { name: /Programa Cuencada 2026/ })).toBeInTheDocument();
   });
+
+  // WP-2.3 M2: /members needs a verified email; a 403 is final, so no retry.
+  it("shows the verify-email prompt (no retry, no member links) when /members answers 403 EMAIL_UNVERIFIED, keeping the public sections", async () => {
+    server.use(
+      http.get(apiUrl("/cuencadas/2026/members"), () => {
+        memberRequests += 1;
+        return HttpResponse.json(errorBody("EMAIL_UNVERIFIED", "Confirma tu correo electrónico para ver esta sección."), { status: 403 });
+      })
+    );
+    renderApp("/cuencada/2026", authenticatedState(makeUser({ emailVerified: false })));
+
+    const familia = await screen.findByRole("region", { name: /Para la familia/ });
+    expect(
+      await within(familia).findByRole("heading", { level: 3, name: "Verifica tu correo para ver la sección de la familia" })
+    ).toBeInTheDocument();
+    expect(within(familia).getByRole("button", { name: /Reenviar/ })).toBeInTheDocument();
+    expect(within(familia).queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Grupo WhatsApp/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Ver álbum compartido/ })).not.toBeInTheDocument();
+    // Public content stays.
+    expect(screen.getByRole("heading", { level: 1, name: "Cuencada 2026" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Programa Cuencada 2026/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /¿Dónde estamos\?/ })).toBeInTheDocument();
+    expect(memberRequests).toBe(1);
+  });
+
+  it("shows the no-access copy without a retry for any other 403 on /members", async () => {
+    server.use(
+      http.get(apiUrl("/cuencadas/2026/members"), () => HttpResponse.json(errorBody("FORBIDDEN", "Sin acceso."), { status: 403 }))
+    );
+    renderApp("/cuencada/2026", authenticatedState());
+
+    const familia = await screen.findByRole("region", { name: /Para la familia/ });
+    expect(await within(familia).findByRole("heading", { level: 3, name: "No tienes acceso a la sección de la familia" })).toBeInTheDocument();
+    expect(within(familia).queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Programa Cuencada 2026/ })).toBeInTheDocument();
+  });
 });

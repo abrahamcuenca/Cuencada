@@ -205,6 +205,9 @@ describe("GalleryPage access", () => {
 
     expect(await screen.findByRole("heading", { name: "Verifica tu correo para ver el álbum" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
+    // Uploads are gated too (WP-2.3 M2): no upload button or file input over the denial.
+    expect(screen.queryByRole("button", { name: /Subir fotos y videos/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("gallery-file-input")).not.toBeInTheDocument();
   });
 
   it("says access is closed for any other 403", async () => {
@@ -212,6 +215,7 @@ describe("GalleryPage access", () => {
     renderApp("/galeria/2026", authenticatedState());
 
     expect(await screen.findByRole("heading", { name: "No tienes acceso al álbum" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Subir fotos y videos/ })).not.toBeInTheDocument();
   });
 });
 
