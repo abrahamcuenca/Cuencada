@@ -134,6 +134,13 @@ describe("ChatPage", { timeout: 20_000 }, () => {
     await waitFor(() => expect(db.reads.at(-1)?.messageId).toBe(makeMessage(6).id), { timeout: 5000 });
   });
 
+  it("puts the message log in the tab order so keyboard users can scroll it", async () => {
+    renderApp(`/chat/${ROOMS.familia}`, authenticatedState());
+
+    expect(await screen.findByText("Mensaje 5")).toBeInTheDocument();
+    expect(log()).toHaveAttribute("tabindex", "0");
+  });
+
   it("keeps a message that arrives while the room's history is still loading (exactly once)", async () => {
     let release: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => {

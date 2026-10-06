@@ -1,0 +1,76 @@
+{
+  "generatedAt": "2026-10-06T19:03:01.054Z",
+  "lighthouse": "13.x",
+  "formFactor": "mobile",
+  "throttling": "simulated (Lighthouse default)",
+  "target": 90,
+  "results": [
+    {
+      "page": "home",
+      "path": "/",
+      "cold": true,
+      "scores": {
+        "performance": 99,
+        "accessibility": 100,
+        "best-practices": 96
+      },
+      "metrics": {
+        "lcpMs": 1930.327,
+        "tbtMs": 18.5,
+        "cls": 0,
+        "fcpMs": 1780.327
+      },
+      "failedAudits": [
+        "errors-in-console",
+        "valid-source-maps",
+        "unused-javascript",
+        "network-dependency-tree-insight",
+        "render-blocking-insight"
+      ]
+    },
+    {
+      "page": "cuencada-2027",
+      "path": "/cuencada/2027",
+      "cold": true,
+      "scores": {
+        "performance": 98,
+        "accessibility": 100,
+        "best-practices": 96
+      },
+      "metrics": {
+        "lcpMs": 2035.4945,
+        "tbtMs": 15,
+        "cls": 0,
+        "fcpMs": 1776.9945
+      },
+      "failedAudits": [
+        "errors-in-console",
+        "valid-source-maps",
+        "unused-javascript",
+        "network-dependency-tree-insight",
+        "render-blocking-insight"
+      ]
+    },
+    {
+      "page": "galeria-2027",
+      "path": "/galeria/2027",
+      "cold": false,
+      "scores": {
+        "performance": 100,
+        "accessibility": 100,
+        "best-practices": 100
+      },
+      "metrics": {
+        "lcpMs": 937.777799407959,
+        "tbtMs": 38.5,
+        "cls": 0.00722067962981865,
+        "fcpMs": 87.41627883911133
+      },
+      "failedAudits": [
+        "valid-source-maps",
+        "network-dependency-tree-insight",
+        "render-blocking-insight"
+      ]
+    }
+  ]
+}

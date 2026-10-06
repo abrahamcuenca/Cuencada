@@ -42,6 +42,9 @@ family, profile, admin, chat, media, cuencadas) · **0.8c** web features
 | WP-2.3: route inventory drift guard, authorization matrix (99 routes × 7 principals, 27 state-checked IDOR/rule/mass-assignment probes, CSRF, WS), PII leak scans (bodies and WS frames), header/CSP tests, threat model, OWASP/ASVS checklist, dependency review, SPA CSP verified in Chromium (incl. the resize worker); M1 `Cache-Control: no-store` on every `/api/` response; **M2 (owner decision) gallery, media routes and member edition links need a verified email**; L6 stored photo/avatar cache ≤ 1 h | WP-2.3 (`docs/security/`, PR #35) |
 | WP-0.8a: Toast never evicts an action toast, clears evicted timers; Badge `max` ("999+"); BottomNav "Programa" fits at 320 px | WP-0.8a |
 | WP-0.8a: emails Container `width="600"`, Button no-VML JSDoc, LICENSE title + repo URL, test script `--config` | WP-0.8a |
+| WP-2.2: Playwright e2e (iPhone 13 / Pixel 7 / desktop subset), mobile gates (overflow, 44 px targets, 16 px inputs, axe), Lighthouse mobile, CI `e2e.yml` | WP-2.2 |
+| WP-2.2 bug: invite page stuck on "Revisando tu invitación…" when the boot refresh 401 aborted the inspect (waits for the session gate now) | WP-2.2 |
+| WP-2.2 bug: chat message log not keyboard-focusable (axe `scrollable-region-focusable`) | WP-2.2 |
 
 ## Open
 
@@ -75,6 +78,14 @@ family, profile, admin, chat, media, cuencadas) · **0.8c** web features
 - Chat fixtures/handlers answer `FORBIDDEN` for unverified members; the server now answers `EMAIL_UNVERIFIED` (`socket.ts` already branches on the 403 status).
 - `features/chat/testing/fixtures.ts` `ME` is "Prima Cuenca": rename to a fictional person and retake the `docs/ux/screenshots/t7/` screenshots if the name shows.
 - Preview update after delete.
+
+### WP-2.2 findings (e2e + gates)
+- T9 / UX: offline, the year page hero shows a broken-image glyph. `/images/Logo_Cuencada2026.jpg` (the 2026 `heroImageUrl`) is neither precached nor runtime-cached. Either add a CacheFirst runtime route for same-origin `/images/**` (size-capped, no user data) or hide the hero `<img>` on `error` (see `docs/ux/screenshots/e2e/10-offline-programa-375.webp`).
+- WP-0.6 / UX: the top `OFFLINE_NOTICE` banner ("Sin conexión. Reintentaremos…") renders edge to edge with no side padding at 375 px (same screenshot). One combined offline banner is still T9 Request 5.
+- WP-0.7 / UX (WCAG 2.2 2.4.11 Focus Not Obscured): the sticky header and the bottom tab bar can cover a control that the browser scrolls into view (Playwright's scroll-into-view put the RSVP radio under the tab bar and the directory switch under the header). Add `scroll-padding-top`/`scroll-padding-bottom` on `html` matching the bar heights.
+- T5/T6-FE copy: the profile hint for "Rama familiar" says "Por ejemplo: Rama Norte.", but the tree renders `Rama ${familyBranch}` and the profile header `Rama: ${familyBranch}`, so following the hint shows "Rama Rama Norte". Either change the hint to "Por ejemplo: Norte." or stop prefixing. (The e2e fixtures now use "Norte".)
+- Ops (unconfirmed): under parallel e2e load, a caption `PATCH` once took about 13 s while sharp jobs and argon2 logins ran. Both use the libuv threadpool (default 4). Measure in staging; consider `UV_THREADPOOL_SIZE` and/or a sharp concurrency limit in the systemd unit.
+- CI: add a WebKit project for the iPhone profile once the runner installs WebKit dependencies (journeys run in Chromium today; service-worker checks may need to stay Chromium-only). Decide whether `e2e.yml` is a required check and whether Lighthouse should block.
 
 ### WP-2.x
 - WP-2.1 nits: fix the NOT VALID locking comment; schema comments point to the WP-2.1.md hand-written SQL section.

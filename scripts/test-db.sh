@@ -52,6 +52,17 @@ wait_until_ready() {
   done
 }
 
+# Mark this cluster as the disposable test container. The e2e harness
+# (tests/e2e/harness/dbGuard.ts) refuses to DROP/CREATE databases on a cluster
+# without this marker, so a mistyped URL aimed at a tunnel to production fails
+# closed. A database-level setting: idempotent, and applied to an already
+# running (older) container without recreating it.
+mark_test_cluster() {
+  podman exec -e PGPASSWORD="$DB_PASSWORD" "$CONTAINER_NAME" \
+    psql -h 127.0.0.1 -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 -qtAc \
+    "ALTER DATABASE postgres SET cuencada.test_cluster = 'cuencada-test'" >/dev/null
+}
+
 cmd_up() {
   require_podman
   if container_running; then
@@ -71,6 +82,7 @@ cmd_up() {
       "$IMAGE" >/dev/null
   fi
   wait_until_ready
+  mark_test_cluster
   echo "test-db: ready at postgresql://${DB_USER}:***@127.0.0.1:${HOST_PORT}/${DB_NAME}"
 }
 
