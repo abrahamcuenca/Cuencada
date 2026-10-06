@@ -19,7 +19,8 @@ import {
   parseServerFrame,
   resetChatSocketForTests,
   SEND_ACK_TIMEOUT_MS,
-  SEND_BUDGET
+  SEND_BUDGET,
+  SERVER_BUSY_MIN_DELAY_MS
 } from "./socket";
 import { createFakeSocket, FakeSocket } from "./testing/fakeSocket";
 import { type ChatDb, chatHandlers, frames, makeChatDb, makeMessage, ticketValue } from "./testing/fixtures";
@@ -271,6 +272,31 @@ describe("ChatConnection lifecycle", { timeout: 15_000 }, () => {
     connection.acquire();
     (await connectedSocket(connection)).serverClose(WsCloseCode.SessionRevoked);
     await vi.advanceTimersByTimeAsync(1000);
+    await socketCount(2);
+  });
+
+  it("does not reconnect after being evicted for too many connections, until asked to", async () => {
+    const connection = getChatConnection(store);
+    connection.acquire();
+    const socket = await connectedSocket(connection);
+    socket.receive({ type: "error", code: "CONFLICT", message: "Demasiadas conexiones abiertas.", clientMessageId: null });
+    socket.serverClose(1000, "Demasiadas conexiones abiertas.");
+    expect(connection.getStatus()).toBe("evicted");
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(FakeSocket.instances).toHaveLength(1);
+
+    connection.reconnect();
+    (await socketCount(2)).open();
+    expect(connection.getStatus()).toBe("open");
+  });
+
+  it("waits at least 30 s when the server is full (1013)", async () => {
+    const connection = getChatConnection(store);
+    connection.acquire();
+    (await connectedSocket(connection)).serverClose(1013);
+    await vi.advanceTimersByTimeAsync(SERVER_BUSY_MIN_DELAY_MS - 1000);
+    expect(FakeSocket.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1100);
     await socketCount(2);
   });
 

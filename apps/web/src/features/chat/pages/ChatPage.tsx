@@ -60,7 +60,7 @@ export function ChatPage(): ReactNode {
   const [messagesForbidden, setMessagesForbidden] = useState(false);
   const forbidden = is403(rooms.error) || messagesForbidden;
   // Connect only once the server let us list the rooms (an unverified account gets a 403 there first).
-  const connection = useChatConnection(rooms.isSuccess && !forbidden);
+  const { status: connection, reconnect } = useChatConnection(rooms.isSuccess && !forbidden);
   const layoutRef = useRef<HTMLDivElement>(null);
   const markerRef = useRef<HTMLDivElement>(null);
   const now = useMinuteClock();
@@ -94,7 +94,7 @@ export function ChatPage(): ReactNode {
               <EmptyState icon="💬" title="Elige una sala" description="Tus conversaciones con la familia aparecen a la izquierda." />
             </div>
           ) : validRoomId ? (
-            <Conversation key={roomId} roomId={roomId} room={room} connection={connection} timeZone={timeZone} now={now} onForbidden={onForbidden} />
+            <Conversation key={roomId} roomId={roomId} room={room} connection={connection} timeZone={timeZone} now={now} onForbidden={onForbidden} onReconnect={reconnect} />
           ) : (
             <EmptyState icon="🔍" title="No encontramos esa sala" description="Revisa el enlace o elige otra sala." action={<Button to="/chat">Ver salas</Button>} />
           )}

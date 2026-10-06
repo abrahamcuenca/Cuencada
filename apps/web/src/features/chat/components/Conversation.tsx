@@ -9,12 +9,12 @@ import { Spinner } from "../../../shared/ui/Spinner";
 import { useToast } from "../../../shared/ui/Toast";
 import { selectCurrentUser, selectIsAdmin } from "../../auth/authSlice";
 import { discardChatMessage, loadOlderMessages, retryChatMessage, sendChatMessage } from "../actions";
-import { useDeleteChatMessageMutation, useGetMessagesQuery, useMarkRoomReadMutation } from "../conversationApi";
+import { conversationApi, useDeleteChatMessageMutation, useGetMessagesQuery, useMarkRoomReadMutation } from "../conversationApi";
 import styles from "../chat.module.css";
 import { sendChatFrame, setViewingRoom, subscribeChatEvents } from "../events";
 import { buildConversation } from "../lib/format";
 import type { ChatRoomView } from "../lib/rooms";
-import { firstUnreadMessageId, lastServerMessage, type ThreadMessage } from "../lib/thread";
+import { applyDeletedMessage, firstUnreadMessageId, lastServerMessage, type ThreadMessage } from "../lib/thread";
 import type { ChatConnectionStatus } from "../socket";
 import { Composer, enterSends } from "./Composer";
 import { MessageList, type MessageListHandle } from "./MessageList";
@@ -40,13 +40,16 @@ export interface ConversationProps {
   now: Date;
   /** The messages request answered 403 (unverified). */
   onForbidden: () => void;
+  /** Reopens the socket after it was taken over by another tab. */
+  onReconnect: () => void;
 }
 
 const STATUS_TEXT: Partial<Record<ChatConnectionStatus, string>> = {
   connecting: "Conectando…",
   reconnecting: "Reconectando… Los mensajes se enviarán cuando vuelva la conexión.",
   paused: "Reconectando…",
-  offline: "Sin conexión. Los mensajes se enviarán cuando vuelva la conexión."
+  offline: "Sin conexión. Los mensajes se enviarán cuando vuelva la conexión.",
+  evicted: "Se abrió el chat en otra pestaña."
 };
 
 function subscribeVisibility(listener: () => void): () => void {
@@ -121,7 +124,7 @@ function errorStatus(error: unknown): number | string | null {
  * The conversation (wireframes §8.2): app bar, connection banner, the
  * message log, the typing line and the composer pinned above the keyboard.
  */
-export function Conversation({ roomId, room, connection, timeZone, now, onForbidden }: ConversationProps): ReactNode {
+export function Conversation({ roomId, room, connection, timeZone, now, onForbidden, onReconnect }: ConversationProps): ReactNode {
   const dispatch = useAppDispatch();
   const toast = useToast();
   const me = useAppSelector(selectCurrentUser);
@@ -246,6 +249,13 @@ export function Conversation({ roomId, room, connection, timeZone, now, onForbid
       listRef.current?.focus();
     } catch (deleteError) {
       if (isAbortError(deleteError)) return;
+      if (errorStatus(deleteError) === 404) {
+        // Someone (or a moderator) already deleted it, or it is not ours to delete: it is gone either way.
+        dispatch(conversationApi.util.updateQueryData("getMessages", roomId, (thread) => applyDeletedMessage(thread, message.id)));
+        setMenuMessage(null);
+        toast.show({ message: "Ese mensaje ya no existe.", tone: "info" });
+        return;
+      }
       toast.show({ message: getApiErrorMessage(deleteError), tone: "danger" });
     }
   };
@@ -311,7 +321,14 @@ export function Conversation({ roomId, room, connection, timeZone, now, onForbid
         </h2>
       </header>
       {statusText === undefined ? null : (
-        <output className={cx(styles.status, connection === "offline" && styles.statusOffline)}>{statusText}</output>
+        <div className={cx(styles.status, connection === "offline" && styles.statusOffline)}>
+          <output>{statusText}</output>
+          {connection === "evicted" ? (
+            <button type="button" className={styles.linkButton} onClick={onReconnect}>
+              Reconectar
+            </button>
+          ) : null}
+        </div>
       )}
       {body}
       <p className={styles.typing} aria-hidden="true">

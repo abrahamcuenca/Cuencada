@@ -1,7 +1,11 @@
 # WP-T7-FE Chat [SEC]
 Owner: Frontend · Reviewers: TL, Sec · Branch: wp/t7-fe-chat · PR: # (not opened)
 
-Built against the WP-0.2 chat contract with MSW and a fake WebSocket. Mid-task, the orchestrator relayed the T7-BE notes and asked for its local branch `wp/t7-be-chat` to be merged in to align types. This branch therefore contains the T7-BE commits (contract: `ChatRoom.lastMessage`, `CHAT_UNREAD_COUNT_MAX`, `WS_MAX_FRAME_BYTES` 8 KB, history `limit` ≤ 50). **Merge T7-BE first.**
+Built against the WP-0.2 chat contract with MSW and a fake WebSocket. Mid-task, the orchestrator relayed the T7-BE notes twice and asked for `wp/t7-be-chat` to be merged in to align types (last merge: `origin/wp/t7-be-chat` @ eee980d, PR #25 round 1). This branch therefore contains the T7-BE commits:
+- contract: `ChatRoom.lastMessage`, `CHAT_UNREAD_COUNT_MAX`, `WS_MAX_FRAME_BYTES` 8 KB, history `limit` ≤ 50
+- socket caps: 3 per session, 8 per user, with eviction of the oldest
+
+**Merge T7-BE first.**
 
 ## Scope
 
@@ -35,10 +39,12 @@ Built against the WP-0.2 chat contract with MSW and a fake WebSocket. Mid-task, 
 
   | Code | Meaning | Client response |
   |---|---|---|
-  | 1008, 1009, 1006, 4400 | ticket problem, oversized frame, dropped connection, protocol error | retry with backoff and a new ticket |
+  | 1008, 1009, 1006, 4400 | ticket problem, oversized frame, dropped connection (or a slow reader the server terminated), protocol error | retry with backoff and a new ticket (a ticket is burned on any attempt, so it is never reused) |
   | 4008 | rate limited / backpressure | retry, with the backoff floor raised to 8 s |
+  | 1013 | server full | wait at least 30 s (30–45 s with jitter) |
+  | 1000 after an `error` frame with `CONFLICT` and no `clientMessageId`, or with the reason "Demasiadas conexiones abiertas." | the account has too many sockets and the server evicted this one | **no automatic reconnect** (it would evict another tab in turn); status `evicted` shows "Se abrió el chat en otra pestaña." with a **Reconectar** button |
   | 4003 | forbidden | `forbidden` state, no retries |
-  | 4010 | session revoked | **no blind retry**: one authenticated `GET /chat/rooms` runs the normal auth flow (refresh, or `loggedOut` if refused). Only a session that survives it reconnects |
+  | 4010 | session revoked | **no blind retry**: one authenticated `GET /chat/rooms` runs the normal auth flow (refresh, or `loggedOut` if refused). Only a session that survives it reconnects; a revoked session can't, because its ticket request would 401 as well |
 
 - **Pauses:**
   - **offline** (`navigator.onLine === false` or the auth `isOffline` flag): the socket is closed and the client waits for `online`.
@@ -87,6 +93,7 @@ Built against the WP-0.2 chat contract with MSW and a fake WebSocket. Mid-task, 
   - it updates on `visualViewport` resize/scroll, window resize/scroll and body resize
   - when the visual viewport is ≥120px shorter than the window it sets `data-keyboard="open"`, which drops the `env(safe-area-inset-bottom)` padding (the inset sits under the keyboard)
   - the list sticks to the newest message when it shrinks (ResizeObserver), so the keyboard opening never hides the last bubble
+- **Text only [SEC]:** message bodies and display names are rendered strictly as React text nodes. Presence frames are validated and ignored.
 - **Bubbles:**
   - grouped by sender within 5 minutes on the same day
   - avatar and name at the start of a group, time at the end
@@ -112,6 +119,7 @@ Built against the WP-0.2 chat contract with MSW and a fake WebSocket. Mid-task, 
   - the "⋯" button is always focusable; on hover-capable devices it is hidden until hover/focus
   - the menu offers "Copiar texto" (when the Clipboard API exists) and "Eliminar" (my messages, or any for admins; a UX hint only, since the server decides)
   - "Eliminar" opens an `alertdialog` confirm (`closeOnBackdrop={false}`), then sends `DELETE`, which produces a tombstone and a toast
+  - a 404 (already deleted, or someone else's message for a non-admin) is treated as "ya no existe": the message is tombstoned locally and a "Ese mensaje ya no existe." toast is shown
 - **Composer:**
   - plain `<textarea>` with a hidden "Mensaje" label
   - grows to 5 lines, then scrolls
@@ -132,6 +140,7 @@ Built against the WP-0.2 chat contract with MSW and a fake WebSocket. Mid-task, 
   | connecting | "Conectando…" |
   | reconnecting | "Reconectando… Los mensajes se enviarán cuando vuelva la conexión." |
   | offline | "Sin conexión. Los mensajes se enviarán cuando vuelva la conexión." |
+  | evicted | "Se abrió el chat en otra pestaña." + "Reconectar" |
 
 - **403** (on the room list, the history or the ticket, or close code 4003) shows "Verifica tu correo para usar el chat" and never opens a socket.
   - The socket is only acquired after `GET /chat/rooms` succeeds, so an unverified account never asks for a ticket.
@@ -168,8 +177,8 @@ Built against the WP-0.2 chat contract with MSW and a fake WebSocket. Mid-task, 
   - `lib/{thread,rooms,format,linkify,scroll,uuid,limits,useChatViewport}.ts`
   - `testing/{fakeSocket,fixtures}.ts`
 - **Tests:**
-  - `socket.test.ts` (23)
-  - `pages/ChatPage.test.tsx` (18)
+  - `socket.test.ts` (25)
+  - `pages/ChatPage.test.tsx` (20)
   - `lib/thread.test.ts` (22)
   - `lib/linkify.test.ts` (6)
   - `lib/scroll.test.ts` (9, including the visual-viewport geometry)

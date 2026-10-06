@@ -234,6 +234,37 @@ describe("ChatPage", { timeout: 20_000 }, () => {
     expect(within(log()).queryByText("Mensaje mío")).not.toBeInTheDocument();
   });
 
+  it("treats a 404 on delete as already gone", async () => {
+    db.messages.set(ROOMS.familia, [makeMessage(1, { sender: ME, body: "Ya lo borré en otra pestaña" })]);
+    server.use(http.delete(apiUrl("/chat/messages/:id"), () => HttpResponse.json({ error: { code: "NOT_FOUND", message: "No existe." } }, { status: 404 })));
+    const user = userEvent.setup();
+    renderApp(`/chat/${ROOMS.familia}`, authenticatedState());
+    await screen.findByText("Ya lo borré en otra pestaña");
+
+    await user.click(screen.getByRole("button", { name: "Opciones del mensaje de Tú" }));
+    await user.click(within(await screen.findByRole("dialog", { name: "Mensaje" })).getByRole("button", { name: "Eliminar" }));
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Eliminar" }));
+
+    expect(await screen.findByText("Ese mensaje ya no existe.")).toBeInTheDocument();
+    expect(within(log()).getByText("🚫 Mensaje eliminado")).toBeInTheDocument();
+  });
+
+  it("offers Reconectar after another tab took over the connection", async () => {
+    const user = userEvent.setup();
+    renderApp(`/chat/${ROOMS.familia}`, authenticatedState());
+    await screen.findByText("Mensaje 5");
+    const socket = await openSocket();
+    act(() => {
+      socket.receive({ type: "error", code: "CONFLICT", message: "Demasiadas conexiones abiertas.", clientMessageId: null });
+      socket.serverClose(1000, "Demasiadas conexiones abiertas.");
+    });
+    expect(await screen.findByText("Se abrió el chat en otra pestaña.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reconectar" }));
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(2));
+    act(() => FakeSocket.latest().open());
+    await waitFor(() => expect(screen.queryByText("Se abrió el chat en otra pestaña.")).not.toBeInTheDocument());
+  });
+
   it("lets an admin open the delete menu on someone else's message (also by right-click)", async () => {
     const user = userEvent.setup();
     renderApp(`/chat/${ROOMS.familia}`, authenticatedState(makeUser({ role: "admin" })));

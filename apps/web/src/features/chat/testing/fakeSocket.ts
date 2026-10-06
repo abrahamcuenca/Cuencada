@@ -9,8 +9,8 @@ const CONNECTING = 0;
 const OPEN = 1;
 const CLOSED = 3;
 
-function closeEvent(code: number): CloseEvent {
-  return new CloseEvent("close", { code, wasClean: code === 1000 });
+function closeEvent(code: number, reason: string): CloseEvent {
+  return new CloseEvent("close", { code, reason, wasClean: code === 1000 });
 }
 
 /** Records every socket the client opens. */
@@ -85,10 +85,11 @@ export class FakeSocket implements WebSocketLike {
    * Server (or network) closed the socket.
    *
    * @param code - The close code.
+   * @param reason - The close reason.
    */
-  serverClose(code = 1006): void {
+  serverClose(code = 1006, reason = ""): void {
     this.readyState = CLOSED;
-    this.onclose?.(closeEvent(code));
+    this.onclose?.(closeEvent(code, reason));
   }
 
   /** @returns The client frames, parsed. */

@@ -29,7 +29,10 @@
  *    authenticated REST call runs the normal auth flow (refresh, or logout
  *    if refused); only a session that survives it reconnects. 1008 (bad or
  *    used ticket), 1009, 4400 and 4008 (backpressure, longer backoff) retry
- *    with a fresh ticket.
+ *    with a fresh ticket (a ticket is burned on any attempt, so never reused).
+ *    1013 (server full) waits 30 s or more. 1000 after an `error` CONFLICT
+ *    frame ("Demasiadas conexiones abiertas.") means another tab took this
+ *    socket's place: no automatic reconnect, the user taps "Reconectar".
  * 7. Outgoing frames stay under the server's limits (20 sends and 60 frames
  *    per 10 s, no bursts): extra `send`s wait in a short queue, extra
  *    `typing`/`ping` frames are dropped.
@@ -46,7 +49,7 @@ import {
   type WsServerMessage,
   wsServerMessageSchema
 } from "@cuencada/types";
-import { useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { useStore } from "react-redux";
 import type { AppDispatch, AppStore, RootState } from "../../app/store";
 import { getApiErrorCode, isAbortError, isFetchBaseQueryError } from "../../shared/api/errors";
@@ -70,7 +73,9 @@ export type ChatConnectionStatus =
   /** The tab was hidden for a long time; reconnects when visible again. */
   | "paused"
   /** The server refused chat for this account (unverified email). */
-  | "forbidden";
+  | "forbidden"
+  /** The server closed this socket because the account has too many open (another tab); waits for "Reconectar". */
+  | "evicted";
 
 /** The subset of `WebSocket` the client uses, so tests can inject a fake. */
 export interface WebSocketLike {
@@ -117,6 +122,14 @@ export const HIDDEN_PAUSE_MS = 5 * 60_000;
 export const SEND_ACK_TIMEOUT_MS = 15_000;
 /** No inbound frame (pong included) for this long → the connection is dead. */
 export const LIVENESS_TIMEOUT_MS = WS_PING_INTERVAL_MS * 2 + 10_000;
+/** Normal closure; with {@link EVICTION_REASON} it means "too many connections". */
+const WS_NORMAL_CLOSURE = 1000;
+/** 1013 Try Again Later: the server is full. */
+const WS_TRY_AGAIN_LATER = 1013;
+/** Close reason the server uses when it evicts the oldest socket of an account. */
+const EVICTION_REASON = "Demasiadas conexiones abiertas.";
+/** After 1013, wait at least this long (plus jitter). */
+export const SERVER_BUSY_MIN_DELAY_MS = 30_000;
 /** Backoff floor after the server closed with 4008 (rate limited / backpressure). */
 const RATE_LIMITED_ATTEMPT = 3;
 
@@ -227,6 +240,8 @@ export class ChatConnection {
   private generation = 0;
   private attempt = 0;
   private everOpened = false;
+  /** The server announced an eviction (`error` CONFLICT without a message id) before closing. */
+  private evictionAnnounced = false;
   private openedAt: number | null = null;
   private lastInboundAt = 0;
   private sessionKey: string | null = null;
@@ -362,6 +377,13 @@ export class ChatConnection {
       }
       if (this.outbox.length > 0) this.scheduleDrain();
     }, this.budgetDelay());
+  }
+
+  /** Reconnects now (the "Reconectar" button after an eviction). */
+  reconnect(): void {
+    if (this.refs === 0) return;
+    this.attempt = 0;
+    void this.connect();
   }
 
   /** Closes everything for good (store replaced, tests). */
@@ -533,7 +555,7 @@ export class ChatConnection {
     };
     socket.onclose = (event) => {
       if (generation !== this.generation) return;
-      this.handleClose(event.code);
+      this.handleClose(event.code, event.reason);
     };
     socket.onerror = () => {
       // `close` always follows `error`; retries are handled there.
@@ -558,14 +580,27 @@ export class ChatConnection {
     if ((frame.type === "message" || frame.type === "error") && frame.clientMessageId !== null) {
       this.clearAck(frame.clientMessageId);
     }
+    // Too many sockets for this account: the server sends this, then closes with 1000.
+    if (frame.type === "error" && frame.clientMessageId === null && frame.code === "CONFLICT") this.evictionAnnounced = true;
     emitChatEvent({ type: "frame", frame });
   }
 
-  private handleClose(code: number): void {
+  private handleClose(code: number, reason: string): void {
     const openedAt = this.openedAt;
+    const evicted = this.evictionAnnounced || (code === WS_NORMAL_CLOSURE && reason === EVICTION_REASON);
+    this.evictionAnnounced = false;
     this.teardownSocket();
     if (code === WsCloseCode.Forbidden) {
       this.setStatus("forbidden");
+      return;
+    }
+    if (evicted) {
+      // Reconnecting on our own would just evict another tab in turn.
+      this.setStatus("evicted");
+      return;
+    }
+    if (code === WS_TRY_AGAIN_LATER) {
+      this.scheduleRetry(SERVER_BUSY_MIN_DELAY_MS);
       return;
     }
     if (code === WsCloseCode.SessionRevoked) {
@@ -591,13 +626,14 @@ export class ChatConnection {
     this.scheduleRetry();
   }
 
-  private scheduleRetry(): void {
+  private scheduleRetry(minDelayMs = 0): void {
     if (this.refs === 0) return;
     if (!this.canReachNetwork()) {
       this.setStatus("offline");
       return;
     }
-    const delay = backoffDelay(this.attempt, this.deps.random());
+    const random = this.deps.random();
+    const delay = Math.max(backoffDelay(this.attempt, random), minDelayMs + Math.round((minDelayMs / 2) * random));
     this.attempt += 1;
     this.setStatus(this.everOpened ? "reconnecting" : "connecting");
     this.retryTimer = setTimeout(() => {
@@ -717,16 +753,25 @@ export function resetChatSocketForTests(): void {
 
 const useAppStore = useStore.withTypes<AppStore>();
 
+/** What {@link useChatConnection} returns. */
+export interface ChatConnectionHandle {
+  status: ChatConnectionStatus;
+  /** Reconnects now (after an eviction). */
+  reconnect: () => void;
+}
+
 /**
  * Keeps the shared chat connection open while the calling component is
  * mounted (and `enabled`).
  *
  * @param enabled - False to stay disconnected (e.g. the chat is forbidden).
- * @returns The live connection status.
+ * @returns The live connection status and a manual reconnect.
  */
-export function useChatConnection(enabled: boolean): ChatConnectionStatus {
+export function useChatConnection(enabled: boolean): ChatConnectionHandle {
   const store = useAppStore();
   const connection = getChatConnection(store);
   useEffect(() => (enabled ? connection.acquire() : undefined), [connection, enabled]);
-  return useSyncExternalStore(connection.subscribe, connection.getStatus, connection.getStatus);
+  const status = useSyncExternalStore(connection.subscribe, connection.getStatus, connection.getStatus);
+  const reconnect = useCallback(() => connection.reconnect(), [connection]);
+  return { status, reconnect };
 }
