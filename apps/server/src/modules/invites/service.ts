@@ -10,6 +10,7 @@ import { type invites, people } from "../../db/schema/index.js";
 import type { DbOrTx } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
 import { AppLinkPath, appLink, sendTemplate } from "../../lib/mailer/index.js";
+import { sendWithRetry } from "../auth/mailQueue.js";
 
 /** An `invites` row. */
 export type InviteRow = typeof invites.$inferSelect;
@@ -112,7 +113,8 @@ export interface InviteEmailInput {
 }
 
 /**
- * Send the invite email now (awaited, so the admin learns about failures).
+ * Send the invite email now (awaited, so the admin learns about failures),
+ * retrying provider rate limits and server errors like the mail queue does.
  *
  * @param app - The app (mailer, config).
  * @param input - Recipient, raw token and names.
@@ -120,7 +122,7 @@ export interface InviteEmailInput {
  */
 export async function sendInviteEmail(app: FastifyInstance, input: InviteEmailInput): Promise<void> {
   try {
-    await sendTemplate(
+    await sendWithRetry(() => sendTemplate(
       app,
       input.to,
       {
@@ -134,7 +136,7 @@ export async function sendInviteEmail(app: FastifyInstance, input: InviteEmailIn
       },
       // Derived from the operation (invite id + send time), never from the token.
       { idempotencyKey: `invite:${input.inviteId}:${input.sentAt.getTime()}` }
-    );
+    ), new AbortController().signal);
   } catch (error) {
     throw new AppError("SERVICE_UNAVAILABLE", "No pudimos enviar el correo de invitación. Intenta reenviarla.", {
       cause: error

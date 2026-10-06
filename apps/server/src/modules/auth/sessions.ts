@@ -20,7 +20,7 @@ import { createOpaqueToken, hashToken } from "../../lib/tokens.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** A used refresh token presented again within this window is a race, not reuse. */
-export const REFRESH_REUSE_GRACE_MS = 20_000;
+export const REFRESH_REUSE_GRACE_MS = 10_000;
 /** Stored and returned User-Agent length (matches `sessionListItemSchema`). */
 export const USER_AGENT_MAX = 300;
 
@@ -147,7 +147,7 @@ export type RefreshOutcome =
   /** Unknown token, expired token/session, revoked session or disabled user. */
   | { kind: "invalid" }
   /** Used within the grace window: another tab just rotated it. */
-  | { kind: "race" }
+  | { kind: "race"; userId: string; sessionId: string }
   /** Used after the grace window: the session was revoked by this call. */
   | { kind: "reuse"; userId: string; sessionId: string };
 
@@ -195,7 +195,7 @@ export async function rotateRefreshToken(
   if (sessionDead) return { kind: "invalid" };
 
   if (row.usedAt !== null) {
-    if (now.getTime() - row.usedAt.getTime() <= REFRESH_REUSE_GRACE_MS) return { kind: "race" };
+    if (now.getTime() - row.usedAt.getTime() <= REFRESH_REUSE_GRACE_MS) return { kind: "race", userId: row.userId, sessionId: row.sessionId };
     await revokeSessions(tx, { userId: row.userId, sessionId: row.sessionId }, "refresh_reuse", now);
     return { kind: "reuse", userId: row.userId, sessionId: row.sessionId };
   }

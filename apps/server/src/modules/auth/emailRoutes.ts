@@ -23,7 +23,7 @@ import { issueAuthResponse } from "./currentUser.js";
 import {
   AuthAuditAction,
   consumeEmailToken,
-  createEmailToken,
+  issueBudgetedEmailToken,
   EMAIL_TOKEN_TTL_MINUTES,
   markEmailVerified,
   sendInBackground
@@ -61,13 +61,14 @@ const emailRoutes: FastifyPluginAsyncZod = async (app) => {
       if (user !== undefined && user.status === "active") {
         const now = app.clock.now();
         const created = await app.db.transaction(async (tx) => {
-          const token = await createEmailToken(tx, {
+          const token = await issueBudgetedEmailToken(app, tx, {
             userId: user.id,
             email: user.email,
             purpose: "login",
             requestIp: request.ip,
             now
           });
+          if (token === null) return null;
           await recordAudit(tx, {
             actorUserId: null,
             action: AuthAuditAction.MagicLinkRequested,
@@ -77,7 +78,7 @@ const emailRoutes: FastifyPluginAsyncZod = async (app) => {
           });
           return token;
         });
-        sendInBackground(app, "mail.magic-link", () =>
+        if (created !== null) sendInBackground(app, "mail.magic-link", () =>
           sendTemplate(
             app,
             user.email,
@@ -148,13 +149,14 @@ const emailRoutes: FastifyPluginAsyncZod = async (app) => {
       if (!user.emailVerified) {
         const now = app.clock.now();
         const created = await app.db.transaction(async (tx) => {
-          const token = await createEmailToken(tx, {
+          const token = await issueBudgetedEmailToken(app, tx, {
             userId: user.id,
             email: user.email,
             purpose: "email_verify",
             requestIp: request.ip,
             now
           });
+          if (token === null) return null;
           await recordAudit(tx, {
             actorUserId: user.id,
             action: AuthAuditAction.EmailVerificationRequested,
@@ -164,7 +166,7 @@ const emailRoutes: FastifyPluginAsyncZod = async (app) => {
           });
           return token;
         });
-        sendInBackground(app, "mail.verify-email", () =>
+        if (created !== null) sendInBackground(app, "mail.verify-email", () =>
           sendTemplate(
             app,
             user.email,

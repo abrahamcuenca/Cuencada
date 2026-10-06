@@ -257,6 +257,11 @@ describe("POST /api/auth/refresh", () => {
     expect(code(race)).toBe("REFRESH_RACE");
     const [session] = await getTestDb().select().from(sessions).where(eq(sessions.userId, user.id));
     expect(session?.revokedAt).toBeNull();
+    expect(REFRESH_REUSE_GRACE_MS).toBe(10_000);
+    const audits = await getTestDb().select().from(auditLogs).where(eq(auditLogs.action, "auth.refresh_race"));
+    expect(audits).toHaveLength(1);
+    expect(audits[0]?.entityId).toBe(session?.id);
+    expect(JSON.stringify(audits[0])).not.toContain(login.refreshToken);
   });
 
   it("detects reuse after the grace window: revokes the session, audits and answers 401", async () => {

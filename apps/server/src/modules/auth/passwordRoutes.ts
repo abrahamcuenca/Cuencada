@@ -9,12 +9,12 @@ import {
   passwordResetConfirmInputSchema,
   passwordResetRequestInputSchema
 } from "@cuencada/types";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { magicLinks, users } from "../../db/schema/index.js";
-import { recordAudit, type Transaction } from "../../lib/audit.js";
+import { users } from "../../db/schema/index.js";
+import { recordAudit } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
 import { AppLinkPath, appLink, sendTemplate } from "../../lib/mailer/index.js";
 import { hashPassword, verifyDummyPassword, verifyPassword } from "../../lib/passwords.js";
@@ -24,11 +24,13 @@ import { issueAuthResponse } from "./currentUser.js";
 import {
   AuthAuditAction,
   consumeEmailToken,
-  createEmailToken,
+  burnPendingEmailTokens,
+  issueBudgetedEmailToken,
   EMAIL_TOKEN_TTL_MINUTES,
   markEmailVerified,
   sendInBackground
 } from "./emailTokens.js";
+import { MailTier, withinGlobalMailCap } from "./mailBudget.js";
 import { revokeSessions, sessionOrigin, startSession } from "./sessions.js";
 
 const noContent = z.null().describe("No content");
@@ -41,21 +43,25 @@ const errorResponses = {
 } as const;
 
 /**
- * Queue the "your password changed" notice (no button, names the support contact).
+ * Queue the "your password changed" notice (no button, names the support
+ * contact). It uses the reserved part of the daily cap; past that it is
+ * skipped (and `mail.cap_reached` is logged).
  *
- * @param app - The app (mailer, jobs, config).
+ * @param app - The app (mailer, jobs, config, db).
  * @param to - The account's address.
  * @param displayName - Greeting name.
  * @param changedAt - When the change happened.
  * @param operationId - Stable id for the idempotency key (never a token).
  */
-export function queuePasswordChangedEmail(
+export async function queuePasswordChangedEmail(
   app: FastifyInstance,
   to: string,
   displayName: string,
   changedAt: Date,
   operationId: string
-): void {
+): Promise<void> {
+  // The change's own audit row is already committed and counted.
+  if (!(await withinGlobalMailCap(app, app.db, MailTier.Reserved, changedAt))) return;
   sendInBackground(app, "mail.password-changed", () =>
     sendTemplate(
       app,
@@ -64,14 +70,6 @@ export function queuePasswordChangedEmail(
       { idempotencyKey: `password-changed:${operationId}` }
     )
   );
-}
-
-/** Burn every outstanding password-reset link of a user (after any password change). */
-async function invalidateResetLinks(tx: Transaction, userId: string, now: Date): Promise<void> {
-  await tx
-    .update(magicLinks)
-    .set({ usedAt: now })
-    .where(and(eq(magicLinks.userId, userId), eq(magicLinks.purpose, "password_reset"), isNull(magicLinks.usedAt)));
 }
 
 /** Password routes, mounted under `/api`. */
@@ -129,7 +127,7 @@ const passwordRoutes: FastifyPluginAsyncZod = async (app) => {
           .set({ passwordHash, mustChangePassword: false, passwordChangedAt: now })
           .where(eq(users.id, current.id));
         const revoked = await revokeSessions(tx, { userId: current.id }, "password_changed", now);
-        await invalidateResetLinks(tx, current.id, now);
+        await burnPendingEmailTokens(tx, current.id, now);
         const started = await startSession(tx, app.config, current.id, sessionOrigin(request), now);
         await recordAudit(tx, {
           actorUserId: current.id,
@@ -141,7 +139,7 @@ const passwordRoutes: FastifyPluginAsyncZod = async (app) => {
         });
         return started;
       });
-      queuePasswordChangedEmail(app, user.email, user.displayName, now, issued.sessionId);
+      await queuePasswordChangedEmail(app, user.email, user.displayName, now, issued.sessionId);
       return issueAuthResponse(app, reply, issued, current.id, now);
     }
   );
@@ -164,13 +162,14 @@ const passwordRoutes: FastifyPluginAsyncZod = async (app) => {
       if (user !== undefined && user.status === "active") {
         const now = app.clock.now();
         const created = await app.db.transaction(async (tx) => {
-          const token = await createEmailToken(tx, {
+          const token = await issueBudgetedEmailToken(app, tx, {
             userId: user.id,
             email: user.email,
             purpose: "password_reset",
             requestIp: request.ip,
             now
           });
+          if (token === null) return null;
           await recordAudit(tx, {
             actorUserId: null,
             action: AuthAuditAction.PasswordResetRequested,
@@ -180,7 +179,7 @@ const passwordRoutes: FastifyPluginAsyncZod = async (app) => {
           });
           return token;
         });
-        sendInBackground(app, "mail.password-reset", () =>
+        if (created !== null) sendInBackground(app, "mail.password-reset", () =>
           sendTemplate(
             app,
             user.email,
@@ -225,7 +224,7 @@ const passwordRoutes: FastifyPluginAsyncZod = async (app) => {
         if (!user) throw new Error("password-reset confirm: user update returned no row");
         await markEmailVerified(tx, consumed, now);
         const revoked = await revokeSessions(tx, { userId: consumed.userId }, "password_reset", now);
-        await invalidateResetLinks(tx, consumed.userId, now);
+        await burnPendingEmailTokens(tx, consumed.userId, now);
         await recordAudit(tx, {
           actorUserId: consumed.userId,
           action: AuthAuditAction.PasswordReset,
@@ -237,7 +236,7 @@ const passwordRoutes: FastifyPluginAsyncZod = async (app) => {
         return { ...user, operationId: consumed.tokenId };
       });
       if (result === null) throw new AppError("TOKEN_INVALID");
-      queuePasswordChangedEmail(app, result.email, result.displayName, now, result.operationId);
+      await queuePasswordChangedEmail(app, result.email, result.displayName, now, result.operationId);
       return reply.code(204).send(null);
     }
   );

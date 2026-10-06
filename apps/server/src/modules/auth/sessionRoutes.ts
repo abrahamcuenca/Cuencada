@@ -128,6 +128,17 @@ const sessionRoutes: FastifyPluginAsyncZod = async (app) => {
       const now = app.clock.now();
       const outcome = await app.db.transaction(async (tx) => {
         const result = await rotateRefreshToken(tx, app.config, rawToken, now);
+        if (result.kind === "race") {
+          // Benign multi-tab races and a thief racing the victim look the same here;
+          // the audit trail lets an admin spot a pattern (no token data).
+          await recordAudit(tx, {
+            actorUserId: result.userId,
+            action: AuthAuditAction.RefreshRace,
+            entityType: "session",
+            entityId: result.sessionId,
+            ip: request.ip
+          });
+        }
         if (result.kind === "reuse") {
           await recordAudit(tx, {
             actorUserId: null,

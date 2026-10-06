@@ -8,9 +8,10 @@ import { AuditAction } from "@cuencada/types";
 import { and, eq, isNull } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { type MagicLinkPurpose, magicLinks, users } from "../../db/schema/index.js";
-import type { Transaction } from "../../lib/audit.js";
+import type { DbOrTx, Transaction } from "../../lib/audit.js";
 import { createOpaqueToken, hashToken } from "../../lib/tokens.js";
-import { mailQueue } from "./mailQueue.js";
+import { MailTier, withinGlobalMailCap, withinRecipientBudget } from "./mailBudget.js";
+import { enqueueMail } from "./mailQueue.js";
 
 /** Lifetimes per purpose, in minutes. */
 export const EMAIL_TOKEN_TTL_MINUTES = {
@@ -27,6 +28,7 @@ export const AuthAuditAction = {
   SessionRevoked: AuditAction.SessionRevoked,
   SessionsRevoked: AuditAction.SessionsRevoked,
   RefreshReuseDetected: AuditAction.RefreshReuseDetected,
+  RefreshRace: AuditAction.RefreshRace,
   PasswordChanged: AuditAction.PasswordChanged,
   PasswordReset: AuditAction.PasswordReset,
   PasswordResetRequested: AuditAction.PasswordResetRequested,
@@ -70,11 +72,56 @@ export async function createEmailToken(tx: Transaction, input: CreateEmailTokenI
       tokenHash: hashToken(token),
       purpose: input.purpose,
       requestIp: input.requestIp,
-      expiresAt
+      expiresAt,
+      // App clock, not the DB's, so budget windows and tests agree on time.
+      createdAt: input.now
     })
     .returning({ id: magicLinks.id });
   if (!row) throw new Error("createEmailToken: insert returned no row");
   return { id: row.id, token, expiresAt };
+}
+
+/**
+ * Create a token for a user-triggered email **only if** the recipient's
+ * budget and today's global cap allow it (Security M1). The one gate for
+ * magic-link, password-reset and verify requests. When it returns `null` the
+ * caller sends nothing and still answers its generic 202.
+ *
+ * @param app - The app (log, jobs).
+ * @param tx - Open transaction.
+ * @param input - Owner, address, purpose, IP, time.
+ * @returns The token, or `null` when over budget.
+ */
+export async function issueBudgetedEmailToken(
+  app: Pick<FastifyInstance, "jobs" | "log">,
+  tx: Transaction,
+  input: CreateEmailTokenInput
+): Promise<CreatedEmailToken | null> {
+  if (!(await withinRecipientBudget(tx, input.email, input.purpose, input.now))) {
+    app.log.warn({ event: "mail.recipient_budget_exceeded", userId: input.userId, purpose: input.purpose }, "email skipped");
+    return null;
+  }
+  if (!(await withinGlobalMailCap(app, tx, MailTier.User, input.now))) return null;
+  return createEmailToken(tx, input);
+}
+
+/**
+ * Burn every unused email token of a user, of every purpose (Security L3):
+ * after a password change or reset, or when an admin disables the account,
+ * no earlier login, reset or verify link may still work.
+ *
+ * @param tx - Open transaction.
+ * @param userId - The user.
+ * @param now - Time to record as `used_at`.
+ * @returns How many tokens were burned.
+ */
+export async function burnPendingEmailTokens(tx: DbOrTx, userId: string, now: Date): Promise<number> {
+  const rows = await tx
+    .update(magicLinks)
+    .set({ usedAt: now })
+    .where(and(eq(magicLinks.userId, userId), isNull(magicLinks.usedAt)))
+    .returning({ id: magicLinks.id });
+  return rows.length;
 }
 
 /** The user a consumed token belongs to. */
@@ -90,7 +137,8 @@ export interface ConsumedEmailToken {
 /**
  * Consume a token: it must exist, have this purpose, be unused and unexpired,
  * and belong to an active user. Marks it used. The row is locked, so two
- * concurrent consumes cannot both succeed.
+ * concurrent consumes cannot both succeed. A token presented for the wrong
+ * purpose is rejected without being burned (harmless at 256 bits of entropy).
  *
  * @param tx - Open transaction.
  * @param rawToken - Token from the request body.
@@ -151,17 +199,18 @@ export async function markEmailVerified(tx: Transaction, consumed: ConsumedEmail
 }
 
 /**
- * Run a mail send off the request path, on the auth module's own serial mail
- * queue, so request-for-token endpoints answer in the same time whether or
- * not an email goes out (no account enumeration by timing). Failures are
- * logged by the queue (never with the body or token).
+ * Run a mail send off the request path on the auth module's bounded, retrying
+ * mail queue ({@link enqueueMail}), so request-for-token endpoints answer the
+ * same way whether or not an email goes out (no account enumeration).
  *
- * @param app - Needs `jobs` (identifies the app's mail queue).
+ * @param app - Needs `jobs` (identifies the app's mail queue) and `log`.
  * @param name - Job label for logs (no PII, no token).
- * @param send - The send.
+ * @param send - The send (with an idempotency key).
  */
-export function sendInBackground(app: Pick<FastifyInstance, "jobs">, name: string, send: () => Promise<unknown>): void {
-  mailQueue(app).enqueue(name, async () => {
-    await send();
-  });
+export function sendInBackground(
+  app: Pick<FastifyInstance, "jobs" | "log">,
+  name: string,
+  send: () => Promise<unknown>
+): void {
+  enqueueMail(app, name, send);
 }

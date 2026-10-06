@@ -25,6 +25,7 @@ import { AppLinkPath, appLink } from "../../lib/mailer/index.js";
 import { rateLimitByIp } from "../../lib/rateLimit.js";
 import { createOpaqueToken, hashToken } from "../../lib/tokens.js";
 import { authUser } from "../../plugins/auth.js";
+import { MailTier, withinGlobalMailCap } from "../auth/mailBudget.js";
 import {
   decodeInviteCursor,
   encodeInviteCursor,
@@ -60,6 +61,16 @@ function statusCondition(status: InviteStatus, now: Date): SQL | undefined {
 /** Admin invite routes, mounted under `/api`. */
 const adminInviteRoutes: FastifyPluginAsyncZod = async (app) => {
   const mutationLimit = rateLimitByIp({ max: 60, timeWindow: "1 minute" });
+
+  /** Invite emails use the reserved part of the daily cap; past it the admin gets 503. */
+  async function assertInviteMailAllowed(now: Date): Promise<void> {
+    if (!(await withinGlobalMailCap(app, app.db, MailTier.Reserved, now))) {
+      throw new AppError(
+        "SERVICE_UNAVAILABLE",
+        "Se alcanzó el límite diario de correos. Intenta mañana o crea una invitación con enlace."
+      );
+    }
+  }
 
   async function loadListItem(inviteId: string): Promise<AdminInviteListItem> {
     const [row] = await app.db
@@ -150,6 +161,8 @@ const adminInviteRoutes: FastifyPluginAsyncZod = async (app) => {
           .limit(1);
         if (existing !== undefined) throw new AppError("CONFLICT", "Ya existe una cuenta con ese correo.");
       }
+
+      if (input.sendEmail) await assertInviteMailAllowed(now);
 
       const token = createOpaqueToken();
       const expiresAt = new Date(now.getTime() + input.expiresInDays * DAY_MS);
@@ -268,6 +281,7 @@ const adminInviteRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request) => {
       const admin = authUser(request);
       const now = app.clock.now();
+      await assertInviteMailAllowed(now);
       const token = createOpaqueToken();
       const invite = await app.db.transaction(async (tx) => {
         const [row] = await tx

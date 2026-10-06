@@ -36,6 +36,8 @@ export const AuditAction = {
   UserDisabled: "user.disabled",
   UserSessionsRevoked: "user.sessions_revoked",
   RefreshReuseDetected: "auth.refresh_reuse_detected",
+  /** A used refresh token was presented again inside the grace window (409, nothing revoked). */
+  RefreshRace: "auth.refresh_race",
   PasswordChanged: "auth.password_changed",
   PasswordReset: "auth.password_reset",
   /** Password or magic-link login (`metadata.method`). */
