@@ -5,7 +5,7 @@ import { render } from "@react-email/render";
 import { describe, expect, it } from "vitest";
 import { CTA_FALLBACK_LABEL, FOOTER_BRAND, FOOTER_IGNORE } from "./content.js";
 import { EmailRenderError, EmailRenderErrorCode } from "./errors.js";
-import { cleanName } from "./format.js";
+import { cleanName, defangLinks } from "./format.js";
 import { EmailKind, type EmailTemplate, renderEmail } from "./render.js";
 import { InviteEmail } from "./templates/InviteEmail.js";
 
@@ -351,6 +351,23 @@ describe("renderEmail", () => {
       expect(email.text).not.toContain("ignorarlo");
     });
 
+    it("says new admins are still announced (WP-2.3b P1)", async () => {
+      const email = await renderEmail(limit);
+      expect(email.text).toContain("cuando alguien se una como administrador");
+    });
+
+    it("has an open-invites variant for the open-invite alert cap (WP-2.3b L2)", async () => {
+      const email = await renderEmail({ ...limit, props: { ...limit.props, topic: "open-invites" } });
+      expect(email.subject).toBe("Se alcanzó el límite de avisos de seguridad de hoy");
+      expect(email.text).toMatch(
+        /Hoy muchas personas se unieron al portal de la Cuencada con enlaces de invitación abiertos y el lunes 14 de septiembre ·\s7:40/,
+      );
+      expect(email.text).toContain("no te avisaremos de cada persona que se una con un enlace abierto");
+      expect(email.text).not.toContain("cuentas de administrador");
+      expect(countOccurrences(email.text, auditLogUrl)).toBe(1);
+      expect(email.text).not.toContain("ignorarlo");
+    });
+
     it("escapes names and requires an https link", async () => {
       const escaped = await renderEmail({ ...limit, props: { ...limit.props, recipientName: XSS } });
       expect(escaped.html).not.toContain("<script");
@@ -358,6 +375,126 @@ describe("renderEmail", () => {
       await expect(
         renderEmail({ ...limit, props: { ...limit.props, auditLogUrl: "http://cuencada.com/admin/bitacora" } }),
       ).rejects.toMatchObject({ code: EmailRenderErrorCode.InsecureUrl });
+    });
+  });
+
+  describe("admin-invite-accepted", () => {
+    const reviewUrl =
+      "https://cuencada.com/admin/bitacora?accion=invite.accepted&actor=00000000-0000-4000-8000-000000000001";
+    const accepted: EmailTemplate = {
+      kind: EmailKind.AdminInviteAccepted,
+      props: {
+        recipientName: "Tía Lupita",
+        memberName: "Primo Nuevo",
+        inviteLabel: "Grupo de primos",
+        inviteShortId: "3F2A9C1B",
+        useCount: 2,
+        maxUses: 5,
+        acceptedAt: EXPIRES,
+        reviewUrl,
+      },
+    };
+
+    it("says who joined, with which link, how many uses and when, and links to the review page", async () => {
+      const email = await renderEmail(accepted);
+      expect(email.subject).toBe("Alguien se unió con un enlace de invitación");
+      expect(email.text).toContain("¡Hola, Tía Lupita!");
+      expect(email.text).toMatch(
+        /Primo Nuevo creó su cuenta en el portal de la Cuencada con el enlace «Grupo de primos» \(3f2a9c1b\) el lunes 14 de septiembre ·\s7:40/,
+      );
+      expect(email.text).toContain("El enlace lleva 2 de 5 usos.");
+      expect(email.text).toContain(`Revisar en la bitácora:\n${reviewUrl}`);
+      expect(email.text).toContain("IMPORTANTE: Si no reconoces a esta persona");
+      expect(countOccurrences(email.text, "bitacora?accion=invite.accepted")).toBe(1);
+      expect(email.text).not.toContain("@");
+    });
+
+    it("is a security notice: it never says to ignore it", async () => {
+      const email = await renderEmail(accepted);
+      expect(email.html).not.toContain("ignorarlo");
+      expect(email.text).not.toContain("ignorarlo");
+      expect(email.text.trimEnd()).toMatch(/administras el portal de la Cuencada\.$/);
+    });
+
+    it("falls back to the short id without a label, and to a neutral name", async () => {
+      const email = await renderEmail({
+        ...accepted,
+        props: { ...accepted.props, inviteLabel: null, memberName: "\u200b", useCount: 1, maxUses: 1 },
+      });
+      expect(email.text).toContain("Una persona creó su cuenta en el portal de la Cuencada con el enlace 3f2a9c1b el");
+      expect(email.text).toContain("El enlace lleva 1 de 1 uso.");
+    });
+
+    it("escapes names and labels and requires an https link", async () => {
+      const escaped = await renderEmail({
+        ...accepted,
+        props: { ...accepted.props, memberName: XSS, inviteLabel: XSS, recipientName: XSS },
+      });
+      expect(escaped.html).not.toContain("<script");
+      expect(countOccurrences(escaped.html, "&lt;script&gt;")).toBeGreaterThanOrEqual(3);
+      await expect(
+        renderEmail({ ...accepted, props: { ...accepted.props, reviewUrl: "http://cuencada.com/admin/bitacora" } }),
+      ).rejects.toMatchObject({ code: EmailRenderErrorCode.InsecureUrl });
+    });
+
+    it("rejects a malformed short id or inconsistent use counts", async () => {
+      await expect(
+        renderEmail({ ...accepted, props: { ...accepted.props, inviteShortId: "<b>x</b>" } }),
+      ).rejects.toMatchObject({ code: EmailRenderErrorCode.InvalidOption, field: "inviteShortId" });
+      for (const [useCount, maxUses] of [
+        [0, 5],
+        [6, 5],
+        [1, 51],
+        [1.5, 5],
+      ] as const) {
+        await expect(
+          renderEmail({ ...accepted, props: { ...accepted.props, useCount, maxUses } }),
+        ).rejects.toMatchObject({ code: EmailRenderErrorCode.InvalidOption, field: "useCount" });
+      }
+    });
+  });
+
+  describe("link-like names in admin alerts (Security L1)", () => {
+    const PHISH = "https://evil.example/login www.phish.example soporte.example J.R. Pérez";
+    const DEFANGED = "https[:]//evil[.]example/login www[.]phish[.]example soporte[.]example J.R. Pérez";
+    const templates: Array<[string, EmailTemplate]> = [
+      ["admin-account-changed", adminChanged(PHISH)],
+      [
+        "admin-alert-limit",
+        { kind: EmailKind.AdminAlertLimit, props: { recipientName: PHISH, reachedAt: EXPIRES, auditLogUrl } },
+      ],
+      [
+        "admin-invite-accepted",
+        {
+          kind: EmailKind.AdminInviteAccepted,
+          props: {
+            recipientName: PHISH,
+            memberName: PHISH,
+            inviteLabel: PHISH,
+            inviteShortId: "3f2a9c1b",
+            useCount: 1,
+            maxUses: 5,
+            acceptedAt: EXPIRES,
+            reviewUrl: auditLogUrl,
+          },
+        },
+      ],
+    ];
+
+    it.each(templates)("%s defangs URLs and domains in every name", async (_name, template) => {
+      const email = await renderEmail(template);
+      for (const body of [email.text, email.html, email.subject]) {
+        expect(body).not.toContain("://evil");
+        expect(body).not.toMatch(/evil\.example|phish\.example|soporte\.example/);
+      }
+      expect(email.text).toContain(DEFANGED);
+    });
+
+    it("defangLinks breaks schemes and domain dots (also fullwidth ones) but keeps initials", () => {
+      expect(defangLinks("http://a.b.example")).toBe("http[:]//a[.]b[.]example");
+      expect(defangLinks("evil。example")).toBe("evil[.]example");
+      expect(defangLinks("Ana M. Vega, J.R.")).toBe("Ana M. Vega, J.R.");
+      expect(cleanName(PHISH)).toBe(PHISH);
     });
   });
 

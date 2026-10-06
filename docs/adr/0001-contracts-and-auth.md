@@ -52,7 +52,7 @@ Phase 1 builds frontend and backend tracks in parallel. They need one contract t
   - `POST /api/invites/inspect` returns only `emailMasked` (`maskEmail`: `t***@e***.com`), never the full bound address. The invitee has to type it, and `accept` compares it after `emailSchema` normalization.
   - Admin invites must be email-bound, single-use and sent by email (`sendEmail: true`, no copy-link). Holding an admin token therefore implies controlling that mailbox.
   - `emailVerified` is set on accept **only** when the invite was bound to that email **and** delivered by email. Copy-link and open invites leave it `false` until the user verifies.
-  - Open member invites are limited to 20 uses and 14 days.
+  - Open member invites are limited to 10 uses and 72 hours (defaults: 5 uses, 72 h), and every acceptance alerts all active admins (WP-2.3b owner decision; originally 20 uses and 14 days, see below).
 - Request-for-token endpoints (magic link, password reset) always answer 202 `{ ok: true }`, so they reveal nothing about which accounts exist.
 
 ### 4. Error envelope and codes
@@ -75,7 +75,7 @@ Changes made in response to the Security and Tech Lead reviews. Most are already
 - **Invite inspect** returns `emailMasked` instead of the full email.
 - **Admin invites** require `sendEmail: true`.
 - **`emailVerified`** is only granted for email-delivered invites.
-- **Open invites** are limited to 20 uses and 14 days.
+- **Open invites** are limited to 20 uses and 14 days (superseded by WP-2.3b: 10 uses, 72 hours).
 - **Media allowlist:** HEIC removed and QuickTime added (orchestrator decision).
 - **Links** are canonicalized (`URL.href`); userinfo and single-label hosts are rejected.
 - **Bidi and invisible characters** are rejected in names and file names, and stripped from chat bodies.
@@ -91,8 +91,12 @@ Changes made in response to the Security and Tech Lead reviews. Most are already
   - Why: photos and uploader names reveal family membership just as the attendees list does.
   - Still open to unverified members: announcements, the RSVP summary (counts only), their own RSVP, their own profile and avatar, and `/me`.
   - Thumbnail and display images are presigned bucket URLs that only these routes hand out, so the gate covers them too.
-  - Residual risk: email verification proves control of a mailbox, not family membership. A stranger holding a leaked open invite can verify their own address. A separate WP will tighten open invites (about 5 uses, 72 h lifetime, an admin alert on each acceptance).
+  - Residual risk: email verification proves control of a mailbox, not family membership. A stranger holding a leaked open invite can verify their own address. Mitigated by the stricter open invites below (WP-2.3b).
   - Enforced and tested by `apps/server/src/__tests__/security/verified-gating.test.ts` and the authorization matrix.
+- **Decided (owner, WP-2.3 security audit → WP-2.3b, 2026-10-06): stricter open invites.** Verifying an email proves mailbox ownership, not family membership, so a leaked open (not email-bound) invite link lets a stranger join. Therefore:
+  - Open invites default to **5 uses and 72 h** and allow at most **10 uses and 72 h** (`OPEN_INVITE_*` in `packages/types/src/auth.ts`). `expiresInDays` stays in whole days, so the open maximum is 3 days (= 72 h). Enforced by `adminInviteCreateInputSchema` (defaults depend on `email`) **and** by a separate server-side guard in `POST /api/admin/invites`. Email-bound invites keep 1 use, default 7 days, maximum 30.
+  - Open invites created under the old limits are **clamped at accept time** (no migration): they stop 72 h after `created_at` and after 10 uses, with the same generic `INVITE_INVALID`. The admin list shows the clamped `expiresAt`, `maxUses` and status.
+  - Every acceptance of an open invite emails every active admin an `admin-invite-accepted` notice (display name, invite note and short id, uses so far / allowed, bitácora link). No email address, like the other admin alerts. Queued after commit; bounded by its own daily cap, separate from the admin-account alert cap. Details: `docs/coordination/WP-2.3b.md`.
 
 ## Consequences
 

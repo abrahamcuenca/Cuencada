@@ -106,7 +106,7 @@ describe("POST /api/admin/invites", () => {
     app = await createTestApp({ mailer });
     const { auth } = await adminAuth(app);
 
-    const open = await createInvite(app, auth, { sendEmail: false, maxUses: 20, expiresInDays: 14 });
+    const open = await createInvite(app, auth, { sendEmail: false, maxUses: 10, expiresInDays: 3 });
     const boundCopy = await createInvite(app, auth, { email: "tio@familia.mx", sendEmail: false });
 
     expect(open.statusCode).toBe(201);
@@ -126,8 +126,8 @@ describe("POST /api/admin/invites", () => {
 
     const cases = [
       { email: "a@familia.mx", maxUses: 2 },
-      { sendEmail: false, maxUses: 21 },
-      { sendEmail: false, expiresInDays: 15 },
+      { sendEmail: false, maxUses: 11 },
+      { sendEmail: false, expiresInDays: 4 },
       { role: "admin", email: "b@familia.mx", sendEmail: false },
       { role: "admin", sendEmail: false },
       { email: null }
@@ -456,8 +456,8 @@ describe("POST /api/invites/accept", () => {
   it(`limits accept attempts per invite to ${INVITE_ACCEPT_PER_TOKEN.max} across IPs (429)`, async () => {
     app = await createTestApp({ config: { TRUST_PROXY: ["loopback"] } });
     const { auth } = await adminAuth(app);
-    const open = await createInvite(app, auth, { sendEmail: false, maxUses: 20 });
-    const other = await createInvite(app, auth, { sendEmail: false, maxUses: 20 });
+    const open = await createInvite(app, auth, { sendEmail: false, maxUses: 10 });
+    const other = await createInvite(app, auth, { sendEmail: false, maxUses: 10 });
     const existing = await createUser();
     const statuses: number[] = [];
     for (let attempt = 0; attempt <= INVITE_ACCEPT_PER_TOKEN.max; attempt += 1) {

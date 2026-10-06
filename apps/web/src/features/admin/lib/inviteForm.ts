@@ -1,12 +1,17 @@
 /**
  * Invite create form: values, defaults and validation against the contract
  * schema (`adminInviteCreateInputSchema`), so the form and the server agree
- * on every rule (admin ⇒ email + sent by email; open ⇒ ≤ 20 uses, ≤ 14 days).
+ * on every rule (admin ⇒ email + sent by email; open ⇒ ≤ 10 uses, ≤ 72 h).
  */
 import {
   type AdminInviteCreateRequest,
   adminInviteCreateInputSchema,
+  BOUND_INVITE_DEFAULT_DAYS,
+  BOUND_INVITE_MAX_DAYS,
+  OPEN_INVITE_DEFAULT_DAYS,
+  OPEN_INVITE_DEFAULT_USES,
   OPEN_INVITE_MAX_DAYS,
+  OPEN_INVITE_MAX_HOURS,
   OPEN_INVITE_MAX_USES,
   type UserRole
 } from "@cuencada/types";
@@ -38,15 +43,35 @@ export const INVITE_FORM_DEFAULTS: InviteFormValues = {
   delivery: "email",
   role: "member",
   email: "",
-  maxUses: "10",
-  expiresInDays: "7",
+  maxUses: String(OPEN_INVITE_DEFAULT_USES),
+  expiresInDays: String(BOUND_INVITE_DEFAULT_DAYS),
   note: ""
 };
 
-/** Longest expiry the server accepts for a bound invite. */
-export const BOUND_INVITE_MAX_DAYS = 30;
+/** Why open links are short-lived (shown under the link fields). */
+export const OPEN_INVITE_SECURITY_HELP =
+  "Por seguridad, los enlaces abiertos caducan en 72 horas y avisan a los administradores cada vez que alguien se une.";
 
-export { OPEN_INVITE_MAX_DAYS, OPEN_INVITE_MAX_USES };
+export { BOUND_INVITE_MAX_DAYS, OPEN_INVITE_MAX_DAYS, OPEN_INVITE_MAX_HOURS, OPEN_INVITE_MAX_USES };
+
+/**
+ * Switch how the invite is delivered, resetting uses and expiry to that
+ * delivery's defaults (open link: 5 uses, 72 h; email: 7 days).
+ *
+ * @param values - Current values.
+ * @param delivery - The new delivery.
+ * @returns The values the form should show.
+ */
+export function changeInviteDelivery(values: InviteFormValues, delivery: InviteDelivery): InviteFormValues {
+  if (values.delivery === delivery) return values;
+  const open = delivery === "link";
+  return {
+    ...values,
+    delivery,
+    maxUses: String(OPEN_INVITE_DEFAULT_USES),
+    expiresInDays: String(open ? OPEN_INVITE_DEFAULT_DAYS : BOUND_INVITE_DEFAULT_DAYS)
+  };
+}
 
 const FIELDS: readonly InviteFormField[] = ["email", "maxUses", "expiresInDays", "note"];
 
@@ -67,7 +92,7 @@ function toInt(value: string): number {
  * @returns The values the form should show.
  */
 export function normalizeInviteForm(values: InviteFormValues): InviteFormValues {
-  return values.role === "admin" && values.delivery !== "email" ? { ...values, delivery: "email" } : values;
+  return values.role === "admin" && values.delivery !== "email" ? changeInviteDelivery(values, "email") : values;
 }
 
 /**
@@ -104,15 +129,19 @@ export function validateInviteForm(input: InviteFormValues): InviteFormResult {
   for (const issue of parsed.error.issues) {
     const key = issue.path[0];
     const field: InviteFormField = isField(key) ? key : "form";
-    errors[field] ??= numberMessage(field, issue.code) ?? issue.message;
+    errors[field] ??= numberMessage(field, issue.code, byEmail) ?? issue.message;
   }
   return { ok: false, errors };
 }
 
 /** Plain messages for out-of-range numbers (zod's defaults are generic). */
-function numberMessage(field: InviteFormField, code: string): string | null {
+function numberMessage(field: InviteFormField, code: string, byEmail: boolean): string | null {
   if (code !== "too_big" && code !== "too_small" && code !== "invalid_type") return null;
   if (field === "maxUses") return `Escribe un número de usos entre 1 y ${OPEN_INVITE_MAX_USES}.`;
-  if (field === "expiresInDays") return `Escribe un número de días entre 1 y ${BOUND_INVITE_MAX_DAYS}.`;
+  if (field === "expiresInDays") {
+    return byEmail
+      ? `Escribe un número de días entre 1 y ${BOUND_INVITE_MAX_DAYS}.`
+      : `Escribe un número de días entre 1 y ${OPEN_INVITE_MAX_DAYS} (${OPEN_INVITE_MAX_HOURS} horas).`;
+  }
   return null;
 }

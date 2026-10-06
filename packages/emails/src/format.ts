@@ -148,6 +148,40 @@ function replaceUnsafeChar(char: string): string {
 }
 
 /**
+ * A dot (ASCII, ideographic, fullwidth or halfwidth) after a letter/digit that
+ * starts a domain-like label: two or more letters/digits, or one followed by
+ * another dot and label (`a.b.example`). A lone initial ("J.R.") does not match.
+ */
+const DOMAIN_DOT = /([\p{L}\p{N}_-])[.。．｡](?=[\p{L}\p{N}-](?:[\p{L}\p{N}-]|[.。．｡][\p{L}\p{N}-]))/gu;
+
+/**
+ * Defangs URL-like text so mail clients do not auto-link it (anti-phishing
+ * for names shown to administrators, Security L1 on PR #36): `://` becomes
+ * `[:]//` and every dot that starts a domain-like label becomes `[.]`
+ * (`www.evil.example` → `www[.]evil[.]example`). Uses only visible ASCII,
+ * never zero-width characters (which {@link cleanName} strips anyway).
+ * Initials such as "J.R." are left alone.
+ *
+ * @param text - Already cleaned text.
+ * @returns The text with links broken.
+ */
+export function defangLinks(text: string): string {
+  return text.replace(/:\/\//g, "[:]//").replace(DOMAIN_DOT, "$1[.]");
+}
+
+/**
+ * {@link cleanName} plus {@link defangLinks}: for user-controlled names (and
+ * labels) rendered in **admin security alerts**, so a display name like
+ * "soporte-cuencada.example/login" cannot become a clickable link.
+ *
+ * @returns The cleaned, defanged name, or `null` when nothing printable remains.
+ */
+export function cleanAlertName(value: string | null | undefined): string | null {
+  const cleaned = cleanName(value);
+  return cleaned === null ? null : defangLinks(cleaned);
+}
+
+/**
  * Normalizes a user-provided name for display: strips control characters
  * (so a name can never inject a header line into the subject) and
  * invisible/bidi characters (so it cannot be disguised or reorder the

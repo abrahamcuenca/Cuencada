@@ -322,30 +322,61 @@ export type InviteAcceptRequest = z.input<typeof inviteAcceptInputSchema>;
 /* Invites (admin side)                                                        */
 /* -------------------------------------------------------------------------- */
 
-/** Limits for open (not email-bound) member invites, which are shared as links. */
-export const OPEN_INVITE_MAX_USES = 20;
-export const OPEN_INVITE_MAX_DAYS = 14;
+/**
+ * Limits for open (not email-bound) member invites, which are shared as links
+ * (WP-2.3b owner decision): verifying an email proves mailbox ownership, not
+ * family membership, so a leaked open link must stay short-lived and small.
+ * Every acceptance of an open invite also alerts all active admins.
+ */
+export const OPEN_INVITE_MAX_USES = 10;
+/** Default uses of an open invite when the admin does not pick one. */
+export const OPEN_INVITE_DEFAULT_USES = 5;
+/** Longest life of an open invite, in hours (also enforced at accept time for older rows). */
+export const OPEN_INVITE_MAX_HOURS = 72;
+/** {@link OPEN_INVITE_MAX_HOURS} in milliseconds. */
+export const OPEN_INVITE_MAX_LIFETIME_MS = OPEN_INVITE_MAX_HOURS * 60 * 60 * 1000;
+/** {@link OPEN_INVITE_MAX_HOURS} in the whole days `expiresInDays` takes (72 h = 3 days). */
+export const OPEN_INVITE_MAX_DAYS = OPEN_INVITE_MAX_HOURS / 24;
+/** Default life of an open invite: the maximum, 72 h. */
+export const OPEN_INVITE_DEFAULT_DAYS = OPEN_INVITE_MAX_DAYS;
+/** Default life of an email-bound invite, in days. */
+export const BOUND_INVITE_DEFAULT_DAYS = 7;
+/** Longest life of an email-bound invite, in days. */
+export const BOUND_INVITE_MAX_DAYS = 30;
 
 /**
  * `POST /api/admin/invites`.
  * - Admin invites: bound to an email, single-use, and **must be sent by email**
  *   (no copy-link), so holding the token implies controlling the mailbox.
  * - Email-bound member invites are single-use too (T1 amendment): one bound
- *   address can create only one account.
- * - Open member invites (`email: null`): at most 20 uses and 14 days.
+ *   address can create only one account. Default 7 days, at most 30.
+ * - Open member invites (`email: null`, WP-2.3b): default 5 uses and 72 h
+ *   (3 days); at most {@link OPEN_INVITE_MAX_USES} uses and
+ *   {@link OPEN_INVITE_MAX_HOURS} h. `maxUses` and `expiresInDays` default by
+ *   kind, so leaving them out never yields an over-limit open invite.
  */
 export const adminInviteCreateInputSchema = z
   .object({
     /** Bind to an email (recommended). `null` = open invite (shared by WhatsApp). */
     email: emailSchema.nullable().default(null),
     role: userRoleSchema.default(UserRole.Member),
-    maxUses: z.number().int().min(1).max(50).default(1),
-    expiresInDays: z.number().int().min(1).max(30).default(7),
+    /** Default: 1 for bound invites, {@link OPEN_INVITE_DEFAULT_USES} for open ones. */
+    maxUses: z.number().int().min(1).max(50).optional(),
+    /** Default: {@link BOUND_INVITE_DEFAULT_DAYS} for bound invites, {@link OPEN_INVITE_DEFAULT_DAYS} for open ones. */
+    expiresInDays: z.number().int().min(1).max(BOUND_INVITE_MAX_DAYS).optional(),
     /** Link the new account to an existing family-tree person. */
     personId: idSchema.nullable().default(null),
     /** Send the invite email via Resend. Requires `email`. */
     sendEmail: z.boolean().default(true),
     note: nullableTextSchema(200).default(null)
+  })
+  .transform(({ maxUses, expiresInDays, ...rest }) => {
+    const open = rest.email === null;
+    return {
+      ...rest,
+      maxUses: maxUses ?? (open ? OPEN_INVITE_DEFAULT_USES : 1),
+      expiresInDays: expiresInDays ?? (open ? OPEN_INVITE_DEFAULT_DAYS : BOUND_INVITE_DEFAULT_DAYS)
+    };
   })
   .refine((value) => !value.sendEmail || value.email !== null, {
     error: "Para enviar la invitación por correo necesitas un correo.",
@@ -368,11 +399,11 @@ export const adminInviteCreateInputSchema = z
     path: ["maxUses"]
   })
   .refine((value) => value.email !== null || value.maxUses <= OPEN_INVITE_MAX_USES, {
-    error: `Una invitación abierta admite como máximo ${OPEN_INVITE_MAX_USES} usos.`,
+    error: `Un enlace abierto admite como máximo ${OPEN_INVITE_MAX_USES} usos.`,
     path: ["maxUses"]
   })
   .refine((value) => value.email !== null || value.expiresInDays <= OPEN_INVITE_MAX_DAYS, {
-    error: `Una invitación abierta dura como máximo ${OPEN_INVITE_MAX_DAYS} días.`,
+    error: `Un enlace abierto dura como máximo ${OPEN_INVITE_MAX_HOURS} horas (${OPEN_INVITE_MAX_DAYS} días).`,
     path: ["expiresInDays"]
   });
 export type AdminInviteCreateInput = z.infer<typeof adminInviteCreateInputSchema>;

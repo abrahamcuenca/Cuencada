@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readAuditFilters, toAuditQuery, writeAuditFilters, zonedMidnight } from "./auditFilters";
-import { INVITE_FORM_DEFAULTS, normalizeInviteForm, validateInviteForm } from "./inviteForm";
+import { changeInviteDelivery, INVITE_FORM_DEFAULTS, normalizeInviteForm, validateInviteForm } from "./inviteForm";
 import { auditActionLabel, auditEntityLabel } from "./labels";
-import { formatMetadataValue, METADATA_VALUE_MAX, metadataRows } from "./metadata";
+import { alertFlags, formatMetadataValue, METADATA_VALUE_MAX, metadataRows } from "./metadata";
 import { LAST_ADMIN_MESSAGE, SELF_CHANGE_MESSAGE, userActionErrorMessage } from "./userErrors";
 
 describe("validateInviteForm", () => {
@@ -26,17 +26,32 @@ describe("validateInviteForm", () => {
   });
 
   it("builds an open invite body without an email", () => {
-    expect(validateInviteForm({ ...INVITE_FORM_DEFAULTS, delivery: "link", email: "ignored@example.com", maxUses: "20", expiresInDays: "14" })).toEqual({
+    expect(validateInviteForm({ ...INVITE_FORM_DEFAULTS, delivery: "link", email: "ignored@example.com", maxUses: "10", expiresInDays: "3" })).toEqual({
       ok: true,
-      request: { email: null, role: "member", maxUses: 20, expiresInDays: 14, sendEmail: false, note: null }
+      request: { email: null, role: "member", maxUses: 10, expiresInDays: 3, sendEmail: false, note: null }
     });
   });
 
+  it("defaults an open link to 5 uses and 72 hours, and an email invite back to 7 days", () => {
+    const link = changeInviteDelivery({ ...INVITE_FORM_DEFAULTS, expiresInDays: "20" }, "link");
+    expect(link).toMatchObject({ delivery: "link", maxUses: "5", expiresInDays: "3" });
+    expect(validateInviteForm(link)).toEqual({
+      ok: true,
+      request: { email: null, role: "member", maxUses: 5, expiresInDays: 3, sendEmail: false, note: null }
+    });
+    expect(changeInviteDelivery(link, "email")).toMatchObject({ delivery: "email", expiresInDays: "7" });
+    expect(changeInviteDelivery(link, "link")).toBe(link);
+    expect(normalizeInviteForm({ ...link, role: "admin" })).toMatchObject({ delivery: "email", expiresInDays: "7" });
+  });
+
   it("rejects open invites over the contract limits", () => {
-    const result = validateInviteForm({ ...INVITE_FORM_DEFAULTS, delivery: "link", maxUses: "21", expiresInDays: "15" });
+    const result = validateInviteForm({ ...INVITE_FORM_DEFAULTS, delivery: "link", maxUses: "11", expiresInDays: "4" });
     expect(result).toEqual({
       ok: false,
-      errors: { maxUses: "Una invitación abierta admite como máximo 20 usos.", expiresInDays: "Una invitación abierta dura como máximo 14 días." }
+      errors: {
+        maxUses: "Un enlace abierto admite como máximo 10 usos.",
+        expiresInDays: "Un enlace abierto dura como máximo 72 horas (3 días)."
+      }
     });
   });
 
@@ -46,7 +61,12 @@ describe("validateInviteForm", () => {
     ["60", "maxUses"]
   ])("rejects %s uses with a plain message", (maxUses) => {
     const result = validateInviteForm({ ...INVITE_FORM_DEFAULTS, delivery: "link", maxUses });
-    expect(result.ok ? null : result.errors.maxUses).toBe("Escribe un número de usos entre 1 y 20.");
+    expect(result.ok ? null : result.errors.maxUses).toBe("Escribe un número de usos entre 1 y 10.");
+  });
+
+  it("rejects an open link lasting 0 days with the 72-hour range", () => {
+    const result = validateInviteForm({ ...INVITE_FORM_DEFAULTS, delivery: "link", maxUses: "1", expiresInDays: "0" });
+    expect(result.ok ? null : result.errors.expiresInDays).toBe("Escribe un número de días entre 1 y 3 (72 horas).");
   });
 
   it("rejects a bound invite past 30 days", () => {
@@ -97,6 +117,17 @@ describe("audit filters", () => {
 });
 
 describe("metadata", () => {
+  it("badges an open-invite acceptance whose admin alert was skipped (WP-2.3b)", () => {
+    expect(alertFlags({ open: true, inviteAlertRecipients: 0, inviteAlertSkipped: true })).toEqual([
+      { key: "inviteAlertSkipped", label: "Aviso no enviado", tone: "danger" }
+    ]);
+    expect(alertFlags({ open: true, inviteAlertRecipients: 2, inviteAlertSkipped: "true" })).toEqual([]);
+    expect(alertFlags({ inviteAlertRecipients: 2, inviteAlertLimitNotice: true, inviteAlertSkipped: true }).map((flag) => flag.key)).toEqual([
+      "inviteAlertLimitNotice",
+      "inviteAlertSkipped"
+    ]);
+  });
+
   it("formats every JSON value as plain text", () => {
     expect(formatMetadataValue(true)).toBe("Sí");
     expect(formatMetadataValue(false)).toBe("No");

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   adminInviteCreateInputSchema,
+  OPEN_INVITE_DEFAULT_DAYS,
+  OPEN_INVITE_DEFAULT_USES,
+  OPEN_INVITE_MAX_DAYS,
+  OPEN_INVITE_MAX_HOURS,
+  OPEN_INVITE_MAX_LIFETIME_MS,
+  OPEN_INVITE_MAX_USES,
   changePasswordInputSchema,
   displayNameSchema,
   hasVisibleNameChars,
@@ -113,7 +119,7 @@ describe("adminInviteCreateInputSchema", () => {
 
   it("requires an email when sendEmail is true", () => {
     expect(adminInviteCreateInputSchema.safeParse({}).success).toBe(false);
-    expect(adminInviteCreateInputSchema.safeParse({ sendEmail: false, maxUses: 10 }).success).toBe(true);
+    expect(adminInviteCreateInputSchema.safeParse({ sendEmail: false, maxUses: OPEN_INVITE_MAX_USES }).success).toBe(true);
   });
 
   it("rejects open or multi-use admin invites", () => {
@@ -128,10 +134,51 @@ describe("adminInviteCreateInputSchema", () => {
     expect(adminInviteCreateInputSchema.safeParse({ role: "admin", email: "a@b.mx" }).success).toBe(true);
   });
 
-  it("caps open member invites at 20 uses and 14 days", () => {
-    expect(adminInviteCreateInputSchema.safeParse({ sendEmail: false, maxUses: 20, expiresInDays: 14 }).success).toBe(true);
-    expect(adminInviteCreateInputSchema.safeParse({ sendEmail: false, maxUses: 21 }).success).toBe(false);
-    expect(adminInviteCreateInputSchema.safeParse({ sendEmail: false, expiresInDays: 15 }).success).toBe(false);
+  it("defaults open invites to 5 uses and 72 hours (3 days)", () => {
+    expect(adminInviteCreateInputSchema.parse({ sendEmail: false })).toMatchObject({
+      email: null,
+      maxUses: OPEN_INVITE_DEFAULT_USES,
+      expiresInDays: OPEN_INVITE_DEFAULT_DAYS
+    });
+    expect(OPEN_INVITE_DEFAULT_USES).toBe(5);
+    expect(OPEN_INVITE_DEFAULT_DAYS * 24).toBe(OPEN_INVITE_MAX_HOURS);
+    expect(OPEN_INVITE_MAX_LIFETIME_MS).toBe(72 * 60 * 60 * 1000);
+  });
+
+  it.each([
+    [0, false],
+    [1, true],
+    [10, true],
+    [11, false]
+  ])("open invite with %i uses is valid: %s", (maxUses, valid) => {
+    const result = adminInviteCreateInputSchema.safeParse({ sendEmail: false, maxUses });
+    expect(result.success).toBe(valid);
+    if (!result.success) expect(result.error.issues.some((issue) => issue.path[0] === "maxUses")).toBe(true);
+  });
+
+  it.each([
+    [0, false],
+    [1, true],
+    [3, true],
+    [4, false]
+  ])("open invite lasting %i days is valid: %s (72 h max)", (expiresInDays, valid) => {
+    const result = adminInviteCreateInputSchema.safeParse({ sendEmail: false, expiresInDays });
+    expect(result.success).toBe(valid);
+    if (!result.success) expect(result.error.issues.some((issue) => issue.path[0] === "expiresInDays")).toBe(true);
+  });
+
+  it("rejects fractional days, so an open invite can never reach 72 h + 1 s", () => {
+    expect(adminInviteCreateInputSchema.safeParse({ sendEmail: false, expiresInDays: 3 + 1 / 86_400 }).success).toBe(false);
+    expect(OPEN_INVITE_MAX_DAYS).toBe(3);
+  });
+
+  it("keeps the email-bound rules: 1 use, 7 days by default, up to 30 days", () => {
+    expect(adminInviteCreateInputSchema.parse({ email: "tio@familia.mx", sendEmail: false })).toMatchObject({
+      maxUses: 1,
+      expiresInDays: 7
+    });
+    expect(adminInviteCreateInputSchema.safeParse({ email: "tio@familia.mx", expiresInDays: 30 }).success).toBe(true);
+    expect(adminInviteCreateInputSchema.safeParse({ email: "tio@familia.mx", expiresInDays: 31 }).success).toBe(false);
   });
 
   it("forces email-bound member invites to a single use", () => {
