@@ -14,9 +14,22 @@ description = "Lint with Biome"
 run = "pnpm typecheck"
 description = "Type-check every package"
 
+[tasks."test:db:up"]
+run = "scripts/test-db.sh up"
+description = "Start the disposable podman Postgres for tests (port 55432, tmpfs)"
+
+[tasks."test:db:down"]
+run = "scripts/test-db.sh down"
+description = "Remove the disposable test Postgres container"
+
+[tasks."test:db:status"]
+run = "scripts/test-db.sh status"
+description = "Report whether the test Postgres is up and ready"
+
 [tasks.test]
+depends = ["test:db:up"]
 run = "pnpm test"
-description = "Run the Vitest suites"
+description = "Run the Vitest suites (starts the test Postgres first)"
 
 [tasks.audit]
 run = "pnpm audit --prod --audit-level=high"

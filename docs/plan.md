@@ -218,7 +218,7 @@ Codex/opencode left a pnpm/turbo monorepo (`apps/web`, `apps/server`, `packages/
 | WP | Owner → reviewers | Scope |
 |---|---|---|
 | 0.0 | Tech Lead | **Baseline commit** of the current scaffold to `main` and push. Add `tsbuildinfo` and `.turbo` to ignores. Fix the `pnpm-workspace.yaml` argon2 placeholder. PR template with checklist (mobile screenshots, tests, security items), CODEOWNERS, `docs/plan.md` |
-| 0.1 | Backend → TL | `compose.test.yml` (podman `postgres:16`, port 55432, tmpfs). Root `vitest.config.ts` projects (server/node, web/jsdom, types). Template-DB-per-worker setup. Factories, `loginAs`, fake Mailer and fake Storage. `.github/workflows/ci.yml` with a Postgres service. Wire turbo `test` |
+| 0.1 | Backend → TL | `scripts/test-db.sh` (`up`/`down`/`status`; podman `postgres:16-alpine`, 127.0.0.1:55432, tmpfs; run-namespaced test DBs). Root `vitest.config.ts` projects (server/node, web/jsdom, types). Template-DB-per-worker setup. Factories, `loginAs`, fake Mailer and fake Storage. `.github/workflows/ci.yml` with a Postgres service. Wire turbo `test` |
 | 0.2 | Architect → TL, Sec | All module contracts in `packages/types` (zod + interfaces + `ErrorCode`), frozen barrel |
 | 0.3 | Backend (data) → Architect, TL | Schema split, migration 0001, migrator script, migration test, idempotent seed |
 | 0.4 | Backend → TL, **Sec** | Error handler (zod → 400), type provider, default-deny guard plus `sid` session check plus must-change gate, cookie, websocket, `trustProxy`, DB `onClose`/SIGTERM, `lib/{tokens,passwords,audit,mailer,storage}`, every module registered as a stub, **all server deps installed**, config hardening |
@@ -270,7 +270,7 @@ Codex/opencode left a pnpm/turbo monorepo (`apps/web`, `apps/server`, `packages/
 
 ## Verification
 - **For every PR:**
-  - `mise run verify`: lint, typecheck, Vitest against the podman Postgres (`podman compose -f compose.test.yml up -d`), prod audit
+  - `mise run verify`: lint, typecheck, Vitest against the podman Postgres (`scripts/test-db.sh up`, run automatically by `mise run test`), prod audit
   - CI green
   - Tech Lead approval, plus Security approval on [SEC] PRs
   - 375px and 1280px screenshots for UI changes
