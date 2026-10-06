@@ -6,7 +6,6 @@ import { Button } from "../../../shared/ui/Button";
 import { Card } from "../../../shared/ui/Card";
 import { Countdown } from "../../../shared/ui/Countdown";
 import { selectAuthStatus, selectCurrentUser, selectPasswordChangeRequired } from "../../auth/authSlice";
-import { ResendVerificationButton } from "../../auth/components/VerifyEmailBanner";
 import { GalleryPreview } from "../../gallery/components/GalleryPreview";
 import { useGetCuencadaHomeQuery, useListCuencadasQuery, useListMemberAnnouncementsQuery } from "../api";
 import { AnnouncementList } from "../components/AnnouncementList";
@@ -179,12 +178,14 @@ function MemoriesPhotos({ latestPast }: { latestPast: CuencadaSummary | null }):
       <img src="/images/logo-96.webp" alt="" width={96} height={96} className={styles.teaserArt} loading="lazy" decoding="async" />
       <div className={styles.teaserText}>
         <p className={styles.teaserTitle}>{isMember ? PHOTOS_VERIFY_TEASER : PHOTOS_LOGIN_TEASER}</p>
-        <p>Las fotos y videos de la Cuencada son privados: solo los ve la familia con cuenta.</p>
-        {isMember ? (
-          <ResendVerificationButton />
-        ) : (
+        <p>
+          {isMember
+            ? "Abre el enlace que te enviamos por correo; si no lo encuentras, pide otro desde el aviso de arriba."
+            : "Las fotos y videos de la Cuencada son privados: solo los ve la familia con cuenta."}
+        </p>
+        {isMember ? null : (
           <Button to="/entrar" variant="secondary" size="sm">
-            Entrar
+            Iniciar sesión
           </Button>
         )}
       </div>

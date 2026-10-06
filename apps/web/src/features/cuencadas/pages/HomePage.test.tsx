@@ -111,7 +111,7 @@ describe("HomePage", () => {
 
     const memories = await screen.findByRole("region", { name: /Últimos momentos/ });
     expect(within(memories).getByText("Inicia sesión para ver las fotos de la familia")).toBeInTheDocument();
-    expect(within(memories).getByRole("link", { name: "Entrar" })).toHaveAttribute("href", "/entrar");
+    expect(within(memories).getByRole("link", { name: "Iniciar sesión" })).toHaveAttribute("href", "/entrar");
     const sources = Array.from(document.querySelectorAll("img")).map((img) => img.getAttribute("src") ?? "");
     expect(sources.some((src) => /\/fotos\//.test(src) || src.includes("bucket"))).toBe(false);
   });
@@ -122,7 +122,7 @@ describe("HomePage", () => {
 
     const memories = await screen.findByRole("region", { name: /Últimos momentos/ });
     expect(within(memories).getByText("Verifica tu correo para ver las fotos de la familia")).toBeInTheDocument();
-    expect(within(memories).getByRole("button", { name: "Reenviar enlace" })).toBeInTheDocument();
+    expect(within(memories).getByText(/pide otro desde el aviso de arriba/)).toBeInTheDocument();
   });
 
   it("shows verified members the latest past edition's photos through the gallery preview", async () => {
