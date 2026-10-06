@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LINK_TEXT_MAX, linkify, safeHref } from "./linkify";
+import { displayHost, HOST_TEXT_MAX, LINK_TEXT_MAX, linkify, safeHref } from "./linkify";
 
 const links = (text: string): string[] => linkify(text).flatMap((segment) => (segment.kind === "link" ? [segment.href] : []));
 
@@ -89,5 +89,24 @@ describe("linkify", () => {
     expect(link).toMatchObject({ href: long, title: long });
     // Hosts are lower-cased and paths percent-encoded: what you see is where it goes.
     expect(linkify("https://EXAMPLE.com/Mérida")[0]).toMatchObject({ text: "https://example.com/M%C3%A9rida" });
+  });
+
+  it("never truncates the host: a long one keeps its registrable end", () => {
+    const spoof = "https://accounts.google.com.secure-login-verification-portal-cuencada.evil.example/x";
+    const [link] = linkify(spoof).filter((segment) => segment.kind === "link");
+    expect(link?.text).toBe("https://…evil.example/x");
+    expect(link?.text).toContain("evil.example");
+    expect(link).toMatchObject({ href: spoof, title: spoof });
+    expect(displayHost(`${"a".repeat(30)}.sub.cuencada.evil.example`)).toBe("…sub.cuencada.evil.example");
+    expect(displayHost(`${"b".repeat(50)}.example`)).toBe("…example");
+    expect(displayHost(`x.${"c".repeat(60)}`)).toHaveLength(HOST_TEXT_MAX);
+  });
+
+  it("with a short host and a long path, truncates only the path", () => {
+    const long = `https://example.com/fotos/${"a".repeat(100)}?q=1`;
+    const [link] = linkify(long).filter((segment) => segment.kind === "link");
+    expect(link?.text.startsWith("https://example.com/fotos/")).toBe(true);
+    expect(link?.text).toHaveLength(LINK_TEXT_MAX);
+    expect(link?.text.endsWith("…")).toBe(true);
   });
 });

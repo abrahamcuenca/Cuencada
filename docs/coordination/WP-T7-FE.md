@@ -133,7 +133,7 @@ Built against the WP-0.2 chat contract with MSW and a fake WebSocket. Mid-task, 
   - `javascript:`, `data:`, `vbscript:` and `www.` stay text
   - trailing punctuation is trimmed, keeping a parenthesis that balances one inside the URL
   - no `innerHTML`, no `eval`
-  - **anti-spoofing (Security L1, PR #28):** the visible link text is rebuilt from the parsed URL, never the typed text: scheme, the ASCII host (punycode for lookalikes, e.g. `https://xn--pple-43d.com/login`) and the percent-encoded path, cut at 60 characters with "…". The `title` carries the full ASCII URL. A URL containing zero-width, bidi-control or BOM characters (U+200B–200F, U+202A–202E, U+2066–2069, U+FEFF) is never linkified. Ideographic full stops (。．｡) are normalized to "." before parsing, so `evil.com。com` shows as `evil.com.com`
+  - **anti-spoofing (Security L1, PR #28):** the visible link text is rebuilt from the parsed URL, never the typed text: scheme, the ASCII host (punycode for lookalikes, e.g. `https://xn--pple-43d.com/login`) and the percent-encoded path. **The host is never truncated** (Security re-review): a host longer than 40 characters shows only its end, cut at a label boundary, so the registrable domain stays visible (`https://…evil.example/x`); only the path/query/fragment is cut, at 60 characters total, with "…". The `title` carries the full ASCII URL. A URL containing zero-width, bidi-control or BOM characters (U+200B–200F, U+202A–202E, U+2066–2069, U+FEFF) is never linkified. Ideographic full stops (。．｡) are normalized to "." before parsing, so `evil.com。com` shows as `evil.com.com`
 - **Connection status** (`<output>` under the app bar):
 
   | State | Message |

@@ -78,8 +78,34 @@ export function safeHref(candidate: string): string | null {
  */
 export function linkText(url: URL, typed: string): string {
   const bareRoot = url.pathname === "/" && url.search === "" && url.hash === "" && !typed.endsWith("/");
-  const text = `${url.protocol}//${url.host}${bareRoot ? "" : `${url.pathname}${url.search}${url.hash}`}`;
-  return text.length > LINK_TEXT_MAX ? `${text.slice(0, LINK_TEXT_MAX - 1)}…` : text;
+  const prefix = `${url.protocol}//${displayHost(url.host)}`;
+  const rest = bareRoot ? "" : `${url.pathname}${url.search}${url.hash}`;
+  // [SEC] Only the path/query/fragment is ever cut: the host (or its registrable end) always stays visible.
+  const room = Math.max(LINK_TEXT_MAX - prefix.length, 2);
+  return rest.length > room ? `${prefix}${rest.slice(0, room - 1)}…` : `${prefix}${rest}`;
+}
+
+/** Hosts longer than this show only their end. */
+export const HOST_TEXT_MAX = 40;
+
+/**
+ * @param host - An ASCII host (with port).
+ * @returns The host, or for a long one its end with the start elided
+ *   (`…cuencada.evil.example`), cut at a label boundary when possible, so the
+ *   registrable domain is never hidden.
+ */
+export function displayHost(host: string): string {
+  if (host.length <= HOST_TEXT_MAX) return host;
+  const labels = host.split(".");
+  let kept = labels[labels.length - 1] ?? host;
+  for (let index = labels.length - 2; index >= 0; index -= 1) {
+    const next = `${labels[index] ?? ""}.${kept}`;
+    if (next.length > HOST_TEXT_MAX - 1) break;
+    kept = next;
+  }
+  // A single label (or last two) longer than the budget: keep its end anyway.
+  if (kept.length > HOST_TEXT_MAX - 1) kept = host.slice(-(HOST_TEXT_MAX - 1));
+  return `…${kept}`;
 }
 
 /**
