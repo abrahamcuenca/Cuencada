@@ -15,7 +15,13 @@ Owner: Senior SWE (platform) · Reviewers: TL, Sec · Branch: wp/0.8a-platform-h
 
 ## Interfaces consumed / exposed
 - **`ErrorCode.EMAIL_UNVERIFIED`** (403, `packages/types/src/common.ts`). The auth guard answers it when a `requireVerifiedEmail` route is called with an unverified email; default message "Confirma tu correo electrónico para ver esta sección.". Before, this was 403 `FORBIDDEN`. WP-0.8c makes the web accept both.
-- **Logged query parameters**: only `limit`, `year`, `status`, `role`, `kind`, `depth`, `before`, `scope`, `entityType`, `action` keep their values, and only when the value matches `^[A-Za-z0-9_.:=-]{0,128}$`. Every other parameter becomes `name=[REDACTED]`; a pair whose decoded name is not a plain identifier becomes `[REDACTED]`. Matching is exact on the decoded name, so `Limit`, `q[]`, `%71` are redacted. `before` is allowed because the chat cursor encodes only `(created_at, id)`; `cursor` stays redacted. Add a parameter to `LOGGABLE_QUERY_PARAMS` only if its values are enums, numbers or opaque ids.
+- **Logged query parameters** (strict after Security L1, PR #31): `LOGGABLE_QUERY_PARAMS` maps each loggable name to a value check:
+  - `limit`/`year`/`depth`: digits only;
+  - `status`/`role`/`kind`/`scope`/`entityType`/`action`/`moderationStatus`/`uploadStatus`: the contract enum values (`UserStatus` ∪ `InviteStatus`, `UserRole`, `MediaKind`, `AnnouncementScope`, `AuditEntityType`, `AuditAction`, …);
+  - `reported`/`emailVerified`: `true`/`false`;
+  - `before`: plain base64url (the chat cursor encodes only `(created_at, id)`).
+
+  A value that fails its check is redacted. Known API parameters (`q`, `search`, `cursor`, `ticket`, `token`, `city`, `familyBranch`, ids, `from`/`to`) are logged as `name=[REDACTED]`; any other or undecodable name (including case variants and `q[]`) is logged as `[param]=[REDACTED]`, because a name can carry data too.
 - **`assertDrizzleCommandAllowed`** (`apps/server/src/db/drizzle-guard.ts`), called by `drizzle.config.ts`.
 - **`warmRoutes(...paths)`** (`apps/web/test/renderApp.tsx`): preloads lazy route modules in `beforeAll`.
 - **`Badge` `max` prop** and `formatCount`; **`evictForNewToast`** / `MAX_VISIBLE_TOASTS` in `Toast.tsx`.
