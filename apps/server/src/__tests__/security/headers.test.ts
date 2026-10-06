@@ -7,6 +7,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { App } from "../../app.js";
 import { createTestApp } from "../../../test/helpers/app.js";
+import { bearerFor, createSession, createUser } from "../../../test/helpers/factories.js";
 
 const PROD_LIKE = {
   NODE_ENV: "production" as const,
@@ -108,10 +109,37 @@ describe("API security headers", () => {
     }
   });
 
-  it("marks the chat ticket response no-store", async () => {
-    // Shape check only: the 401 for an anonymous caller still comes back JSON, never cached by intermediaries.
-    const response = await app.inject({ method: "POST", url: "/api/chat/ticket" });
-    expect(response.statusCode).toBe(401);
-    expect(response.headers["content-type"]).toContain("application/json");
+});
+
+describe("API responses are never stored by browser or proxy caches (WP-2.3 M1, ASVS 8.2.1)", () => {
+  it("sends Cache-Control: no-store on PII reads, token responses, errors and public reads", async () => {
+    const member = await createUser({ emailVerified: true });
+    const auth = await bearerFor(member, await createSession(member.id));
+    const responses = [
+      await app.inject({ method: "GET", url: "/api/me", ...auth }),
+      await app.inject({ method: "GET", url: "/api/directory", ...auth }),
+      await app.inject({ method: "GET", url: "/api/profile/me", ...auth }),
+      await app.inject({ method: "POST", url: "/api/auth/login", payload: { email: member.email, password: member.password } }),
+      await app.inject({ method: "GET", url: "/api/me" }),
+      await app.inject({ method: "GET", url: "/api/no-such-route" }),
+      await app.inject({ method: "GET", url: "/api/cuencadas" })
+    ];
+    expect(responses.map((response) => [response.statusCode, response.headers["cache-control"]])).toEqual([
+      [200, "no-store"],
+      [200, "no-store"],
+      [200, "no-store"],
+      [200, "no-store"],
+      [401, "no-store"],
+      [404, "no-store"],
+      [200, "no-store"]
+    ]);
+  });
+
+  it("keeps a route's own Cache-Control", async () => {
+    const member = await createUser({ emailVerified: true });
+    const auth = await bearerFor(member, await createSession(member.id));
+    const ticket = await app.inject({ method: "POST", url: "/api/chat/ticket", ...auth });
+    expect(ticket.statusCode).toBe(201);
+    expect(ticket.headers["cache-control"]).toBe("no-store");
   });
 });

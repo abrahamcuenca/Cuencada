@@ -17,6 +17,9 @@ import { type AppConfig, allowedOrigins } from "../config.js";
 /** Origin of the weather widget, allowed only as a frame (never as a script source). */
 export const WEATHER_WIDGET_ORIGIN = "https://weatherwidget.io";
 
+/** Path prefix of the JSON API (every module is mounted under it). */
+const API_PREFIX = "/api/";
+
 type CspConfig = Pick<
   AppConfig,
   "NODE_ENV" | "APP_BASE_URL" | "CORS_ORIGIN" | "DEV_ALLOWED_ORIGINS" | "S3_ENDPOINT" | "S3_BUCKET" | "S3_PUBLIC_BASE_URL"
@@ -108,8 +111,9 @@ export function contentSecurityPolicy(config: CspConfig): string {
 }
 
 /**
- * Register helmet (strict CSP) and CORS for exactly the allowed origins with
- * credentials.
+ * Register helmet (strict CSP), CORS for exactly the allowed origins with
+ * credentials, and `Cache-Control: no-store` on every `/api/` response that
+ * does not set its own.
  *
  * @param app - Root instance.
  */
@@ -129,4 +133,15 @@ export async function registerSecurity(app: FastifyInstance): Promise<void> {
     allowedHeaders: ["content-type", "authorization", CSRF_HEADER],
     maxAge: 600
   });
+  // API bodies are per-user PII or tokens (and public reads are tiny and dynamic):
+  // no browser or proxy cache may store them, so nothing survives a logout on a
+  // shared computer (WP-2.3 M1, ASVS 8.2.1). The service worker's public-edition
+  // cache is separate and unaffected. Routes that set their own value keep it.
+  app.addHook("onSend", async (request, reply, payload) => {
+    if (request.url.startsWith(API_PREFIX) && !reply.hasHeader("cache-control")) {
+      reply.header("cache-control", "no-store");
+    }
+    return payload;
+  });
 }
+
