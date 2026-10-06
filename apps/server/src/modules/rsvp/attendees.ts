@@ -33,8 +33,9 @@ export interface MergedAttendee {
   isMe: boolean;
   /**
    * Tie-break after `displayName` (server-side only, never sent). Visible
-   * rows: their id. Hidden rows: `source` + a keyed HMAC of the id, so their
-   * order depends neither on DB/insertion order (≈ RSVP time) nor on the id.
+   * rows: their id. Hidden rows: `source` + a keyed HMAC of the edition and
+   * the id, so their order depends neither on DB/insertion order (≈ RSVP
+   * time) nor on the id, and is not linkable across editions.
    */
   orderKey: string;
 }
@@ -48,13 +49,19 @@ const HIDDEN_ORDER_KEY = randomBytes(32);
 
 /**
  * Non-identifying sort key for a hidden row: `source`, then
- * HMAC-SHA256(`HIDDEN_ORDER_KEY`, dedupe key).
+ * HMAC-SHA256(`HIDDEN_ORDER_KEY`, edition id + dedupe key). Mixing in the
+ * edition means the same hidden person lands at an unrelated position in
+ * each edition's list, so comparing lists cannot track one anonymous row
+ * across years.
  *
  * @param source - Where the row comes from (attendance sorts before rsvp).
  * @param dedupeKey - `p:<personId>` or `u:<userId>`.
+ * @param cuencadaId - The edition whose list is being ordered.
  */
-export function hiddenOrderKey(source: AttendeeSource, dedupeKey: string): string {
-  return `${source}:${createHmac("sha256", HIDDEN_ORDER_KEY).update(dedupeKey).digest("hex")}`;
+export function hiddenOrderKey(source: AttendeeSource, dedupeKey: string, cuencadaId: string): string {
+  // `|` cannot occur in a uuid or a dedupe key, so the HMAC input is unambiguous.
+  const digest = createHmac("sha256", HIDDEN_ORDER_KEY).update(`${cuencadaId}|${dedupeKey}`).digest("hex");
+  return `${source}:${digest}`;
 }
 
 function keyOf(candidate: AttendeeCandidate): string | null {
@@ -78,11 +85,13 @@ function nameOf(candidate: AttendeeCandidate): string {
  * @param rsvps - `yes` RSVP candidates (active accounts).
  * @param attendance - Historical attendance candidates.
  * @param viewerId - Caller: their own row is never anonymized.
+ * @param cuencadaId - The edition (mixed into hidden rows' order keys).
  */
 export function mergeAttendees(
   rsvps: readonly AttendeeCandidate[],
   attendance: readonly AttendeeCandidate[],
-  viewerId: string
+  viewerId: string,
+  cuencadaId: string
 ): MergedAttendee[] {
   const merged = new Map<string, MergedAttendee>();
   const add = (candidate: AttendeeCandidate, source: AttendeeSource): void => {
@@ -100,7 +109,7 @@ export function mergeAttendees(
             avatarKey: null,
             source,
             isMe,
-            orderKey: hiddenOrderKey(source, key)
+            orderKey: hiddenOrderKey(source, key, cuencadaId)
           }
         : {
             personId: candidate.personId,

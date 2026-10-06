@@ -99,7 +99,13 @@ describe("chatHistoryQuerySchema", () => {
 
 describe("chatRoomSchema", () => {
   it("carries a bounded last-message preview and unread count", () => {
-    const lastMessage = { id: messageId, senderDisplayName: "Ana", preview: "hola", createdAt: "2026-09-13T19:30:00.000Z" };
+    const lastMessage = {
+      id: messageId,
+      senderUserId: roomId,
+      senderDisplayName: "Ana",
+      preview: "hola",
+      createdAt: "2026-09-13T19:30:00.000Z"
+    };
     const room = {
       id: roomId,
       kind: "global",

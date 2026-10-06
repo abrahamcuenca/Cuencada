@@ -16,6 +16,9 @@
  *   per-admin mutation limit.
  * - **Exempt:** demote, disable and force-reset of an admin always alert,
  *   even past the cap ({@link CAP_EXEMPT_CHANGES}); they still add to the count.
+ *   A force-reset is exempt only when it actually flips `must_change_password`
+ *   from false to true (the caller passes `capExempt: false` for repeats), so
+ *   repeating it cannot burn through the alert quota for free.
  * - **Limit notice:** the first non-exempt alert of the day that no longer
  *   fits is replaced by ONE "Se alcanzó el límite de avisos de seguridad de
  *   hoy" email to every other active admin; later non-exempt alerts that day
@@ -78,6 +81,11 @@ export interface PlanAdminAlertInput {
   target: AlertTarget;
   changes: readonly AdminAccountChange[];
   now: Date;
+  /**
+   * `false` withdraws the cap exemption that {@link CAP_EXEMPT_CHANGES}
+   * would grant (e.g. a repeated force-reset). Omitted: decided by `changes`.
+   */
+  capExempt?: boolean;
 }
 
 /** What to tell the admins (after commit). */
@@ -128,9 +136,13 @@ export async function planAdminAlert(
     .select({ id: users.id, email: users.email, displayName: users.displayName })
     .from(users)
     .where(and(eq(users.role, "admin"), eq(users.status, "active"), sql`${users.id} <> ${input.actorId}::uuid`));
+  // The target is filtered out of the "other admins" list on purpose: it gets
+  // its own "tu cuenta" copy (`recipientIsTarget`) via `target` below, never
+  // the third-person one, and never twice. `targetStillAdmin` is read from
+  // the same post-change query, so a demoted/disabled target is not in it.
   const others = activeAdmins.filter((admin) => admin.id !== input.target.id);
   const targetStillAdmin = activeAdmins.length !== others.length;
-  const exempt = input.changes.some((change) => CAP_EXEMPT_CHANGES.has(change));
+  const exempt = input.capExempt !== false && input.changes.some((change) => CAP_EXEMPT_CHANGES.has(change));
   const target = exempt || targetStillAdmin ? input.target : null;
   if (exempt) return { kind: "change", recipients: others, target, exempt };
 

@@ -30,14 +30,17 @@ import { AppError } from "../../lib/errors.js";
 import { rateLimitByIp } from "../../lib/rateLimit.js";
 import { authUser } from "../../plugins/auth.js";
 import { PgErrorCode, pgErrorInfo } from "./db-errors.js";
+import { AvatarSize } from "../profile/constants.js";
 import {
   escapeLike,
   findPerson,
   findPersonByUserId,
   type PersonRow,
   personColumns,
-  toPerson,
-  toPersonSummary
+  presignPersonAvatars,
+  selectPersonViews,
+  toPersonSummary,
+  toPersonWithAvatar
 } from "./repository.js";
 import { loadTreeView } from "./tree.js";
 
@@ -141,16 +144,16 @@ const memberFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
         after === undefined
           ? undefined
           : sql`(lower(${people.fullName}), ${people.id}) > (select lower(p.full_name), p.id from ${people} p where p.id = ${after}::uuid)`;
-      const rows = await app.db
-        .select(personColumns)
-        .from(people)
-        .where(and(match, keyset))
-        .orderBy(sql`lower(${people.fullName})`, people.id)
-        .limit(limit + 1);
+      const viewer = authUser(request);
+      const rows = await selectPersonViews(app.db, and(match, keyset), {
+        orderBy: [sql`lower(${people.fullName})`, sql`${people.id}`],
+        limit: limit + 1
+      });
       const pageRows = rows.slice(0, limit);
       const last = pageRows.at(-1);
+      const avatars = await presignPersonAvatars(app, pageRows, viewer, AvatarSize.Small);
       return {
-        items: pageRows.map(toPersonSummary),
+        items: pageRows.map((row) => toPersonSummary(row, viewer, avatars)),
         nextCursor: rows.length > limit && last !== undefined ? encodeCursor(last.id) : null
       };
     }
@@ -167,7 +170,7 @@ const memberFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
       const viewer = authUser(request);
       const row = await findPerson(app.db, request.params.id);
       if (row === undefined) throw new AppError("NOT_FOUND", PERSON_NOT_FOUND_MESSAGE);
-      return toPerson(row, viewer);
+      return toPersonWithAvatar(app, row, viewer);
     }
   );
 
@@ -186,7 +189,7 @@ const memberFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
         if (own === undefined) throw new AppError("NOT_FOUND", NOT_LINKED_MESSAGE);
         focusId = own.id;
       }
-      return loadTreeView(app.db, focusId, request.query.depth, viewer);
+      return loadTreeView(app, focusId, request.query.depth, viewer);
     }
   );
 
@@ -204,8 +207,8 @@ const memberFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
     }
   } satisfies RouteShorthandOptions;
 
-  const selfEditHandler = async (viewer: ReturnType<typeof authUser>, input: SelfEditPersonInput, ip: string): Promise<Person> =>
-    app.db.transaction(async (tx) => {
+  const selfEditHandler = async (viewer: ReturnType<typeof authUser>, input: SelfEditPersonInput, ip: string): Promise<Person> => {
+    const saved = await app.db.transaction(async (tx) => {
       const own = await findPersonByUserId(tx, viewer.id);
       if (own === undefined) throw new AppError("NOT_FOUND", NOT_LINKED_MESSAGE);
       const values = selfEditValues(input);
@@ -219,8 +222,13 @@ const memberFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
         metadata: { fields: Object.keys(values), self: true },
         ip
       });
-      return toPerson(updated, viewer);
+      // Re-read with the profile join (avatar) inside the same transaction.
+      const view = await findPerson(tx, updated.id);
+      if (view === undefined) throw new AppError("NOT_FOUND", NOT_LINKED_MESSAGE);
+      return view;
     });
+    return toPersonWithAvatar(app, saved, viewer);
+  };
 
   app.patch("/family/me", selfEditOptions, async (request) =>
     selfEditHandler(authUser(request), request.body, request.ip)

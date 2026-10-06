@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
-import { afterEach, describe, expect, it } from "vitest";
+import { eq, sql } from "drizzle-orm";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestApp } from "../../../test/helpers/app.js";
 import { linkToken, loginFull, TestClock } from "../../../test/helpers/auth.js";
 import { getTestDb } from "../../../test/helpers/db.js";
@@ -125,6 +125,91 @@ describe("per-recipient email budget (Security M1)", () => {
     await mailQueue(app).onIdle();
 
     expect(mailer.outbox.map((mail) => mail.tags?.category)).toEqual(["magic-link", "verify-email", "password-reset"]);
+  });
+});
+
+describe("timing decoy for unknown addresses (Security L2, PR #14)", () => {
+  it("runs the same budget reads for unknown and inactive addresses, writing and sending nothing", async () => {
+    const mailer = new FakeMailer();
+    app = await createTestApp({ mailer });
+    const server = app;
+    const known = await createUser();
+    const disabled = await createUser({ status: "disabled" });
+    // Count the reads and writes each request's transaction issues.
+    const counts = { transactions: 0, execute: 0, select: 0, insert: 0 };
+    const runTransaction = server.db.transaction.bind(server.db);
+    vi.spyOn(server.db, "transaction").mockImplementation((work, config) => {
+      counts.transactions += 1;
+      return runTransaction(async (tx) => {
+        const execute = tx.execute.bind(tx);
+        const select = tx.select.bind(tx);
+        const insert = tx.insert.bind(tx);
+        vi.spyOn(tx, "execute").mockImplementation((query) => {
+          counts.execute += 1;
+          return execute(query);
+        });
+        vi.spyOn(tx, "select").mockImplementation((...fields: Parameters<typeof select>) => {
+          counts.select += 1;
+          return select(...fields);
+        });
+        vi.spyOn(tx, "insert").mockImplementation((table) => {
+          counts.insert += 1;
+          return insert(table);
+        });
+        return work(tx);
+      }, config);
+    });
+    const request = async (url: string, email: string): Promise<typeof counts> => {
+      Object.assign(counts, { transactions: 0, execute: 0, select: 0, insert: 0 });
+      expect((await post(server, url, email)).statusCode).toBe(202);
+      return { ...counts };
+    };
+
+    for (const url of [MAGIC, RESET]) {
+      // Real: lock + daily count (execute), budget counts (select), token + audit (insert).
+      const real = await request(url, known.email);
+      expect(real).toEqual({ transactions: 1, execute: 2, select: 1, insert: 2 });
+      // Decoy: the same reads, no writes.
+      const reads = { transactions: 1, execute: 2, select: 1, insert: 0 };
+      expect(await request(url, "nadie-con-esta-cuenta@example.test")).toEqual(reads);
+      expect(await request(url, disabled.email)).toEqual(reads);
+    }
+    await mailQueue(server).onIdle();
+
+    expect(mailer.outbox.map((mail) => mail.to)).toEqual([known.email, known.email]);
+    const rows = await getTestDb().select({ email: magicLinks.email }).from(magicLinks);
+    expect(rows.map((row) => row.email)).toEqual([known.email, known.email]);
+  });
+
+  it("takes the per-address advisory lock for unknown addresses too (requests for one address serialize)", async () => {
+    app = await createTestApp();
+    const server = app;
+    const unknown = "nadie-mas@example.test";
+    // Hold the address' budget lock in another transaction: the decoy must wait for it.
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let locked: () => void = () => undefined;
+    const lockTaken = new Promise<void>((resolve) => {
+      locked = resolve;
+    });
+    const holder = getTestDb().transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`mail-budget:${unknown}`}))`);
+      locked();
+      await held;
+    });
+    await lockTaken;
+    let answered = false;
+    const request = post(server, MAGIC, unknown).then((result) => {
+      answered = true;
+      return result;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(answered).toBe(false);
+    release();
+    await holder;
+    expect((await request).statusCode).toBe(202);
   });
 });
 

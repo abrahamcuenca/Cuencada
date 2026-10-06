@@ -10,7 +10,14 @@ import type { AvatarMimeType } from "../../db/schema/index.js";
 import sharp from "sharp";
 import type { FastifyBaseLogger } from "fastify";
 import type { StorageService } from "../../lib/storage/types.js";
-import { AVATAR_MAX_INPUT_PIXELS, AVATAR_URL_TTL_SECONDS, AVATAR_WEBP_QUALITY, AvatarSize } from "./constants.js";
+import {
+  AVATAR_MAX_INPUT_PIXELS,
+  AVATAR_PROCESSING_CONCURRENCY,
+  AVATAR_URL_TTL_SECONDS,
+  AVATAR_WEBP_QUALITY,
+  AvatarSize
+} from "./constants.js";
+import { Semaphore } from "./semaphore.js";
 import { errorName } from "./shared.js";
 import { normalizeContentType, signatureMatches, sniffMediaType } from "../media/files.js";
 
@@ -135,28 +142,52 @@ function isPixelLimitError(error: unknown): boolean {
 }
 
 /**
+ * Process-wide cap on concurrent avatar decodes (see
+ * {@link AVATAR_PROCESSING_CONCURRENCY}). Exported for tests.
+ */
+export const avatarProcessingSlots = new Semaphore(AVATAR_PROCESSING_CONCURRENCY);
+
+/**
  * Decode, auto-rotate (EXIF orientation), centre-crop to a square and
  * encode both sizes as WebP. sharp writes **no metadata** unless asked, so
  * EXIF (incl. GPS), XMP, IPTC, ICC and orientation tags are all dropped.
  * Only the first frame of an animated image is used.
  *
+ * The upload is **decoded once**: it is rendered to a raw 256 px square,
+ * and both WebPs are encoded from that small buffer. At most
+ * {@link AVATAR_PROCESSING_CONCURRENCY} avatars are processed at a time in
+ * this process; further confirms wait their turn.
+ *
  * @param input - The whole uploaded file.
  * @param declared - The type the magic bytes already matched.
  */
 export async function processAvatar(input: Uint8Array, declared: AvatarMimeType): Promise<AvatarProcessingResult> {
+  return avatarProcessingSlots.run(() => processAvatarNow(input, declared));
+}
+
+async function processAvatarNow(input: Uint8Array, declared: AvatarMimeType): Promise<AvatarProcessingResult> {
   try {
+    // Header only (no pixel decode): format check before the expensive step.
     const metadata = await sharpInput(input).metadata();
     if (metadata.format !== SHARP_FORMAT_BY_MIME[declared]) {
       return { ok: false, failure: AvatarProcessingFailure.FormatMismatch };
     }
-    const render = (size: AvatarSize): Promise<Buffer> =>
-      sharpInput(input)
-        .rotate()
-        .resize(size, size, { fit: "cover", position: "centre" })
+    const square = await sharpInput(input)
+      .rotate()
+      .resize(AvatarSize.Large, AvatarSize.Large, { fit: "cover", position: "centre" })
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const fromSquare = (): ReturnType<typeof sharp> =>
+      sharp(square.data, {
+        raw: { width: square.info.width, height: square.info.height, channels: square.info.channels }
+      });
+    const [large, small] = await Promise.all([
+      fromSquare().webp({ quality: AVATAR_WEBP_QUALITY }).toBuffer(),
+      fromSquare()
+        .resize(AvatarSize.Small, AvatarSize.Small, { fit: "cover", position: "centre" })
         .webp({ quality: AVATAR_WEBP_QUALITY })
-        .toBuffer();
-    const large = await render(AvatarSize.Large);
-    const small = await render(AvatarSize.Small);
+        .toBuffer()
+    ]);
     return { ok: true, avatar: { large, small } };
   } catch (error) {
     return {

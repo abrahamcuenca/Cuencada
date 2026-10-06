@@ -56,6 +56,19 @@ async function anotherSession(member: ChatMember): Promise<ChatMember> {
   return { user: member.user, sessionId: session.id, auth: await bearerFor(member.user, session) };
 }
 
+/**
+ * Resolve once `condition` holds, checking every few milliseconds.
+ *
+ * @throws Error when it still does not hold after `timeoutMs`.
+ */
+async function pollUntil(condition: () => boolean, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() > deadline) throw new Error("pollUntil: condition not met in time");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 /** Override `bufferedAmount` on the server-side socket(s) of the app. */
 function fakeBuffered(server: App, bytes: number): void {
   for (const socket of server.websocketServer.clients) {
@@ -125,12 +138,14 @@ describe("backpressure", () => {
     await fastSocket.waitFor(frameOf("message"));
 
     expect((await slowSocket.closed).code).toBe(1006);
-    await sleep(50);
-    expect(
-      hubOf(app)
+    // The hub forgets the socket on its server-side `close` event: poll for it instead of sleeping.
+    const server = app;
+    const userIds = (): string[] =>
+      hubOf(server)
         .connections()
-        .map((connection) => connection.principal.userId)
-    ).toEqual([fast.user.id]);
+        .map((connection) => connection.principal.userId);
+    await pollUntil(() => userIds().length === 1);
+    expect(userIds()).toEqual([fast.user.id]);
   });
 
   it("skips typing and presence, but not messages, above the low-priority threshold", () => {

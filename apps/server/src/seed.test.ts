@@ -94,6 +94,22 @@ describe("runSeed", () => {
     expect(await argon2.verify(admin?.passwordHash ?? "", options.adminTempPassword)).toBe(true);
   });
 
+  it("stamps first_published_at on the published 2026 edition once and keeps it on re-runs", async () => {
+    const db = getTestDb();
+    const before = Date.now();
+
+    await runSeed(db, options);
+    const [seeded] = await db.select().from(cuencadas);
+    expect(seeded?.isPublished).toBe(true);
+    const stamped = seeded?.firstPublishedAt?.getTime();
+    expect(stamped).toBeGreaterThanOrEqual(before - 1000);
+    expect(stamped).toBeLessThanOrEqual(Date.now() + 1000);
+
+    await runSeed(db, options);
+    const [again] = await db.select().from(cuencadas);
+    expect(again?.firstPublishedAt?.getTime()).toBe(stamped);
+  });
+
   it("ports the legacy 2026 content", async () => {
     const db = getTestDb();
     await runSeed(db, options);

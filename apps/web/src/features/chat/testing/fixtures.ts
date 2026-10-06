@@ -66,6 +66,7 @@ export function makeRooms(overrides: Partial<Record<keyof typeof ROOMS, Partial<
       lastReadMessageId: null,
       lastMessage: {
         id: chatId(3, 900),
+        senderUserId: PEOPLE.marta.userId,
         senderDisplayName: PEOPLE.marta.displayName,
         preview: "¡Gracias por todo, familia!",
         createdAt: "2025-09-20T18:00:00.000Z"
@@ -81,7 +82,13 @@ export function makeRooms(overrides: Partial<Record<keyof typeof ROOMS, Partial<
       unreadCount: 3,
       lastMessageAt: "2026-09-14T15:05:00.000Z",
       lastReadMessageId: null,
-      lastMessage: { id: chatId(3, 5), senderDisplayName: PEOPLE.lucia.displayName, preview: "Mensaje 5", createdAt: "2026-09-14T15:05:00.000Z" },
+      lastMessage: {
+        id: chatId(3, 5),
+        senderUserId: PEOPLE.lucia.userId,
+        senderDisplayName: PEOPLE.lucia.displayName,
+        preview: "Mensaje 5",
+        createdAt: "2026-09-14T15:05:00.000Z"
+      },
       ...overrides.familia
     },
     {

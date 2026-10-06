@@ -8,9 +8,10 @@ import { AuditAction } from "@cuencada/types";
 import { and, eq, isNull } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { type MagicLinkPurpose, magicLinks, users } from "../../db/schema/index.js";
+import type { Database } from "../../db/client.js";
 import type { DbOrTx, Transaction } from "../../lib/audit.js";
 import { createOpaqueToken, hashToken } from "../../lib/tokens.js";
-import { MailTier, withinGlobalMailCap, withinRecipientBudget } from "./mailBudget.js";
+import { dailyMailCount, MailTier, withinGlobalMailCap, withinRecipientBudget } from "./mailBudget.js";
 import { enqueueMail } from "./mailQueue.js";
 
 /** Lifetimes per purpose, in minutes. */
@@ -103,6 +104,37 @@ export async function issueBudgetedEmailToken(
   }
   if (!(await withinGlobalMailCap(app, tx, MailTier.User, input.now))) return null;
   return createEmailToken(tx, input);
+}
+
+/**
+ * Timing decoy for request-for-token routes (Security L2 on PR #14): when
+ * the address has no active account, run the same budget reads that
+ * {@link issueBudgetedEmailToken} runs for a real one (advisory lock on the
+ * address, per-recipient counts, today's global count) in a transaction that
+ * writes nothing, so the response time does not reveal whether the address
+ * belongs to an account. Behaviour is unchanged: no token, no audit row, no
+ * email, no log line.
+ *
+ * Residual difference (documented, accepted): a real request also inserts
+ * the token and its audit row (two small inserts in the same transaction)
+ * and enqueues the email off the request path.
+ *
+ * @param db - The root client (`app.db`).
+ * @param email - The normalized address from the request body.
+ * @param purpose - The purpose the real path would budget.
+ * @param now - Current time (`app.clock`).
+ */
+export async function simulateBudgetedEmailToken(
+  db: Pick<Database, "transaction">,
+  email: string,
+  purpose: MagicLinkPurpose,
+  now: Date
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    // Same order and statements as the real path; the results are ignored on purpose.
+    await withinRecipientBudget(tx, email, purpose, now);
+    await dailyMailCount(tx, now);
+  });
 }
 
 /**

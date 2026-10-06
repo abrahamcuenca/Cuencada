@@ -145,6 +145,23 @@ describe("admin-account change alerts", () => {
     }
   });
 
+  it("treats a force-reset as cap-exempt only when it flips must_change_password false to true", async () => {
+    const target = await createMember({ role: "admin" });
+    await exhaustAlertCap();
+
+    expect(await forceReset(target)).toBe(200);
+    expect(await mailsTo(watcher, CHANGED)).toHaveLength(1);
+    // Repeat on an already-forced account: not exempt, so past the cap it becomes the limit notice.
+    expect(await forceReset(target)).toBe(200);
+    expect(await mailsTo(watcher, CHANGED)).toHaveLength(1);
+    expect(await mailsTo(watcher, LIMIT)).toHaveLength(1);
+
+    const rows = await getTestDb().select().from(auditLogs).where(eq(auditLogs.entityId, target.user.id));
+    const metadata = rows.map((row) => row.metadata);
+    expect(metadata.filter((entry) => entry.adminAlertExempt === true)).toHaveLength(1);
+    expect(metadata.filter((entry) => entry.adminAlertLimitNotice === true)).toHaveLength(1);
+  });
+
   it("replaces capped alerts with one daily limit notice, then skips them", async () => {
     const promoted = await createMember();
     const other = await createMember({ role: "admin" });

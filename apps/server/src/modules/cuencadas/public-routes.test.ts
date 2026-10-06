@@ -15,6 +15,7 @@ import { getTestDb } from "../../../test/helpers/db.js";
 import { createUser, loginAs } from "../../../test/helpers/factories.js";
 import type { App } from "../../app.js";
 import { LEGACY_DEV_LINKS } from "../../seed-data.js";
+import { countVisibleMediaByCuencada } from "../media/service.js";
 import { DEFAULT_DAILY_MESSAGES_FILE, runSeed } from "../../seed.js";
 
 const MEMBER_ONLY_KEYS = ["whatsappUrl", "externalAlbumUrl", "isPublished", "createdAt", "updatedAt"];
@@ -123,6 +124,33 @@ describe("GET /api/cuencadas", () => {
     ]);
     expect(body[0]?.timezone).toBe("America/Merida");
     for (const summary of body) for (const key of MEMBER_ONLY_KEYS) expect(summary).not.toHaveProperty(key);
+  });
+
+  it("derives hasMedia from the media module's visibility rule (countVisibleMediaByCuencada)", async () => {
+    const states: Array<[number, Parameters<typeof insertMedia>[1] | null]> = [
+      [2016, null],
+      [2017, {}],
+      [2018, { moderationStatus: "pending_review" }],
+      [2019, { moderationStatus: "hidden" }],
+      [2020, { uploadStatus: "pending_upload" }],
+      [2021, { uploadStatus: "processing" }],
+      [2022, { uploadStatus: "failed" }],
+      [2023, { deletedAt: new Date() }]
+    ];
+    const ids: string[] = [];
+    for (const [year, media] of states) {
+      const edition = await insertCuencada({ year });
+      ids.push(edition.id);
+      if (media !== null) await insertMedia(edition.id, media);
+    }
+
+    const response = await app.inject({ method: "GET", url: "/api/cuencadas" });
+
+    expect(response.statusCode).toBe(200);
+    const visible = await countVisibleMediaByCuencada(getTestDb(), ids);
+    const byId = new Map(response.json<CuencadaSummary[]>().map((summary) => [summary.id, summary.hasMedia]));
+    expect(ids.map((id) => byId.get(id))).toEqual(ids.map((id) => (visible.get(id) ?? 0) > 0));
+    expect(ids.map((id) => byId.get(id))).toEqual([false, true, false, false, false, false, false, false]);
   });
 });
 

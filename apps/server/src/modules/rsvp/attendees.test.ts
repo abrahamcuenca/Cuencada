@@ -23,6 +23,8 @@ const P2 = "33333333-3333-4333-8333-333333333333";
 const U1 = "22222222-2222-4222-8222-222222222222";
 const U2 = "44444444-4444-4444-8444-444444444444";
 const VIEWER = "55555555-5555-4555-8555-555555555555";
+const EDITION = "99999999-9999-4999-8999-999999999999";
+const OTHER_EDITION = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 describe("mergeAttendees", () => {
   it("keeps one row per person, preferring the RSVP, and sorts accent-insensitively", () => {
@@ -32,7 +34,8 @@ describe("mergeAttendees", () => {
         candidate({ personId: P1, userId: U1, accountName: "Ángel" }),
         candidate({ personId: "p2", fullName: "Beatriz" })
       ],
-      VIEWER
+      VIEWER,
+      EDITION
     );
     expect(merged.map((row) => [row.displayName, row.source])).toEqual([
       ["Ángel", "rsvp"],
@@ -41,7 +44,7 @@ describe("mergeAttendees", () => {
   });
 
   it("uses the nickname for people without an account", () => {
-    const [row] = mergeAttendees([], [candidate({ personId: P1, nickname: "Tita", fullName: "Rosa María" })], VIEWER);
+    const [row] = mergeAttendees([], [candidate({ personId: P1, nickname: "Tita", fullName: "Rosa María" })], VIEWER, EDITION);
     expect(row?.displayName).toBe("Tita");
   });
 
@@ -52,7 +55,8 @@ describe("mergeAttendees", () => {
         candidate({ personId: P1, userId: U1, accountName: "Abel", avatarKey: "a.webp", listedInDirectory: false }),
         candidate({ personId: P2, userId: U2, accountName: "Zacarías", listedInDirectory: true })
       ],
-      VIEWER
+      VIEWER,
+      EDITION
     );
     expect(merged).toEqual([
       {
@@ -62,7 +66,7 @@ describe("mergeAttendees", () => {
         avatarKey: null,
         source: "rsvp",
         isMe: false,
-        orderKey: hiddenOrderKey("rsvp", `p:${P1}`)
+        orderKey: hiddenOrderKey("rsvp", `p:${P1}`, EDITION)
       },
       {
         personId: P2,
@@ -86,8 +90,8 @@ describe("mergeAttendees", () => {
     );
     const hiddenAttendance = candidate({ personId: "88888888-8888-4888-8888-888888888888", listedInDirectory: false });
 
-    const forward = mergeAttendees(hiddenRsvps, [hiddenAttendance], VIEWER);
-    const reversed = mergeAttendees([...hiddenRsvps].reverse(), [hiddenAttendance], VIEWER);
+    const forward = mergeAttendees(hiddenRsvps, [hiddenAttendance], VIEWER, EDITION);
+    const reversed = mergeAttendees([...hiddenRsvps].reverse(), [hiddenAttendance], VIEWER, EDITION);
 
     expect(forward.map((row) => row.orderKey)).toEqual(reversed.map((row) => row.orderKey));
     // Source first: the attendance-only hidden row sorts before the hidden RSVPs.
@@ -95,15 +99,41 @@ describe("mergeAttendees", () => {
     // Within a source, ascending HMAC order, which neither follows insertion order nor reveals ids.
     const rsvpKeys = forward.slice(1).map((row) => row.orderKey);
     expect(rsvpKeys).toEqual([...rsvpKeys].sort());
-    expect(rsvpKeys).toEqual(people.map((personId) => hiddenOrderKey("rsvp", `p:${personId}`)).sort());
+    expect(rsvpKeys).toEqual(people.map((personId) => hiddenOrderKey("rsvp", `p:${personId}`, EDITION)).sort());
     for (const row of forward) expect(row).toMatchObject({ personId: null, userId: null, displayName: "Familiar" });
+  });
+
+  it("mixes the edition into hidden order keys so a hidden row is not linkable across editions", () => {
+    const people = Array.from(
+      { length: 12 },
+      (_, index) => `${String(index + 10).padStart(8, "0")}-1111-4111-8111-111111111111`
+    );
+    const hidden = people.map((personId) => candidate({ personId, listedInDirectory: false }));
+    const keysIn = (cuencadaId: string): string[] =>
+      mergeAttendees(hidden, [], VIEWER, cuencadaId).map((row) => row.orderKey);
+    /** Which person sits at each position of the edition's list. */
+    const peopleOrderIn = (cuencadaId: string): string[] =>
+      [...people].sort((a, b) => {
+        const keyA = hiddenOrderKey("rsvp", `p:${a}`, cuencadaId);
+        const keyB = hiddenOrderKey("rsvp", `p:${b}`, cuencadaId);
+        return keyA < keyB ? -1 : keyA > keyB ? 1 : 0;
+      });
+
+    expect(hiddenOrderKey("rsvp", `p:${P1}`, EDITION)).toBe(hiddenOrderKey("rsvp", `p:${P1}`, EDITION));
+    expect(hiddenOrderKey("rsvp", `p:${P1}`, EDITION)).not.toBe(hiddenOrderKey("rsvp", `p:${P1}`, OTHER_EDITION));
+    // Same people in two editions: no shared key, and the positions are reshuffled
+    // (two independent orders of 12 rows coincide with probability 1/12!).
+    const first = keysIn(EDITION);
+    expect(first.filter((key) => keysIn(OTHER_EDITION).includes(key))).toEqual([]);
+    expect(peopleOrderIn(EDITION)).not.toEqual(peopleOrderIn(OTHER_EDITION));
   });
 
   it("keeps the viewer's own row complete even when unlisted", () => {
     const [row] = mergeAttendees(
       [candidate({ personId: P1, userId: U1, accountName: "Abel", avatarKey: "a.webp", listedInDirectory: false })],
       [],
-      U1
+      U1,
+      EDITION
     );
     expect(row).toEqual({
       personId: P1,
@@ -126,7 +156,8 @@ describe("toAttendees", () => {
     const merged = mergeAttendees(
       [candidate({ personId: P1, userId: U1, accountName: "A", avatarKey: "a.webp" })],
       [candidate({ personId: "p2", fullName: "B", avatarKey: "b.webp" })],
-      U1
+      U1,
+      EDITION
     );
     const rows = await toAttendees(merged, storage, log);
     expect(rows.map((row) => [row.avatarUrl, row.isMe])).toEqual([
@@ -143,7 +174,8 @@ describe("toAttendees", () => {
     const merged = mergeAttendees(
       [candidate({ personId: P1, userId: U1, accountName: "A", avatarKey: "a.webp", listedInDirectory: false })],
       [],
-      VIEWER
+      VIEWER,
+      EDITION
     );
     const [row] = await toAttendees(merged, storage, log);
     expect(row).toMatchObject({ personId: null, userId: null, displayName: "Familiar", avatarUrl: null });
@@ -154,7 +186,7 @@ describe("toAttendees", () => {
     const storage = new FakeStorage();
     vi.spyOn(storage, "presignGet").mockRejectedValue(new Error("boom"));
     const log = { warn: vi.fn() } as unknown as FastifyBaseLogger; // test-only: only `warn` is called
-    const merged = mergeAttendees([candidate({ userId: U1, accountName: "A", avatarKey: "a.webp" })], [], U1);
+    const merged = mergeAttendees([candidate({ userId: U1, accountName: "A", avatarKey: "a.webp" })], [], U1, EDITION);
     await expect(toAttendees(merged, storage, log)).rejects.toThrow("boom");
   });
 });

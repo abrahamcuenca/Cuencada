@@ -65,11 +65,20 @@ export class TicketStore {
     }
   }
 
-  /** Drop every unused ticket of a user (disable). */
-  revokeUser(userId: string): void {
+  /**
+   * Drop every unused ticket of a user (disable).
+   *
+   * @returns The session ids those tickets were bound to.
+   */
+  revokeUser(userId: string): Set<string> {
+    const sessionIds = new Set<string>();
     for (const [key, grant] of this.grants) {
-      if (grant.userId === userId) this.grants.delete(key);
+      if (grant.userId === userId) {
+        sessionIds.add(grant.sessionId);
+        this.grants.delete(key);
+      }
     }
+    return sessionIds;
   }
 
   /**

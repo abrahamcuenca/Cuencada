@@ -29,7 +29,8 @@ import {
   issueBudgetedEmailToken,
   EMAIL_TOKEN_TTL_MINUTES,
   markEmailVerified,
-  sendInBackground
+  sendInBackground,
+  simulateBudgetedEmailToken
 } from "./emailTokens.js";
 import { MailTier, withinGlobalMailCap } from "./mailBudget.js";
 import { revokeSessions, sessionOrigin, startSession } from "./sessions.js";
@@ -197,6 +198,9 @@ const passwordRoutes: FastifyPluginAsyncZod = async (app) => {
             { idempotencyKey: `password-reset:${created.id}` }
           )
         );
+      } else {
+        // Unknown or inactive address: same budget reads, no writes (timing decoy).
+        await simulateBudgetedEmailToken(app.db, email, "password_reset", app.clock.now());
       }
       return reply.code(202).send({ ok: true });
     }
