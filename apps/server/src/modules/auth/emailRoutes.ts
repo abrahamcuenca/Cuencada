@@ -26,7 +26,8 @@ import {
   issueBudgetedEmailToken,
   EMAIL_TOKEN_TTL_MINUTES,
   markEmailVerified,
-  sendInBackground
+  sendInBackground,
+  simulateBudgetedEmailToken
 } from "./emailTokens.js";
 import { sessionOrigin, startSession } from "./sessions.js";
 
@@ -93,6 +94,9 @@ const emailRoutes: FastifyPluginAsyncZod = async (app) => {
             { idempotencyKey: `magic-link:${created.id}` }
           )
         );
+      } else {
+        // Unknown or inactive address: same budget reads, no writes (timing decoy).
+        await simulateBudgetedEmailToken(app.db, email, "login", app.clock.now());
       }
       return reply.code(202).send({ ok: true });
     }
