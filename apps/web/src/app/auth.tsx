@@ -16,7 +16,11 @@ const demoAdmin: CurrentUser = {
   email: "admin@cuencada.com",
   displayName: "Administrador Cuencada",
   role: "admin",
-  mustChangePassword: true
+  status: "active",
+  mustChangePassword: true,
+  emailVerified: false,
+  personId: null,
+  avatarUrl: null
 };
 
 export function AuthProvider({ children }: PropsWithChildren): React.ReactNode {
