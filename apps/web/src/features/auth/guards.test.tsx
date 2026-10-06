@@ -1,8 +1,14 @@
 import { act, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { authenticatedState, makeUser, statusState } from "../../../test/auth";
 import { renderApp } from "../../../test/renderApp";
 import { passwordChangeRequired, tokenRefreshed } from "./authSlice";
+import { createTestServer } from "../../../test/msw";
+
+const server = createTestServer();
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
 
 describe("RequireAuth", () => {
   it.each(["idle", "restoring"] as const)("shows the session spinner instead of redirecting while %s", async (status) => {
@@ -42,7 +48,7 @@ describe("RequireAuth", () => {
   it("renders public routes without waiting for the session", async () => {
     renderApp("/recuperar", statusState("restoring"));
 
-    expect(await screen.findByRole("heading", { name: "Recuperar contraseña" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "¿Olvidaste tu contraseña?" })).toBeInTheDocument();
   });
 
   it("renders member routes for an authenticated member", async () => {
@@ -56,7 +62,7 @@ describe("RequirePasswordChanged", () => {
   it("sends a user with a temporary password to /cambiar-contrasena", async () => {
     const { router } = renderApp("/perfil", authenticatedState(makeUser({ mustChangePassword: true })));
 
-    expect(await screen.findByRole("heading", { name: "Cambia tu contraseña" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /Cambia tu contraseña/ })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/cambiar-contrasena");
   });
 
@@ -68,14 +74,14 @@ describe("RequirePasswordChanged", () => {
       store.dispatch(passwordChangeRequired());
     });
 
-    expect(await screen.findByRole("heading", { name: "Cambia tu contraseña" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /Cambia tu contraseña/ })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/cambiar-contrasena");
   });
 
   it("lets the user stay on /cambiar-contrasena without a redirect loop", async () => {
     const { router } = renderApp("/cambiar-contrasena", authenticatedState(makeUser({ mustChangePassword: true })));
 
-    expect(await screen.findByRole("heading", { name: "Cambia tu contraseña" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /Cambia tu contraseña/ })).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/cambiar-contrasena");
   });
 });
@@ -97,7 +103,7 @@ describe("RequireAdmin", () => {
   it("sends an admin with a temporary password to /cambiar-contrasena first", async () => {
     const { router } = renderApp("/admin", authenticatedState(makeUser({ role: "admin", mustChangePassword: true })));
 
-    await screen.findByRole("heading", { name: "Cambia tu contraseña" });
+    await screen.findByRole("heading", { name: /Cambia tu contraseña/ });
     expect(router.state.location.pathname).toBe("/cambiar-contrasena");
   });
 });

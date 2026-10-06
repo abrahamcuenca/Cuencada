@@ -39,13 +39,46 @@ describe("AppLayout", () => {
     expect(screen.getByRole("button", { name: "Salir" })).toBeInTheDocument();
   });
 
+  it.each(["/entrar", "/entrar/enlace", "/invitacion", "/recuperar", "/restablecer", "/verificar"])(
+    "hides the bottom navigation on the auth screen %s",
+    async (path) => {
+      renderApp(path, statusState("anonymous"));
+
+      await screen.findByRole("navigation", { name: "Navegación principal" });
+      expect(await screen.findByRole("heading", { level: 1 })).toBeInTheDocument();
+      expect(screen.queryByRole("navigation", { name: "Navegación inferior" })).not.toBeInTheDocument();
+    }
+  );
+
+  it("hides the bottom navigation during the forced password change", async () => {
+    renderApp("/perfil", authenticatedState(makeUser({ mustChangePassword: true })));
+
+    expect(await screen.findByRole("heading", { name: /Cambia tu contraseña/ })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Navegación inferior" })).not.toBeInTheDocument();
+  });
+
+  it("shows the verify-email banner only to logged-in users with an unverified email", async () => {
+    renderApp("/", authenticatedState(makeUser({ emailVerified: false })));
+
+    expect(await screen.findByRole("region", { name: "Verifica tu correo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reenviar enlace" })).toBeInTheDocument();
+  });
+
+  it("does not show the verify-email banner to verified users", async () => {
+    renderApp("/", authenticatedState(makeUser({ emailVerified: true })));
+
+    await screen.findByRole("navigation", { name: "Navegación inferior" });
+    expect(screen.queryByRole("region", { name: "Verifica tu correo" })).not.toBeInTheDocument();
+  });
+
   it("points Programa at the featured edition when one is upcoming", async () => {
     server.use(
       http.get(apiUrl("/cuencadas/home"), () =>
         HttpResponse.json({ mode: "upcoming", featured: makePublicCuencada({ year: 2027, status: "upcoming" }), latestPast: null, announcements: [] })
       )
     );
-    renderApp("/chat", statusState("anonymous"));
+    // Logged in: /chat for an anonymous visitor redirects to /entrar, which has no BottomNav (minimal chrome).
+    renderApp("/chat", authenticatedState());
 
     const bottom = await screen.findByRole("navigation", { name: "Navegación inferior" });
     await waitFor(() => expect(within(bottom).getByRole("link", { name: /Programa/ })).toHaveAttribute("href", "/cuencada/2027"));

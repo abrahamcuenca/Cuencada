@@ -1,8 +1,8 @@
 import { HttpResponse, http } from "msw";
-import { setupServer } from "msw/node";
 import { screen } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { apiUrl, authenticatedState, errorBody, makeUser } from "../../../test/auth";
+import { createTestServer } from "../../../test/msw";
 import { renderApp } from "../../../test/renderApp";
 import { bootstrapApp } from "../../app/bootstrap";
 import { LOGOUT_PENDING_NOTICE } from "../../app/AppLayout";
@@ -12,7 +12,7 @@ import { credentialsReceived } from "./authSlice";
 import { hasPendingLogout, markPendingLogout, PENDING_LOGOUT_KEY } from "./pendingLogout";
 import { cancelOnlineLogoutRetry, logout } from "./session";
 
-const server = setupServer();
+const server = createTestServer();
 const stops: Array<() => void> = [];
 let logoutCalls = 0;
 let refreshCalls = 0;
