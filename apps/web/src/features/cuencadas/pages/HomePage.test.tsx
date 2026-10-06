@@ -71,6 +71,41 @@ describe("HomePage", () => {
     expect(screen.queryByRole("complementary", { name: "Mensaje del día" })).not.toBeInTheDocument();
   });
 
+  it("refetches Home after local midnight in the edition's timezone and shows the new day's message", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    // 23:59:58 on Sep 9 in Mérida (UTC-6).
+    vi.setSystemTime(new Date("2026-09-10T05:59:58Z"));
+    let requests = 0;
+    server.use(
+      http.get(apiUrl("/cuencadas/home"), () => {
+        requests += 1;
+        const message =
+          requests === 1 ? makeDailyMessage({ date: "2026-09-09", message: "Mensaje del 9" }) : makeDailyMessage({ date: "2026-09-10", message: "Mensaje del 10" });
+        const featured = makePublicCuencada({ status: "upcoming", todayMessage: message });
+        return HttpResponse.json({ mode: "upcoming", featured, latestPast: null, announcements: [] });
+      })
+    );
+    renderApp("/", statusState("anonymous"));
+
+    expect(await screen.findByText("Mensaje del 9")).toBeInTheDocument();
+    await vi.advanceTimersByTimeAsync(4_000);
+
+    expect(await screen.findByText("Mensaje del 10")).toBeInTheDocument();
+    expect(screen.queryByText("Mensaje del 9")).not.toBeInTheDocument();
+    expect(requests).toBe(2);
+  });
+
+  it("shows ¡YA LLEGÓ! when the server says the edition is active, even before startsAt on this device's clock", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-10T03:00:00Z"));
+    const featured = makePublicCuencada({ status: "active", todayMessage: null });
+    server.use(http.get(apiUrl("/cuencadas/home"), () => HttpResponse.json({ mode: "active", featured, latestPast: null, announcements: [] })));
+    renderApp("/", statusState("anonymous"));
+
+    expect(await screen.findByText("¡YA LLEGÓ LA CUENCADA!")).toBeInTheDocument();
+    expect(screen.queryByRole("timer")).not.toBeInTheDocument();
+  });
+
   it("shows a coming-soon hero when there is no edition at all", async () => {
     server.use(
       http.get(apiUrl("/cuencadas/home"), () => HttpResponse.json(makeMemoriesHome({ latestPast: null, announcements: [] }))),

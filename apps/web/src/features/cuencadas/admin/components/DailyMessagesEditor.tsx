@@ -19,9 +19,10 @@ import styles from "../admin.module.css";
 import { ConfirmDialog, toastError } from "./common";
 import { SelectField, TextField } from "./fields";
 
+// Short labels: a native select truncates long options at 375px; the details go in the hint.
 const MODE_OPTIONS = [
-  { value: DailyMessagesImportMode.Merge, label: "Agregar y actualizar (conserva los demás días)" },
-  { value: DailyMessagesImportMode.Replace, label: "Reemplazar todos los mensajes" }
+  { value: DailyMessagesImportMode.Merge, label: "Agregar o actualizar" },
+  { value: DailyMessagesImportMode.Replace, label: "Reemplazar todo" }
 ] as const;
 
 const PLACEHOLDER = "2026-09-13|¡Bienvenidos a Mérida!\n2026-09-14|Hoy toca cenote: no olvides tu traje de baño.";
@@ -135,7 +136,11 @@ export function DailyMessagesEditor({ cuencadaId, timeZone }: DailyMessagesEdito
             options={MODE_OPTIONS}
             onChange={(_name, value) => setMode(value)}
             errors={{}}
-            hint={mode === DailyMessagesImportMode.Replace ? "Se borrarán los mensajes que no estén en el texto." : undefined}
+            hint={
+              mode === DailyMessagesImportMode.Replace
+                ? "Se borrarán los mensajes que no estén en el texto."
+                : "Agrega los días nuevos y actualiza los que ya existen; conserva los demás."
+            }
           />
           <div className={styles.formActions}>
             <Button type="submit" loading={importState.isLoading}>

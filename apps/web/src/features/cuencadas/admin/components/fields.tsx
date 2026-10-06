@@ -1,4 +1,6 @@
-import type { HTMLAttributes, ReactNode } from "react";
+import { ITINERARY_TAG_MAX_LENGTH, ITINERARY_TAGS_MAX, itineraryTagSchema } from "@cuencada/types";
+import { type HTMLAttributes, type KeyboardEvent, type ReactNode, useState } from "react";
+import { Button } from "../../../../shared/ui/Button";
 import { Field } from "../../../../shared/ui/Field";
 import { type SelectOption, Select } from "../../../../shared/ui/Select";
 import { TextArea } from "../../../../shared/ui/TextArea";
@@ -82,6 +84,107 @@ export function SelectField({ name, label, value, options, onChange, errors, hin
     <Field label={label} hint={hint} error={errors[name]} required>
       {(control) => <Select {...control} name={name} value={value} options={options} onChange={(event) => onChange(name, event.target.value)} />}
     </Field>
+  );
+}
+
+/**
+ * Adds `raw` to `tags` with the contract's tag rules (trimmed, 1–24 chars, no
+ * invisible/bidi characters), skipping a case-insensitive duplicate, at most
+ * {@link ITINERARY_TAGS_MAX}.
+ *
+ * @param tags - Current tags.
+ * @param raw - What the admin typed.
+ * @returns The new list, or a Spanish error.
+ */
+export function addTag(tags: readonly string[], raw: string): { ok: true; tags: string[] } | { ok: false; error: string } {
+  const parsed = itineraryTagSchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Etiqueta inválida." };
+  const tag = parsed.data;
+  if (tags.some((existing) => existing.toLocaleLowerCase("es") === tag.toLocaleLowerCase("es"))) return { ok: true, tags: [...tags] };
+  if (tags.length >= ITINERARY_TAGS_MAX) return { ok: false, error: `Máximo ${ITINERARY_TAGS_MAX} etiquetas.` };
+  return { ok: true, tags: [...tags, tag] };
+}
+
+/** Props for {@link TagsField}. */
+export interface TagsFieldProps {
+  name: string;
+  label: string;
+  tags: readonly string[];
+  onChange: (tags: string[]) => void;
+  errors: FieldErrors;
+}
+
+/**
+ * Short labels as removable chips plus an input ("Agregar" or Enter). Rules
+ * from the contract: at most {@link ITINERARY_TAGS_MAX} tags of up to
+ * {@link ITINERARY_TAG_MAX_LENGTH} characters, no duplicates.
+ */
+export function TagsField({ name, label, tags, onChange, errors }: TagsFieldProps): ReactNode {
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const full = tags.length >= ITINERARY_TAGS_MAX;
+
+  const add = (): void => {
+    if (draft.trim() === "") return;
+    const result = addTag(tags, draft);
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+    setError(null);
+    setDraft("");
+    onChange(result.tags);
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>): void => {
+    if (event.key !== "Enter") return;
+    // Enter adds the tag instead of submitting the whole activity form.
+    event.preventDefault();
+    add();
+  };
+
+  return (
+    <div className={styles.tagsField}>
+      <Field
+        label={label}
+        hint={full ? `Llegaste al máximo de ${ITINERARY_TAGS_MAX} etiquetas.` : `Hasta ${ITINERARY_TAGS_MAX}, de ${ITINERARY_TAG_MAX_LENGTH} caracteres; por ejemplo «Incluye comida».`}
+        error={error ?? errors[name]}
+        showOptional
+      >
+        {(control) => (
+          <div className={styles.tagInputRow}>
+            <TextInput
+              {...control}
+              name={name}
+              value={draft}
+              disabled={full}
+              maxLength={ITINERARY_TAG_MAX_LENGTH}
+              autoComplete="off"
+              enterKeyHint="done"
+              onKeyDown={onKeyDown}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                setError(null);
+              }}
+            />
+            <Button variant="secondary" disabled={full || draft.trim() === ""} onClick={add}>
+              Agregar
+            </Button>
+          </div>
+        )}
+      </Field>
+      {tags.length > 0 ? (
+        <ul className={styles.tagChips} aria-label={`${label}: ${tags.length}`}>
+          {tags.map((tag) => (
+            <li key={tag} className={styles.tagChip}>
+              <span>{tag}</span>
+              <button type="button" className={styles.tagRemove} aria-label={`Quitar la etiqueta ${tag}`} onClick={() => onChange(tags.filter((t) => t !== tag))}>
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 

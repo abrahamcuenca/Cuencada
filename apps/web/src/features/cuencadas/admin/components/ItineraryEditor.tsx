@@ -16,7 +16,7 @@ import {
 import { blankToNull, type FieldErrors, issuesToFieldErrors, serverErrorToFieldErrors } from "../forms";
 import styles from "../admin.module.css";
 import { ConfirmDialog, MoveButtons, moveId, toastError } from "./common";
-import { FormError, SelectField, TextField, VISIBILITY_OPTIONS } from "./fields";
+import { FormError, SelectField, TagsField, TextField, VISIBILITY_OPTIONS } from "./fields";
 
 type ItineraryValues = Record<
   "date" | "startTime" | "endTime" | "title" | "description" | "locationName" | "locationId" | "priceNote" | "visibility",
@@ -176,6 +176,7 @@ interface ItineraryFormProps {
 function ItineraryForm({ cuencadaId, item, defaultDate, locations, onDone }: ItineraryFormProps): ReactNode {
   const toast = useToast();
   const [values, setValues] = useState(() => valuesFrom(item, defaultDate));
+  const [tags, setTags] = useState<string[]>(() => [...(item?.tags ?? [])]);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [create, createState] = useCreateItineraryItemMutation();
   const [update, updateState] = useUpdateItineraryItemMutation();
@@ -194,6 +195,7 @@ function ItineraryForm({ cuencadaId, item, defaultDate, locations, onDone }: Iti
       locationName: blankToNull(values.locationName) ?? location?.name ?? null,
       locationId: blankToNull(values.locationId),
       priceNote: values.priceNote,
+      tags,
       visibility: values.visibility
     });
     // Also a schema refine, but zod skips object refines while any field is invalid.
@@ -240,6 +242,7 @@ function ItineraryForm({ cuencadaId, item, defaultDate, locations, onDone }: Iti
           />
           <TextField {...bind("locationName")} label="Nombre del lugar" maxLength={200} hint="Si lo dejas vacío, se usa el lugar vinculado." />
         </div>
+        <TagsField name="tags" label="Etiquetas" tags={tags} onChange={setTags} errors={errors} />
         <div className={styles.grid2}>
           <TextField {...bind("priceNote")} label="Precio" maxLength={120} hint="Texto libre, por ejemplo $1,000 p/p." />
           <SelectField {...bind("visibility")} label="¿Quién lo ve?" options={VISIBILITY_OPTIONS} />

@@ -14,7 +14,8 @@ import { LoadErrorState, OfflineNotice, SectionSkeleton } from "../components/Pa
 import { Section } from "../components/Section";
 import { RsvpSlot } from "../components/slots";
 import { useNow } from "../hooks/useNow";
-import { formatKicker, messageForToday, safeAssetUrl } from "../lib/format";
+import { useOnNewDay } from "../hooks/useZonedToday";
+import { countdownInstants, formatKicker, safeAssetUrl } from "../lib/format";
 import styles from "./home.module.css";
 
 const TAGLINE = "Una familia. Una historia. Una celebración.";
@@ -54,7 +55,7 @@ export function HomePage(): ReactNode {
     <>
       {home.data.featured ? <UpcomingHero featured={home.data.featured} /> : <MemoriesHero latestPast={home.data.latestPast} />}
       <div className="cu-container">{home.error !== undefined ? <OfflineNotice onRetry={() => void home.refetch()} /> : null}</div>
-      {home.data.featured ? <TodayMessage featured={home.data.featured} /> : null}
+      {home.data.featured ? <TodayMessage featured={home.data.featured} onNewDay={() => void home.refetch()} /> : null}
       <HomeAnnouncements home={home.data} />
       {home.data.featured ? null : <Memories latestPast={home.data.latestPast} />}
       <Highlights featuredYear={home.data.featured?.year ?? home.data.latestPast?.year ?? null} />
@@ -78,7 +79,7 @@ function UpcomingHero({ featured }: { featured: PublicCuencada }): ReactNode {
         </Button>
       }
     >
-      <Countdown target={new Date(featured.startsAt)} end={new Date(featured.endsAt)} now={now} />
+      <Countdown {...countdownInstants(featured.status, featured.startsAt, featured.endsAt, now)} />
       <RsvpSlot year={featured.year} />
     </CuencadaHero>
   );
@@ -115,9 +116,14 @@ function MemoriesHero({ latestPast }: { latestPast: CuencadaSummary | null }): R
   );
 }
 
-function TodayMessage({ featured }: { featured: PublicCuencada }): ReactNode {
-  const now = useNow(null);
-  const message = messageForToday(featured.todayMessage, now, featured.timezone);
+/**
+ * Today's message in the edition's timezone. A timer to the next local
+ * midnight refetches Home, so the new day's message replaces yesterday's
+ * without a reload (the old one hides at once: its date no longer matches).
+ */
+function TodayMessage({ featured, onNewDay }: { featured: PublicCuencada; onNewDay: () => void }): ReactNode {
+  const today = useOnNewDay(featured.timezone, onNewDay);
+  const message = featured.todayMessage?.date === today ? featured.todayMessage : null;
   if (message === null) return null;
   return (
     <div className="cu-container">
