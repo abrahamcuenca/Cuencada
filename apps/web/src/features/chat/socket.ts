@@ -24,7 +24,8 @@
  * 5. Logout, user switch or a new session epoch closes the socket right away
  *    (store subscription); a still-mounted chat reconnects with a ticket for
  *    the new session.
- * 6. 403 on the ticket or close code 4003 → `forbidden` (unverified email);
+ * 6. 403 on the ticket or close code 4003 → `unverified` (`EMAIL_UNVERIFIED`)
+ *    or `forbidden` (any other 403);
  *    no retries. Close code 4010 (session revoked) → no blind retry: one
  *    authenticated REST call runs the normal auth flow (refresh, or logout
  *    if refused); only a session that survives it reconnects. 1008 (bad or
@@ -52,12 +53,13 @@ import {
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { useStore } from "react-redux";
 import type { AppDispatch, AppStore, RootState } from "../../app/store";
-import { getApiErrorCode, isAbortError, isFetchBaseQueryError } from "../../shared/api/errors";
+import { isAbortError } from "../../shared/api/errors";
 import { env } from "../../shared/lib/env";
 import { reportUnexpected } from "../../shared/lib/reportUnexpected";
 import { chatApi } from "./api";
 import { conversationApi } from "./conversationApi";
 import { emitChatEvent, setChatTransport } from "./events";
+import { chatDenial } from "./lib/access";
 
 /** What the conversation shows about the connection. */
 export type ChatConnectionStatus =
@@ -72,7 +74,9 @@ export type ChatConnectionStatus =
   | "offline"
   /** The tab was hidden for a long time; reconnects when visible again. */
   | "paused"
-  /** The server refused chat for this account (unverified email). */
+  /** The server refused chat because the email is not verified (`EMAIL_UNVERIFIED`). */
+  | "unverified"
+  /** The server refused chat for another reason (any other 403 / close 4003). */
   | "forbidden"
   /** The server closed this socket because the account has too many open (another tab); waits for "Reconectar". */
   | "evicted"
@@ -227,10 +231,6 @@ function isOnline(): boolean {
 
 function isHidden(): boolean {
   return typeof document !== "undefined" && document.visibilityState === "hidden";
-}
-
-function ticketErrorStatus(error: unknown): number | null {
-  return isFetchBaseQueryError(error) && typeof error.status === "number" ? error.status : null;
 }
 
 /** One tab's chat connection. Use {@link getChatConnection}. */
@@ -483,7 +483,7 @@ export class ChatConnection {
   };
 
   private readonly onOffline = (): void => {
-    if (this.status === "forbidden" || this.status === "idle") return;
+    if (this.status === "forbidden" || this.status === "unverified" || this.status === "idle") return;
     this.teardownSocket();
     this.clearTimer("retry");
     this.setStatus("offline");
@@ -494,7 +494,7 @@ export class ChatConnection {
       this.clearTimer("hidden");
       this.hiddenTimer = setTimeout(() => {
         this.hiddenTimer = null;
-        if (this.status === "forbidden" || this.status === "idle") return;
+        if (this.status === "forbidden" || this.status === "unverified" || this.status === "idle") return;
         this.teardownSocket();
         this.clearTimer("retry");
         this.setStatus("paused");
@@ -535,8 +535,9 @@ export class ChatConnection {
         if (this.currentSessionKey() === sessionKey) this.scheduleRetry();
         return;
       }
-      if (ticketErrorStatus(error) === 403 || getApiErrorCode(error) === "FORBIDDEN") {
-        this.setStatus("forbidden");
+      const denial = chatDenial(error, this.store.getState().auth.user?.emailVerified);
+      if (denial !== null) {
+        this.setStatus(denial);
         return;
       }
       // 401s were already handled by the base query (refresh, or logout → store listener).
@@ -609,7 +610,7 @@ export class ChatConnection {
     this.evictionAnnounced = false;
     this.teardownSocket();
     if (code === WsCloseCode.Forbidden) {
-      this.setStatus("forbidden");
+      this.setStatus(this.store.getState().auth.user?.emailVerified === false ? "unverified" : "forbidden");
       return;
     }
     if (evicted) {

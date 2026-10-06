@@ -41,16 +41,8 @@ const selectRoomsResult = chatApi.endpoints.getRooms.select();
  * @returns "1 mensaje sin leer" / "3 mensajes sin leer".
  */
 export function unreadLabel(count: number): string {
-  if (count >= UNREAD_COUNT_MAX) return `Más de ${UNREAD_COUNT_MAX} mensajes sin leer`;
+  if (count >= UNREAD_COUNT_MAX) return `${UNREAD_COUNT_MAX} o más mensajes sin leer`;
   return count === 1 ? "1 mensaje sin leer" : `${count} mensajes sin leer`;
-}
-
-/**
- * @param count - A room's unread count (the server caps it at 999).
- * @returns The badge text: the number, or "999+" at the cap.
- */
-export function unreadCountText(count: number): string {
-  return count >= UNREAD_COUNT_MAX ? `${UNREAD_COUNT_MAX}+` : String(count);
 }
 
 /**

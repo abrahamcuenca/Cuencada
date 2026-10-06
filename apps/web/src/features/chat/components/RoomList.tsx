@@ -7,7 +7,8 @@ import { Skeleton } from "../../../shared/ui/Skeleton";
 import styles from "../chat.module.css";
 import { roomTimeLabel } from "../lib/format";
 import type { ChatRoomView, RoomPreview } from "../lib/rooms";
-import { unreadCountText, unreadLabel } from "../unread";
+import { UNREAD_COUNT_MAX } from "../lib/limits";
+import { unreadLabel } from "../unread";
 
 /** Props for {@link RoomList}. */
 export interface RoomListProps {
@@ -80,8 +81,9 @@ export function RoomList({ rooms, loading, error, onRetry, activeRoomId, meId, n
                   <span className={styles.roomMeta}>
                     {room.lastMessageAt === null ? null : <span>{roomTimeLabel(room.lastMessageAt, now, timeZone)}</span>}
                     {unread ? (
-                      <Badge tone="festive" shape="count" srLabel={unreadLabel(room.unreadCount)}>
-                        {unreadCountText(room.unreadCount)}
+                      <Badge tone="festive" shape="count" max={UNREAD_COUNT_MAX} srLabel={unreadLabel(room.unreadCount)}>
+                        {/* The server stops counting at 999, so 999 means "999 or more": show "999+". */}
+                        {room.unreadCount >= UNREAD_COUNT_MAX ? UNREAD_COUNT_MAX + 1 : room.unreadCount}
                       </Badge>
                     ) : null}
                   </span>

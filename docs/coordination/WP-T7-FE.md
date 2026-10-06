@@ -83,7 +83,7 @@ Built against the WP-0.2 chat contract with MSW and a fake WebSocket. Mid-task, 
 - The global "Toda la familia" room is pinned first; the others follow by most recent activity.
 - Each row shows the last message as "Nombre: texto", or "Tú: …" when known from a frame or history, and "🚫 Mensaje eliminado" for a deleted one.
 - The time label reads "9:41 a.m." today, then "ayer", then a weekday ("dom"), then a date ("14 sept").
-- A festive count badge shows unread messages ("999+" at the server cap), with screen-reader text "3 mensajes sin leer" / "Más de 999 mensajes sin leer".
+- A festive count badge shows unread messages ("999+" at the server cap), with screen-reader text "3 mensajes sin leer" / "999 o más mensajes sin leer".
 - **≥900px:** two panes (320px list + conversation), with an "Elige una sala" placeholder.
 
 ### `/chat/:roomId`: conversation
@@ -231,3 +231,9 @@ Fixtures, tests and screenshots use invented people only ("Lucía Ramírez Solí
   - **TL nit:** a comment in `conversationApi.ts` explains why resending pending messages before the `resumed` refetch is safe.
   - **TL nit:** the "⋯" button is now a white disc with a shadow and full-contrast text colour (still hidden until hover/focus with a mouse).
   - **Request 7 (approved):** `apps/web/index.html` viewport meta gains `interactive-widget=resizes-content`. Screenshots retaken: the composer still sits right above the (simulated) keyboard and overflow is 0 px at 320/375/1280.
+- **2026-10-06, follow-up (branch `wp/t7-fe-followup`, after PR #28 merged; `origin/wp/0.8a-platform-hygiene` merged in for `EMAIL_UNVERIFIED` and `Badge max`):**
+  - **403 handling:** `lib/access.ts` `chatDenial()`. `EMAIL_UNVERIFIED` (or `FORBIDDEN` for a user known to be unverified) shows "Verifica tu correo para usar el chat"; any other 403 shows a generic "No tienes acceso al chat". Applied to the room list, the history and the ticket (new socket status `unverified`); close 4003 uses the in-memory `emailVerified`. Fixtures answer `EMAIL_UNVERIFIED` by default, with a `forbiddenCode` switch for the generic case. Request 3 is resolved.
+  - **`room_preview` frames** (PR #30) replace a room's preview and `lastMessageAt` (or clear them), re-sorting the list. Server previews carry `senderUserId`, so "Tú:" now works straight from `GET /chat/rooms`. Requests 1 and 2 are resolved.
+  - **Room badge:** `Badge max={999}`. A capped count of 999 means "999 or more", so it is rendered as "999+" (screen reader: "999 o más mensajes sin leer").
+  - **Fixtures:** `ME` is now "Prima Morales", matching `makeUser()`. The screenshots only show invented names ("Inés Navarro Soto", …), so they were not retaken.
+
