@@ -156,9 +156,66 @@ No changes to `packages/types/src/auth.ts`.
   - Taken with headless Chromium against the Vite dev server, with `/api` proxied to a throwaway stub. Neither the stub nor the temporary config was committed.
   - **Horizontal overflow** is 0 px at 320, 375 and 1280 on all four pages, measured as the max `getBoundingClientRect().right` of every element in `<main>` minus the viewport width.
 
+## PR #10 review round 1 (Security M1/L2, TL #1/#2/#4, nits)
+- **M1, no silent account switching / login CSRF [SEC]** (`components/SessionConflict.tsx`):
+  - `useSessionGate()` returns `waiting` (boot refresh still running: show a spinner and do nothing), `conflict` (someone is logged in) or `clear`.
+  - **`/entrar/enlace` never consumes on load.**
+    - Anonymous visitors see "Entrar a la Cuencada" with one "Entrar" button, and the token is consumed only on tap. That also stops JS-running link scanners from burning it.
+    - Logged-in users see "Ya tienes la sesión abierta como {displayName}. ¿Quieres cerrar sesión y entrar con este enlace?". [Cerrar sesión y continuar] awaits `logout()` and then consumes; [Seguir como {displayName}] discards the token and goes home.
+  - **`/invitacion` and `/restablecer`:** the same interstitial comes before the accept or reset form. Invite inspect still runs on load: it's read-only and doesn't burn the token.
+  - **`/verificar`:** consumes only on a tap ("Confirmar mi correo", or "Ahora no", which discards the token).
+    - When logged in, the page names the account and says that confirming doesn't change the session.
+    - It **doesn't log the user out**: verify returns 204 and never creates or switches a session, and forcing a logout would break the common "verify my own email while logged in" case.
+    - The server decides if the token belongs to another account.
+  - **Defense in depth** (authorized edit to `app/store.ts`, plus `authSlice`):
+    - `applyCredentials` bumps `sessionEpoch` when the incoming `user.id` differs from the current one.
+    - A listener on `credentialsReceived` / `tokenRefreshed` dispatches `baseApi.util.resetApiState()` on an A → B switch (`didSwitchUser`).
+- **L2, resend cooldown:** after a successful resend, "Reenviar enlace" is disabled for 60 s with a visible "Reenviar en 0:59" countdown. The cooldown is module-level, so the banner and `/verificar` share it.
+- **TL #1, `MorePage` logout:**
+  - "Cerrar sesión" disables itself (loading), then awaits `navigate("/")` **and** the page unmounting, raced against a 1.5 s timeout (`LOGOUT_NAVIGATION_TIMEOUT_MS`).
+  - `logout()` runs in `finally`, so a stuck navigation or a future `useBlocker` can delay the logout but never skip it.
+  - Waiting for the unmount is still needed: in RR7 the navigation promise can settle before the old tree is gone, and that was the original race.
+- **TL #2, banner fails soft:** the lazy `VerifyEmailBanner` import catches a load failure, reports it with `reportUnexpected`, and renders `null`, so the shell never reaches the route error boundary.
+- **TL #4, autocomplete and toggles:**
+  - The login email uses `autocomplete="username"`.
+  - Each show/hide toggle is named after its field ("Mostrar contraseña temporal", "Mostrar confirmación", …) and reads "Ocultar …" while visible. I dropped `aria-pressed` so the state isn't announced twice.
+  - `PasswordField` re-hides the password on its form's `submit` event (Security I1).
+- **Nits:**
+  - `SessionAction` hides "Entrar" on `/entrar` and `/entrar/*`.
+  - A reset while logged in also calls `broadcastLogout()`. With the interstitial, this branch is now defensive only, because the user logs out first through `logout()`, which already broadcasts.
+  - The masked email is shown once on `/invitacion`, in the banner; the field hint no longer repeats it.
+- **`POST /auth/logout-all`** (T1-BE, still on `wp/t1-be-auth`): the `logoutAll` endpoint is added but unused, with `TODO(T1-BE merge)`. "Cerrar sesión en todos los dispositivos" keeps revoke-others + `logout()` until that merges.
+- **Contract paths confirmed:** `POST /api/auth/email/verify-request` and `POST /api/auth/email/verify`.
+- **Merged `origin/main`** (T2-FE, #11), following the TL recipe:
+  - `AppLayout` keeps T2's `bottomNavItems(programaPath)`, `topNavItems` and `useProgramaPath()` alongside `showStatus` / `showVerify` / `minimalChrome` and the lazy banner.
+  - `bottomNav = minimalChrome ? undefined : <BottomNav items={bottomNavItems(programaPath)} …/>`.
+  - One T2 test ("points Programa at the featured edition…") now renders `/chat` logged in, because an anonymous `/chat` redirects to `/entrar`, which has no BottomNav.
+- **`apps/web/test/msw.ts`** (authorized): `defaultHandlers` (`/cuencadas/home` → `makeMemoriesHome()`, plus Home's `/cuencadas` and `/announcements`) and `createTestServer(...handlers)`.
+  - Every T1 and app test that renders the layout uses it, with `onUnhandledRequest: "error"` kept.
+  - The remaining "unhandled request" stderr comes from T2's own admin and year-page tests, which don't use this helper.
+- **New tests:**
+  - magic link: no consume on load, consume on tap, waits while restoring, interstitial with no consume, logout-then-consume order, keep session
+  - invite and reset interstitials
+  - verify: tap-only, logged-in notice, "Ahora no"
+  - `store.test.ts`: A → B clears the cache and bumps the epoch for both actions; same user keeps the cache
+  - resend countdown (fake timers)
+  - toggle labels, re-hide on submit, `username` autocomplete, no TopNav "Entrar" on `/entrar`
+  - `MorePage.pendingNavigation.test.tsx`: the Home chunk never resolves; the button is disabled and the logout still happens
+  - `AppLayout.bannerFailure.test.tsx`: the banner module fails to load; the shell renders and no error page appears
+- **Verification:**
+  - `pnpm lint`: 0 diagnostics (330 files).
+  - `pnpm typecheck`: 6/6.
+  - `pnpm test` ×2: 68 files, 652 passed both times.
+  - `pnpm build` succeeds. Size: **167.72 kB gzip** initial JS (budget 190). The banner chunk is 0.91 KB and `MagicLinkPage` 1.04 KB.
+  - Screenshots re-taken (`entrar` has no TopNav "Entrar"; `invitacion` shows the mask once). 0 px overflow at 320, 375 and 1280.
+
 ## Review log
 - 2026-10-06, orchestrator decisions:
   - wrong-current-password mapping (400 `VALIDATION` + 401)
   - IP removed from the sessions page
   - Requests 1–4 applied as app-owned changes, in a separate commit
   - contract gaps resolved, with `logout-all` as a follow-up
+- 2026-10-06, PR #10 round 1:
+  - **TL:** approved, with non-blocking items #1, #2 and #4 addressed. #3 (merge order) is moot now that T2 merged first, and `origin/main` is merged in.
+  - **Security:** changes requested for M1, now fixed. L2 and I1 are fixed. L1 (open-invite email probing) is left to T1-BE rate limiting.
+  - Details in the section above.
