@@ -13,6 +13,7 @@ Based on `origin/main` (37dd59d). T6-FE is built in parallel against the same co
   - `db-errors.ts`: SQLSTATE/constraint extraction
   - tests: `member-routes.test.ts`, `admin-routes.test.ts`; fixtures in `apps/server/test/helpers/family.ts` (new file)
 - `packages/types/src/family.ts`: contract amendment (below) + updated `admin.test.ts` case.
+- Authorized platform fix: `apps/server/src/logging.ts` (`q`, `search` redacted from logged URLs) + `logging.test.ts`.
 
 ## Interfaces exposed
 | Route | Auth | Notes |
@@ -34,7 +35,7 @@ Based on `origin/main` (37dd59d). T6-FE is built in parallel against the same co
 
 ### Privacy
 - Admins and the member linked to the person see every field.
-- **Living** people: never a death year. **Living people linked to an account hide `birthYear` from other members** (fail closed: profiles have no birthday-visibility flag; see Requests). Living unlinked people (kids, relatives entered by admins) show the birth year only. There are no birth dates, notes or contact fields in this module.
+- **Living** people: never a death year. **Living people linked to an account hide `birthYear` from other members** (intended default; orchestrator declined a visibility flag). Living unlinked people (kids, relatives entered by admins) show the birth year only. There are no birth dates, notes or contact fields in this module.
 - Deceased people show birth and death years.
 - `PersonSummary` has no years at all. Response schemas strip everything else (`createdByUserId`, timestamps). `avatarUrl` is always `null` (the profile module has no `avatarUrlFor` on main yet).
 
@@ -52,13 +53,13 @@ Based on `origin/main` (37dd59d). T6-FE is built in parallel against the same co
 
 ## Decisions
 - Admin routes are `auth: "admin"` without `requireVerifiedEmail` (the seeded admin starts unverified); the member read routes do require it, so an admin who wants the tree view must verify their email.
-- A living linked person's birth year is hidden from other members until a visibility flag exists (see Requests).
+- A living linked person's birth year is hidden from other members (accepted as the permanent default).
 - Unknown person in a relationship → 404 (not in the WP-0.2 table, which lists only 409).
 
-## Requests (→ orchestrator)
-1. **Search terms reach the logs.** The request serializer logs the URL, and `scrubUrl` (`src/logging.ts`, frozen) does not redact `q`, so `GET /api/family/people?q=<name>` (and the T5 directory search) writes names into access logs. Proposed: add `q` to `SENSITIVE_QUERY_PARAMS`. The names-in-logs test therefore covers writes and error paths only.
-2. **Birthday visibility flag:** add `profiles.show_birth_year boolean not null default false` in 0002 and a `ProfileVisibility` field (T5), then `toPerson` can show the year of linked living people when it is on.
-3. **Avatars:** when T5 lands `avatarUrlFor`, replace `avatarUrl: null` in `repository.ts` with a batched presign for linked people.
+## Requests (→ orchestrator) and resolutions
+1. **Search terms reached the logs** (resolved, orchestrator-authorized platform fix in a separate commit): `scrubUrl` in `src/logging.ts` now also redacts `q` and `search`, so `GET /api/family/people?q=<name>` (and the T5 directory search) logs `?q=[REDACTED]`. Regression test in `logging.test.ts`; the family no-names-in-logs test now covers the search route too.
+2. **Birthday visibility flag:** declined. Hiding living linked people's birth years from other members is the intended privacy default.
+3. **Avatars:** follow-up after T5 merges: replace `avatarUrl: null` (TODOs in `repository.ts`) with a batched presign via `avatarUrlFor`.
 4. Optional: `pg_trgm` index for `ILIKE '%q%'` search if the tree grows beyond family scale.
 
 ## Verification

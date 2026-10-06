@@ -4,8 +4,8 @@
  * Privacy rules (people are PII; see AGENTS.md):
  * - Admins and the person linked to the viewer's own account see every field.
  * - Living people: never a death year. Living people **linked to an account**
- *   also hide their birth year from other members, because profiles have no
- *   opt-in flag for it yet (fail closed; see WP-T6-BE "Requests").
+ *   also hide their birth year from other members. This is the intended
+ *   privacy default (orchestrator decision; no visibility flag is planned).
  * - Living people without an account (children, relatives added by admins)
  *   show the birth year only. There are no birth dates, notes or contact
  *   fields in this module at all.
@@ -76,6 +76,7 @@ export function toPerson(row: PersonRow, viewer: Viewer): Person {
     birthYear: hideBirthYear ? null : row.birthYear,
     deathYear: living ? null : row.deathYear,
     deceased: row.deceased,
+    // TODO(T6 follow-up after T5 merges): presign linked people's avatars via the profile module's `avatarUrlFor` (batched).
     avatarUrl: null
   };
 }
@@ -92,6 +93,7 @@ export function toPersonSummary(row: PersonRow): PersonSummary {
     fullName: row.fullName,
     nickname: row.nickname,
     deceased: row.deceased,
+    // TODO(T6 follow-up after T5 merges): same avatar presign as `toPerson`.
     avatarUrl: null
   };
 }
