@@ -327,3 +327,66 @@ describe("admin alert on open-invite acceptance (WP-2.3b)", () => {
     expect(accepted?.metadata).toMatchObject({ [INVITE_ALERT_METADATA_KEY]: 0, inviteAlertSkipped: true });
   });
 });
+
+describe("admin alert on admin-role invite acceptance (WP-2.3b, Security P1)", () => {
+  const CHANGED = "admin-account-changed";
+
+  async function mailsTo(mailer: FakeMailer, user: { email: string }, category: string): Promise<SentMail[]> {
+    if (app !== undefined) await mailQueue(app).onIdle();
+    return mailer.outbox.filter((mail) => mail.to === user.email && mail.tags?.category === category);
+  }
+
+  it("tells every other active admin, cap-exempt, and not the new admin", async () => {
+    const mailer = new FakeMailer();
+    app = await createTestApp({ mailer });
+    const { admin, auth } = await adminAuth(app);
+    const other = await createUser({ role: "admin", displayName: "Tío Beto", emailVerified: true });
+    const member = await createUser({ displayName: "Prima Ana" });
+    expect((await createInvite(app, auth, { role: "admin", email: "nueva.admin@example.com" })).statusCode).toBe(201);
+
+    const token = linkToken(mailer.lastTo("nueva.admin@example.com"));
+    const response = await accept(app, token, "nueva.admin@example.com", "Ana Morales Vega");
+    expect(response.statusCode).toBe(201);
+
+    for (const recipient of [admin, other]) {
+      const mails = await mailsTo(mailer, recipient, CHANGED);
+      expect(mails).toHaveLength(1);
+      expect(mails[0]?.text).toContain("Tía Lupe hizo este cambio en la cuenta de Ana Morales Vega");
+      expect(mails[0]?.text).toContain("Le dio el rol de administrador.");
+      expect(mails[0]?.text).not.toContain("nueva.admin@example.com");
+    }
+    expect(await mailsTo(mailer, { email: "nueva.admin@example.com" }, CHANGED)).toHaveLength(0);
+    expect(await mailsTo(mailer, member, CHANGED)).toHaveLength(0);
+    expect(await mailsTo(mailer, admin, ALERT)).toHaveLength(0);
+    const [audit] = await getTestDb().select().from(auditLogs).where(eq(auditLogs.action, "invite.accepted"));
+    expect(audit?.metadata).toMatchObject({ role: "admin", open: false, adminAlertRecipients: 2, adminAlertExempt: true });
+  });
+
+  it("sends nothing when the acceptance rolls back", async () => {
+    const mailer = new FakeMailer();
+    app = await createTestApp({ mailer });
+    const { admin, auth } = await adminAuth(app);
+    const created = await createInvite(app, auth, { role: "admin", email: "rollback.admin@example.com" });
+    const db = getTestDb();
+    await db.execute(
+      sql.raw(`
+      create or replace function w23b_fail_admin_accept() returns trigger language plpgsql as $$
+      begin raise exception 'forced rollback'; end $$;
+      create trigger w23b_fail_admin_accept before insert on audit_logs for each row
+        when (new.action = 'invite.accepted' and new.entity_id = '${created.inviteId}')
+        execute function w23b_fail_admin_accept();
+    `)
+    );
+    try {
+      const token = linkToken(mailer.lastTo("rollback.admin@example.com"));
+      expect((await accept(app, token, "rollback.admin@example.com")).statusCode).toBe(500);
+    } finally {
+      await db.execute(
+        sql.raw("drop trigger if exists w23b_fail_admin_accept on audit_logs; drop function if exists w23b_fail_admin_accept();")
+      );
+    }
+
+    expect(await mailsTo(mailer, admin, CHANGED)).toHaveLength(0);
+    expect(await db.select().from(users).where(eq(users.email, "rollback.admin@example.com"))).toHaveLength(0);
+  });
+});

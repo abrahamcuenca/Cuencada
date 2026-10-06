@@ -119,6 +119,28 @@ async function alertUsageToday(tx: Transaction, now: Date): Promise<{ sent: numb
 }
 
 /**
+ * Plan the alert for a **new administrator account** created by accepting an
+ * admin-role invite (WP-2.3b, Security P1). Every other active admin gets the
+ * "promoted" variant of the admin-account-changed notice (the inviter is the
+ * actor). Cap-exempt, like the other changes that alter who holds admin
+ * access: a new admin must always be announced; it still adds to the count.
+ * The new admin is not told (they just accepted it themselves).
+ *
+ * Call inside the accept transaction, after the user is inserted and before
+ * `recordAudit` (whose metadata records {@link adminAlertMetadata}).
+ *
+ * @param tx - The accept transaction.
+ * @param newAdminId - The account just created.
+ */
+export async function planNewAdminAlert(tx: Transaction, newAdminId: string): Promise<AdminAlertPlan> {
+  const recipients: AlertRecipient[] = await tx
+    .select({ id: users.id, email: users.email, displayName: users.displayName })
+    .from(users)
+    .where(and(eq(users.role, "admin"), eq(users.status, "active"), sql`${users.id} <> ${newAdminId}::uuid`));
+  return { kind: "change", recipients, target: null, exempt: true };
+}
+
+/**
  * Decide who to notify about a change to an administrator account. Call
  * inside the mutation's transaction, after the change is written (so the
  * active-admin set reflects it) and before `recordAudit`.

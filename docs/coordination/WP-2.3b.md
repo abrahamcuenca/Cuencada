@@ -103,4 +103,11 @@ Verifying an email proves that someone controls a mailbox, not that they belong 
 `pnpm lint`, `pnpm turbo run typecheck --force`, `pnpm test` and `pnpm build` all pass, and the web bundle is within budget (174 kB of 190 kB gzip).
 
 ## Review log
-- (pending)
+- **Security: APPROVED at 4d5af70**, with follow-ups that are handled in this PR as separate commits:
+  - **P1 (Medium, pre-existing): accepting an admin-role invite created a new admin without any alert.**
+    - Every other active admin now gets the existing `admin-account-changed` notice with the "promoted" change ("Le dio el rol de administrador"). The inviter is shown as the actor ("Un administrador" if that account is gone).
+    - Decided in the accept transaction (`planNewAdminAlert` in `admin/adminAlerts.ts`) and queued after commit with `queueAdminAlerts`.
+    - The new admin is not told: they accepted it themselves.
+    - It is **cap-exempt**, like demote, disable and force-reset, because it changes who holds admin access. It still adds to `adminAlertRecipients`. The audit row gets `adminAlertRecipients` and `adminAlertExempt`.
+    - **Not alerted on creation:** the moment admin access exists is the acceptance, and creation is already in the bitácora. A creation alert would need new copy (no `AdminAccountChange` fits "invited as admin"), and every admin invite would then notify twice. If an earlier warning is wanted, it belongs in the backlog.
+    - Tests: the other admins (inviter included) get one alert each; the new admin and members get none; no open-invite alert; a rollback sends nothing.
