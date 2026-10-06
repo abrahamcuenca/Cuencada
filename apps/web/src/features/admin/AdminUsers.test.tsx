@@ -5,7 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { apiUrl, authenticatedState, errorBody } from "../../../test/auth";
 import { createTestServer } from "../../../test/msw";
 import { renderApp } from "../../../test/renderApp";
-import { ADMIN_USER, type AdminDb, adminHandlers, IDS, makeAdminDb, writes } from "./testing/fixtures";
+import { ADMIN_USER, type AdminDb, adminHandlers, IDS, makeAdminDb, makeUnverifiedUsers, writes } from "./testing/fixtures";
 
 const server = createTestServer();
 let db: AdminDb;
@@ -54,6 +54,22 @@ describe("UsersPage", { timeout: 15_000 }, () => {
     await user.selectOptions(screen.getByRole("combobox", { name: "Correo" }), "");
     await waitFor(() => expect(router.state.location.search).toBe(""));
     expect(await screen.findByRole("button", { name: /^Mateo Ortega Vidal/ })).toBeInTheDocument();
+  });
+
+  it("pages the server-filtered unverified list with «Cargar más» and the filter kept", async () => {
+    db.users = [...db.users, ...makeUnverifiedUsers(30)];
+    const user = userEvent.setup();
+    renderApp("/admin/usuarios?correo=sin-verificar", authenticatedState(ADMIN_USER));
+
+    await screen.findByRole("button", { name: /^Lucía Ramírez Soto/ });
+    const list = screen.getByRole("region", { name: "Lista de usuarios" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(25);
+    await user.click(screen.getByRole("button", { name: "Cargar más" }));
+
+    await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(31));
+    expect(db.log.at(-1)).toMatchObject({ path: "/admin/users", query: { emailVerified: "false", cursor: expect.any(String) } });
+    expect(screen.queryByRole("button", { name: "Cargar más" })).not.toBeInTheDocument();
+    expect(within(list).queryByRole("button", { name: /^Mateo Ortega Vidal/ })).not.toBeInTheDocument();
   });
 
   it("shows the server's Spanish message for the per-account change limit (429)", async () => {

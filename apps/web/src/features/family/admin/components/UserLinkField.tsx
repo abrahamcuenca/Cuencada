@@ -26,7 +26,7 @@ export interface UserLinkFieldProps {
 /**
  * "Nombre (correo)" of the account already linked to the person, found with
  * the admin users search by the person's name (`GET /admin/users` has no
- * by-id lookup; TODO(T8-BE): use `GET /admin/users/:id` if it is added).
+ * by-id lookup; see the backlog).
  * `null` while loading or when the account's name differs from the person's.
  */
 function useLinkedAccountLabel(value: LinkedAccount | null, personName: string | null): string | null {

@@ -61,6 +61,23 @@ function user(overrides: Partial<AdminUserListItem> & Pick<AdminUserListItem, "i
   });
 }
 
+/**
+ * `count` fictional unverified members ("Primo N Ejemplo"), for paging tests.
+ *
+ * @param count - How many.
+ * @returns Admin list rows.
+ */
+export function makeUnverifiedUsers(count: number): AdminUserListItem[] {
+  return Array.from({ length: count }, (_, index) =>
+    user({
+      id: `0b9c2f7e-1d2a-4c3b-8e4f-${String(index + 100).padStart(12, "0")}`,
+      email: `primo${index + 1}@example.com`,
+      displayName: `Primo ${index + 1} Ejemplo`,
+      emailVerified: false
+    })
+  );
+}
+
 /** Users, newest first. */
 export function makeUsers(): AdminUserListItem[] {
   return [

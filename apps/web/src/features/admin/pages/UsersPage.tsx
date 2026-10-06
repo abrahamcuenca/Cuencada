@@ -127,13 +127,8 @@ export function UsersPage(): ReactNode {
 
 function UserList({ filter }: { filter: UserListFilter }): ReactNode {
   const list = useListAdminUsersInfiniteQuery(filter);
-  // TODO(WP-0.8b merged): drop the client-side check. A server without the `emailVerified`
-  // filter ignores the parameter (the query schema strips unknown keys), so rows are also
-  // filtered here to keep the list right either way.
-  const items = useMemo(() => {
-    const rows = list.data?.pages.flatMap((page) => page.items) ?? [];
-    return filter.emailVerified === undefined ? rows : rows.filter((user) => user.emailVerified === filter.emailVerified);
-  }, [list.data, filter.emailVerified]);
+  // `emailVerified` is filtered by the server (WP-0.8b), so every page and its cursor already match.
+  const items = useMemo(() => list.data?.pages.flatMap((page) => page.items) ?? [], [list.data]);
   const me = useAppSelector(selectCurrentUser);
   const [selected, setSelected] = useState<AdminUserListItem | null>(null);
 
