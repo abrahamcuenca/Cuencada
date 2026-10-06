@@ -31,8 +31,8 @@ function statCards(summary: AdminSummary): StatCard[] {
     // The users list has no "unverified" filter; the rows carry a "Sin verificar" badge.
     { key: "usersUnverified", value: summary.usersUnverified, label: "Sin verificar correo", to: "/admin/usuarios?estado=active" },
     { key: "invitesPending", value: summary.invitesPending, label: "Invitaciones pendientes", to: "/admin/invitaciones?estado=pending" },
-    { key: "mediaPendingReview", value: summary.mediaPendingReview, label: "Fotos por revisar", to: "/admin/media", needsAttention: true },
-    { key: "mediaReported", value: summary.mediaReported, label: "Fotos reportadas", to: "/admin/media", needsAttention: true }
+    { key: "mediaPendingReview", value: summary.mediaPendingReview, label: "Fotos por revisar", to: "/admin/media?cola=pending", needsAttention: true },
+    { key: "mediaReported", value: summary.mediaReported, label: "Fotos reportadas", to: "/admin/media?cola=reported", needsAttention: true }
   ];
 }
 

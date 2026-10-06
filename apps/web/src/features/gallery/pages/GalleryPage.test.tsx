@@ -87,6 +87,7 @@ describe("GalleryPage grid", () => {
 
     expect(await screen.findByRole("heading", { name: "Aún no hay fotos de este año. ¡Sé el primero en subir!" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Subir fotos y videos/ }).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText(/Las cámaras de acción y drones pueden guardar ubicación en el video\./)).toBeInTheDocument();
   });
 
   it("redirects /galeria to the newest edition that has media", async () => {
@@ -97,12 +98,13 @@ describe("GalleryPage grid", () => {
     expect(await screen.findByRole("heading", { name: "Álbum vivo 2025" })).toBeInTheDocument();
   });
 
-  it("skips a failing probe instead of failing the page", async () => {
+  it("picks the default year from CuencadaSummary.hasMedia without probing each year", async () => {
     db.media = [makeMedia(1, { year: 2025 })];
-    db.failingProbes = [2026];
     const { router } = renderApp("/galeria", authenticatedState());
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/galeria/2025"));
+    expect(db.log.filter((line) => line.includes("limit=1"))).toEqual([]);
+    expect(db.log.filter((line) => line === "GET /cuencadas")).toHaveLength(1);
   });
 
   it("falls back to the newest started edition when no year has media", async () => {
@@ -464,13 +466,24 @@ describe("GalleryPage uploads", () => {
     expect(document.body.textContent).not.toContain("attacker.example");
   });
 
-  it("refuses uploads when no bucket origin is configured", async () => {
+  it("disables uploading, with Spanish copy and a dev hint, when no bucket origin is configured", async () => {
+    env.mediaUploadOrigin = null;
+    renderApp("/galeria/2026", authenticatedState());
+
+    const button = await screen.findByRole("button", { name: /Subir fotos y videos/ });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAccessibleDescription(/Por ahora no se pueden subir fotos ni videos\. Avísale a un administrador\./);
+    expect(screen.getByText(/falta VITE_MEDIA_UPLOAD_ORIGIN/)).toBeInTheDocument();
+  });
+
+  it("never asks for an upload intent when no bucket origin is configured (no orphan rows)", async () => {
     env.mediaUploadOrigin = null;
     const user = userEvent.setup();
     renderApp("/galeria/2026", authenticatedState());
     await pickAndUpload(user, [fileOf("IMG_1.jpg", "image/jpeg")]);
 
     expect(await screen.findByText(/⚠️ No se pudo subir/)).toBeInTheDocument();
+    expect(db.log.some((line) => line.startsWith("POST /cuencadas/2026/media/uploads"))).toBe(false);
     expect(FakeXhr.instances).toHaveLength(0);
   });
 

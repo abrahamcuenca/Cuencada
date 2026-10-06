@@ -4,6 +4,7 @@ import { getApiErrorMessage } from "../../../shared/api/errors";
 import { selectCurrentUser, selectSessionEpoch } from "../../auth/authSlice";
 import { galleryApi, MEDIA_PAGE_SIZE } from "../api";
 import { putToPresignedUrl, UploadTransferError } from "../lib/putToPresignedUrl";
+import { UploadsUnavailableError, uploadsConfigured } from "../lib/uploadOrigin";
 import type { AcceptedFile } from "../lib/validateFile";
 
 /** Uploads running at once (intent → PUT → confirm). Keeps phones on 4G responsive. */
@@ -318,6 +319,9 @@ export class UploadManager {
     job.intent = null;
     job.putDone = false;
     this.update(job, { phase: "creating", progress: 0 });
+    // [SEC/ops] Without a bucket origin every intent would be refused after the server already
+    // created its row: don't ask for one at all.
+    if (!uploadsConfigured()) throw new UploadsUnavailableError();
     const request = this.store.dispatch(
       galleryApi.endpoints.createUpload.initiate({
         year: job.entry.year,
@@ -430,7 +434,7 @@ export class UploadManager {
 
 /** User-safe message for any failure in the pipeline (never the presigned URL or a raw error message). */
 function failureMessage(error: unknown): string {
-  if (error instanceof UploadTransferError) return error.message;
+  if (error instanceof UploadTransferError || error instanceof UploadsUnavailableError) return error.message;
   return getApiErrorMessage(error);
 }
 

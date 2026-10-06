@@ -17,7 +17,8 @@ import { UploadPanel } from "../components/UploadPanel";
 import { Uploader, type UploaderHandle } from "../components/Uploader";
 import styles from "../gallery.module.css";
 import { parseYearParam } from "../lib/mediaText";
-import { UPLOAD_RULES_TEXT } from "../lib/validateFile";
+import { uploadsConfigured } from "../lib/uploadOrigin";
+import { UPLOAD_LOCATION_NOTE, UPLOAD_RULES_TEXT } from "../lib/validateFile";
 import { useExpiredUrlRefetch } from "../lib/useExpiredUrlRefetch";
 import { PROCESSING_POLL_MS } from "../upload/uploadManager";
 import { useUploadManager } from "../upload/useUploadManager";
@@ -152,9 +153,11 @@ function GalleryYear({ year }: { year: number }): React.ReactNode {
         title="Aún no hay fotos de este año. ¡Sé el primero en subir!"
         description="Comparte un momento de esta Cuencada con toda la familia."
         action={
-          <Button icon="📤" onClick={() => uploader.current?.openPicker()}>
-            Subir fotos y videos
-          </Button>
+          uploadsConfigured() ? (
+            <Button icon="📤" onClick={() => uploader.current?.openPicker()}>
+              Subir fotos y videos
+            </Button>
+          ) : undefined
         }
       />
     );
@@ -187,7 +190,9 @@ function GalleryYear({ year }: { year: number }): React.ReactNode {
         </div>
       </header>
       <Uploader ref={uploader} year={year} />
-      <p className={styles.hint}>{UPLOAD_RULES_TEXT}</p>
+      <p className={styles.hint}>
+        {UPLOAD_RULES_TEXT} {UPLOAD_LOCATION_NOTE}
+      </p>
       {content}
       <UploadPanel year={year} />
       <GalleryLightbox items={viewable} openId={openId} onOpenIdChange={setOpenId} onMediaError={onMediaError} />
