@@ -70,6 +70,7 @@ Both live in `tests/e2e/harness/`, **outside `apps/server/src`**. They aren't co
     - CI's e2e job sets it on its service container.
     - An older container gets the marker on its next `scripts/test-db.sh up`. Until then the harness refuses and says to run it. There is deliberately no weaker fallback such as a port or version heuristic.
   - Unit tests: `harness/dbGuard.test.ts` (Vitest project `e2e-harness`, part of `pnpm test`) covers a wrong port refused, the override, a missing marker refused and a wrong marker refused.
+- **Seed environment allowlist** (`harness/seedEnv.ts`, Security L1). The product seed gets an explicit set of e2e-only constants: `NODE_ENV=test`, the guarded `DATABASE_URL`, an e2e admin email and temporary password, and fake `*.example.test` `SEED_*_URL` links. It never gets `process.env`, so vault seed values in an operator's shell can't reach the e2e database, screenshots or traces. `harness/seedEnv.test.ts` covers this.
 - TLS: `openssl` makes self-signed certificates per run, outside the repo. Only the test Chromium runs with `--ignore-certificate-errors` and `ignoreHTTPSErrors`.
 - `X-Forwarded-For` spoofing works here only because the client is on loopback. Production depends on nginx overwriting `X-Forwarded-For` (already on the cutover checklist). The e2e setup demonstrates why that item matters.
 - The JWT secret is a fixed, non-secret e2e value, used only for the throwaway database.

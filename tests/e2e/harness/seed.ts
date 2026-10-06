@@ -8,6 +8,7 @@
  * port and the test-cluster marker, all checked before any DROP/CREATE.
  */
 import { assertE2eDatabaseUrl, assertTestClusterMarker } from "./dbGuard.js";
+import { E2E_SEED_ADMIN_TEMP_PASSWORD, e2eSeedEnv } from "./seedEnv.js";
 import { createDatabase, type Database } from "../../../apps/server/dist/db/client.js";
 import { runMigrations } from "../../../apps/server/dist/db/migrate.js";
 import { hashPassword } from "../../../apps/server/dist/lib/passwords.js";
@@ -22,14 +23,6 @@ import {
   ProjectKey,
   TEMP_ADMIN_PASSWORD
 } from "./people.js";
-
-/** Fake https links for the seeded edition, so no real (legacy) link reaches the e2e UI or screenshots. */
-const FAKE_LINKS = {
-  SEED_WHATSAPP_URL: "https://chat.example.test/grupo-e2e",
-  SEED_EXTERNAL_ALBUM_URL: "https://album.example.test/e2e",
-  SEED_LYRICS_URL: "https://letra.example.test/e2e",
-  SEED_PROGRAM_URL: "https://programa.example.test/e2e"
-};
 
 /**
  * Drop and recreate the e2e database. Static URL checks first, then a live
@@ -145,7 +138,10 @@ export async function prepareE2eDatabase(databaseUrl: string): Promise<void> {
 
   const db = createDatabase({ DATABASE_URL: databaseUrl }, { max: 1 });
   try {
-    await runSeed(db, resolveSeedOptions({ ...process.env, ...FAKE_LINKS, NODE_ENV: "test", DATABASE_URL: databaseUrl }));
+    // An explicit allowlist, never process.env: an operator shell may hold vault seed values (Security L1).
+    const seedEnv = e2eSeedEnv(databaseUrl);
+    if (seedEnv.SEED_ADMIN_TEMP_PASSWORD !== E2E_SEED_ADMIN_TEMP_PASSWORD) throw new Error("e2e seed: unexpected seed env");
+    await runSeed(db, resolveSeedOptions(seedEnv));
   } finally {
     await db.close();
   }
