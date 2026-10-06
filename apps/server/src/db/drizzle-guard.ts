@@ -35,14 +35,16 @@ export function isLoopbackDatabaseUrl(databaseUrl: string): boolean {
 }
 
 /**
- * The dangerous drizzle-kit subcommand in `argv`, if any. drizzle-kit is
- * invoked as `node <bin> <command> …`, so the command is any argument after
- * the script path that is not a flag.
+ * The drizzle-kit command in `argv` when it is a dangerous one. drizzle-kit
+ * is invoked as `node <bin> <command> [flags]`, so the command is the first
+ * argument after the script path that is not a flag; a later `push` (e.g.
+ * `generate --name push`) is a flag value, not the command.
  *
  * @param argv - `process.argv`.
  */
 export function dangerousDrizzleCommand(argv: readonly string[]): string | undefined {
-  return argv.slice(2).find((arg) => DANGEROUS_COMMANDS.has(arg));
+  const command = argv.slice(2).find((arg) => !arg.startsWith("-"));
+  return command !== undefined && DANGEROUS_COMMANDS.has(command) ? command : undefined;
 }
 
 /**

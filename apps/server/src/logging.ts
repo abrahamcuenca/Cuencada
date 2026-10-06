@@ -14,46 +14,94 @@
  * - Request headers and bodies are not logged at all by default.
  */
 import type { FastifyRequest, FastifyServerOptions } from "fastify";
+import {
+  AnnouncementScope,
+  AuditAction,
+  AuditEntityType,
+  InviteStatus,
+  MediaKind,
+  MediaUploadStatus,
+  ModerationStatus,
+  UserRole,
+  UserStatus
+} from "@cuencada/types";
 import type { AppConfig } from "./config.js";
 
 export const REDACTED = "[REDACTED]";
 
+/** Accepts one value of an allowlisted query parameter. */
+type QueryValueCheck = (value: string) => boolean;
+
+/** A value from a fixed set (an enum of the contracts). */
+function oneOf(...groups: ReadonlyArray<Record<string, string>>): QueryValueCheck {
+  const allowed = new Set(groups.flatMap((group) => Object.values(group)));
+  return (value) => allowed.has(value);
+}
+
+/** Up to six digits (limits, depths, years). */
+const digits: QueryValueCheck = (value) => /^\d{1,6}$/.test(value);
+
+/** `true` / `false` query booleans. */
+const booleanFlag: QueryValueCheck = (value) => value === "true" || value === "false";
+
+/** Plain base64url (no `.`, `:` or `=`): the chat history cursor. */
+const base64url: QueryValueCheck = (value) => /^[A-Za-z0-9_-]{1,512}$/.test(value);
+
 /**
- * Query parameters whose values may be logged [SEC]. This is an ALLOWLIST:
- * every other parameter keeps its name but its value becomes `[REDACTED]`,
- * so free text (`q`, `search`, `city`, `familyBranch`), cursors and tokens
- * (`ticket`, `token`, `cursor`) never reach the logs, including parameters
- * added later that nobody remembered to deny.
+ * Query parameters whose values may be logged [SEC], each with the exact
+ * shape its value must have. This is an ALLOWLIST: every other parameter's
+ * value becomes `[REDACTED]`, so free text (`q`, `search`, `city`,
+ * `familyBranch`), cursors and tokens (`ticket`, `token`, `cursor`) never
+ * reach the logs, including parameters added later that nobody remembered
+ * to deny. An allowlisted parameter whose value fails its check is redacted
+ * too (a client can put any text in any parameter).
  *
- * Every entry is an enum, a small integer or an opaque server-made id:
- * `before` is the chat history cursor, `(created_at, id)` encoded, which
- * carries no personal data. Matching is exact (case-sensitive) on the
+ * `before` is the chat history cursor, `(created_at, id)` base64url-encoded,
+ * which carries no personal data. Matching is exact (case-sensitive) on the
  * decoded name, because that is how the routes read them; `Limit`, `q[]` or
- * `limit[]` are therefore redacted.
+ * `limit[]` are therefore not allowlisted.
  */
-const LOGGABLE_QUERY_PARAMS: ReadonlySet<string> = new Set([
-  "limit",
-  "year",
-  "status",
-  "role",
-  "kind",
-  "depth",
-  "before",
-  "scope",
-  "entityType",
-  "action"
+const LOGGABLE_QUERY_PARAMS: ReadonlyMap<string, QueryValueCheck> = new Map([
+  ["limit", digits],
+  ["year", digits],
+  ["depth", digits],
+  ["status", oneOf(UserStatus, InviteStatus)],
+  ["role", oneOf(UserRole)],
+  ["kind", oneOf(MediaKind)],
+  ["scope", oneOf(AnnouncementScope)],
+  ["entityType", oneOf(AuditEntityType)],
+  ["action", oneOf(AuditAction)],
+  ["moderationStatus", oneOf(ModerationStatus)],
+  ["uploadStatus", oneOf(MediaUploadStatus)],
+  ["reported", booleanFlag],
+  ["emailVerified", booleanFlag],
+  ["before", base64url]
 ]);
 
 /**
- * Shape a loggable value must have even for an allowlisted name: enum
- * values, integers and opaque ids. Anything else (spaces, `@`, `%`-escapes,
- * very long input) is redacted, because a client can put any text in any
- * parameter.
+ * Names of the API's other query parameters. Their values are always
+ * redacted, but the name is logged (`q=[REDACTED]`) for observability. Any
+ * name in neither list is logged as `[param]=[REDACTED]`: a client could
+ * put data in a parameter name too.
  */
-const LOGGABLE_QUERY_VALUE = /^[A-Za-z0-9_.:=-]{0,128}$/;
+const KNOWN_QUERY_PARAM_NAMES: ReadonlySet<string> = new Set([
+  "q",
+  "search",
+  "cursor",
+  "ticket",
+  "token",
+  "city",
+  "familyBranch",
+  "personId",
+  "actorUserId",
+  "entityId",
+  "cuencadaId",
+  "from",
+  "to"
+]);
 
-/** Shape a parameter name must have to be logged at all (otherwise the whole pair is redacted). */
-const LOGGABLE_QUERY_NAME = /^[A-Za-z0-9_.[\]-]{1,64}$/;
+/** Logged in place of a parameter name that is neither allowlisted nor known. */
+export const UNKNOWN_QUERY_PARAM = "[param]";
 
 /** Object keys whose values never reach the logs (case-insensitive, substring). */
 export const SENSITIVE_LOG_KEY = /token|password|passwd|ticket|secret|authorization|cookie|hash|api[-_]?key|credential/i;
@@ -267,21 +315,24 @@ function scrubQueryPair(pair: string): string {
   const separator = pair.indexOf("=");
   const rawName = separator === -1 ? pair : pair.slice(0, separator);
   const name = decodeQueryComponent(rawName);
-  // An undecodable or odd-looking name could itself be data: drop the whole pair.
-  if (name === undefined || !LOGGABLE_QUERY_NAME.test(name)) return REDACTED;
-  if (!LOGGABLE_QUERY_PARAMS.has(name)) return `${rawName}=${REDACTED}`;
+  const check = name === undefined ? undefined : LOGGABLE_QUERY_PARAMS.get(name);
+  if (name === undefined || (check === undefined && !KNOWN_QUERY_PARAM_NAMES.has(name))) {
+    // Unknown or undecodable name: it could itself be data, so hide it too.
+    return `${UNKNOWN_QUERY_PARAM}=${REDACTED}`;
+  }
+  if (check === undefined) return `${rawName}=${REDACTED}`;
   if (separator === -1) return pair;
   const value = decodeQueryComponent(pair.slice(separator + 1));
-  return value !== undefined && LOGGABLE_QUERY_VALUE.test(value) ? pair : `${rawName}=${REDACTED}`;
+  return value !== undefined && check(value) ? pair : `${rawName}=${REDACTED}`;
 }
 
 /**
  * Redact query parameter values from a request URL using an allowlist [SEC].
  * Only the parameters in {@link LOGGABLE_QUERY_PARAMS} keep their value, and
- * only when it looks like an enum, number or opaque id. Every other
- * parameter keeps its (raw) name with the value `[REDACTED]`; repeated
- * parameters are handled pair by pair. A pair whose name is undecodable or
- * not a plain identifier is replaced entirely by `[REDACTED]`.
+ * only when it passes that parameter's check (digits, a contract enum value,
+ * plain base64url). Known API parameters keep their (raw) name with the
+ * value `[REDACTED]`; any other or undecodable name is logged as
+ * `[param]=[REDACTED]`. Repeated parameters are handled pair by pair.
  *
  * @param rawUrl - Path plus query, e.g. `/api/chat/ws?ticket=abc`.
  * @returns The scrubbed URL, e.g. `/api/chat/ws?ticket=[REDACTED]`.

@@ -19,7 +19,9 @@ export function DirectoryError({ error, onRetry }: { error: unknown; onRetry: ()
   const user = useAppSelector(selectCurrentUser);
   const code = getApiErrorCode(error);
 
-  if (code === "FORBIDDEN" && user?.emailVerified === false) {
+  // EMAIL_UNVERIFIED (WP-0.8a); FORBIDDEN + unverified kept until 0.8c centralizes this.
+  const unverified = code === "EMAIL_UNVERIFIED" || (code === "FORBIDDEN" && user?.emailVerified === false);
+  if (unverified && user !== null) {
     return (
       <EmptyState
         tone="lock"

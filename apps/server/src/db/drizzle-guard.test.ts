@@ -25,11 +25,18 @@ describe("isLoopbackDatabaseUrl", () => {
 });
 
 describe("dangerousDrizzleCommand", () => {
-  it("finds push and drop and ignores other commands", () => {
+  it("finds push and drop as the command and ignores other commands", () => {
     expect(dangerousDrizzleCommand([...BIN, "push", "--force"])).toBe("push");
-    expect(dangerousDrizzleCommand([...BIN, "--config", "drizzle.config.ts", "drop"])).toBe("drop");
+    expect(dangerousDrizzleCommand([...BIN, "drop"])).toBe("drop");
+    expect(dangerousDrizzleCommand([...BIN, "--verbose", "push"])).toBe("push");
     expect(dangerousDrizzleCommand([...BIN, "generate"])).toBeUndefined();
     expect(dangerousDrizzleCommand([...BIN, "migrate"])).toBeUndefined();
+    expect(dangerousDrizzleCommand([...BIN])).toBeUndefined();
+  });
+
+  it("only matches the command, not a later argument", () => {
+    expect(dangerousDrizzleCommand([...BIN, "generate", "--name", "push"])).toBeUndefined();
+    expect(dangerousDrizzleCommand([...BIN, "check", "drop"])).toBeUndefined();
   });
 });
 

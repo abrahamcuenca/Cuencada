@@ -108,7 +108,7 @@ location /assets/            { add_header Cache-Control "public, max-age=3153600
   - A byte-changed `sw.js` shows the banner. Actualizar → Recargar ahora reloads once onto the new worker, and the banner is gone afterwards.
   - `/mas` shows the iOS hint, the dismissal persists across a reload, and the Android card appears via a synthetic `beforeinstallprompt`.
   - The console shows **no CSP violations**. The only errors are the expected 401 from `/auth/refresh` (anonymous) and `ERR_INTERNET_DISCONNECTED` while offline.
-- **Screenshots** in `docs/ux/screenshots/t9/`: `update-banner-375`, `update-confirm-375`, `offline-programa-375`, `offline-home-375`, `install-ios-375`, `install-android-375` (webp).
+- **Screenshots** in `docs/ux/screenshots/t9/`: `update-banner-375`, `update-confirm-375`, `offline-programa-375`, `offline-home-375`, `install-ios-375`, `install-android-375` (webp). _(WP-0.8a: `apps/web/public/images/fotos/` was removed; real family photos are members-only, and these screenshots were deleted pending a re-take with placeholders.)_
 
 ## Requests
 1. **TL / CI:** done (approved): `pnpm --filter @cuencada/web check:sw` runs after the `size` step in `.github/workflows/ci.yml`.

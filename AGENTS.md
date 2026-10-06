@@ -11,6 +11,7 @@
 
 - Install with `pnpm install`.
 - Use `pnpm build`, `pnpm typecheck`, `pnpm lint`, and `pnpm test` from the repo root.
+- `pnpm test` needs the test Postgres: run `scripts/test-db.sh up` first. Never run `scripts/test-db.sh down` while other agents may share the container.
 - Use `pnpm --filter @cuencada/web dev` for the frontend and `pnpm --filter @cuencada/server dev` for the API.
 - Use `mise run verify` before deploy work; it runs lint, typecheck, tests, and production audit.
 - Never use `drizzle-kit push`; apply schema only via migrations (`db:migrate`). `drizzle.config.ts` refuses `push`/`drop` unless `ALLOW_DRIZZLE_PUSH=1` and the database is on loopback. There is no `db:push` script; do not add one.
@@ -19,7 +20,7 @@
 
 - `infra/project.yml` targets `cuencada.com` on `server_1` with bundled deploy mode and backend port `3104`; verify the port with `mise run ports -- server_1` before deploying.
 - Acleron deployment tasks are in `mise.toml`; mutating deploys still require explicit approval.
-- Required vault refs include `vault_cuencada_database_url`, `vault_cuencada_jwt_secret`, `vault_cuencada_seed_admin_temp_password`, and Linode Object Storage `vault_cuencada_s3_*` values.
+- Required vault refs include `vault_cuencada_database_url`, `vault_cuencada_jwt_secret`, `vault_cuencada_resend_api_key`, and Linode Object Storage `vault_cuencada_s3_*` values. `vault_cuencada_seed_admin_temp_password` is operator-only: it is passed to the one-off prod seed by hand, never to the running API (WP-0.4).
 - Do not commit vault files, deploy keys, object storage credentials, or generated secrets.
 
 ## Privacy And Access
@@ -28,7 +29,7 @@
 - RSVP requires an account. Admins manually create past/future Cuencadas and historical attendance.
 - Invite tokens, magic-link tokens, and refresh/session tokens must be stored hashed, not plaintext.
 - Directory contact fields and family tree data are PII; default to member-only and honor profile visibility.
-- This repository is public. Fixtures, seeds, docs, wireframes, style guides and screenshots use fictional people only (e.g. "Ana Morales Vega", branch "Rama Norte", phones `+52 555 0…`, `@example.com` emails). Never use real family names or real family photos.
+- This repository is public. Fixtures, seeds, docs, wireframes, style guides and screenshots use fictional people only (e.g. "Ana Morales Vega", branch "Rama Norte", phones `+52 555 0…`, `@example.com` emails). Never use real family names or real family photos: real photos are members-only (private gallery). The only exception is the legacy root site (`index.html`, `cuencada2026.html`, root `images/`), pending retirement at cutover.
 - Never interpolate PII (emails, names, phones, tokens) into `Error` messages or log lines; errors get logged. Keep identifiers in structured fields that the logger redacts.
 
 ## Agent Workflow
@@ -40,10 +41,10 @@
 
 ## Editing Notes
 
-- Keep the site self-contained unless asked otherwise: HTML, CSS, and JavaScript currently live inline in `index.html`.
+- Legacy page only: the root `index.html` keeps its HTML, CSS, and JavaScript inline and self-contained. The new app lives in `apps/web` (React/Vite) and `apps/server`.
 - Preserve Spanish copy and the mobile-first event-site style.
 - Be careful with external links: OneDrive, WhatsApp, WeatherWidget, hotel links, and Google Maps are user-facing production links.
-- `mensajes.txt` contains date-keyed messages in `YYYY-MM-DD|message` format; the message-loading script in `index.html` is currently commented out.
+- `mensajes.txt` contains date-keyed messages in `YYYY-MM-DD|message` format. The seed (`apps/server/src/seed.ts`) imports them as daily messages; the loader in the legacy `index.html` is commented out.
 - The initial admin is `admin@cuencada.com`; the temporary password belongs in vault/env and must force password change on first login.
 
 <!-- BEGIN:turborepo-agent-rules -->
