@@ -215,7 +215,7 @@ Fixtures, tests and screenshots use invented people only ("Lucía Ramírez Solí
    - pass the `Upgrade`/`Connection` headers
    - keep `proxy_read_timeout` above 60 s: the client pings every 25 s and treats 60 s of silence as dead
 6. **T9 (PWA), forwarded by the orchestrator:** the service worker must **never** intercept or cache `/api/chat/*` (REST or WS). Chat data lives only in the in-memory RTK cache, which `loggedOut` already resets.
-7. **WP-0.6 / `index.html`:** consider `interactive-widget=resizes-content` in the viewport meta. Android Chrome then resizes the layout viewport for the keyboard; the `visualViewport` handling stays as the iOS path.
+7. ~~**WP-0.6 / `index.html`:** `interactive-widget=resizes-content`~~ **Approved and done** in the PR #28 review round (see the review log).
 8. **WP-0.7:**
    - `Badge shape="count"` caps numbers at "99+". The room list passes the string "999+" at the server cap.
    - The BottomNav tab badge sums rooms and shows "99+" above 99 (fine).
@@ -223,3 +223,11 @@ Fixtures, tests and screenshots use invented people only ("Lucía Ramírez Solí
 9. **Orchestrator:** this branch includes `wp/t7-be-chat` (merged as instructed). Please merge T7-BE before this PR, or review the two together.
 
 ## Review log
+- **2026-10-06, PR #28 round 1.** Security approved with one Low; the Tech Lead requested changes. Addressed:
+  - **Security L1 (link spoofing):** visible link text rebuilt from the parsed URL (punycode host, encoded path, truncated), `title` with the full ASCII URL; no links containing bidi/invisible characters; ideographic full stops normalized. Tests: Cyrillic lookalike → `xn--pple-43d.com`, RTL `…gpj.exe` not linkified, `evil.com。com` → `evil.com.com`, normal links unchanged.
+  - **TL Blocking 1 (lost frames during the first history load):** `getMessages` and `getRooms` now subscribe to the event hub **before** `cacheDataLoaded` (`subscribeChatEventsOnceLoaded` in `events.ts`), buffer frames, and replay them in order once the data is there; if the load fails, they unsubscribe. The dedupe helpers make the overlap harmless. Test: the history response is held, frames for message 5 (also in the page) and message 6 arrive, the response is released, and each renders exactly once.
+  - **TL non-blocking 1:** 5 consecutive 1008 closes (with no valid frame in between) stop the retries, set status `failed` ("No pudimos conectar el chat. Recarga la página.") and call `reportUnexpected` (the ticket is never in the error). Tested.
+  - **TL non-blocking 3:** the store listener returns early when `state.auth` is the same object as last time.
+  - **TL nit:** a comment in `conversationApi.ts` explains why resending pending messages before the `resumed` refetch is safe.
+  - **TL nit:** the "⋯" button is now a white disc with a shadow and full-contrast text colour (still hidden until hover/focus with a mouse).
+  - **Request 7 (approved):** `apps/web/index.html` viewport meta gains `interactive-widget=resizes-content`. Screenshots retaken: the composer still sits right above the (simulated) keyboard and overflow is 0 px at 320/375/1280.

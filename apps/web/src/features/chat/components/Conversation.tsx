@@ -49,7 +49,8 @@ const STATUS_TEXT: Partial<Record<ChatConnectionStatus, string>> = {
   reconnecting: "Reconectando… Los mensajes se enviarán cuando vuelva la conexión.",
   paused: "Reconectando…",
   offline: "Sin conexión. Los mensajes se enviarán cuando vuelva la conexión.",
-  evicted: "Se abrió el chat en otra pestaña."
+  evicted: "Se abrió el chat en otra pestaña.",
+  failed: "No pudimos conectar el chat. Recarga la página."
 };
 
 function subscribeVisibility(listener: () => void): () => void {
@@ -321,7 +322,7 @@ export function Conversation({ roomId, room, connection, timeZone, now, onForbid
         </h2>
       </header>
       {statusText === undefined ? null : (
-        <div className={cx(styles.status, connection === "offline" && styles.statusOffline)}>
+        <div className={cx(styles.status, (connection === "offline" || connection === "failed") && styles.statusOffline)}>
           <output>{statusText}</output>
           {connection === "evicted" ? (
             <button type="button" className={styles.linkButton} onClick={onReconnect}>

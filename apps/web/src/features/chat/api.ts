@@ -1,7 +1,7 @@
 import type { ChatRoom } from "@cuencada/types";
 import { baseApi } from "../../shared/api/baseApi";
 import type { WithAuthState } from "../auth/authSlice";
-import { type ChatHubEvent, getViewingRoom, subscribeChatEvents } from "./events";
+import { type ChatHubEvent, getViewingRoom, subscribeChatEventsOnceLoaded } from "./events";
 import { applyDeletedToRooms, applyMessageToRooms, type ChatRoomView, mergeRoomLists, roomsFromResponse } from "./lib/rooms";
 
 function currentUserId(state: unknown): string | null {
@@ -29,12 +29,8 @@ export const chatApi = baseApi.injectEndpoints({
       merge: (current, incoming) => mergeRoomLists(current, incoming),
       providesTags: [{ type: "ChatRoom", id: "LIST" }],
       async onCacheEntryAdded(_arg, { cacheDataLoaded, cacheEntryRemoved, updateCachedData, getState, dispatch }) {
-        try {
-          await cacheDataLoaded;
-        } catch {
-          return;
-        }
-        const unsubscribe = subscribeChatEvents((event: ChatHubEvent) => {
+        // Subscribed before the first load resolves: frames that arrive meanwhile are buffered, not lost.
+        const unsubscribe = await subscribeChatEventsOnceLoaded(cacheDataLoaded, (event: ChatHubEvent) => {
           if (event.type === "open" && event.resumed) {
             dispatch(chatApi.util.invalidateTags([{ type: "ChatRoom", id: "LIST" }]));
             return;
@@ -57,6 +53,7 @@ export const chatApi = baseApi.injectEndpoints({
             updateCachedData((rooms) => applyDeletedToRooms(rooms, frame.roomId, frame.messageId));
           }
         });
+        if (unsubscribe === null) return;
         await cacheEntryRemoved;
         unsubscribe();
       }

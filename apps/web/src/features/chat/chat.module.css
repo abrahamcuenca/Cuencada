@@ -431,13 +431,15 @@
 }
 
 /* The ⋯ button: always reachable by keyboard; shown on hover/focus with a mouse. */
-.more {
+.row .more {
   flex: none;
-  opacity: 0.55;
+  color: var(--color-text);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .more {
+  .row .more {
     opacity: 0;
   }
 

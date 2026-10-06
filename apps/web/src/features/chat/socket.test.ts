@@ -16,6 +16,7 @@ import {
   getChatConnection,
   HIDDEN_PAUSE_MS,
   LIVENESS_TIMEOUT_MS,
+  MAX_HANDSHAKE_FAILURES,
   parseServerFrame,
   resetChatSocketForTests,
   SEND_ACK_TIMEOUT_MS,
@@ -298,6 +299,21 @@ describe("ChatConnection lifecycle", { timeout: 15_000 }, () => {
     expect(FakeSocket.instances).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1100);
     await socketCount(2);
+  });
+
+  it("stops after 5 consecutive 1008 closes, reports it, and asks to reload", async () => {
+    const reported: unknown[] = [];
+    vi.stubGlobal("reportError", (error: unknown) => reported.push(error));
+    const connection = getChatConnection(store);
+    connection.acquire();
+    for (let attempt = 1; attempt <= MAX_HANDSHAKE_FAILURES; attempt += 1) {
+      (await socketCount(attempt)).serverClose(1008);
+      await vi.advanceTimersByTimeAsync(BACKOFF_MAX_MS);
+    }
+    expect(connection.getStatus()).toBe("failed");
+    expect(FakeSocket.instances).toHaveLength(MAX_HANDSHAKE_FAILURES);
+    expect(reported).toHaveLength(1);
+    expect(String(reported[0])).not.toContain("tkt");
   });
 
   it("retries with a fresh ticket after 1008 (used or expired ticket)", async () => {

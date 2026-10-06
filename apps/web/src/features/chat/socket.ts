@@ -75,7 +75,9 @@ export type ChatConnectionStatus =
   /** The server refused chat for this account (unverified email). */
   | "forbidden"
   /** The server closed this socket because the account has too many open (another tab); waits for "Reconectar". */
-  | "evicted";
+  | "evicted"
+  /** The handshake kept failing (1008, e.g. a misconfigured Origin): stopped; the user should reload. */
+  | "failed";
 
 /** The subset of `WebSocket` the client uses, so tests can inject a fake. */
 export interface WebSocketLike {
@@ -124,6 +126,10 @@ export const SEND_ACK_TIMEOUT_MS = 15_000;
 export const LIVENESS_TIMEOUT_MS = WS_PING_INTERVAL_MS * 2 + 10_000;
 /** Normal closure; with {@link EVICTION_REASON} it means "too many connections". */
 const WS_NORMAL_CLOSURE = 1000;
+/** 1008 Policy Violation: a bad, used or expired ticket, or a refused Origin. */
+const WS_POLICY_VIOLATION = 1008;
+/** Stop after this many consecutive 1008 closes. */
+export const MAX_HANDSHAKE_FAILURES = 5;
 /** 1013 Try Again Later: the server is full. */
 const WS_TRY_AGAIN_LATER = 1013;
 /** Close reason the server uses when it evicts the oldest socket of an account. */
@@ -240,6 +246,10 @@ export class ChatConnection {
   private generation = 0;
   private attempt = 0;
   private everOpened = false;
+  /** The auth slice last seen by the store listener (skip unrelated dispatches). */
+  private lastAuth: RootState["auth"] | null = null;
+  /** Consecutive 1008 closes without a valid frame in between. */
+  private handshakeFailures = 0;
   /** The server announced an eviction (`error` CONFLICT without a message id) before closing. */
   private evictionAnnounced = false;
   private openedAt: number | null = null;
@@ -383,6 +393,7 @@ export class ChatConnection {
   reconnect(): void {
     if (this.refs === 0) return;
     this.attempt = 0;
+    this.handshakeFailures = 0;
     void this.connect();
   }
 
@@ -420,6 +431,8 @@ export class ChatConnection {
 
   private stop(): void {
     this.started = false;
+    this.lastAuth = null;
+    this.handshakeFailures = 0;
     for (const detach of this.detachers) detach();
     this.detachers = [];
     this.teardownSocket();
@@ -442,6 +455,10 @@ export class ChatConnection {
   }
 
   private readonly onStoreChange = (): void => {
+    // Every dispatch lands here (frames dispatch often); only auth changes matter.
+    const auth = this.store.getState().auth;
+    if (auth === this.lastAuth) return;
+    this.lastAuth = auth;
     const key = this.currentSessionKey();
     if (key !== this.sessionKey) {
       // [SEC] Logout, account switch or a new epoch: the old socket must not live on.
@@ -577,6 +594,7 @@ export class ChatConnection {
     const frame = parseServerFrame(data);
     if (frame === null) return;
     this.lastInboundAt = Date.now();
+    this.handshakeFailures = 0;
     if ((frame.type === "message" || frame.type === "error") && frame.clientMessageId !== null) {
       this.clearAck(frame.clientMessageId);
     }
@@ -598,6 +616,15 @@ export class ChatConnection {
       // Reconnecting on our own would just evict another tab in turn.
       this.setStatus("evicted");
       return;
+    }
+    if (code === WS_POLICY_VIOLATION) {
+      this.handshakeFailures += 1;
+      if (this.handshakeFailures >= MAX_HANDSHAKE_FAILURES) {
+        // A permanent problem (e.g. an Origin missing from CORS_ORIGIN): stop instead of looping every 30 s.
+        reportUnexpected(new Error(`Chat: el WebSocket se cerró con 1008 ${MAX_HANDSHAKE_FAILURES} veces seguidas.`));
+        this.setStatus("failed");
+        return;
+      }
     }
     if (code === WS_TRY_AGAIN_LATER) {
       this.scheduleRetry(SERVER_BUSY_MIN_DELAY_MS);

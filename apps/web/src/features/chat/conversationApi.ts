@@ -1,6 +1,6 @@
 import { CHAT_HISTORY_LIMIT_MAX, type ChatHistoryPage, type ChatTicketResponse } from "@cuencada/types";
 import { chatApi } from "./api";
-import { type ChatHubEvent, sendChatFrame, subscribeChatEvents } from "./events";
+import { type ChatHubEvent, sendChatFrame, subscribeChatEventsOnceLoaded } from "./events";
 import { applyDeletedToRooms, applyHistoryPreview, applyReadToRooms } from "./lib/rooms";
 import {
   applyDeletedMessage,
@@ -66,14 +66,13 @@ export const conversationApi = chatApi.injectEndpoints({
         }
       },
       async onCacheEntryAdded(roomId, { cacheDataLoaded, cacheEntryRemoved, updateCachedData, getCacheEntry, dispatch }) {
-        try {
-          await cacheDataLoaded;
-        } catch {
-          return;
-        }
-        const unsubscribe = subscribeChatEvents((event: ChatHubEvent) => {
+        // Subscribed before the first page resolves: a frame that arrives while the history request is
+        // in flight is buffered and applied after it (duplicates of messages in the page are ignored).
+        const unsubscribe = await subscribeChatEventsOnceLoaded(cacheDataLoaded, (event: ChatHubEvent) => {
           if (event.type === "open") {
-            // Resend what is still pending (the server is idempotent on clientMessageId).
+            // Resend what is still pending (the server is idempotent on clientMessageId). The order relative
+            // to the `resumed` refetch below does not matter: an echo and the refetched page both dedupe by
+            // id / clientMessageId, and a pending message stays local until its echo confirms it.
             for (const message of getCacheEntry().data?.messages ?? []) {
               if (message.status === "pending" && message.clientMessageId !== null) {
                 sendChatFrame({ type: "send", roomId, body: message.body, clientMessageId: message.clientMessageId });
@@ -96,6 +95,7 @@ export const conversationApi = chatApi.injectEndpoints({
             updateCachedData((thread) => setLocalStatus(thread, failedId, "failed"));
           }
         });
+        if (unsubscribe === null) return;
         await cacheEntryRemoved;
         unsubscribe();
       }

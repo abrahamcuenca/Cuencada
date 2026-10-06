@@ -134,6 +134,37 @@ describe("ChatPage", { timeout: 20_000 }, () => {
     await waitFor(() => expect(db.reads.at(-1)?.messageId).toBe(makeMessage(6).id), { timeout: 5000 });
   });
 
+  it("keeps a message that arrives while the room's history is still loading (exactly once)", async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let requested = false;
+    server.use(
+      http.get(apiUrl(`/chat/rooms/${ROOMS.familia}/messages`), async () => {
+        requested = true;
+        await gate;
+        // The page was built before message 6 existed; message 5 is in both the page and a frame.
+        return HttpResponse.json({ messages: [1, 2, 3, 4, 5].map((n) => makeMessage(n)), nextBefore: null });
+      })
+    );
+    const { router } = renderApp("/chat", authenticatedState());
+    await screen.findByRole("list", { name: "Salas" });
+    const socket = await openSocket();
+
+    await act(() => router.navigate(`/chat/${ROOMS.familia}`));
+    await waitFor(() => expect(requested).toBe(true));
+    act(() => {
+      socket.receive(frames.message(makeMessage(5)));
+      socket.receive(frames.message(makeMessage(6, { sender: PEOPLE.marta, body: "Llegó durante la carga" })));
+    });
+    release();
+
+    expect(await within(await screen.findByRole("log")).findByText("Llegó durante la carga")).toBeInTheDocument();
+    expect(within(log()).getAllByText("Llegó durante la carga")).toHaveLength(1);
+    expect(within(log()).getAllByText("Mensaje 5")).toHaveLength(1);
+  });
+
   it("sends optimistically, dedupes the echo, and retries a failed message with the same id", async () => {
     const user = userEvent.setup();
     renderApp(`/chat/${ROOMS.familia}`, authenticatedState());

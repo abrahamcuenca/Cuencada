@@ -47,6 +47,40 @@ export function subscribeChatEvents(listener: ChatHubListener): () => void {
 }
 
 /**
+ * Subscribes **at once** and buffers events until `loaded` resolves, then
+ * replays them in order and delivers live. A cache entry uses it so a frame
+ * that arrives while its first page is in flight is never lost; the merge
+ * helpers ignore duplicates, so frames already in the page are harmless.
+ *
+ * @param loaded - The cache entry's `cacheDataLoaded`.
+ * @param listener - Called for every event once the data is there.
+ * @returns The unsubscribe function, or `null` when the load failed (already unsubscribed).
+ */
+export async function subscribeChatEventsOnceLoaded(loaded: Promise<unknown>, listener: ChatHubListener): Promise<(() => void) | null> {
+  const buffer: ChatHubEvent[] = [];
+  let ready = false;
+  const unsubscribe = subscribeChatEvents((event) => {
+    if (ready) listener(event);
+    else buffer.push(event);
+  });
+  try {
+    await loaded;
+  } catch {
+    unsubscribe();
+    return null;
+  }
+  ready = true;
+  for (const event of buffer.splice(0)) {
+    try {
+      listener(event);
+    } catch (error) {
+      reportUnexpected(error);
+    }
+  }
+  return unsubscribe;
+}
+
+/**
  * Delivers an event to every listener. A throwing listener never stops the others.
  *
  * @param event - The event to deliver.
