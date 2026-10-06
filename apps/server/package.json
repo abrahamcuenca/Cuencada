@@ -7,8 +7,10 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:seed": "tsx src/seed.ts",
+    "db:migrate": "node dist/db/migrate.js",
+    "db:migrate:dev": "tsx --env-file-if-exists=../../.env --env-file-if-exists=.env src/db/migrate.ts",
+    "db:seed": "node dist/seed.js",
+    "db:seed:dev": "tsx --env-file-if-exists=../../.env --env-file-if-exists=.env src/seed.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run --config ../../vitest.config.ts --project server"
   },

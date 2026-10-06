@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { hashToken } from "../../auth.js";
-import { users } from "../../db/schema.js";
+import { users } from "../../db/schema/index.js";
 
 const loginBodySchema = z.object({
   email: z.string().email(),
