@@ -14,11 +14,21 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run --root ../.. --project emails"
   },
   "dependencies": {
-    "@react-email/components": "^1.0.12",
-    "@react-email/render": "^2.0.6",
+    "@react-email/body": "0.3.0",
+    "@react-email/button": "0.2.1",
+    "@react-email/container": "0.0.16",
+    "@react-email/head": "0.0.13",
+    "@react-email/heading": "0.0.16",
+    "@react-email/hr": "0.0.12",
+    "@react-email/html": "0.0.12",
+    "@react-email/img": "0.0.12",
+    "@react-email/preview": "0.0.14",
+    "@react-email/render": "^2.1.0",
+    "@react-email/section": "0.0.17",
+    "@react-email/text": "0.1.6",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },

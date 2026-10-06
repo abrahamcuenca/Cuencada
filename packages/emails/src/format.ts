@@ -121,9 +121,38 @@ function isControlChar(char: string): boolean {
 }
 
 /**
+ * Invisible and bidi-control characters that can disguise a name or reorder
+ * the subject line (e.g. U+202E RIGHT-TO-LEFT OVERRIDE): zero-width
+ * space/joiners and LRM/RLM (U+200B–U+200F), embeddings and overrides
+ * (U+202A–U+202E), word joiner and isolates (U+2060–U+2069), BOM (U+FEFF),
+ * soft hyphen (U+00AD) and Hangul filler (U+3164).
+ */
+function isInvisibleChar(char: string): boolean {
+  const code = char.codePointAt(0) ?? 0;
+  return (
+    (code >= 0x200b && code <= 0x200f) ||
+    (code >= 0x202a && code <= 0x202e) ||
+    (code >= 0x2060 && code <= 0x2069) ||
+    code === 0xfeff ||
+    code === 0x00ad ||
+    code === 0x3164
+  );
+}
+
+/** Controls become a space (they usually separate words); invisibles are dropped. */
+function replaceUnsafeChar(char: string): string {
+  if (isControlChar(char)) {
+    return " ";
+  }
+  return isInvisibleChar(char) ? "" : char;
+}
+
+/**
  * Normalizes a user-provided name for display: strips control characters
- * (so a name can never inject a header line into the subject), collapses
- * whitespace and truncates to 80 characters. HTML escaping is left to React.
+ * (so a name can never inject a header line into the subject) and
+ * invisible/bidi characters (so it cannot be disguised or reorder the
+ * subject), collapses whitespace and truncates to 80 characters. HTML
+ * escaping is left to React.
  *
  * @returns The cleaned name, or `null` when nothing printable remains.
  */
@@ -131,9 +160,7 @@ export function cleanName(value: string | null | undefined): string | null {
   if (value === null || value === undefined) {
     return null;
   }
-  const cleaned = Array.from(value, (char) =>
-    isControlChar(char) ? " " : char,
-  )
+  const cleaned = Array.from(value, replaceUnsafeChar)
     .join("")
     .replace(/\s+/g, " ")
     .trim();

@@ -1,22 +1,19 @@
-import {
-  Body,
-  Button,
-  Container,
-  Head,
-  Heading,
-  Hr,
-  Html,
-  Img,
-  Preview,
-  Section,
-  Text,
-} from "@react-email/components";
+import { Body } from "@react-email/body";
+import { Button } from "@react-email/button";
+import { Container } from "@react-email/container";
+import { Head } from "@react-email/head";
+import { Heading } from "@react-email/heading";
+import { Hr } from "@react-email/hr";
+import { Html } from "@react-email/html";
+import { Img } from "@react-email/img";
+import { Preview } from "@react-email/preview";
+import { Section } from "@react-email/section";
+import { Text } from "@react-email/text";
 import type { CSSProperties, ReactElement } from "react";
 import {
   CTA_FALLBACK_LABEL,
   type EmailContent,
   FOOTER_BRAND,
-  FOOTER_IGNORE,
 } from "../content.js";
 
 /** Brand colours from `apps/web/src/shared/styles/tokens.css` (emails cannot use CSS variables). */
@@ -34,7 +31,37 @@ const color = {
 } as const;
 
 const fontStack =
-  "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
+  "-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif";
+
+/**
+ * Dark-mode hardening. The email is designed light-only:
+ * - `color-scheme: light only` tells Apple Mail / iOS not to recolour it.
+ * - Outlook.com marks the nodes it recolours with `data-ogsc` (text) and
+ *   `data-ogsb` (background); these rules restore the brand colours there.
+ * - Gmail ignores all of this and may invert; every node therefore sets an
+ *   explicit text colour on an explicit background (no colour on transparent),
+ *   and the button is light text on a dark, saturated background with a gold
+ *   border, which inverters leave readable (see `styles.button`).
+ * Static CSS only: no user input ever reaches this string.
+ */
+const darkModeCss = [
+  ":root { color-scheme: light only; supported-color-schemes: light only; }",
+  `[data-ogsc] .cu-ink { color: ${color.ink} !important; }`,
+  `[data-ogsc] .cu-muted { color: ${color.muted} !important; }`,
+  `[data-ogsc] .cu-brand { color: ${color.green} !important; }`,
+  `[data-ogsc] .cu-wordmark { color: ${color.goldOnDark} !important; }`,
+  `[data-ogsc] .cu-btn { color: ${color.white} !important; }`,
+  `[data-ogsb] .cu-btn { background-color: ${color.green} !important; }`,
+  `[data-ogsb] .cu-card { background-color: ${color.white} !important; }`,
+  `[data-ogsb] .cu-header { background-color: ${color.green} !important; }`,
+  `[data-ogsb] .cu-bg { background-color: ${color.cream} !important; }`,
+  `[data-ogsb] .cu-warning { background-color: ${color.dangerSoft} !important; }`,
+].join("\n");
+
+/** Legacy `bgcolor` attribute: honoured by Outlook desktop and kept by Gmail's inverter as a hint. */
+function bgcolor(value: string): Record<string, string> {
+  return { bgcolor: value };
+}
 
 const styles = {
   body: {
@@ -45,6 +72,7 @@ const styles = {
     color: color.ink,
   },
   container: {
+    backgroundColor: color.cream,
     maxWidth: "600px",
     width: "100%",
     margin: "0 auto",
@@ -97,15 +125,26 @@ const styles = {
     lineHeight: "26px",
     margin: "0 0 16px",
   },
-  ctaSection: { padding: "8px 0 16px", textAlign: "center" },
+  ctaSection: {
+    backgroundColor: color.white,
+    padding: "8px 0 16px",
+    textAlign: "center",
+  },
+  // 2px border + 12px padding + 24px line height = 52px tall (≥ 44px target).
+  // Email exception to the web "gold primary" rule: dark-mode inverters
+  // (Gmail, Chromium auto-dark) lighten dark text but keep saturated
+  // backgrounds, so ink-on-gold became light-on-gold (unreadable). White on
+  // green (7.65:1) survives both light mode and inversion; the gold border
+  // keeps the brand accent.
   button: {
-    backgroundColor: color.gold,
-    color: color.ink,
+    backgroundColor: color.green,
+    border: `2px solid ${color.gold}`,
+    color: color.white,
     borderRadius: "12px",
     fontSize: "17px",
     fontWeight: 700,
     lineHeight: "24px",
-    padding: "14px 28px",
+    padding: "12px 28px",
     textDecoration: "none",
     display: "inline-block",
     minWidth: "200px",
@@ -170,8 +209,10 @@ export interface EmailLayoutProps {
 
 /**
  * Shared single-column (≤ 600px) layout: green header, white card, one gold
- * bulletproof button (48px tall), small print, optional warning and footer.
- * Contains no tracking pixels and no images other than the optional logo.
+ * bulletproof button (52px tall) with a copy-paste fallback link, small
+ * print, optional warning and footer. Light-only and hardened against
+ * dark-mode recolouring. Contains no tracking pixels and no images other
+ * than the optional logo.
  */
 export function EmailLayout({
   content,
@@ -180,15 +221,26 @@ export function EmailLayout({
   return (
     <Html lang="es" dir="ltr">
       <Head>
-        <meta name="color-scheme" content="light" />
-        <meta name="supported-color-schemes" content="light" />
+        <meta name="color-scheme" content="light only" />
+        <meta name="supported-color-schemes" content="light only" />
+        <style>{darkModeCss}</style>
       </Head>
       <Preview>{content.preview}</Preview>
-      <Body style={styles.body}>
-        <Container style={styles.container}>
-          <Section style={styles.header}>
+      <Body style={styles.body} className="cu-bg">
+        <Container
+          style={styles.container}
+          className="cu-bg"
+          {...bgcolor(color.cream)}
+        >
+          <Section
+            style={styles.header}
+            className="cu-header"
+            {...bgcolor(color.green)}
+          >
             {logoUrl === null ? (
-              <Text style={styles.wordmark}>CUENCADA</Text>
+              <Text style={styles.wordmark} className="cu-wordmark">
+                CUENCADA
+              </Text>
             ) : (
               <Img
                 src={logoUrl}
@@ -198,41 +250,65 @@ export function EmailLayout({
               />
             )}
           </Section>
-          <Section style={styles.stripe}>&nbsp;</Section>
-          <Section style={styles.card}>
-            <Heading as="h1" style={styles.heading}>
+          <Section style={styles.stripe} {...bgcolor(color.gold)}>
+            &nbsp;
+          </Section>
+          <Section
+            style={styles.card}
+            className="cu-card"
+            {...bgcolor(color.white)}
+          >
+            <Heading as="h1" style={styles.heading} className="cu-ink">
               {content.heading}
             </Heading>
-            <Text style={styles.text}>{content.greeting}</Text>
-            {content.paragraphs.map((paragraph) => (
-              <Text key={paragraph} style={styles.text}>
-                {paragraph}
+            <Text style={styles.text} className="cu-ink">
+              {content.greeting}
+            </Text>
+            {content.paragraphs.map((block) => (
+              <Text key={block.id} style={styles.text} className="cu-ink">
+                {block.text}
               </Text>
             ))}
             {content.cta === null ? null : (
-              <Section style={styles.ctaSection}>
-                <Button href={content.cta.url} style={styles.button}>
-                  {content.cta.label}
-                </Button>
-              </Section>
-            )}
-            {content.cta === null ? null : (
               <>
-                <Text style={styles.fallbackLabel}>{CTA_FALLBACK_LABEL}</Text>
-                <Text style={styles.fallbackUrl}>{content.cta.url}</Text>
+                <Section
+                  style={styles.ctaSection}
+                  className="cu-card"
+                  {...bgcolor(color.white)}
+                >
+                  <Button
+                    href={content.cta.url}
+                    style={styles.button}
+                    className="cu-btn"
+                  >
+                    {content.cta.label}
+                  </Button>
+                </Section>
+                <Text style={styles.fallbackLabel} className="cu-muted">
+                  {CTA_FALLBACK_LABEL}
+                </Text>
+                <Text style={styles.fallbackUrl} className="cu-brand">
+                  {content.cta.url}
+                </Text>
               </>
             )}
-            {content.notes.map((note) => (
-              <Text key={note} style={styles.note}>
-                {note}
+            {content.notes.map((block) => (
+              <Text key={block.id} style={styles.note} className="cu-muted">
+                {block.text}
               </Text>
             ))}
             {content.warning === null ? null : (
-              <Text style={styles.warning}>{content.warning}</Text>
+              <Text style={styles.warning} className="cu-ink cu-warning">
+                {content.warning}
+              </Text>
             )}
             <Hr style={styles.hr} />
-            <Text style={styles.footerBrand}>{FOOTER_BRAND}</Text>
-            <Text style={styles.footer}>{FOOTER_IGNORE}</Text>
+            <Text style={styles.footerBrand} className="cu-brand">
+              {FOOTER_BRAND}
+            </Text>
+            <Text style={styles.footer} className="cu-muted">
+              {content.footerNote}
+            </Text>
           </Section>
         </Container>
       </Body>

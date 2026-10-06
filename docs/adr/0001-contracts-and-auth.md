@@ -39,7 +39,8 @@ Phase 1 builds frontend and backend tracks in parallel. They need one contract t
 
 ### 3. Tokens travel in the body (and the URL fragment), never in the path or query
 
-- Emails link to `https://cuencada.com/<page>#token=<opaque>`. The SPA reads the fragment and POSTs `{ token }` to `/api/invites/inspect`, `/api/invites/accept`, `/api/auth/magic-link/consume`, `/api/auth/password-reset/confirm`, or `/api/auth/email/verify`.
+- Emails link to `https://cuencada.com/<page>#t=<opaque>`. The SPA reads the fragment and POSTs `{ token }` to `/api/invites/inspect`, `/api/invites/accept`, `/api/auth/magic-link/consume`, `/api/auth/password-reset/confirm`, or `/api/auth/email/verify`.
+  - *Note (WP-0.5.1, orchestrator decision):* `#t=` is the canonical fragment name, and it is what `@cuencada/emails` generates. Earlier drafts said `#token=`.
 - Fragments are never sent to the server or in `Referer`, so tokens stay out of access logs and proxies. Email link scanners don't consume them, because a GET does nothing.
 - The refresh token exists only in the `__Secure-cuencada_rt` cookie (HttpOnly, Secure, SameSite=Strict, Path=/api/auth). It is never in a JSON body. Refresh and logout also require the `X-Cuencada-CSRF` header and an exact `Origin` match. The access token is returned in the body and kept only in memory.
 - **The one exception** is the WebSocket ticket. Browsers cannot set headers on a WS upgrade, so the 30-second, single-use ticket from `POST /api/chat/ticket` goes in `?ticket=`. The ticket is bound to the issuing session, so revoking the session invalidates unused tickets. The server must redact `ticket` from request logs, burn the ticket on first use, and check `Origin` on upgrade. App-level redaction doesn't cover the VPS reverse proxy, so WP-2.4 must also strip the query string from proxy access logs for `/api/chat/ws`.
