@@ -61,7 +61,8 @@ Phase 1 builds frontend and backend tracks in parallel. They need one contract t
   - `code` comes from the `ErrorCode` as-const object, with its HTTP status fixed in `errorHttpStatus`.
   - `message` is Spanish, produced server-side, and safe to show to the user.
   - `details` lists `{ path, message, code? }` for validation failures. `code` is an optional
-    `ValidationIssueCode` for the few reasons the web branches on; today only `PASSWORD_BREACHED`
+    reason for the few cases the web branches on. The schema accepts any string (≤ 64 chars) so older
+    clients still parse new codes; the known values are `ValidationIssueCode`, today only `PASSWORD_BREACHED`
     (WP-2.3c: the new password is in known breaches; the web shows the Spanish message on that field).
 - The web branches on `code` only. Notable codes:
   - `TOKEN_EXPIRED` (401): the client refreshes and retries.

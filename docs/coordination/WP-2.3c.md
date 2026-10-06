@@ -9,7 +9,7 @@ Based on `origin/main` (bc2d3d5). Comes from the owner's decision on WP-2.3 find
   - Only the 5-char prefix leaves the server. The 35-char suffix is looked up locally in the parsed answer. Padding entries (count 0) and malformed lines are ignored.
   - 1.5 s timeout (one `AbortController`, covers headers and body), `redirect: "error"`, and a 512 KiB body cap enforced from `content-length` and while streaming. Over the cap counts as unavailable (`oversized`).
   - Threshold: reject when the count is ≥ `PASSWORD_BREACH_MIN_COUNT` (default 1, the ASVS default).
-  - A small LRU cache of prefix → (suffix → count): at most 500 prefixes, 10-minute TTL. It holds public range data only, never the password, hash or suffix. Failed lookups are not cached.
+  - A small LRU cache of the **outcome per password** (its breach count): at most 2000 entries (~150 bytes each, well under 1 MB), 10-minute TTL. The key is HMAC-SHA-256 of the full SHA-1 under a random per-process key, so memory never holds the plain unsalted SHA-1. Failed lookups are not cached. (Was a whole-bucket cache per prefix; TL review: tens of MB at worst on a < 1 GB VPS and rare hits.)
   - `assertPasswordNotBreached(checker, password, path)` throws the route error.
 - **Wiring:**
   - `config.ts`: `PASSWORD_BREACH_CHECK=on|off` (case-insensitive, blank = default; defaults to `off` under `NODE_ENV=test`, `on` otherwise) and `PASSWORD_BREACH_MIN_COUNT` (integer 1–1,000,000, default 1). Both are validated and tested in `config.test.ts`.
@@ -21,7 +21,7 @@ Based on `origin/main` (bc2d3d5). Comes from the owner's decision on WP-2.3 find
   - `POST /api/auth/password-reset/confirm` → detail on `newPassword`.
 - **Seed:** `assertSeedPasswordNotBreached` runs in `main()` when `NODE_ENV=production` (unless `PASSWORD_BREACH_CHECK=off`). A breached `SEED_ADMIN_TEMP_PASSWORD` fails the seed with "SEED_ADMIN_TEMP_PASSWORD appears in known data breaches (Have I Been Pwned). Generate a new random one in vault." The seed also fails open (stderr warning) when HIBP is unreachable, since the admin is forced to change that password at first login, where the API checks it.
 - **Contract** (`packages/types`):
-  - `common.ts`: `ValidationIssueCode = { PASSWORD_BREACHED }` and an optional `code` on `ApiErrorDetail` / `apiErrorDetailSchema`. The barrel is untouched.
+  - `common.ts`: `ValidationIssueCode = { PASSWORD_BREACHED }` (exported constant) and an optional `code` on `ApiErrorDetail` / `apiErrorDetailSchema`. The wire schema accepts **any** string up to 64 chars (`API_ERROR_DETAIL_CODE_MAX`), so an older client still parses an error carrying a code it doesn't know; the web branches only on the known value. The barrel is untouched.
   - `auth.ts`: `PASSWORD_BREACHED_MESSAGE` = "Esta contraseña apareció en filtraciones de datos conocidas. Elige otra."
   - `plugins/errors.ts`: `capErrorDetails` keeps a detail's `code`.
 - **Frontend** (`apps/web/src/features/auth`):
@@ -38,7 +38,7 @@ Based on `origin/main` (bc2d3d5). Comes from the owner's decision on WP-2.3 find
 3. **Ordering and single-use tokens.** The check runs after the zod body validation and **before** argon2 hashing, the DB transaction and any token or invite lookup. A breached password therefore never consumes the reset token or an invite use: the user can retry with the same link (tested: the token's `used_at` stays null, the invite's `use_count` stays 0, and the retry succeeds). The check is a plain `await` in the handler before any state change, so there is no race that skips it: every path to the hash/write goes through it.
    - Side effect: with a breached password, a dead invite/reset token answers `PASSWORD_BREACHED` rather than `INVITE_INVALID`/`TOKEN_INVALID`. That reveals nothing about the token (the breach status is public data about the password).
    - change-password runs the check before verifying the current password (argon2), as required. A caller with a stolen session learns nothing new from it.
-4. **Outbound calls are bounded by existing rate limits** (confirmed in the route configs): invite accept 10/15 min per IP plus 5/15 min per invite token; change-password 20/15 min per IP plus 10/15 min per user; reset confirm 10/15 min per IP; plus the global 300/min per IP. The prefix cache cuts repeat calls further.
+4. **Outbound calls are bounded by existing rate limits** (confirmed in the route configs): invite accept 10/15 min per IP plus 5/15 min per invite token; change-password 20/15 min per IP plus 10/15 min per user; reset confirm 10/15 min per IP; plus the global 300/min per IP. The outcome cache cuts repeat calls further.
 5. **Tests default to `off`** (`NODE_ENV=test` default), so no test can reach the network. Tests that exercise the check pass `config: { PASSWORD_BREACH_CHECK: "on" }` and a fake `breachFetcher` (`test/helpers/breach.ts`); that is the only mocked boundary.
 
 ## Egress, nginx and firewall
@@ -49,7 +49,7 @@ Based on `origin/main` (bc2d3d5). Comes from the owner's decision on WP-2.3 find
 - The one-off prod seed, run from the operator's machine, needs the same egress (or `PASSWORD_BREACH_CHECK=off` with a password generated by the vault).
 
 ## Interfaces consumed / exposed
-- Exposed: `ValidationIssueCode`, `validationIssueCodeSchema`, `ApiErrorDetail.code?`, `PASSWORD_BREACHED_MESSAGE` (`@cuencada/types`); `app.breachedPasswords`; `AppDeps.breachFetcher`; `createTestApp({ breachFetcher })`.
+- Exposed: `ValidationIssueCode`, `API_ERROR_DETAIL_CODE_MAX`, `ApiErrorDetail.code?` (open string), `PASSWORD_BREACHED_MESSAGE` (`@cuencada/types`); `app.breachedPasswords`; `AppDeps.breachFetcher`; `createTestApp({ breachFetcher })`.
 - Consumed: `api.pwnedpasswords.com/range/*`.
 
 ## Tests
@@ -63,3 +63,4 @@ Based on `origin/main` (bc2d3d5). Comes from the owner's decision on WP-2.3 find
 
 ## Review log
 - PR #39, Security: APPROVED with two Lows, both folded in. L1: the body cap is now enforced from `content-length` and while streaming (abort + `oversized`); before, it was checked only after `response.text()` buffered everything. L2: `redirect: "error"`, and a 3xx counts as fail-open. Ops: the alert on a rising `password.breach_check_unavailable` counter is documented above and in the backlog.
+- PR #39, TL: APPROVED with two non-blocking items, both folded in. Cache: per-password outcome (HMAC-keyed count, bounded LRU, TTL) instead of whole prefix buckets. Contract: the detail `code` is an open string on the wire (an unknown code parses; tested in `common.test.ts` and `forms.test.ts`).

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ValidationIssueCode,
   apiErrorSchema,
   assetUrlSchema,
   cursorQuerySchema,
@@ -107,11 +108,17 @@ describe("apiErrorSchema", () => {
     expect(apiErrorSchema.safeParse({ error: { code: "VALIDATION", message: "x", details } }).success).toBe(false);
   });
 
-  it("keeps a known detail code and rejects an unknown one", () => {
-    const detail = { path: "password", message: "x", code: "PASSWORD_BREACHED" };
+  it("keeps a known detail code", () => {
+    const detail = { path: "password", message: "x", code: ValidationIssueCode.PASSWORD_BREACHED };
     const parsed = apiErrorSchema.parse({ error: { code: "VALIDATION", message: "x", details: [detail] } });
     expect(parsed.error.details).toEqual([detail]);
-    const unknown = { error: { code: "VALIDATION", message: "x", details: [{ ...detail, code: "NOPE" }] } };
-    expect(apiErrorSchema.safeParse(unknown).success).toBe(false);
+  });
+
+  it("parses an unknown detail code (forward compatibility) but bounds its length", () => {
+    const future = { path: "password", message: "Mensaje nuevo.", code: "PASSWORD_TOO_SIMILAR_TO_EMAIL" };
+    const parsed = apiErrorSchema.parse({ error: { code: "VALIDATION", message: "x", details: [future] } });
+    expect(parsed.error.details).toEqual([future]);
+    const huge = { error: { code: "VALIDATION", message: "x", details: [{ ...future, code: "X".repeat(65) }] } };
+    expect(apiErrorSchema.safeParse(huge).success).toBe(false);
   });
 });

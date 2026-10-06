@@ -178,22 +178,41 @@ describe("createBreachedPasswordChecker", () => {
     expect(await subject.check(BREACHED)).toBe("breached");
   });
 
-  it("caches a prefix's range until the TTL passes, and evicts the least recently used prefix", async () => {
+  it("caches each password's outcome until the TTL passes, and evicts the least recently used one", async () => {
     let now = 0;
     const range = fakeRange([BREACHED]);
     const { checker: subject } = checker({ fetcher: range.fetcher, now: () => now, cacheMaxEntries: 1 });
 
-    await subject.check(BREACHED);
-    await subject.check(BREACHED);
+    expect(await subject.check(BREACHED)).toBe("breached");
+    expect(await subject.check(BREACHED)).toBe("breached"); // from the cache
     expect(range.urls).toHaveLength(1);
 
     now += 11 * 60 * 1000;
     await subject.check(BREACHED);
     expect(range.urls).toHaveLength(2);
 
-    await subject.check(CLEAN); // different prefix evicts the first (max 1 entry)
+    expect(await subject.check(CLEAN)).toBe("clean"); // evicts the first (max 1 entry)
+    expect(await subject.check(CLEAN)).toBe("clean");
+    expect(range.urls).toHaveLength(3);
     await subject.check(BREACHED);
     expect(range.urls).toHaveLength(4);
+  });
+
+  it("caches outcomes per password, not whole prefix buckets", async () => {
+    // Two passwords sharing a prefix: the second still needs its own lookup.
+    const { prefix } = sha1Range(BREACHED);
+    // Deterministic search (~1M SHA-1s on average for a 20-bit prefix; well under a second).
+    let sibling: string | undefined;
+    for (let index = 0; index < 20_000_000 && sibling === undefined; index += 1) {
+      if (sha1Range(`hermana-${index}`).prefix === prefix) sibling = `hermana-${index}`;
+    }
+    if (sibling === undefined) throw new Error("no same-prefix candidate found");
+    const range = fakeRange([BREACHED]);
+    const { checker: subject } = checker({ fetcher: range.fetcher });
+
+    expect(await subject.check(BREACHED)).toBe("breached");
+    expect(await subject.check(sibling)).toBe("clean");
+    expect(range.urls).toEqual([`${PWNED_RANGE_URL}${prefix}`, `${PWNED_RANGE_URL}${prefix}`]);
   });
 
   it("does not cache a failed lookup", async () => {

@@ -5,9 +5,11 @@
  * - Only the first 5 hex characters of the password's SHA-1 leave the server
  *   (`GET https://api.pwnedpasswords.com/range/<prefix>`, `Add-Padding: true`).
  *   The 35-character suffix is compared locally against the returned list.
- * - The password, its hash and the suffix are never logged, cached or thrown.
- *   The optional cache holds only the public range data (suffix → count) keyed
- *   by the public prefix.
+ * - The password, its hash and the suffix are never logged or thrown. The
+ *   optional cache keeps one outcome (the breach count) per password, keyed by
+ *   an HMAC of the full SHA-1 under a random per-process key, so the memory
+ *   never holds the plain unsalted SHA-1 and the key is useless outside this
+ *   process. It is bounded (LRU) and short-lived.
  * - **Fail-open:** a network error, timeout (1.5 s), redirect (fetch uses
  *   `redirect: "error"`), oversized body (checked against `content-length`
  *   first, then with a running byte cap while streaming) or non-200 answer
@@ -17,7 +19,7 @@
  *   length policy still applies, and the counter makes a prolonged outage
  *   visible in the logs.
  */
-import { createHash } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { PASSWORD_BREACHED_MESSAGE, ValidationIssueCode } from "@cuencada/types";
 import { AppError } from "./errors.js";
 
@@ -27,8 +29,11 @@ export const PWNED_RANGE_URL = "https://api.pwnedpasswords.com/range/";
 export const BREACH_CHECK_TIMEOUT_MS = 1500;
 /** A padded range answer is ~800–1000 lines of ~40 bytes (~40 KB); anything far bigger is not HIBP. */
 export const MAX_RANGE_BODY_BYTES = 512 * 1024;
-/** Cache bounds: prefixes kept and how long. Range data changes rarely. */
-const CACHE_MAX_ENTRIES = 500;
+/**
+ * Cache bounds: outcomes kept and how long. One entry is ~150 bytes, so the
+ * default is well under 1 MB (a whole-bucket cache could reach tens of MB).
+ */
+const CACHE_MAX_ENTRIES = 2000;
 const CACHE_TTL_MS = 10 * 60 * 1000;
 
 const PREFIX_LENGTH = 5;
@@ -74,7 +79,7 @@ export interface BreachCheckerOptions {
   timeoutMs?: number;
   /** Defaults to `Date.now` (cache expiry only). */
   now?: () => number;
-  /** Set to `0` to disable the prefix cache. */
+  /** Set to `0` to disable the outcome cache. */
   cacheMaxEntries?: number;
 }
 
@@ -154,28 +159,37 @@ class RangeUnavailable extends Error {
   }
 }
 
-/** Small LRU of prefix → range data with a TTL. Holds public data only. */
-class RangeCache {
-  private readonly entries = new Map<string, { expiresAt: number; counts: Map<string, number> }>();
+/**
+ * Small LRU of password outcome (breach count) with a TTL, keyed by
+ * HMAC-SHA-256(per-process random key, full SHA-1). Never holds the SHA-1 itself.
+ */
+class OutcomeCache {
+  private readonly entries = new Map<string, { expiresAt: number; count: number }>();
+  private readonly key = randomBytes(32);
 
   constructor(
     private readonly maxEntries: number,
     private readonly now: () => number
   ) {}
 
-  get(prefix: string): Map<string, number> | undefined {
-    const entry = this.entries.get(prefix);
-    if (entry === undefined) return undefined;
-    this.entries.delete(prefix);
-    if (entry.expiresAt <= this.now()) return undefined;
-    this.entries.set(prefix, entry); // most recently used goes last
-    return entry.counts;
+  /** Cache key for a full uppercase SHA-1 hex digest. */
+  keyFor(sha1: string): string {
+    return createHmac("sha256", this.key).update(sha1).digest("base64url");
   }
 
-  set(prefix: string, counts: Map<string, number>): void {
+  get(key: string): number | undefined {
+    const entry = this.entries.get(key);
+    if (entry === undefined) return undefined;
+    this.entries.delete(key);
+    if (entry.expiresAt <= this.now()) return undefined;
+    this.entries.set(key, entry); // most recently used goes last
+    return entry.count;
+  }
+
+  set(key: string, count: number): void {
     if (this.maxEntries <= 0) return;
-    this.entries.delete(prefix);
-    this.entries.set(prefix, { expiresAt: this.now() + CACHE_TTL_MS, counts });
+    this.entries.delete(key);
+    this.entries.set(key, { expiresAt: this.now() + CACHE_TTL_MS, count });
     while (this.entries.size > this.maxEntries) {
       const oldest = this.entries.keys().next().value;
       if (oldest === undefined) break;
@@ -194,7 +208,7 @@ export function createBreachedPasswordChecker(options: BreachCheckerOptions): Br
   const fetcher: RangeFetcher = options.fetcher ?? ((url, init) => fetch(url, init));
   const timeoutMs = options.timeoutMs ?? BREACH_CHECK_TIMEOUT_MS;
   const now = options.now ?? Date.now;
-  const cache = new RangeCache(options.cacheMaxEntries ?? CACHE_MAX_ENTRIES, now);
+  const cache = new OutcomeCache(options.cacheMaxEntries ?? CACHE_MAX_ENTRIES, now);
   let unavailableCount = 0;
 
   async function fetchRange(prefix: string): Promise<Map<string, number>> {
@@ -241,10 +255,11 @@ export function createBreachedPasswordChecker(options: BreachCheckerOptions): Br
     async check(password) {
       if (!options.enabled) return "skipped";
       const { prefix, suffix } = sha1Range(password);
-      let counts = cache.get(prefix);
-      if (counts === undefined) {
+      const cacheKey = cache.keyFor(prefix + suffix);
+      let count = cache.get(cacheKey);
+      if (count === undefined) {
         try {
-          counts = await fetchRange(prefix);
+          count = (await fetchRange(prefix)).get(suffix) ?? 0;
         } catch (error) {
           if (!(error instanceof RangeUnavailable)) throw error;
           unavailableCount += 1;
@@ -260,9 +275,8 @@ export function createBreachedPasswordChecker(options: BreachCheckerOptions): Br
           );
           return "unavailable";
         }
-        cache.set(prefix, counts);
+        cache.set(cacheKey, count);
       }
-      const count = counts.get(suffix) ?? 0;
       return count >= options.minCount ? "breached" : "clean";
     }
   };
