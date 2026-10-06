@@ -27,7 +27,14 @@ import { AppError } from "../../lib/errors.js";
 import { authUser } from "../../plugins/auth.js";
 import { PgErrorCode, pgErrorInfo } from "./db-errors.js";
 import { insertRelationship } from "./relationships.js";
-import { findPerson, type PersonRow, personColumns, relationshipColumns, toPerson } from "./repository.js";
+import {
+  findPerson,
+  type PersonRow,
+  type PersonViewRow,
+  personColumns,
+  relationshipColumns,
+  toPersonWithAvatar
+} from "./repository.js";
 
 const PERSON_NOT_FOUND = "No encontramos a esa persona.";
 const RELATIONSHIP_NOT_FOUND = "No encontramos esa relación.";
@@ -141,6 +148,18 @@ async function auditLinkChange(
   }
 }
 
+/**
+ * Re-read a just-written person with the profile/account join (for the
+ * avatar), inside the write's transaction.
+ *
+ * @throws Error when the row vanished (cannot happen inside the transaction).
+ */
+async function viewOf(tx: Transaction, id: string): Promise<PersonViewRow> {
+  const view = await findPerson(tx, id);
+  if (view === undefined) throw new Error("person vanished inside its write transaction");
+  return view;
+}
+
 /** Admin family routes (mounted under `/api`). */
 const adminFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
   /** `POST /api/admin/people`: create a person, optionally linked to an account. */
@@ -174,9 +193,9 @@ const adminFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
           ip: request.ip
         });
         await auditLinkChange(tx, undefined, row, admin.id, request.ip);
-        return toPerson(row, admin);
+        return viewOf(tx, row.id);
       });
-      return reply.code(201).send(person);
+      return reply.code(201).send(await toPersonWithAvatar(app, person, admin));
     }
   );
 
@@ -194,7 +213,7 @@ const adminFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request): Promise<Person> => {
       const admin = authUser(request);
       const { id } = request.params;
-      return app.db.transaction(async (tx) => {
+      const saved = await app.db.transaction(async (tx) => {
         const before = await findPerson(tx, id);
         if (before === undefined) throw new AppError("NOT_FOUND", PERSON_NOT_FOUND);
         const input = request.body;
@@ -216,8 +235,9 @@ const adminFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
           ip: request.ip
         });
         await auditLinkChange(tx, before, row, admin.id, request.ip);
-        return toPerson(row, admin);
+        return viewOf(tx, row.id);
       });
+      return toPersonWithAvatar(app, saved, admin);
     }
   );
 

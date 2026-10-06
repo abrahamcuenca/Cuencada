@@ -11,7 +11,7 @@ import {
   insertPerson
 } from "../../../test/helpers/family.js";
 import type { App } from "../../app.js";
-import { auditLogs, people } from "../../db/schema/index.js";
+import { auditLogs, people, profiles } from "../../db/schema/index.js";
 
 const PERSON_KEYS = ["avatarUrl", "birthYear", "deathYear", "deceased", "familyBranch", "fullName", "id", "nickname", "userId"];
 const SUMMARY_KEYS = ["avatarUrl", "deceased", "fullName", "id", "nickname", "userId"];
@@ -348,5 +348,120 @@ describe("PATCH /api/family/me", () => {
     await insertPerson({ fullName: "Sin cuenta" });
     const response = await app.inject({ method: "PATCH", url: "/api/family/me", payload: { nickname: "x" }, ...memberAuth });
     expect(response.statusCode).toBe(404);
+  });
+});
+
+describe("account links and avatars (profiles.listed_in_directory)", () => {
+  const UPLOAD_ID = "2c3d4e5f-6071-4c8d-9e0f-1a2b3c4d5e6f";
+
+  function avatarKeyFor(userId: string): string {
+    return `avatars/${userId}/${UPLOAD_ID}-256.webp`;
+  }
+
+  /** A verified member with an avatar, linked to a person who is the caller's parent. */
+  async function linkedRelative(options: { listed: boolean; status?: "active" | "disabled" }): Promise<{
+    user: TestUser;
+    personId: string;
+    meId: string;
+  }> {
+    const user = await createUser({
+      emailVerified: true,
+      ...(options.status === undefined ? {} : { status: options.status }),
+      profile: { fullName: "Pariente Ficticio", listedInDirectory: options.listed }
+    });
+    await getTestDb()
+      .update(profiles)
+      .set({ avatarKey: avatarKeyFor(user.id) })
+      .where(eq(profiles.userId, user.id));
+    const relative = await insertPerson({ fullName: "Pariente Ficticio", userId: user.id });
+    const me = await insertPerson({ fullName: "Yo", userId: member.id });
+    await insertParentOf(relative.id, me.id);
+    return { user, personId: relative.id, meId: me.id };
+  }
+
+  async function search(auth: AuthInjectOptions): Promise<PersonSummary | undefined> {
+    const response = await app.inject({ method: "GET", url: "/api/family/people?q=pariente", ...auth });
+    expect(response.statusCode).toBe(200);
+    return response.json<Page<PersonSummary>>().items[0];
+  }
+
+  async function detail(personId: string, auth: AuthInjectOptions): Promise<Person> {
+    const response = await app.inject({ method: "GET", url: `/api/family/people/${personId}`, ...auth });
+    expect(response.statusCode).toBe(200);
+    return response.json<Person>();
+  }
+
+  it("presigns listed, active accounts' avatars: 256 px on a Person, 64 px on summaries", async () => {
+    const { user, personId } = await linkedRelative({ listed: true });
+
+    const person = await detail(personId, memberAuth);
+    expect(person.userId).toBe(user.id);
+    expect(person.avatarUrl).toContain(`${UPLOAD_ID}-256.webp`);
+    expect((await search(memberAuth))?.avatarUrl).toContain(`${UPLOAD_ID}-64.webp`);
+    const tree = await getTree("");
+    expect(tree.parents[0]).toMatchObject({ id: personId, userId: user.id });
+    expect(tree.parents[0]?.avatarUrl).toContain(`${UPLOAD_ID}-64.webp`);
+  });
+
+  it("returns userId and avatarUrl null for unlisted accounts in detail, search and tree, keeping name and genealogy", async () => {
+    const { personId, meId } = await linkedRelative({ listed: false });
+
+    expect(await detail(personId, memberAuth)).toMatchObject({
+      fullName: "Pariente Ficticio",
+      userId: null,
+      avatarUrl: null
+    });
+    const found = await search(memberAuth);
+    expect(found).toMatchObject({ id: personId, userId: null, avatarUrl: null });
+
+    const tree = await getTree("");
+    expect(tree.parents).toEqual([
+      expect.objectContaining({ id: personId, fullName: "Pariente Ficticio", userId: null, avatarUrl: null })
+    ]);
+    expect(tree.extended.relationships).toEqual([
+      expect.objectContaining({ fromPersonId: personId, toPersonId: meId })
+    ]);
+    const focused = await getTree(`?personId=${personId}`);
+    expect(focused.focus).toMatchObject({ id: personId, userId: null, avatarUrl: null });
+
+    expect(JSON.stringify([tree, focused, found])).not.toContain("avatars/");
+  });
+
+  it("still shows an unlisted account's link and avatar to that member and to admins", async () => {
+    const { user, personId } = await linkedRelative({ listed: false });
+    const admin = await createUser({ role: "admin", emailVerified: true });
+
+    for (const auth of [await loginAs(app, user), await loginAs(app, admin)]) {
+      const person = await detail(personId, auth);
+      expect(person.userId).toBe(user.id);
+      expect(person.avatarUrl).toContain(`${UPLOAD_ID}-256.webp`);
+      expect((await search(auth))?.userId).toBe(user.id);
+    }
+  });
+
+  it("keeps the link but never presigns the avatar of a disabled account for other members", async () => {
+    const { user, personId } = await linkedRelative({ listed: true, status: "disabled" });
+
+    expect(await detail(personId, memberAuth)).toMatchObject({ userId: user.id, avatarUrl: null });
+    expect((await getTree("")).parents[0]?.avatarUrl).toBeNull();
+  });
+
+  it("returns the caller's own avatar from the self edit, even when unlisted", async () => {
+    await getTestDb()
+      .update(profiles)
+      .set({ avatarKey: avatarKeyFor(member.id), listedInDirectory: false })
+      .where(eq(profiles.userId, member.id));
+    await insertPerson({ fullName: "Yo", userId: member.id });
+
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/api/family/me",
+      payload: { nickname: "Yoyo" },
+      ...memberAuth
+    });
+
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json<Person>()).toMatchObject({ userId: member.id, nickname: "Yoyo" });
+    expect(response.json<Person>().avatarUrl).toContain(`${UPLOAD_ID}-256.webp`);
   });
 });

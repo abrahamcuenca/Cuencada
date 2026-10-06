@@ -5,8 +5,10 @@
  * (descendants) from the focus, bounded by `depth` and guarded against
  * cycles by a `path` array, so it terminates even on corrupt, cyclic data
  * inserted behind the service's back. The same statement adds the focus'
- * partners and siblings. People and the edges between them are then loaded
- * with one query each (no N+1): three queries per view in total.
+ * partners and siblings. People (joined to the linked profile and account
+ * for the privacy rules) and the edges between them are then loaded with one
+ * query each (no N+1): three queries per view in total. Avatars are
+ * presigned once per distinct key (no DB work).
  */
 import {
   FAMILY_TREE_MAX_DEPTH,
@@ -20,16 +22,23 @@ import { z } from "zod";
 import { people, personRelationships } from "../../db/schema/index.js";
 import type { DbOrTx } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
+import type { AvatarUrlDeps } from "../profile/avatar.js";
+import { AvatarSize } from "../profile/constants.js";
 import {
   compareByName,
-  type PersonRow,
-  personColumns,
+  type PersonAvatarUrls,
+  type PersonViewRow,
+  presignPersonAvatars,
   relationshipColumns,
+  selectPersonViews,
   toPerson,
   toPersonSummary,
   toRelationship,
   type Viewer
 } from "./repository.js";
+
+/** What {@link loadTreeView} needs from the app. */
+export type TreeViewDeps = AvatarUrlDeps & { db: DbOrTx };
 
 const TreeRole = {
   Up: "up",
@@ -104,13 +113,18 @@ async function walkTree(db: DbOrTx, focusId: string, depth: number): Promise<Tre
 }
 
 /** Summaries for `ids` (deduplicated, missing ids skipped), sorted by name. */
-function summariesFor(ids: Iterable<string>, byId: ReadonlyMap<string, PersonRow>): PersonSummary[] {
-  const rows: PersonRow[] = [];
+function summariesFor(
+  ids: Iterable<string>,
+  byId: ReadonlyMap<string, PersonViewRow>,
+  viewer: Viewer,
+  avatars: PersonAvatarUrls
+): PersonSummary[] {
+  const rows: PersonViewRow[] = [];
   for (const id of new Set(ids)) {
     const row = byId.get(id);
     if (row !== undefined) rows.push(row);
   }
-  return rows.sort(compareByName).map(toPersonSummary);
+  return rows.sort(compareByName).map((row) => toPersonSummary(row, viewer, avatars));
 }
 
 /**
@@ -123,24 +137,25 @@ function summariesFor(ids: Iterable<string>, byId: ReadonlyMap<string, PersonRow
  *   (including the focus and the first ring), so the client can lay them out
  *   and admins can find relationship ids to delete.
  *
- * @param db - Client.
+ * @param deps - Client, storage and logger (`app`).
  * @param focusId - Centre of the view.
  * @param requestedDepth - Requested depth; clamped to 1..{@link FAMILY_TREE_MAX_DEPTH}.
- * @param viewer - The caller (privacy of the focus' years).
+ * @param viewer - The caller (privacy of years, account links and avatars).
  * @throws AppError `NOT_FOUND` when the focus does not exist.
  */
 export async function loadTreeView(
-  db: DbOrTx,
+  deps: TreeViewDeps,
   focusId: string,
   requestedDepth: number,
   viewer: Viewer
 ): Promise<FamilyTreeView> {
+  const { db } = deps;
   const depth = Math.min(Math.max(Math.trunc(requestedDepth), 1), FAMILY_TREE_MAX_DEPTH);
   const walk = await walkTree(db, focusId, depth);
 
   const ids = new Set<string>([focusId, ...walk.map((row) => row.person_id)]);
   const idList = [...ids];
-  const rows = await db.select(personColumns).from(people).where(inArray(people.id, idList));
+  const rows = await selectPersonViews(db, inArray(people.id, idList));
   const byId = new Map(rows.map((row) => [row.id, row]));
   const focus = byId.get(focusId);
   if (focus === undefined) throw new AppError("NOT_FOUND", "No encontramos a esa persona.");
@@ -156,18 +171,27 @@ export async function loadTreeView(
 
   const idsWhere = (predicate: (row: TreeRow) => boolean): string[] =>
     walk.filter(predicate).map((row) => row.person_id);
+  const [focusAvatars, avatars] = await Promise.all([
+    presignPersonAvatars(deps, [focus], viewer, AvatarSize.Large),
+    presignPersonAvatars(
+      deps,
+      rows.filter((row) => row.id !== focusId),
+      viewer,
+      AvatarSize.Small
+    )
+  ]);
+  const summaries = (ids: Iterable<string>): PersonSummary[] => summariesFor(ids, byId, viewer, avatars);
 
   return {
-    focus: toPerson(focus, viewer),
-    parents: summariesFor(idsWhere((row) => row.role === TreeRole.Up && row.level === 1), byId),
-    partners: summariesFor(idsWhere((row) => row.role === TreeRole.Partner), byId),
-    children: summariesFor(idsWhere((row) => row.role === TreeRole.Down && row.level === 1), byId),
-    siblings: summariesFor(idsWhere((row) => row.role === TreeRole.Sibling), byId),
+    focus: toPerson(focus, viewer, focusAvatars),
+    parents: summaries(idsWhere((row) => row.role === TreeRole.Up && row.level === 1)),
+    partners: summaries(idsWhere((row) => row.role === TreeRole.Partner)),
+    children: summaries(idsWhere((row) => row.role === TreeRole.Down && row.level === 1)),
+    siblings: summaries(idsWhere((row) => row.role === TreeRole.Sibling)),
     depth,
     extended: {
-      people: summariesFor(
-        idsWhere((row) => (row.role === TreeRole.Up || row.role === TreeRole.Down) && row.level >= 2),
-        byId
+      people: summaries(
+        idsWhere((row) => (row.role === TreeRole.Up || row.role === TreeRole.Down) && row.level >= 2)
       ),
       relationships: edges
     }
