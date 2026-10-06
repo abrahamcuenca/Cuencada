@@ -8,34 +8,100 @@
  *   SQL text and the Postgres code/constraint/table/column/schema, never the
  *   bound parameters (`params`, `detail`, `where`), which carry emails,
  *   password hashes and token hashes.
- * - The request serializer logs a scrubbed URL: sensitive query parameters
- *   (the chat WebSocket `ticket`, any `token`) are redacted, so the one token
- *   that travels in a URL never reaches the logs.
+ * - The request serializer logs a scrubbed URL: only allowlisted query
+ *   parameters (enums, limits, opaque ids) keep their value; everything else
+ *   (the chat WebSocket `ticket`, free-text searches, cursors) is redacted.
  * - Request headers and bodies are not logged at all by default.
  */
 import type { FastifyRequest, FastifyServerOptions } from "fastify";
+import {
+  AnnouncementScope,
+  AuditAction,
+  AuditEntityType,
+  InviteStatus,
+  MediaKind,
+  MediaUploadStatus,
+  ModerationStatus,
+  UserRole,
+  UserStatus
+} from "@cuencada/types";
 import type { AppConfig } from "./config.js";
 
 export const REDACTED = "[REDACTED]";
 
+/** Accepts one value of an allowlisted query parameter. */
+type QueryValueCheck = (value: string) => boolean;
+
+/** A value from a fixed set (an enum of the contracts). */
+function oneOf(...groups: ReadonlyArray<Record<string, string>>): QueryValueCheck {
+  const allowed = new Set(groups.flatMap((group) => Object.values(group)));
+  return (value) => allowed.has(value);
+}
+
+/** Up to six digits (limits, depths, years). */
+const digits: QueryValueCheck = (value) => /^\d{1,6}$/.test(value);
+
+/** `true` / `false` query booleans. */
+const booleanFlag: QueryValueCheck = (value) => value === "true" || value === "false";
+
+/** Plain base64url (no `.`, `:` or `=`): the chat history cursor. */
+const base64url: QueryValueCheck = (value) => /^[A-Za-z0-9_-]{1,512}$/.test(value);
+
 /**
- * Query parameters whose values are always redacted from logged URLs.
- * `q`/`search` carry free-text searches (people's names in the family tree
- * and directory), which are PII.
+ * Query parameters whose values may be logged [SEC], each with the exact
+ * shape its value must have. This is an ALLOWLIST: every other parameter's
+ * value becomes `[REDACTED]`, so free text (`q`, `search`, `city`,
+ * `familyBranch`), cursors and tokens (`ticket`, `token`, `cursor`) never
+ * reach the logs, including parameters added later that nobody remembered
+ * to deny. An allowlisted parameter whose value fails its check is redacted
+ * too (a client can put any text in any parameter).
+ *
+ * `before` is the chat history cursor, `(created_at, id)` base64url-encoded,
+ * which carries no personal data. Matching is exact (case-sensitive) on the
+ * decoded name, because that is how the routes read them; `Limit`, `q[]` or
+ * `limit[]` are therefore not allowlisted.
  */
-const SENSITIVE_QUERY_PARAMS = new Set([
+const LOGGABLE_QUERY_PARAMS: ReadonlyMap<string, QueryValueCheck> = new Map([
+  ["limit", digits],
+  ["year", digits],
+  ["depth", digits],
+  ["status", oneOf(UserStatus, InviteStatus)],
+  ["role", oneOf(UserRole)],
+  ["kind", oneOf(MediaKind)],
+  ["scope", oneOf(AnnouncementScope)],
+  ["entityType", oneOf(AuditEntityType)],
+  ["action", oneOf(AuditAction)],
+  ["moderationStatus", oneOf(ModerationStatus)],
+  ["uploadStatus", oneOf(MediaUploadStatus)],
+  ["reported", booleanFlag],
+  ["emailVerified", booleanFlag],
+  ["before", base64url]
+]);
+
+/**
+ * Names of the API's other query parameters. Their values are always
+ * redacted, but the name is logged (`q=[REDACTED]`) for observability. Any
+ * name in neither list is logged as `[param]=[REDACTED]`: a client could
+ * put data in a parameter name too.
+ */
+const KNOWN_QUERY_PARAM_NAMES: ReadonlySet<string> = new Set([
+  "q",
+  "search",
+  "cursor",
   "ticket",
   "token",
-  "t",
-  "code",
-  "key",
-  "signature",
-  "x-amz-signature",
-  "q",
-  "search"
+  "city",
+  "familyBranch",
+  "personId",
+  "actorUserId",
+  "entityId",
+  "cuencadaId",
+  "from",
+  "to"
 ]);
-/** Query parameter name prefixes that are always redacted (`ticket[]`, `token_x`, …). */
-const SENSITIVE_QUERY_PREFIXES = ["ticket", "token"];
+
+/** Logged in place of a parameter name that is neither allowlisted nor known. */
+export const UNKNOWN_QUERY_PARAM = "[param]";
 
 /** Object keys whose values never reach the logs (case-insensitive, substring). */
 export const SENSITIVE_LOG_KEY = /token|password|passwd|ticket|secret|authorization|cookie|hash|api[-_]?key|credential/i;
@@ -234,35 +300,49 @@ export const REDACT_PATHS: string[] = [
   ...SENSITIVE_FIELDS.map((field) => `*.*.${field}`)
 ];
 
+/** Decode a query-string component (`+` is a space), or `undefined` if malformed. */
+function decodeQueryComponent(raw: string): string | undefined {
+  try {
+    return decodeURIComponent(raw.replace(/\+/g, " "));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Scrub one `name=value` pair of a query string (see {@link scrubUrl}). */
+function scrubQueryPair(pair: string): string {
+  if (pair === "") return pair;
+  const separator = pair.indexOf("=");
+  const rawName = separator === -1 ? pair : pair.slice(0, separator);
+  const name = decodeQueryComponent(rawName);
+  const check = name === undefined ? undefined : LOGGABLE_QUERY_PARAMS.get(name);
+  if (name === undefined || (check === undefined && !KNOWN_QUERY_PARAM_NAMES.has(name))) {
+    // Unknown or undecodable name: it could itself be data, so hide it too.
+    return `${UNKNOWN_QUERY_PARAM}=${REDACTED}`;
+  }
+  if (check === undefined) return `${rawName}=${REDACTED}`;
+  if (separator === -1) return pair;
+  const value = decodeQueryComponent(pair.slice(separator + 1));
+  return value !== undefined && check(value) ? pair : `${rawName}=${REDACTED}`;
+}
+
 /**
- * Redact sensitive query parameter values from a request URL.
+ * Redact query parameter values from a request URL using an allowlist [SEC].
+ * Only the parameters in {@link LOGGABLE_QUERY_PARAMS} keep their value, and
+ * only when it passes that parameter's check (digits, a contract enum value,
+ * plain base64url). Known API parameters keep their (raw) name with the
+ * value `[REDACTED]`; any other or undecodable name is logged as
+ * `[param]=[REDACTED]`. Repeated parameters are handled pair by pair.
  *
  * @param rawUrl - Path plus query, e.g. `/api/chat/ws?ticket=abc`.
- * @returns The same URL with sensitive values replaced, e.g. `/api/chat/ws?ticket=[REDACTED]`.
+ * @returns The scrubbed URL, e.g. `/api/chat/ws?ticket=[REDACTED]`.
  */
 export function scrubUrl(rawUrl: string): string {
   const queryStart = rawUrl.indexOf("?");
   if (queryStart === -1) return rawUrl;
   const path = rawUrl.slice(0, queryStart);
   const query = rawUrl.slice(queryStart + 1);
-  const scrubbed = query
-    .split("&")
-    .map((pair) => {
-      const separator = pair.indexOf("=");
-      const rawName = separator === -1 ? pair : pair.slice(0, separator);
-      let name: string;
-      try {
-        name = decodeURIComponent(rawName.replace(/\+/g, " ")).toLowerCase();
-      } catch {
-        // Undecodable name: redact the whole pair rather than risk leaking it.
-        return REDACTED;
-      }
-      const sensitive =
-        SENSITIVE_QUERY_PARAMS.has(name) || SENSITIVE_QUERY_PREFIXES.some((prefix) => name.startsWith(prefix));
-      return sensitive ? `${rawName}=${REDACTED}` : pair;
-    })
-    .join("&");
-  return `${path}?${scrubbed}`;
+  return `${path}?${query.split("&").map(scrubQueryPair).join("&")}`;
 }
 
 /** Request fields that are logged (no headers, no body). */

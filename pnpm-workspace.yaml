@@ -21,5 +21,8 @@ onlyBuiltDependencies:
   - "esbuild"
 
 overrides:
+  # drizzle-kit's deprecated @esbuild-kit loader pins esbuild 0.18 (GHSA-67mh-4wv8-2f99,
+  # dev server only, never used here); lift it to a patched 0.25 (WP-0.8a).
+  "@esbuild-kit/core-utils>esbuild": "^0.25.12"
   drizzle-orm: "^0.45.2"
   source-map-js: "^1.2.2"

@@ -123,7 +123,7 @@ describe("log redaction", () => {
       .filter((url): url is string => url !== undefined);
 
     expect(urls).toContain(`/api/chat/ws?ticket=${REDACTED}`);
-    expect(urls).toContain(`/t/log?ticket=${REDACTED}&page=2`);
+    expect(urls).toContain(`/t/log?ticket=${REDACTED}&[param]=${REDACTED}`);
   });
 });
 
@@ -215,34 +215,73 @@ describe("serializeError", () => {
 });
 
 describe("scrubUrl", () => {
+  const P = `[param]=${REDACTED}`;
+
   it("leaves URLs without a query unchanged", () => {
     expect(scrubUrl("/api/cuencadas/2026")).toBe("/api/cuencadas/2026");
   });
 
-  it("redacts sensitive parameters regardless of case and keeps the others", () => {
-    expect(scrubUrl("/x?Ticket=a&token=b&t=c&year=2026")).toBe(
-      `/x?Ticket=${REDACTED}&token=${REDACTED}&t=${REDACTED}&year=2026`
+  it("keeps allowlisted digits, contract enum values, booleans and the base64url chat cursor", () => {
+    const url =
+      "/x?limit=20&year=2026&depth=2&status=active&role=admin&kind=image&scope=portal&entityType=user&action=user.updated" +
+      "&moderationStatus=approved&uploadStatus=ready&reported=true&emailVerified=false";
+    expect(scrubUrl(url)).toBe(url);
+    expect(scrubUrl("/x?status=pending")).toBe("/x?status=pending");
+    expect(scrubUrl("/api/chat/rooms/r1/messages?before=MTcwMDAwMDAwMDAwMF9hYmM&limit=50")).toBe(
+      "/api/chat/rooms/r1/messages?before=MTcwMDAwMDAwMDAwMF9hYmM&limit=50"
     );
   });
 
-  it("redacts parameters whose names start with ticket or token", () => {
-    expect(scrubUrl("/x?ticket[]=a&token_hint=b&type=c")).toBe(`/x?ticket[]=${REDACTED}&token_hint=${REDACTED}&type=c`);
+  it("logs known API parameters by name with the value redacted", () => {
+    expect(scrubUrl("/x?ticket=a&token=b&cursor=c&city=Monterrey&familyBranch=Rama%20Norte&year=2026")).toBe(
+      `/x?ticket=${REDACTED}&token=${REDACTED}&cursor=${REDACTED}&city=${REDACTED}&familyBranch=${REDACTED}&year=2026`
+    );
+    expect(scrubUrl("/api/family/people?q=Ana")).toBe(`/api/family/people?q=${REDACTED}`);
+    expect(scrubUrl("/api/directory?search=Ana%20Morales&limit=20")).toBe(`/api/directory?search=${REDACTED}&limit=20`);
   });
 
-  it("redacts percent-encoded parameter names", () => {
-    expect(scrubUrl("/x?%74icket=abc")).toBe(`/x?%74icket=${REDACTED}`);
+  it("hides unknown parameter names, which could carry data themselves", () => {
+    expect(scrubUrl("/x?ana.lopez.SECRETx=1")).toBe(`/x?${P}`);
+    expect(scrubUrl("/x?SECRETx")).toBe(`/x?${P}`);
+    expect(scrubUrl("/x?page=2&limit=1")).toBe(`/x?${P}&limit=1`);
+    expect(scrubUrl("/x?Ana%20Morales=1&ana%40example.com")).toBe(`/x?${P}&${P}`);
   });
 
-  it("redacts a pair whose name cannot be decoded", () => {
-    expect(scrubUrl("/x?%E0%A4%A=abc&ok=1")).toBe(`/x?${REDACTED}&ok=1`);
+  it("validates each allowlisted value against that parameter's shape", () => {
+    expect(scrubUrl("/x?limit=1&limit=SECRETx.doe")).toBe(`/x?limit=1&limit=${REDACTED}`);
+    expect(scrubUrl("/x?status=SECRETx&role=root&kind=Ana&scope=x")).toBe(
+      `/x?status=${REDACTED}&role=${REDACTED}&kind=${REDACTED}&scope=${REDACTED}`
+    );
+    expect(scrubUrl("/x?action=ana.lopez&entityType=SECRETx&reported=1")).toBe(
+      `/x?action=${REDACTED}&entityType=${REDACTED}&reported=${REDACTED}`
+    );
+    expect(scrubUrl("/x?before=eyJ.SECRETx&before=a:b&before=YQ==")).toBe(
+      `/x?before=${REDACTED}&before=${REDACTED}&before=${REDACTED}`
+    );
+    expect(scrubUrl(`/x?before=${"a".repeat(513)}&depth=1234567`)).toBe(`/x?before=${REDACTED}&depth=${REDACTED}`);
+    expect(scrubUrl("/x?limit=%E0%A4%A&year=20%2026")).toBe(`/x?limit=${REDACTED}&year=${REDACTED}`);
   });
 
-  it("redacts free-text search terms (q, search), which may hold names", () => {
-    expect(scrubUrl("/api/family/people?q=Rosa")).toBe(`/api/family/people?q=${REDACTED}`);
-    expect(scrubUrl("/api/directory?Search=Rosa%20Cuenca&limit=20")).toBe(`/api/directory?Search=${REDACTED}&limit=20`);
+  it("does not allowlist case variants or array forms", () => {
+    expect(scrubUrl("/x?Limit=5&LIMIT=6&Ticket=t&Q=Ana")).toBe(`/x?${P}&${P}&${P}&${P}`);
+    expect(scrubUrl("/x?q[]=Ana&status[]=active&q%5B%5D=Ana")).toBe(`/x?${P}&${P}&${P}`);
+  });
+
+  it("decodes percent-encoded names before matching, keeping the raw name of known ones", () => {
+    expect(scrubUrl("/x?%71=Ana&%74icket=abc")).toBe(`/x?%71=${REDACTED}&%74icket=${REDACTED}`);
+    expect(scrubUrl("/x?%6Cimit=5")).toBe("/x?%6Cimit=5");
+    expect(scrubUrl("/x?%2571=Ana&q%00=Ana")).toBe(`/x?${P}&${P}`);
+  });
+
+  it("handles every occurrence of a repeated parameter", () => {
+    expect(scrubUrl("/x?q=Ana&limit=1&q=Luis&limit=2")).toBe(`/x?q=${REDACTED}&limit=1&q=${REDACTED}&limit=2`);
+  });
+
+  it("hides an undecodable name", () => {
+    expect(scrubUrl("/x?%E0%A4%A=abc&limit=1")).toBe(`/x?${P}&limit=1`);
   });
 
   it("handles empty and valueless parameters", () => {
-    expect(scrubUrl("/x?&ticket&a=")).toBe(`/x?&ticket=${REDACTED}&a=`);
+    expect(scrubUrl("/x?&ticket&limit&a=")).toBe(`/x?&ticket=${REDACTED}&limit&${P}`);
   });
 });

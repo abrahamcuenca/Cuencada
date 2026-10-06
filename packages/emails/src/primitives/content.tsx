@@ -112,6 +112,15 @@ export function Img({
 /**
  * Bulletproof button. `style` must set `backgroundColor` and `padding`; they
  * are mirrored onto the table cell for Outlook desktop.
+ *
+ * Outlook trade-off: there is deliberately no VML (`<v:roundrect>`), because
+ * VML only works inside conditional comments, i.e. raw unescaped HTML, which
+ * this package forbids. Outlook desktop (Word engine) therefore renders a
+ * square-cornered button: it ignores `border-radius`, and the anchor's
+ * `border`/padding, drawing the coloured cell (`bgcolor` + `mso-padding-alt`)
+ * instead. Only the text is clickable there; in every other client the whole
+ * button is. Good enough for transactional mail; revisit only if Outlook
+ * desktop becomes a significant share of recipients.
  */
 export function Button({
   href,

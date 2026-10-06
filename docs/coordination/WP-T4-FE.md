@@ -186,8 +186,8 @@ Outside the feature, for Security L2 (round 1, authorized by the orchestrator fo
   - shared gallery chunk 7.9 KB gzip (+2.9 KB CSS)
   - `AdminMediaPage` 3.0 KB gzip
 - `pnpm --filter @cuencada/web size`: initial JS **167.56 KB gzip** (budget 190 KB). No gallery code is in the initial chunk; only the lazy route entries are.
-- **Screenshots** are in `docs/ux/screenshots/t4/`: `grid`, `lightbox`, `upload-sheet`, `upload-progress` and `admin-queue`, each at 375 and 1280.
-  - They were taken with headless Chromium against the Vite dev server, with `/api/**` stubbed, placeholder images from `public/images/fotos/`, and a fake XHR (72%, failed, 18%, waiting).
+- **Screenshots** are in `docs/ux/screenshots/t4/`: `grid`, `lightbox`, `upload-sheet`, `upload-progress` and `admin-queue`, each at 375 and 1280. _(WP-0.8a: `apps/web/public/images/fotos/` was removed; real family photos are members-only, and these screenshots were deleted pending a re-take with placeholders.)_
+  - They were taken with headless Chromium against the Vite dev server, with `/api/**` stubbed, placeholder images from `public/images/fotos/`, and a fake XHR (72%, failed, 18%, waiting). _(WP-0.8a: `apps/web/public/images/fotos/` was removed; real family photos are members-only, and these screenshots were deleted pending a re-take with placeholders.)_
   - Horizontal overflow measured **0 px** for all five screens at 320, 375 and 1280.
 
 ## Open questions (→ orchestrator)

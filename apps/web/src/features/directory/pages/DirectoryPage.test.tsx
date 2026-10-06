@@ -188,6 +188,14 @@ describe("DirectoryPage access", () => {
     await waitFor(() => expect(requests).toEqual(["verify-request"]));
   });
 
+  it("asks to verify the email on 403 EMAIL_UNVERIFIED (WP-0.8a server code)", async () => {
+    db.listError = "EMAIL_UNVERIFIED";
+    renderApp("/directorio", authenticatedState(makeUser({ emailVerified: false })));
+
+    expect(await screen.findByRole("heading", { name: "Verifica tu correo para ver el directorio" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "No tienes acceso al directorio" })).not.toBeInTheDocument();
+  });
+
   it("says access is closed for any other 403", async () => {
     db.listError = "FORBIDDEN";
     renderApp("/directorio", authenticatedState());

@@ -55,7 +55,7 @@ export async function makeJpegWithGps(width = 64, height = 32): Promise<Buffer> 
   return sharp({ create: { width, height, channels: 3, background: "#0b5e55" } })
     .withMetadata({ orientation: 6 })
     .withExif({
-      IFD0: { Make: "SecretCam", Copyright: "Familia Cuenca" },
+      IFD0: { Make: "SecretCam", Copyright: "Familia Morales" },
       IFD3: { GPSLatitudeRef: "N", GPSLatitude: "20/1 58/1 0/1", GPSLongitudeRef: "W", GPSLongitude: "89/1 37/1 0/1" }
     })
     .jpeg()

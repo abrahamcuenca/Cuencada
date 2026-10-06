@@ -29,7 +29,7 @@ const OTHER_EDITION = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 describe("mergeAttendees", () => {
   it("keeps one row per person, preferring the RSVP, and sorts accent-insensitively", () => {
     const merged = mergeAttendees(
-      [candidate({ personId: P1, userId: U1, accountName: "Ángel", fullName: "Ángel Cuenca" })],
+      [candidate({ personId: P1, userId: U1, accountName: "Ángel", fullName: "Ángel Morales" })],
       [
         candidate({ personId: P1, userId: U1, accountName: "Ángel" }),
         candidate({ personId: "p2", fullName: "Beatriz" })

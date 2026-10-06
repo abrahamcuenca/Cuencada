@@ -120,9 +120,9 @@ describe("runSeed", () => {
       timezone: "America/Merida",
       songUrl: "/canciones/Cancion_Oficial.mp3",
       heroImageUrl: "/images/Logo_Cuencada2026.jpg",
-      whatsappUrl: "https://chat.whatsapp.com/IvI6oayIIoEJ8Wn7EWQxO0?s=cl&p=i&mlu=0",
+      whatsappUrl: LEGACY_DEV_LINKS.whatsappUrl,
       weatherWidgetUrl: "https://forecast7.com/es/20d97n89d59/merida/",
-      externalAlbumUrl: "https://1drv.ms/f/c/b0c7d5955d4a8581/IgAC5vDMrmIvTJwWwOjkJJM7AT3DxtBo9OFj8FSXJI_GQY0?e=ASBPLY",
+      externalAlbumUrl: LEGACY_DEV_LINKS.externalAlbumUrl,
       isPublished: true
     });
     expect(edition?.firstPublishedAt).toBeInstanceOf(Date);

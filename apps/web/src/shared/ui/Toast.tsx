@@ -53,6 +53,28 @@ function resolveDuration(options: ToastOptions, tone: ToastTone): number {
   return options.duration ?? (tone === "danger" ? 8000 : 5000);
 }
 
+/** Toasts on screen at once, counting the new one. Action toasts may exceed it (they are never evicted). */
+export const MAX_VISIBLE_TOASTS = 3;
+
+/**
+ * Makes room for one more toast: evicts the oldest toasts **without** an
+ * action until the stack (plus the new toast) fits {@link MAX_VISIBLE_TOASTS}.
+ * A toast with an action ("Deshacer") is never evicted, because the user may
+ * still need it; if only action toasts remain, the stack grows instead.
+ */
+export function evictForNewToast<TToast extends { id: string } & Pick<ToastOptions, "action">>(
+  list: readonly TToast[]
+): { kept: TToast[]; evicted: TToast[] } {
+  const kept = [...list];
+  const evicted: TToast[] = [];
+  while (kept.length >= MAX_VISIBLE_TOASTS) {
+    const index = kept.findIndex((toast) => toast.action === undefined);
+    if (index === -1) break;
+    evicted.push(...kept.splice(index, 1));
+  }
+  return { kept, evicted };
+}
+
 const ICONS: Record<ToastTone, string> = { info: "💬", success: "✅", danger: "⚠️" };
 
 /** Props for {@link ToastProvider}. */
@@ -66,15 +88,30 @@ export interface ToastProviderProps {
  */
 export function ToastProvider({ children }: ToastProviderProps): React.ReactNode {
   const [toasts, setToasts] = useState<ToastRecord[]>([]);
+  // Mirror of `toasts` so show() can pick evictions (and clear their timers)
+  // outside a state updater, which must stay free of side effects.
+  const listRef = useRef<ToastRecord[]>([]);
   const counter = useRef(0);
   const timers = useRef(new Map<string, ToastTimer>());
 
-  const dismiss = useCallback((id: string): void => {
+  const commit = useCallback((next: ToastRecord[]): void => {
+    listRef.current = next;
+    setToasts(next);
+  }, []);
+
+  const clearTimer = useCallback((id: string): void => {
     const timer = timers.current.get(id);
     if (timer?.handle) clearTimeout(timer.handle);
     timers.current.delete(id);
-    setToasts((list) => list.filter((t) => t.id !== id));
   }, []);
+
+  const dismiss = useCallback(
+    (id: string): void => {
+      clearTimer(id);
+      commit(listRef.current.filter((t) => t.id !== id));
+    },
+    [clearTimer, commit]
+  );
 
   const start = useCallback(
     (id: string): void => {
@@ -100,14 +137,16 @@ export function ToastProvider({ children }: ToastProviderProps): React.ReactNode
       const id = `toast-${counter.current}`;
       const tone = options.tone ?? "info";
       const duration = resolveDuration(options, tone);
-      setToasts((list) => [...list.slice(-2), { ...options, id, tone }]);
+      const { kept, evicted } = evictForNewToast(listRef.current);
+      for (const old of evicted) clearTimer(old.id);
+      commit([...kept, { ...options, id, tone }]);
       if (duration > 0) {
         timers.current.set(id, { handle: null, remaining: duration, startedAt: 0 });
         start(id);
       }
       return id;
     },
-    [start]
+    [start, clearTimer, commit]
   );
 
   useEffect(() => {

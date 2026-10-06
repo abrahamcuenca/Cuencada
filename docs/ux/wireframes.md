@@ -34,7 +34,7 @@ Legend: `[ Botón ]` = Button (gold unless noted) · `( Botón )` = secondary/gh
 ┌──────────────────────────────────────┐
 │               ───                    │ grabber (visual only; no drag-to-dismiss)
 │ Más                              (✕) │
-│ ◯ Rosa Cuenca · Ver mi perfil      › │
+│ ◯ Rosa Ibarra · Ver mi perfil      › │
 │ ──────────────────────────────────── │
 │ 🧭 Directorio                      › │
 │ 🌳 Árbol familiar                  › │
@@ -283,7 +283,7 @@ All auth screens use the same single-column card on cream: brand at the top, the
 ### 3.2 Invitación `/invitacion?token=…`
 ```
 │ 💌 Te invitaron a la Cuencada        │
-│ Jorge Cuenca te invitó a unirte al   │
+│ Ana Morales te invitó a unirte al    │
 │ portal de la familia.                │
 │ Nombre completo        ▢ (autocomplete=name)
 │ Correo electrónico     ▢ (readonly, prefilled from invite)
@@ -342,8 +342,8 @@ All auth screens use the same single-column card on cream: brand at the top, the
 ┌──────────────────────────────────────┐
 │ (‹) Mi perfil                        │
 │        ◯ 96 (foto)   ( 📷 Cambiar )  │ input accept="image/*"
-│ Rosa Elena Cuenca                    │
-│ Rama: Familia de Jorge               │
+│ Rosa Elena Ibarra                    │
+│ Rama: Rama Norte                     │
 │ ──────────────────────────────────── │
 │ Nombre completo        ▢             │
 │ Cómo te dicen          ▢ (opcional)  │
@@ -376,10 +376,10 @@ All auth screens use the same single-column card on cream: brand at the top, the
 │ ( Todas las ramas ▾ )( Fue a 2026 ☐ )│ filter chips → Select sheet
 │ 128 familiares                       │ muted count
 │ ┌──────────────────────────────────┐ │
-│ │ ◯ Rosa Elena Cuenca            › │ │ list rows, 64px
-│ │   Mérida · Familia de Jorge      │ │
+│ │ ◯ Rosa Elena Ibarra            › │ │ list rows, 64px
+│ │   Mérida · Rama Norte            │ │
 │ ├──────────────────────────────────┤ │
-│ │ ◯ Tomás Cuenca                 › │ │
+│ │ ◯ Tomás Ibarra                 › │ │
 │ │   Monterrey · Familia de Tomás   │ │
 │ └──────────────────────────────────┘ │
 │ … (infinite scroll, Skeleton rows)   │
@@ -401,11 +401,11 @@ A person-centred view with tap-to-navigate. No pan or zoom canvas.
 ┌──────────────────────────────────────┐
 │ Árbol familiar        ( 🔎 Buscar )  │
 │ Padres                               │
-│   ◯ Francisco      ◯ Amada           │ tap → becomes centre
+│   ◯ Raúl         ◯ Elena             │ tap → becomes centre
 │          ╲        ╱                  │
 │ ┌──────────────────────────────────┐ │
 │ │        ◯ 96  (gold ring)         │ │ focus person card
-│ │     Jorge Cuenca Fafutis         │ │
+│ │     Ana Morales Vega             │ │
 │ │     1952 · Mérida                │ │
 │ │  ( Ver perfil )  ( ✏️ Editar )   │ │ edit only self/admin
 │ └──────────────────────────────────┘ │
@@ -414,7 +414,7 @@ A person-centred view with tap-to-navigate. No pan or zoom canvas.
 │ Hijos (3)                            │
 │   ◯ Rosa   ◯ Tomás   ◯ Luis          │ horizontal scroll if many
 │ Hermanos (4)                       › │ collapsed row
-│ ‹ Volver a: Francisco Cuenca         │ breadcrumb trail (history)
+│ ‹ Volver a: Raúl Morales             │ breadcrumb trail (history)
 └──────────────────────────────────────┘
 ```
 - People without accounts show initials and the label "Sin cuenta".
@@ -587,7 +587,7 @@ Designed to be **usable on a phone**: lists are cards, editing happens in full-s
 - **Leaving with unsaved changes** opens an alertdialog: "¿Salir sin guardar? Perderás los cambios." with "( Seguir editando )" and "[ Salir sin guardar ]" (danger).
 - **Asistencia (bulk):** a searchable list of people with a ☐ per row and a sticky bar "12 seleccionadas · [ Marcar como asistentes ]". "( Exportar CSV )" sits in the header.
 - **Moderación:** a photo grid with a ⚑ badge on each reported photo. Tap opens the lightbox with the actions "( Ocultar )", "( Restaurar )" and "[ Eliminar ]" (danger + alertdialog).
-- **Bitácora:** cards showing "Rosa Cuenca editó «Cuencada 2026» · hace 2 h", with a filter by person and by action.
+- **Bitácora:** cards showing "Rosa Ibarra editó «Cuencada 2026» · hace 2 h", with a filter by person and by action.
 - **Invitaciones:** "[ ＋ Invitar ]" opens a sheet asking for correo, nombre and rol, then "[ Enviar invitación ]". The list shows each invite's state (Enviada, Aceptada, Caducada) with "( Reenviar )" and "( Revocar )".
 - **≥900px:** A left sidebar navigation (240px). Lists become tables with sortable columns. Edit opens as a right-side drawer (560px) rather than full screen.
 

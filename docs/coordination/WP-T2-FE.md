@@ -110,7 +110,7 @@ Owner: Frontend · Reviewers: TL, Sec · Branch: wp/t2-fe-cuencadas · PR: # (no
 5. **R5, WP-0.6/app (`AppLayout.tsx`, not mine):** the `TODO(T2)` "Programa" tab still points at `/cuencada/2026`. It should use `featured?.year ?? latestPast?.year` from `useGetCuencadaHomeQuery`, which is now available from `features/cuencadas/api`.
 6. **R6, WP-0.7 (`shared/ui/Countdown.tsx`):** `Countdown` computes with its own `getCountdown`, which duplicates `computeCountdown` in `shared/lib/dates.ts`. Please make it use `computeCountdown` and drop `getCountdown`. T2 already uses `computeCountdown` for ticking.
 7. **R7, admin GET filter:** `GET /admin/announcements` can't filter for portal-wide announcements only (`cuencadaId=null`). The web filters client-side. Consider `?scope=portal`.
-8. **R8, T4:** the Home memories mosaic uses the 4 static public photos in `public/images/fotos`. Replace it with admin-picked public highlights when T4 has them.
+8. **R8, T4:** the Home memories mosaic uses the 4 static public photos in `public/images/fotos`. Replace it with admin-picked public highlights when T4 has them. _(WP-0.8a: `apps/web/public/images/fotos/` was removed; real family photos are members-only, and these screenshots were deleted pending a re-take with placeholders.)_
 9. **R9, WP-2.4 CSP:** add `frame-src 'self' https://weatherwidget.io`. Nothing else third-party is loaded by T2 pages.
 10. **R10, WP-0.1:** under heavy machine load, lazy-route tests can exceed Testing Library's 1 s `findBy` default. My three route-level test files raise `asyncUtilTimeout` to 5 s locally. A shared setting in `test/setup.ts` may be worth it.
 
@@ -142,7 +142,7 @@ Owner: Frontend · Reviewers: TL, Sec · Branch: wp/t2-fe-cuencadas · PR: # (no
   - HomePage chunk: 2.2 KB gzip
   - admin editor: 6.3 KB + forms 9.9 KB gzip (admin only)
 - **Screenshots** in `docs/ux/screenshots/t2/`, at 375 and 1280, taken with headless Chromium against `vite preview` with `/api/**` stubbed from `testing/fixtures.ts`, device timezone Europe/Madrid:
-  - `home-memories`
+  - `home-memories` _(WP-0.8a: `apps/web/public/images/fotos/` was removed; real family photos are members-only, and these screenshots were deleted pending a re-take with placeholders.)_
   - `cuencada-2026-anon`
   - `cuencada-2026-member`
   - `admin-programa`

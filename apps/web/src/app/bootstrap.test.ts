@@ -40,7 +40,7 @@ describe("removeLegacyDemoSession", () => {
 describe("bootstrapApp", () => {
   it("removes the legacy demo key and restores the session through a silent refresh", async () => {
     window.localStorage.setItem(LEGACY_DEMO_USER_KEY, legacyDemoUser);
-    const user = makeUser({ displayName: "Abuela Cuenca" });
+    const user = makeUser({ displayName: "Abuela Morales" });
     server.use(http.post(apiUrl("/auth/refresh"), () => HttpResponse.json(tokenBody("fresh", user))));
     const store = makeStore();
 

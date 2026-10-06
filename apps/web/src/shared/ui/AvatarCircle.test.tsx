@@ -4,7 +4,7 @@ import { AvatarCircle, getInitials } from "./AvatarCircle";
 
 describe("getInitials", () => {
   it("skips Spanish particles", () => {
-    expect(getInitials("María de la Luz Cuenca")).toBe("MC");
+    expect(getInitials("María de la Luz Vega")).toBe("MV");
   });
 
   it("falls back to ? for an empty name", () => {
@@ -14,14 +14,14 @@ describe("getInitials", () => {
 
 describe("AvatarCircle", () => {
   it("falls back to initials when the image fails and retries when src changes", () => {
-    const { container, rerender } = render(<AvatarCircle name="Rosa Cuenca" src="/rota.jpg" />);
+    const { container, rerender } = render(<AvatarCircle name="Rosa Ibarra" src="/rota.jpg" />);
     const img = container.querySelector("img");
     if (!img) throw new Error("img missing");
     fireEvent.error(img);
     expect(container.querySelector("img")).toBeNull();
-    expect(screen.getByRole("img", { name: "Rosa Cuenca" })).toHaveTextContent("RC");
+    expect(screen.getByRole("img", { name: "Rosa Ibarra" })).toHaveTextContent("RI");
 
-    rerender(<AvatarCircle name="Rosa Cuenca" src="/nueva.jpg" />);
+    rerender(<AvatarCircle name="Rosa Ibarra" src="/nueva.jpg" />);
     expect(container.querySelector("img")).toHaveAttribute("src", "/nueva.jpg");
   });
 });
