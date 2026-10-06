@@ -125,3 +125,4 @@ Verifying an email proves that someone controls a mailbox, not that they belong 
     - The admin-account copy now also says that a new admin is always announced (P1).
     - The bitácora shows a "Límite de avisos alcanzado" badge for `inviteAlertLimitNotice`.
     - Supersedes decision 5's "no separate limit email".
+  - **L3 (also TL nit 1):** `POST /api/invites/inspect` now returns the effective (clamped) `expiresAt`, so an older open invite shows its real 72 h end. Tested.

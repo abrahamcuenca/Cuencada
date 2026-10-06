@@ -166,6 +166,24 @@ describe("accepting open invites past their limits (WP-2.3b)", () => {
     expect(pendingList.json<{ items: Array<{ id: string }> }>().items.map((item) => item.id)).toEqual([fresh.id]);
   });
 
+  it("inspect shows the clamped expiry of an older open invite (Security L3)", async () => {
+    const clock = new TestClock();
+    app = await createTestApp({ clock });
+    const { admin } = await adminAuth(app);
+    const createdAt = new Date(clock.now().getTime() - 60 * 60 * SECOND_MS);
+    const legacy = await insertLegacyOpenInvite(admin.id, {
+      createdAt,
+      expiresAt: new Date(clock.now().getTime() + 10 * DAY_MS),
+      maxUses: 20
+    });
+
+    const response = await app.inject({ method: "POST", url: "/api/invites/inspect", payload: { token: legacy.token } });
+
+    expect(response.statusCode).toBe(200);
+    const expiresAt = new Date(response.json<{ expiresAt: string }>().expiresAt).getTime();
+    expect(expiresAt).toBe(createdAt.getTime() + OPEN_INVITE_MAX_LIFETIME_MS);
+  });
+
   it("stops an older open invite at 10 uses even when it allowed 20", async () => {
     app = await createTestApp();
     const { admin } = await adminAuth(app);

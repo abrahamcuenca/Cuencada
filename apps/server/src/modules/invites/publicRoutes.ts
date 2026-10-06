@@ -39,7 +39,7 @@ import {
   planInviteAcceptedAlert,
   queueInviteAcceptedAlerts
 } from "./acceptAlerts.js";
-import { effectiveInviteMaxUses, isInviteUsable, personName } from "./service.js";
+import { effectiveInviteExpiresAt, effectiveInviteMaxUses, isInviteUsable, personName } from "./service.js";
 
 const errorResponses = {
   400: apiErrorSchema,
@@ -118,7 +118,8 @@ const publicInviteRoutes: FastifyPluginAsyncZod = async (app) => {
       return {
         emailMasked: invite.email === null ? null : maskEmail(invite.email),
         role: invite.role,
-        expiresAt: invite.expiresAt.toISOString(),
+        // The effective expiry: open invites from before WP-2.3b end 72 h after creation.
+        expiresAt: effectiveInviteExpiresAt(invite).toISOString(),
         invitedByName: row.invitedByName,
         suggestedDisplayName: invite.displayName ?? (await personName(app.db, invite.personId))
       };
