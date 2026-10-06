@@ -191,6 +191,30 @@ describe("accepting open invites past their limits (WP-2.3b)", () => {
     expect(summary.json<{ invitesPending: number }>().invitesPending).toBe(1);
   });
 
+  it("lets exactly one of two concurrent accepts take the last use of a multi-use open link", async () => {
+    const mailer = new FakeMailer();
+    app = await createTestApp({ mailer });
+    const { admin, auth } = await adminAuth(app);
+    // 3 uses, not 5: the per-token accept limit (5 attempts / 15 min) would answer 429 to a 6th attempt.
+    const created = await createInvite(app, auth, { sendEmail: false, maxUses: 3 });
+    for (let index = 1; index <= 2; index += 1) {
+      expect((await accept(app, created.token, `uso${index}@familia.mx`)).statusCode).toBe(201);
+    }
+
+    const results = await Promise.all([
+      accept(app, created.token, "carrera1@familia.mx"),
+      accept(app, created.token, "carrera2@familia.mx")
+    ]);
+
+    expect(results.map((response) => response.statusCode).sort()).toEqual([201, 400]);
+    const [row] = await getTestDb().select().from(invites).where(eq(invites.id, created.inviteId));
+    expect(row).toMatchObject({ useCount: 3, status: "accepted" });
+    expect(await getTestDb().select().from(users).where(eq(users.invitedByInviteId, created.inviteId))).toHaveLength(3);
+    const alerts = await alertsTo(mailer, admin);
+    expect(alerts).toHaveLength(3);
+    expect(alerts.filter((mail) => mail.text.includes("El enlace lleva 3 de 3 usos."))).toHaveLength(1);
+  });
+
   it("inspect shows the clamped expiry of an older open invite (Security L3)", async () => {
     const clock = new TestClock();
     app = await createTestApp({ clock });

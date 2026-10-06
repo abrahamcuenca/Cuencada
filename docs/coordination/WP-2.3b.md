@@ -126,6 +126,9 @@ Verifying an email proves that someone controls a mailbox, not that they belong 
     - The bitácora shows a "Límite de avisos alcanzado" badge for `inviteAlertLimitNotice`.
     - Supersedes decision 5's "no separate limit email".
   - **L3 (also TL nit 1):** `POST /api/invites/inspect` now returns the effective (clamped) `expiresAt`, so an older open invite shows its real 72 h end. Tested.
+  - **Info: race on the last use of a multi-use open link.**
+    - Test: on an open link with uses 2 of 3 already taken, two concurrent accepts give exactly one 201 and one generic 400. The result is `useCount` 3, status `accepted`, 3 accounts, and exactly one "3 de 3" alert.
+    - It uses 3 uses rather than 5 because the per-token accept limit (5 attempts per 15 minutes) would answer 429 to a 6th attempt.
 - **Tech Lead: APPROVED at 4d5af70.** Non-blocking item folded in:
   - **Older open invites clamped by uses** (for example 12 of 20 used) are refused at accept, but the list showed them as pending ("Usos: 12 de 10").
   - `effectiveInviteStatus` now reports a stored `pending` invite whose uses reach the clamped maximum as `accepted` (used up), which wins over `expired`.
