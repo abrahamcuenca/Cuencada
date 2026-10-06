@@ -1,0 +1,125 @@
+/* Home `/` (T2). Mobile-first; `min-width` only. */
+.thanks {
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  background: rgb(255 255 255 / 0.12);
+  border: 1px solid rgb(255 255 255 / 0.28);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+}
+
+.mosaic {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+
+.mosaic img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--gradient-photo-placeholder);
+}
+
+.mosaicAction {
+  margin-top: var(--space-4);
+}
+
+.next {
+  margin-top: var(--space-section);
+}
+
+.highlights {
+  display: grid;
+  gap: var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.highlight {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: var(--tap-min);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-sm);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.highlightIcon {
+  font-size: 1.75rem;
+  line-height: 1;
+}
+
+.highlightText {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.highlightText > span {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.chevron {
+  color: var(--color-primary);
+  font-size: var(--text-xl);
+}
+
+.editions {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding: var(--space-1);
+  margin: calc(-1 * var(--space-1));
+  list-style: none;
+}
+
+.edition {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--tap-min);
+  padding-inline: var(--space-4);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-primary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+@media (min-width: 600px) {
+  .highlights {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 900px) {
+  .mosaic {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+
+  .highlights {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .highlight {
+    flex-direction: column;
+    align-items: flex-start;
+    height: 100%;
+  }
+
+  .chevron {
+    display: none;
+  }
+}

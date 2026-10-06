@@ -1,0 +1,257 @@
+/*
+ * Admin content screens (T2). Usable on a phone: one column of cards, no
+ * tables, 44px targets, a sticky save bar above the BottomNav.
+ * `min-width` media queries only.
+ */
+.page {
+  display: grid;
+  gap: var(--space-6);
+  padding-block: var(--space-6) var(--space-section);
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-min);
+  justify-self: start;
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
+}
+
+.pageHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.pageTitle {
+  margin: 0; /* overrides the legacy global h1 margin in styles.css */
+  letter-spacing: -0.02em;
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  line-height: var(--leading-tight);
+  overflow-wrap: anywhere;
+}
+
+.sectionTitle {
+  font-size: var(--text-2xl);
+  line-height: var(--leading-snug);
+}
+
+.subTitle {
+  font-size: var(--text-xl);
+}
+
+.panel {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.muted {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.publishRow {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+}
+
+.publishRow > a,
+.publishRow > button {
+  justify-self: start;
+}
+
+.tabs {
+  min-width: 0;
+}
+
+/* ---------- Forms ---------- */
+.form {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.grid2,
+.grid3 {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.fieldset {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.fieldset legend {
+  padding-inline: var(--space-2);
+  font-weight: var(--weight-bold);
+}
+
+.formError {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  font-weight: var(--weight-semibold);
+}
+
+.formActions {
+  display: grid;
+  gap: var(--space-3);
+}
+
+/* Primary action in the thumb zone, kept above the fixed BottomNav. */
+.saveBar {
+  position: sticky;
+  bottom: calc(var(--bottom-nav-height) + var(--safe-bottom));
+  z-index: var(--z-raised);
+  display: grid;
+  gap: var(--space-3);
+  margin-inline: calc(-1 * var(--space-2));
+  padding: var(--space-3) var(--space-2);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-bg) 92%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.lineErrors {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-3) var(--space-8);
+  border-radius: var(--radius-sm);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.lineContent {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* ---------- Lists ---------- */
+.editor {
+  display: grid;
+  gap: var(--space-4);
+  padding-top: var(--space-4);
+}
+
+.editorHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.rows {
+  display: grid;
+  gap: var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.row > * + * {
+  margin-top: 0;
+}
+
+.rowMain {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-1);
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.rowTitle {
+  font-size: var(--text-lg);
+  line-height: var(--leading-snug);
+  overflow-wrap: anywhere;
+}
+
+.rowMeta {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  text-transform: capitalize;
+}
+
+.rowActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.moveButtons {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.messageText {
+  overflow-wrap: anywhere;
+}
+
+.cardLink {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--radius-lg);
+}
+
+.chevron {
+  color: var(--color-primary);
+  font-size: var(--text-xl);
+}
+
+@media (min-width: 600px) {
+  .grid2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .grid3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .formActions,
+  .saveBar {
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .publishRow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
+
+@media (min-width: 900px) {
+  .saveBar {
+    bottom: var(--safe-bottom);
+  }
+}
