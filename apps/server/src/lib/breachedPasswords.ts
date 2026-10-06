@@ -8,8 +8,10 @@
  * - The password, its hash and the suffix are never logged, cached or thrown.
  *   The optional cache holds only the public range data (suffix → count) keyed
  *   by the public prefix.
- * - **Fail-open:** a network error, timeout (1.5 s), oversized body or non-200
- *   answer allows the password and logs a structured warn
+ * - **Fail-open:** a network error, timeout (1.5 s), redirect (fetch uses
+ *   `redirect: "error"`), oversized body (checked against `content-length`
+ *   first, then with a running byte cap while streaming) or non-200 answer
+ *   allows the password and logs a structured warn
  *   `password.breach_check_unavailable` with a running counter. An outage of a
  *   third-party service must not block every signup, reset and change; the
  *   length policy still applies, and the counter makes a prolonged outage
@@ -23,8 +25,8 @@ import { AppError } from "./errors.js";
 export const PWNED_RANGE_URL = "https://api.pwnedpasswords.com/range/";
 /** Default timeout for one range request, headers and body included. */
 export const BREACH_CHECK_TIMEOUT_MS = 1500;
-/** A padded range answer is ~800–1000 lines of ~40 bytes; anything far bigger is not HIBP. */
-const MAX_RANGE_BODY_CHARS = 512 * 1024;
+/** A padded range answer is ~800–1000 lines of ~40 bytes (~40 KB); anything far bigger is not HIBP. */
+export const MAX_RANGE_BODY_BYTES = 512 * 1024;
 /** Cache bounds: prefixes kept and how long. Range data changes rarely. */
 const CACHE_MAX_ENTRIES = 500;
 const CACHE_TTL_MS = 10 * 60 * 1000;
@@ -33,7 +35,10 @@ const PREFIX_LENGTH = 5;
 const RANGE_LINE = /^([0-9A-F]{35}):(\d{1,12})$/;
 
 /** The `fetch` subset this module uses. Tests inject a fake (the only mocked boundary). */
-export type RangeFetcher = (url: string, init: { headers: Record<string, string>; signal: AbortSignal }) => Promise<Response>;
+export type RangeFetcher = (
+  url: string,
+  init: { headers: Record<string, string>; signal: AbortSignal; redirect: "error" }
+) => Promise<Response>;
 
 /** Minimal structured logger (pino / Fastify's `app.log` satisfy it). */
 export interface BreachCheckLogger {
@@ -44,7 +49,7 @@ export interface BreachCheckLogger {
 export type BreachCheckOutcome = "breached" | "clean" | "unavailable" | "skipped";
 
 /** Why a range lookup failed (logged; carries no secret). */
-type UnavailableReason = "timeout" | "network" | "status" | "body";
+type UnavailableReason = "timeout" | "network" | "status" | "redirect" | "oversized" | "body";
 
 /** The checker the routes and the seed use. */
 export interface BreachedPasswordChecker {
@@ -106,6 +111,39 @@ export function parseRangeBody(body: string): Map<string, number> {
   return counts;
 }
 
+/**
+ * Read a response body as UTF-8 with a running byte cap. Past
+ * {@link MAX_RANGE_BODY_BYTES} it aborts the request instead of buffering more.
+ *
+ * @param response - A 200 answer.
+ * @param controller - The request's controller (aborted on overflow).
+ * @param timedOut - Whether the timeout fired (distinguishes the failure reason).
+ */
+async function readCapped(response: Response, controller: AbortController, timedOut: () => boolean): Promise<string> {
+  if (response.body === null) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let received = 0;
+  let text = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (received > MAX_RANGE_BODY_BYTES) {
+        controller.abort();
+        await reader.cancel().catch(() => undefined);
+        throw new RangeUnavailable("oversized");
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+  } catch (error) {
+    if (error instanceof RangeUnavailable) throw error;
+    throw new RangeUnavailable(timedOut() ? "timeout" : "body");
+  }
+  return text + decoder.decode();
+}
+
 class RangeUnavailable extends Error {
   constructor(
     readonly reason: UnavailableReason,
@@ -160,29 +198,40 @@ export function createBreachedPasswordChecker(options: BreachCheckerOptions): Br
   let unavailableCount = 0;
 
   async function fetchRange(prefix: string): Promise<Map<string, number>> {
-    const signal = AbortSignal.timeout(timeoutMs);
-    let response: Response;
+    // One controller for the timeout and the body cap, so either aborts the socket.
+    const controller = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
     try {
-      response = await fetcher(`${PWNED_RANGE_URL}${prefix}`, {
-        headers: { "Add-Padding": "true", "User-Agent": "cuencada" },
-        signal
-      });
-    } catch {
-      throw new RangeUnavailable(signal.aborted ? "timeout" : "network");
+      let response: Response;
+      try {
+        response = await fetcher(`${PWNED_RANGE_URL}${prefix}`, {
+          headers: { "Add-Padding": "true", "User-Agent": "cuencada" },
+          signal: controller.signal,
+          // Never follow a redirect off api.pwnedpasswords.com (fetch rejects it: fail-open).
+          redirect: "error"
+        });
+      } catch {
+        throw new RangeUnavailable(timedOut ? "timeout" : "network");
+      }
+      if (response.status !== 200) {
+        controller.abort(); // the body is irrelevant; release the socket
+        const redirect = response.status >= 300 && response.status < 400;
+        throw new RangeUnavailable(redirect ? "redirect" : "status", response.status);
+      }
+      const declared = Number(response.headers.get("content-length") ?? Number.NaN);
+      if (Number.isFinite(declared) && declared > MAX_RANGE_BODY_BYTES) {
+        controller.abort();
+        throw new RangeUnavailable("oversized");
+      }
+      const body = await readCapped(response, controller, () => timedOut);
+      return parseRangeBody(body);
+    } finally {
+      clearTimeout(timer);
     }
-    if (response.status !== 200) {
-      // Release the socket; the body is irrelevant.
-      await response.body?.cancel().catch(() => undefined);
-      throw new RangeUnavailable("status", response.status);
-    }
-    let body: string;
-    try {
-      body = await response.text();
-    } catch {
-      throw new RangeUnavailable(signal.aborted ? "timeout" : "body");
-    }
-    if (body.length > MAX_RANGE_BODY_CHARS) throw new RangeUnavailable("body");
-    return parseRangeBody(body);
   }
 
   return {

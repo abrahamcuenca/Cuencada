@@ -7,6 +7,8 @@ export interface FakeRange {
   urls: string[];
   /** Headers of the last request. */
   lastHeaders: Record<string, string> | null;
+  /** `redirect` mode of the last request. */
+  lastRedirect: string | null;
 }
 
 /** Behaviour of {@link fakeRange}. */
@@ -29,10 +31,11 @@ export interface FakeRangeOptions {
  * @param options - Failure modes.
  */
 export function fakeRange(breached: readonly string[], options: FakeRangeOptions = {}): FakeRange {
-  const state: FakeRange = { fetcher: async () => new Response(null), urls: [], lastHeaders: null };
+  const state: FakeRange = { fetcher: async () => new Response(null), urls: [], lastHeaders: null, lastRedirect: null };
   state.fetcher = async (url, init) => {
     state.urls.push(url);
     state.lastHeaders = init.headers;
+    state.lastRedirect = init.redirect;
     if (options.networkError === true) throw new TypeError("fetch failed");
     if (options.hang === true) {
       return new Promise<Response>((_resolve, reject) => {

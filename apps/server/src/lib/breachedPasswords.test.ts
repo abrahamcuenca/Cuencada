@@ -5,6 +5,7 @@ import {
   BREACH_CHECK_UNAVAILABLE_EVENT,
   type BreachCheckerOptions,
   createBreachedPasswordChecker,
+  MAX_RANGE_BODY_BYTES,
   parseRangeBody,
   PWNED_RANGE_URL,
   sha1Range
@@ -47,6 +48,7 @@ describe("createBreachedPasswordChecker", () => {
     expect(range.urls).toEqual([`${PWNED_RANGE_URL}${prefix}`]);
     expect(range.urls[0]).not.toContain(suffix);
     expect(range.lastHeaders).toEqual({ "Add-Padding": "true", "User-Agent": "cuencada" });
+    expect(range.lastRedirect).toBe("error");
   });
 
   it("reports a password whose suffix is absent as clean", async () => {
@@ -104,6 +106,76 @@ describe("createBreachedPasswordChecker", () => {
       expect.any(String)
     );
     expect(JSON.stringify([down.logger.warn.mock.calls, offline.logger.warn.mock.calls])).not.toContain(BREACHED);
+  });
+
+  it("fails open on a redirect: fetch rejects it (redirect: error), and a 3xx answer counts too", async () => {
+    // What undici does with `redirect: "error"` when the server answers 3xx.
+    const rejecting = checker({
+      fetcher: async (_url, init) => {
+        if (init.redirect !== "error") return new Response("", { status: 200 });
+        throw new TypeError("fetch failed: unexpected redirect");
+      }
+    });
+    expect(await rejecting.checker.check(BREACHED)).toBe("unavailable");
+    expect(rejecting.logger.warn.mock.calls[0]?.[0]).toMatchObject({ reason: "network" });
+
+    const location = { location: "https://elsewhere.example.test/range" };
+    const redirected = checker({ fetcher: async () => new Response(null, { status: 302, headers: location }) });
+    expect(await redirected.checker.check(BREACHED)).toBe("unavailable");
+    expect(redirected.logger.warn).toHaveBeenCalledWith(
+      { event: BREACH_CHECK_UNAVAILABLE_EVENT, reason: "redirect", upstreamStatus: 302, unavailableTotal: 1 },
+      expect.any(String)
+    );
+  });
+
+  it("fails open as oversized when content-length exceeds the cap, without draining the body", async () => {
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        controller.enqueue(new Uint8Array(1024));
+      }
+    });
+    const { checker: subject, logger } = checker({
+      fetcher: async () => new Response(body, { headers: { "content-length": String(MAX_RANGE_BODY_BYTES + 1) } })
+    });
+
+    expect(await subject.check(BREACHED)).toBe("unavailable");
+    expect(logger.warn.mock.calls[0]?.[0]).toMatchObject({ reason: "oversized" });
+    expect(pulled).toBeLessThanOrEqual(1); // at most the stream's initial pull
+  });
+
+  it("stops reading a streamed body past the cap, aborts the request and fails open as oversized", async () => {
+    const chunk = new Uint8Array(64 * 1024).fill(0x41);
+    let enqueued = 0;
+    let signal: AbortSignal | undefined;
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        enqueued += chunk.byteLength;
+        controller.enqueue(chunk);
+      }
+    });
+    const { checker: subject, logger } = checker({
+      fetcher: async (_url, init) => {
+        signal = init.signal;
+        return new Response(endless); // no content-length: only the running cap can stop it
+      }
+    });
+
+    expect(await subject.check(BREACHED)).toBe("unavailable");
+    expect(logger.warn.mock.calls[0]?.[0]).toMatchObject({ reason: "oversized" });
+    expect(signal?.aborted).toBe(true);
+    // Stopped within a few chunks of the cap instead of buffering forever.
+    expect(enqueued).toBeLessThan(MAX_RANGE_BODY_BYTES + 4 * chunk.byteLength);
+  });
+
+  it("reads a body exactly at the cap", async () => {
+    const { suffix } = sha1Range(BREACHED);
+    const line = `${suffix}:9\r\n`;
+    const { checker: subject } = checker({
+      fetcher: async () => new Response(line + "x".repeat(MAX_RANGE_BODY_BYTES - line.length))
+    });
+    expect(await subject.check(BREACHED)).toBe("breached");
   });
 
   it("caches a prefix's range until the TTL passes, and evicts the least recently used prefix", async () => {
