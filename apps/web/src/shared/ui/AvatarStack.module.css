@@ -1,0 +1,67 @@
+.stack {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: flex;
+}
+
+.overlap.sm .item + .item {
+  margin-left: -10px;
+}
+
+.overlap.md .item + .item {
+  margin-left: -14px;
+}
+
+.overlap.lg .item + .item,
+.overlap.xl .item + .item {
+  margin-left: -18px;
+}
+
+.grid {
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.more {
+  display: inline-grid;
+  place-items: center;
+  border-radius: var(--radius-round);
+  border: 3px solid var(--color-surface);
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  font-weight: var(--weight-black);
+  box-shadow: var(--shadow-sm);
+}
+
+.more-sm {
+  width: 32px;
+  height: 32px;
+  border-width: 2px;
+  font-size: 0.6875rem;
+}
+
+.more-md {
+  width: 48px;
+  height: 48px;
+  font-size: 0.875rem;
+}
+
+.more-lg {
+  width: 64px;
+  height: 64px;
+  border-width: 4px;
+  font-size: 1rem;
+}
+
+.more-xl {
+  width: 96px;
+  height: 96px;
+  border-width: 4px;
+  font-size: 1.5rem;
+}

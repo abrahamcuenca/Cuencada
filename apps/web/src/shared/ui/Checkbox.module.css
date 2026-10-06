@@ -1,0 +1,131 @@
+.row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-height: var(--tap-min);
+  padding-block: var(--space-2);
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.label {
+  display: block;
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+
+/* Stretch the label's hit area over the whole row (tap target ≥ 44px). */
+.label::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.hint {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+}
+
+.error {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-danger);
+}
+
+.input {
+  appearance: none;
+  flex-shrink: 0;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  background: var(--color-surface);
+  border: 2px solid var(--color-border-strong);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.input:disabled,
+.input:disabled + .text .label {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.input[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+
+/* ---------- Checkbox ---------- */
+.checkbox {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-xs);
+}
+
+.checkbox::before {
+  content: "";
+  width: 12px;
+  height: 7px;
+  border: solid var(--color-text-inverse);
+  border-width: 0 0 3px 3px;
+  transform: translateY(-2px) rotate(-45deg) scale(0);
+  transition: transform var(--duration-fast) var(--ease-spring);
+}
+
+.checkbox:checked {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.checkbox:checked::before {
+  transform: translateY(-2px) rotate(-45deg) scale(1);
+}
+
+/* ---------- Switch ---------- */
+.switch {
+  width: 52px;
+  height: 30px;
+  border-radius: var(--radius-pill);
+  background: #dfe7e4;
+  justify-items: start;
+  padding: 2px;
+}
+
+.switch::before {
+  content: "";
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-round);
+  background: #ffffff;
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--duration-base) var(--ease-spring);
+}
+
+.switch:checked {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.switch:checked::before {
+  transform: translateX(22px);
+}
+
+.input:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+
+.checkbox:focus-visible {
+  border-radius: var(--radius-xs);
+}
+
+.switch:focus-visible {
+  border-radius: var(--radius-pill);
+}
