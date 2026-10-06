@@ -168,7 +168,7 @@ export const magicLinkRequestInputSchema = z.object({ email: emailSchema });
 export type MagicLinkRequestInput = z.infer<typeof magicLinkRequestInputSchema>;
 export type MagicLinkRequestRequest = z.input<typeof magicLinkRequestInputSchema>;
 
-/** Token read by the SPA from the URL fragment `#token=…`. */
+/** Token read by the SPA from the URL fragment `#t=…`. */
 export const magicLinkConsumeInputSchema = z.object({ token: opaqueTokenSchema });
 export type MagicLinkConsumeInput = z.infer<typeof magicLinkConsumeInputSchema>;
 export type MagicLinkConsumeRequest = z.input<typeof magicLinkConsumeInputSchema>;
@@ -371,7 +371,7 @@ export const adminInviteListItemSchema = z.object({
 }) satisfies z.ZodType<AdminInviteListItem>;
 
 /**
- * Response to invite creation. `inviteUrl` (`…/invitacion#token=…`) is shown
+ * Response to invite creation. `inviteUrl` (`…/invitacion#t=…`) is shown
  * exactly once so the admin can share it; only its hash is stored.
  */
 export interface AdminInviteCreated {

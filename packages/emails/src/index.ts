@@ -6,6 +6,7 @@ export {
   type EmailContent,
   type EmailCta,
   CTA_FALLBACK_LABEL,
+  type EmailBlock,
   FOOTER_BRAND,
   FOOTER_IGNORE,
   renderPlainText,

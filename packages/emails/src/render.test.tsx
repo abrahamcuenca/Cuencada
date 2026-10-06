@@ -5,6 +5,7 @@ import { render } from "@react-email/render";
 import { describe, expect, it } from "vitest";
 import { CTA_FALLBACK_LABEL, FOOTER_BRAND, FOOTER_IGNORE } from "./content.js";
 import { EmailRenderError, EmailRenderErrorCode } from "./errors.js";
+import { cleanName } from "./format.js";
 import { EmailKind, type EmailTemplate, renderEmail } from "./render.js";
 import { InviteEmail } from "./templates/InviteEmail.js";
 
@@ -202,7 +203,16 @@ describe("renderEmail", () => {
       expect(email.text).toContain("admin@cuencada.com");
       expect(email.text).toMatch(/lunes 14 de septiembre ·\s7:40/);
       expect(email.html).not.toContain("<a ");
-      expect(email.html).toContain(FOOTER_IGNORE);
+    });
+
+    it("never ends with 'puedes ignorarlo' and uses the security footer instead", async () => {
+      const email = await renderEmail(passwordChanged);
+      const footer =
+        "Si no reconoces este cambio, escríbenos a admin@cuencada.com de inmediato.";
+      expect(email.html).not.toContain("ignorarlo");
+      expect(email.text).not.toContain("ignorarlo");
+      expect(email.html).toContain(footer);
+      expect(email.text.trimEnd().endsWith(footer)).toBe(true);
     });
 
     it("escapes HTML-like input in names", async () => {
@@ -249,6 +259,50 @@ describe("renderEmail", () => {
     expect(email.subject).toBe(
       "Tía Bcc: x@evil.example te invitó al portal de la Cuencada",
     );
+  });
+
+  it("strips bidi and invisible characters from names", async () => {
+    const invisible = [
+      "\u200b",
+      "\u200f",
+      "\u202a",
+      "\u202e",
+      "\u2060",
+      "\u2069",
+      "\ufeff",
+      "\u00ad",
+      "\u3164",
+    ];
+    const email = await renderEmail({
+      kind: EmailKind.Invite,
+      props: {
+        inviterName: `T${invisible.join("")}ía \u202elupita\u202c`,
+        acceptUrl: inviteUrl,
+        expiresAt: EXPIRES,
+      },
+    });
+    expect(email.subject).toBe("Tía lupita te invitó al portal de la Cuencada");
+    for (const char of invisible) {
+      expect(email.subject).not.toContain(char);
+      expect(email.text).not.toContain(char);
+    }
+    expect(cleanName("\u200b\u202e\ufeff")).toBeNull();
+  });
+
+  it("declares light-only colour scheme and hardens the button for dark mode", async () => {
+    const email = await renderEmail(cases[0]?.template ?? passwordChanged);
+    expect(email.html).toContain(
+      '<meta name="color-scheme" content="light only"',
+    );
+    expect(email.html).toContain(
+      '<meta name="supported-color-schemes" content="light only"',
+    );
+    expect(email.html).toContain("[data-ogsb] .cu-btn");
+    expect(email.html).toMatch(
+      /class="cu-btn"[^>]*background-color:#0b5e55|background-color:#0b5e55[^>]*class="cu-btn"/,
+    );
+    expect(email.html).toContain("border:2px solid #e7b84b;color:#ffffff");
+    expect(email.html).toContain('bgcolor="#ffffff"');
   });
 
   it("rejects a non-https logoUrl and renders a valid one as the only image", async () => {
@@ -338,17 +392,31 @@ describe("InviteEmail", () => {
 });
 
 describe("source", () => {
+  const root = fileURLToPath(new URL(".", import.meta.url));
+  const sources = readdirSync(root, { recursive: true, encoding: "utf8" })
+    .filter((f) => /\.tsx?$/.test(f) && !f.endsWith(".test.tsx"))
+    .map((f) => ({ file: f, text: readFileSync(join(root, f), "utf8") }));
+
   it("never uses dangerouslySetInnerHTML", () => {
-    const root = fileURLToPath(new URL(".", import.meta.url));
-    const files = readdirSync(root, {
-      recursive: true,
-      encoding: "utf8",
-    }).filter((f) => /\.tsx?$/.test(f) && !f.endsWith(".test.tsx"));
-    expect(files.length).toBeGreaterThan(5);
-    for (const file of files) {
-      expect(readFileSync(join(root, file), "utf8")).not.toContain(
-        "dangerouslySetInnerHTML",
-      );
+    expect(sources.length).toBeGreaterThan(5);
+    for (const { text } of sources) {
+      expect(text).not.toContain("dangerouslySetInnerHTML");
     }
+  });
+
+  it("never imports deprecated @react-email component packages, only render", () => {
+    for (const { text } of sources) {
+      for (const [, pkg] of text.matchAll(/from "(@react-email\/[^"]+)"/g)) {
+        expect(pkg).toBe("@react-email/render");
+      }
+    }
+  });
+
+  it("never renders with pretty: true (the only path that loads prettier)", () => {
+    for (const { text } of sources) {
+      expect(text).not.toMatch(/pretty:\s*true/);
+    }
+    const renderSource = sources.find((s) => s.file === "render.tsx");
+    expect(renderSource?.text).toMatch(/pretty:\s*false/);
   });
 });

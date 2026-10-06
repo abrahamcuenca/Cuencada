@@ -162,6 +162,8 @@ Bugambilia is new. It's the bougainvillea that covers walls in Mérida, and it g
 | Use native `<select>`, `<dialog>` and checkbox | Build custom pickers that fight the mobile OS |
 | Keep the legacy wording where it exists | Translate into corporate copy ("Gestionar contenido multimedia") |
 
+> **Email exceptions** (`packages/emails`, approved in WP-0.5.1): the email call to action is **white on green (`#0b5e55`, 7.65:1) with a 2px gold border**, not ink on gold. Dark-mode inverters (Gmail, Chromium auto-dark) lighten dark text but keep saturated backgrounds, so ink on gold became unreadable.
+
 ## 7. Microcopy conventions
 - Use tú, sentence case, and active verbs that match the outcome. If the button says "Confirmar asistencia", the toast says "¡Listo! Confirmaste tu asistencia."
 - **Errors** say what happened and how to fix it: "No pudimos subir la foto. Revisa tu conexión e inténtalo otra vez." Don't use "¡Ups!" and don't apologise.

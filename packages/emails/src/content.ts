@@ -3,7 +3,7 @@ export const FOOTER_BRAND = "CUENCADA · Portal familiar";
 /** Shown under the button, followed by the raw URL, for older mail clients. */
 export const CTA_FALLBACK_LABEL =
   "¿El botón no funciona? Copia y pega este enlace en tu navegador:";
-/** Footer reassurance line printed in every email. */
+/** Default footer reassurance line. Security notices override it via `footerNote`. */
 export const FOOTER_IGNORE = "Si no esperabas este correo, puedes ignorarlo.";
 
 /** The single call to action of an email. */
@@ -11,6 +11,13 @@ export interface EmailCta {
   label: string;
   /** Already validated with `assertSafeUrl`. */
   url: string;
+}
+
+/** A paragraph or note with a stable id (used as the React key). */
+export interface EmailBlock {
+  /** Unique within its list and fixed per template, e.g. `"intro"`. */
+  id: string;
+  text: string;
 }
 
 /**
@@ -24,12 +31,14 @@ export interface EmailContent {
   preview: string;
   heading: string;
   greeting: string;
-  paragraphs: readonly string[];
+  paragraphs: readonly EmailBlock[];
   cta: EmailCta | null;
   /** Small print after the button (expiry, single use…). */
-  notes: readonly string[];
+  notes: readonly EmailBlock[];
   /** Highlighted security warning, if any. */
   warning: string | null;
+  /** Last footer line. Defaults to {@link FOOTER_IGNORE}; security notices must not say "ignóralo". */
+  footerNote: string;
 }
 
 /**
@@ -39,15 +48,15 @@ export function renderPlainText(content: EmailContent): string {
   const blocks: string[] = [
     content.heading,
     content.greeting,
-    ...content.paragraphs,
+    ...content.paragraphs.map((block) => block.text),
   ];
   if (content.cta !== null) {
     blocks.push(`${content.cta.label}:\n${content.cta.url}`);
   }
-  blocks.push(...content.notes);
+  blocks.push(...content.notes.map((block) => block.text));
   if (content.warning !== null) {
     blocks.push(`IMPORTANTE: ${content.warning}`);
   }
-  blocks.push(`--\n${FOOTER_BRAND}\n${FOOTER_IGNORE}`);
+  blocks.push(`--\n${FOOTER_BRAND}\n${content.footerNote}`);
   return `${blocks.join("\n\n")}\n`;
 }
