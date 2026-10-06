@@ -39,6 +39,7 @@ Playwright ──https──▶ vite preview :4190 (apps/web/dist-e2e, self-sign
 ```
 
 - **Real API:** `tests/e2e/harness/server.ts` (run with `tsx`) imports `buildApp`/`loadConfig` from `apps/server/dist` and injects only `mailer` and `storage` through the existing `AppDeps` seam. Routes, auth, CSRF, rate limits, the job queue (sharp), chat sockets and the DB are the production code. Nothing was added to `apps/server/src`. `dist/index.js` isn't used only because it can't take injected services; its graceful shutdown is mirrored.
+- **Start conditions:** the harness requires `E2E=1`, which Playwright's `webServer` sets, and refuses outright when `NODE_ENV=production`. It then **forces `NODE_ENV=test`** in the config it passes to `loadConfig`. That config is built from constants, not `process.env`.
 - **Database:** `harness/seed.ts` drops and recreates the e2e database, runs the real migrations (`runMigrations`) and the real product seed (`runSeed`; the admin, the 2026 edition and the chat rooms, with fake `SEED_*_URL` links), then adds fictional fixtures:
   - a cast per Playwright project (`harness/people.ts`, `@e2e.example.test`): a first-login admin, a ready admin and members Ana, Beto, Carla, Darío, Elena and Fede
   - a published future **Cuencada 2027** in "Pueblo Ejemplo" (RSVP open, a hotel, two programa items, its chat room)
@@ -57,7 +58,7 @@ Both live in `tests/e2e/harness/`, **outside `apps/server/src`**. They aren't co
 |---|---|---|
 | Not shipped | outside the server build | outside the server build |
 | Wired only by | `harness/server.ts` | `harness/server.ts` |
-| Entry refuses | unless `E2E=1`; always with `NODE_ENV=production` | same |
+| Entry refuses | unless `E2E=1`; always when the process has `NODE_ENV=production`. The API config it builds **forces `NODE_ENV=test`** (from constants, not the shell env). | same |
 | Self-check | the constructor throws on `NODE_ENV=production` | — |
 | Data at rest | one JSON file per message (tokens included), file mode 0600, directory mode 0700, under `$TMP/cuencada-e2e/mail`, wiped at every start | bodies named by `sha256(key)`, so a key can't escape the directory |
 | Network | none (specs read the files) | loopback only. Presigned URLs carry an HMAC (per-process random secret) over method, key, expiry, content type and length. A PUT must match the signed `Content-Type` and the exact size. Expired or tampered URLs get 403. CORS is open only to the e2e origin. |

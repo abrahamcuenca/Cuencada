@@ -1,7 +1,9 @@
 /**
  * E2E harness entrypoint (run by Playwright's `webServer`, via tsx):
  *
- * 1. refuse to start unless `E2E=1` and `NODE_ENV=test` (never production);
+ * 1. refuse to start unless `E2E=1`, and always when the process has
+ *    `NODE_ENV=production`; the API config it builds forces `NODE_ENV=test`
+ *    (it never reads the shell's NODE_ENV or other env into the config);
  * 2. wipe the run directory, reset + migrate + seed the `*_e2e` database;
  * 3. start the local object store (presigned PUT/GET) on loopback;
  * 4. build the REAL API from `apps/server/dist` with `buildApp`, injecting
