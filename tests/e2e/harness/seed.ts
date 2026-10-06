@@ -61,7 +61,7 @@ async function insertUser(
   if (row === undefined) throw new Error("e2e seed: user insert returned no row");
   await sql`
     insert into profiles (user_id, full_name, city, family_branch, show_city, listed_in_directory)
-    values (${row.id}, ${cast.displayName}, ${cast.city}, 'Rama Ejemplo', true, true)`;
+    values (${row.id}, ${cast.displayName}, ${cast.city}, 'Norte', true, true)`;
   return row.id;
 }
 
@@ -103,10 +103,10 @@ async function seedFamily(sql: Sql, project: ProjectKey, anaUserId: string, beto
   const beto = castMember(project, CastRole.Beto);
   const rows = await sql<{ id: string; full_name: string }[]>`
     insert into people (user_id, full_name, family_branch, birth_year)
-    values (${anaUserId}, ${ana.displayName}, 'Rama Ejemplo', 1990),
-           (${betoUserId}, ${beto.displayName}, 'Rama Ejemplo', 1992),
-           (null, ${names.parent}, 'Rama Ejemplo', 1960),
-           (null, ${names.partner}, 'Rama Ejemplo', 1962)
+    values (${anaUserId}, ${ana.displayName}, 'Norte', 1990),
+           (${betoUserId}, ${beto.displayName}, 'Norte', 1992),
+           (null, ${names.parent}, 'Norte', 1960),
+           (null, ${names.partner}, 'Norte', 1962)
     returning id, full_name`;
   const id = (fullName: string): string => {
     const found = rows.find((row) => row.full_name === fullName);
