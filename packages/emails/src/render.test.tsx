@@ -392,17 +392,31 @@ describe("InviteEmail", () => {
 });
 
 describe("source", () => {
+  const root = fileURLToPath(new URL(".", import.meta.url));
+  const sources = readdirSync(root, { recursive: true, encoding: "utf8" })
+    .filter((f) => /\.tsx?$/.test(f) && !f.endsWith(".test.tsx"))
+    .map((f) => ({ file: f, text: readFileSync(join(root, f), "utf8") }));
+
   it("never uses dangerouslySetInnerHTML", () => {
-    const root = fileURLToPath(new URL(".", import.meta.url));
-    const files = readdirSync(root, {
-      recursive: true,
-      encoding: "utf8",
-    }).filter((f) => /\.tsx?$/.test(f) && !f.endsWith(".test.tsx"));
-    expect(files.length).toBeGreaterThan(5);
-    for (const file of files) {
-      expect(readFileSync(join(root, file), "utf8")).not.toContain(
-        "dangerouslySetInnerHTML",
-      );
+    expect(sources.length).toBeGreaterThan(5);
+    for (const { text } of sources) {
+      expect(text).not.toContain("dangerouslySetInnerHTML");
     }
+  });
+
+  it("never imports deprecated @react-email component packages, only render", () => {
+    for (const { text } of sources) {
+      for (const [, pkg] of text.matchAll(/from "(@react-email\/[^"]+)"/g)) {
+        expect(pkg).toBe("@react-email/render");
+      }
+    }
+  });
+
+  it("never renders with pretty: true (the only path that loads prettier)", () => {
+    for (const { text } of sources) {
+      expect(text).not.toMatch(/pretty:\s*true/);
+    }
+    const renderSource = sources.find((s) => s.file === "render.tsx");
+    expect(renderSource?.text).toMatch(/pretty:\s*false/);
   });
 });

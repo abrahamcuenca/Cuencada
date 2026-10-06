@@ -2,15 +2,15 @@
 Owner: Frontend + UI/UX · Reviewers: TL · Branch: wp/0.5-emails · PR: # (not opened; orchestrator to open)
 
 ## Scope
-- New workspace package `@cuencada/emails` (`packages/emails`): ESM, TS strict, built by `tsc` to `dist/` with `module`/`moduleResolution: NodeNext` and `.js` import specifiers, so `apps/server` (NodeNext) can import it directly. React 19 (same major as `apps/web`), the individual `@react-email/*` component packages (body, button, container, head, heading, hr, html, img, preview, section, text) plus a single `@react-email/render` 2.1.0 — all older than the 7-day `minimumReleaseAge`.
-- Five Spanish templates sharing one layout (`EmailLayout`): single column ≤ 600px, green header with gold wordmark, white card, one bulletproof button (white on green with a gold border; 2px border + 12px padding + 24px line height = 52px tall, MSO padding hacks from React Email), a copy-paste fallback link under the button, muted small print, optional red warning box, footer "CUENCADA · Portal familiar" + "Si no esperabas este correo, puedes ignorarlo." (password-changed uses "Si no reconoces este cambio, escríbenos a {supportContact} de inmediato." instead)
+- New workspace package `@cuencada/emails` (`packages/emails`): ESM, TS strict, built by `tsc` to `dist/` with `module`/`moduleResolution: NodeNext` and `.js` import specifiers, so `apps/server` (NodeNext) can import it directly. React 19 (same major as `apps/web`), vendored email primitives in `src/primitives/` (from react-email, MIT) and a single `@react-email/render` 2.1.0 — older than the 7-day `minimumReleaseAge`.
+- Five Spanish templates sharing one layout (`EmailLayout`): single column ≤ 600px, green header with gold wordmark, white card, one bulletproof button (white on green with a gold border; 2px border + 12px padding + 24px line height = 52px tall, table-cell bulletproof button with `bgcolor` + `mso-padding-alt` for Outlook), a copy-paste fallback link under the button, muted small print, optional red warning box, footer "CUENCADA · Portal familiar" + "Si no esperabas este correo, puedes ignorarlo." (password-changed uses "Si no reconoces este cambio, escríbenos a {supportContact} de inmediato." instead)
   - `InviteEmail` — `{ inviterName, inviteeName?, eventTitle?, acceptUrl, expiresAt }` (`eventTitle`, e.g. "Cuencada 2027 · Mérida", adds "Ya estamos preparando la próxima reunión: …" to the body)
   - `MagicLinkEmail` — `{ displayName, loginUrl, expiresInMinutes }`
   - `PasswordResetEmail` — `{ displayName, resetUrl, expiresInMinutes }`
   - `PasswordChangedEmail` — `{ displayName, changedAt, supportContact }` (no button; "Si no fuiste tú…" warning)
   - `VerifyEmail` — `{ displayName, verifyUrl, expiresInMinutes }`
 - Plain-text alternative generated from the same content object as the HTML, so they never drift.
-- 39 Vitest tests (`packages/emails/src/render.test.tsx`), run by the root `vitest.config.ts` project `emails` (root `pnpm test`; `pnpm --filter @cuencada/emails test` runs only that project).
+- 41 Vitest tests (`packages/emails/src/render.test.tsx`), run by the root `vitest.config.ts` project `emails` (root `pnpm test`; `pnpm --filter @cuencada/emails test` runs only that project).
 - Screenshots at 375px: `docs/ux/screenshots/emails/*.webp`.
 - `biome.json`: ignore `packages/*/dist`.
 
@@ -91,10 +91,26 @@ Also exported: the React components (for previews), `build*Content` (pure copy b
 - **No `email dev` preview server.** The `react-email` CLI pulls in Next.js, which is heavy. Previews can be rendered with `renderEmail` plus a headless browser instead; that is how the screenshots were made.
 
 ## WP-0.5.1 hardening (Tech Lead follow-ups)
-- **Dependencies.** `@react-email/components` was replaced by the 11 component packages actually used, and exactly one `@react-email/render` (2.1.0) is now installed (`pnpm why` shows 1 version, down from 2).
-  - The production dependency closure went from 31 packages / 26.8 MB to 26 packages / 19.1 MB. tailwind, tailwindcss, code-block, prismjs, marked and the duplicate render 2.0.6 are gone.
-  - Of what remains, `prettier` (9.7 MB) is a hard dependency of `@react-email/render` itself, even though it is only used when `pretty: true`.
-  - ⚠ The individual `@react-email/*` component packages (and `@react-email/components`) are marked *deprecated* on npm: upstream folded them into the `react-email` v6 package, which also bundles the CLI (esbuild, babel, socket.io…). They are pinned to exact versions. The longer-term option is to vendor the ~10 trivial table components and keep only `@react-email/render` (still maintained).
+- **Dependencies: no deprecated packages.** `@react-email/components` and the individual `@react-email/*` component packages are deprecated on npm, because upstream folded them into `react-email` v6, which also bundles its CLI. So the 11 components we use are **vendored** in `packages/emails/src/primitives/`.
+  - They are typed, table-based and inline-styled, with the same markup as upstream. Each file's header credits react-email and names the source version, and the full MIT notice is in `primitives/LICENSE.react-email.md`.
+  - The only remaining react-email dependency is `@react-email/render` 2.1.0, which is still maintained. `pnpm why` shows one version.
+  - A test fails if any source file imports another `@react-email/*` package.
+  - Production dependency closure:
+
+    | Step | Packages | Size |
+    |---|---|---|
+    | WP-0.5 (`@react-email/components`) | 31 | 26.8 MB |
+    | Individual component packages | 26 | 19.1 MB |
+    | Vendored primitives (now) | 15 | 19.0 MB |
+
+    Most of what is left is `prettier` (9.7 MB) and `react-dom` (7.9 MB).
+  - **prettier** is a hard dependency of `@react-email/render`, and it is imported when render loads. It only *runs* for `render(…, { pretty: true })`. We always pass `pretty: false`, and a source test fails if `pretty: true` ever appears.
+  - **Button differs from upstream.** react-email's Button injects Outlook conditional comments as raw HTML, which this package forbids. The vendored Button is the classic table-cell bulletproof button instead:
+    - the `<td>` has `bgcolor` plus `mso-padding-alt`, which is what Outlook desktop renders;
+    - the `<a>` has the padding, border and background, so the whole area is clickable in every other client;
+    - the `<a>` also has `rel="noreferrer"`.
+
+    The invite (light) and forced-dark screenshots were re-checked and look the same, apart from a ~4px shift below the button.
 - **Names.** `cleanName` now also drops bidi and invisible characters: U+200B–U+200F, U+202A–U+202E, U+2060–U+2069, U+FEFF, U+00AD and U+3164. Control characters are still replaced with a space.
 - **Password-changed footer.** It no longer says "puedes ignorarlo". `EmailContent.footerNote` carries a per-template footer line.
 - **Dark mode.**

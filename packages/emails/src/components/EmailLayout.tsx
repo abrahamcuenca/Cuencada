@@ -1,20 +1,23 @@
-import { Body } from "@react-email/body";
-import { Button } from "@react-email/button";
-import { Container } from "@react-email/container";
-import { Head } from "@react-email/head";
-import { Heading } from "@react-email/heading";
-import { Hr } from "@react-email/hr";
-import { Html } from "@react-email/html";
-import { Img } from "@react-email/img";
-import { Preview } from "@react-email/preview";
-import { Section } from "@react-email/section";
-import { Text } from "@react-email/text";
-import type { CSSProperties, ReactElement } from "react";
+import type { ReactElement } from "react";
 import {
   CTA_FALLBACK_LABEL,
   type EmailContent,
   FOOTER_BRAND,
 } from "../content.js";
+import {
+  Body,
+  Button,
+  Container,
+  type EmailStyle,
+  Head,
+  Heading,
+  Hr,
+  Html,
+  Img,
+  Preview,
+  Section,
+  Text,
+} from "../primitives/index.js";
 
 /** Brand colours from `apps/web/src/shared/styles/tokens.css` (emails cannot use CSS variables). */
 const color = {
@@ -57,11 +60,6 @@ const darkModeCss = [
   `[data-ogsb] .cu-bg { background-color: ${color.cream} !important; }`,
   `[data-ogsb] .cu-warning { background-color: ${color.dangerSoft} !important; }`,
 ].join("\n");
-
-/** Legacy `bgcolor` attribute: honoured by Outlook desktop and kept by Gmail's inverter as a hint. */
-function bgcolor(value: string): Record<string, string> {
-  return { bgcolor: value };
-}
 
 const styles = {
   body: {
@@ -198,7 +196,7 @@ const styles = {
     margin: "0",
     textAlign: "center",
   },
-} satisfies Record<string, CSSProperties>;
+} satisfies Record<string, EmailStyle>;
 
 /** Props of {@link EmailLayout}. */
 export interface EmailLayoutProps {
@@ -230,12 +228,12 @@ export function EmailLayout({
         <Container
           style={styles.container}
           className="cu-bg"
-          {...bgcolor(color.cream)}
+          bgcolor={color.cream}
         >
           <Section
             style={styles.header}
             className="cu-header"
-            {...bgcolor(color.green)}
+            bgcolor={color.green}
           >
             {logoUrl === null ? (
               <Text style={styles.wordmark} className="cu-wordmark">
@@ -250,13 +248,13 @@ export function EmailLayout({
               />
             )}
           </Section>
-          <Section style={styles.stripe} {...bgcolor(color.gold)}>
+          <Section style={styles.stripe} bgcolor={color.gold}>
             &nbsp;
           </Section>
           <Section
             style={styles.card}
             className="cu-card"
-            {...bgcolor(color.white)}
+            bgcolor={color.white}
           >
             <Heading as="h1" style={styles.heading} className="cu-ink">
               {content.heading}
@@ -274,7 +272,7 @@ export function EmailLayout({
                 <Section
                   style={styles.ctaSection}
                   className="cu-card"
-                  {...bgcolor(color.white)}
+                  bgcolor={color.white}
                 >
                   <Button
                     href={content.cta.url}
