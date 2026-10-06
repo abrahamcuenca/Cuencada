@@ -277,8 +277,8 @@ describe("PATCH /api/admin/users/:id", () => {
   });
 
   // Each round creates two admins (argon2) and races two PATCHes, so it is
-  // slow under a loaded CI runner: 3 rounds still hit both interleavings
-  // (the advisory lock serializes them) and get a generous timeout.
+  // slow under a loaded CI runner: 3 rounds with a generous timeout. The
+  // earlier "flake" was the 401 interleaving, not a timeout (WP-0.8a).
   it("keeps at least one active admin when two admins demote each other at the same time", { timeout: 60_000 }, async () => {
     for (let round = 0; round < 3; round += 1) {
       const db = getTestDb();
@@ -291,7 +291,11 @@ describe("PATCH /api/admin/users/:id", () => {
       ]);
       const codes = results.map((result) => result.statusCode).sort();
       expect(codes[0]).toBe(200);
-      expect([403, 409]).toContain(codes[1]);
+      // The loser gets 409 (last-admin guard), 403 (no longer an admin) or,
+      // when the disable commits before its request passes the auth guard,
+      // 401 (its session was revoked with the account). All are correct; the
+      // invariant is the single remaining active admin below.
+      expect([401, 403, 409]).toContain(codes[1]);
       const admins = await db
         .select({ id: users.id })
         .from(users)
