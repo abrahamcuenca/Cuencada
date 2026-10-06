@@ -6,7 +6,7 @@ import { HttpResponse, http } from "msw";
 import { apiUrl, authenticatedState, makeUser, statusState } from "../../../../test/auth";
 import { renderApp } from "../../../../test/renderApp";
 import { clearFragmentToken, readAndScrubFragmentToken } from "../../../shared/lib/fragmentToken";
-import { LINK_INVALID_MESSAGE, LINK_MISSING_MESSAGE, PASSWORDS_DIFFER_MESSAGE, RATE_LIMITED_MESSAGE } from "../forms";
+import { EMAIL_MAY_BE_SLOW_HINT, LINK_INVALID_MESSAGE, LINK_MISSING_MESSAGE, PASSWORDS_DIFFER_MESSAGE, RATE_LIMITED_MESSAGE } from "../forms";
 import { apiError, contractRoute, FRAGMENT_TOKEN, noContent, okAccepted } from "../testing/contractHandlers";
 import { cancelOnlineLogoutRetry } from "../session";
 import { RESET_REQUESTED_MESSAGE } from "./ForgotPasswordPage";
@@ -39,7 +39,12 @@ describe("ForgotPasswordPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "Enviar enlace" }));
 
     expect(await screen.findByText(RESET_REQUESTED_MESSAGE)).toBeInTheDocument();
+    expect(screen.getByText(EMAIL_MAY_BE_SLOW_HINT)).toBeInTheDocument();
     expect(requested).toHaveBeenCalledWith("nadie@example.com");
+
+    // "vuelve a pedirlo": back to the form, email kept.
+    await userEvent.click(screen.getByRole("button", { name: "Pedir otro enlace" }));
+    expect(await screen.findByLabelText("Correo electrónico")).toHaveValue("nadie@example.com");
   });
 
   it("asks for a valid email first", async () => {

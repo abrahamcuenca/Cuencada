@@ -42,6 +42,14 @@ export const LOGOUT_PATH = "/auth/logout";
 export const CSRF_HEADERS: Readonly<Record<string, string>> = { [CSRF_HEADER]: "1" };
 /** Pause before retrying a refresh that lost a `REFRESH_RACE`, letting the winner finish. */
 export const REFRESH_RACE_RETRY_DELAY_MS = 150;
+/**
+ * Pause before the last retry after a SECOND consecutive `REFRESH_RACE`: just
+ * past the server's 10 s reuse-grace window (`REFRESH_REUSE_GRACE_MS`), so a
+ * slow winner (e.g. another tab on a bad connection) has surely stored its new
+ * cookie. If the cookie jar still holds the old token by then, the server treats
+ * it as reuse and revokes the session, which is the correct outcome.
+ */
+export const REFRESH_RACE_GRACE_WAIT_MS = 11_000;
 
 type ApiBaseQuery = BaseQueryFn<string | FetchArgs, unknown, FetchBaseQueryError, object, FetchBaseQueryMeta>;
 type QueryResult = Awaited<ReturnType<ApiBaseQuery>>;
@@ -137,9 +145,11 @@ async function refreshOnce(api: BaseQueryApi): Promise<boolean> {
 
   let result = await requestRefresh(api);
   if (loggedOutMeanwhile()) return false;
-  if (isRefreshRace(result)) {
-    // Another tab rotated the cookie inside the grace window; retry exactly once.
-    await delay(REFRESH_RACE_RETRY_DELAY_MS);
+  // Another tab rotated the cookie inside the grace window: retry after a short pause and,
+  // if that races too, once more after the grace window has passed. Then give up.
+  for (const pause of [REFRESH_RACE_RETRY_DELAY_MS, REFRESH_RACE_GRACE_WAIT_MS]) {
+    if (!isRefreshRace(result)) break;
+    await delay(pause);
     if (loggedOutMeanwhile()) return false;
     result = await requestRefresh(api);
     if (loggedOutMeanwhile()) return false;

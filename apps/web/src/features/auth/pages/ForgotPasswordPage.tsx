@@ -9,10 +9,10 @@ import { authApi } from "../api";
 import styles from "../auth.module.css";
 import { AuthLayout } from "../components/AuthLayout";
 import { FormAlert } from "../components/FormAlert";
-import { describeAuthError, type FieldErrors, useFocusFirstInvalid, usePendingAction, validateForm } from "../forms";
+import { describeAuthError, EMAIL_MAY_BE_SLOW_HINT, type FieldErrors, useFocusFirstInvalid, usePendingAction, validateForm } from "../forms";
 
 /** Generic confirmation: never reveals whether the email has an account. */
-export const RESET_REQUESTED_MESSAGE = "Si el correo tiene cuenta, te llegará un enlace en unos minutos.";
+export const RESET_REQUESTED_MESSAGE = "Si el correo tiene cuenta, te enviamos un enlace para crear una contraseña nueva.";
 
 /** `/recuperar`: asks for a password-reset email. The answer is always generic. */
 export function ForgotPasswordPage(): ReactNode {
@@ -49,7 +49,11 @@ export function ForgotPasswordPage(): ReactNode {
     return (
       <AuthLayout title="Revisa tu correo" icon="📬">
         <FormAlert tone="success" message={RESET_REQUESTED_MESSAGE} />
-        <Button to="/entrar" variant="secondary" fullWidth>
+        <p className={styles.note}>{EMAIL_MAY_BE_SLOW_HINT}</p>
+        <Button variant="secondary" fullWidth onClick={() => setSent(false)}>
+          Pedir otro enlace
+        </Button>
+        <Button to="/entrar" variant="ghost" fullWidth>
           Volver a Entrar
         </Button>
       </AuthLayout>
