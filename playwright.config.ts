@@ -8,7 +8,7 @@
  * See docs/coordination/WP-2.2.md.
  */
 import { defineConfig, devices } from "@playwright/test";
-import { API_ORIGIN, WEB_ORIGIN } from "./tests/e2e/harness/settings.js";
+import { API_ORIGIN, E2E_BROWSER_ENV, WEB_ORIGIN } from "./tests/e2e/harness/settings.js";
 
 const CI = process.env.CI !== undefined && process.env.CI !== "";
 
@@ -40,7 +40,9 @@ export default defineConfig({
     // Self-signed certs (preview + object store), generated per run.
     ignoreHTTPSErrors: true,
     // Service workers refuse origins with certificate errors unless Chromium ignores them.
-    launchOptions: { args: ["--ignore-certificate-errors"] },
+    // Fonts are pinned (DejaVu Sans + Noto Color Emoji via tests/e2e/fonts/fonts.conf), so overflow and
+    // target measurements are the same locally and on the CI runner.
+    launchOptions: { args: ["--ignore-certificate-errors"], env: E2E_BROWSER_ENV },
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "off"

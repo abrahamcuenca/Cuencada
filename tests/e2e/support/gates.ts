@@ -18,9 +18,16 @@ export async function horizontalOverflow(page: Page): Promise<{ scrollWidth: num
     const clientWidth = root.clientWidth;
     const culprits: { element: string; detail: string }[] = [];
     if (root.scrollWidth > clientWidth) {
+      // Content inside a horizontal scroller (overflow-x other than visible) that itself fits is not a culprit.
+      const clippedByScroller = (element: HTMLElement): boolean => {
+        for (let parent = element.parentElement; parent !== null && parent !== document.body; parent = parent.parentElement) {
+          if (getComputedStyle(parent).overflowX !== "visible" && parent.getBoundingClientRect().right <= clientWidth + 1) return true;
+        }
+        return false;
+      };
       for (const element of Array.from(document.body.querySelectorAll<HTMLElement>("*"))) {
         const rect = element.getBoundingClientRect();
-        if (rect.width > 0 && rect.right > clientWidth + 1 && culprits.length < 5) {
+        if (rect.width > 0 && rect.right > clientWidth + 1 && culprits.length < 5 && !clippedByScroller(element)) {
           culprits.push({
             element: `${element.tagName.toLowerCase()}${element.className ? `.${String(element.className).split(" ")[0]}` : ""}`,
             detail: `right=${Math.round(rect.right)}px`

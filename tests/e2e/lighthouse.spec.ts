@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { chromium, expect, test } from "@playwright/test";
 import lighthouse from "lighthouse";
 import { CastRole, castMember, FUTURE_YEAR, ProjectKey } from "./harness/people.js";
-import { REPO_ROOT, WEB_ORIGIN } from "./harness/settings.js";
+import { E2E_BROWSER_ENV, REPO_ROOT, WEB_ORIGIN } from "./harness/settings.js";
 import { login } from "./support/fixtures.js";
 
 const DEBUG_PORT = Number(process.env.E2E_LIGHTHOUSE_PORT ?? 9339);
@@ -48,6 +48,7 @@ test.describe("lighthouse mobile", () => {
     const profile = mkdtempSync(join(tmpdir(), "cuencada-e2e-lh-"));
     const context = await chromium.launchPersistentContext(profile, {
       args: [`--remote-debugging-port=${DEBUG_PORT}`, "--ignore-certificate-errors"],
+      env: E2E_BROWSER_ENV,
       ignoreHTTPSErrors: true,
       baseURL: WEB_ORIGIN,
       extraHTTPHeaders: { "x-forwarded-for": "10.200.0.9" }

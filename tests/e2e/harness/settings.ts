@@ -66,3 +66,12 @@ export const WEB_DIST_DIR = join(REPO_ROOT, "apps/web/dist-e2e");
 
 /** Committed journey screenshots (375 px, fictional data only). */
 export const SCREENSHOT_DIR = join(REPO_ROOT, "docs/ux/screenshots/e2e");
+
+/** fontconfig file that pins the browser's fonts (see tests/e2e/fonts/fonts.conf). */
+export const E2E_FONTCONFIG_FILE = join(REPO_ROOT, "tests/e2e/fonts/fonts.conf");
+
+/** Environment for every browser the e2e suite launches: the process env plus the pinned fonts. */
+export const E2E_BROWSER_ENV: Record<string, string> = {
+  ...Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
+  FONTCONFIG_FILE: E2E_FONTCONFIG_FILE
+};
