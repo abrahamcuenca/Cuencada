@@ -15,6 +15,7 @@ describe("AppLayout", () => {
       expect(within(bottom).getByRole("link", { name: new RegExp(label) })).toBeInTheDocument();
     }
     expect(screen.getByRole("link", { name: "Entrar" })).toHaveAttribute("href", "/entrar");
+    expect(within(bottom).getByRole("link", { name: /Más/ })).toHaveAttribute("href", "/mas");
   });
 
   it("shows the admin link and a Salir button for an admin", async () => {

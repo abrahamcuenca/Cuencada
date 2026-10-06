@@ -60,6 +60,8 @@ export const appRoutes: RouteObject[] = [
         Component: RequireAuth,
         children: [
           ...collect("session"),
+          // App-owned mobile "Más" menu (session level: reachable during a forced password change).
+          { path: "/mas", lazy: async () => ({ Component: (await import("./MorePage")).MorePage }) },
           {
             Component: RequirePasswordChanged,
             children: [...collect("member"), { Component: RequireAdmin, children: collect("admin") }]

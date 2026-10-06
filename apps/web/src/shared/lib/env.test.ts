@@ -18,4 +18,11 @@ describe("resolveApiBaseUrl", () => {
       expect(() => resolveApiBaseUrl(bad, ORIGIN), bad).toThrow(EnvConfigError);
     }
   });
+
+  it("rejects absolute http: in production but allows https: and same-origin paths", () => {
+    expect(() => resolveApiBaseUrl("http://api.cuencada.com", ORIGIN, true)).toThrow(EnvConfigError);
+    expect(resolveApiBaseUrl("https://api.cuencada.com", ORIGIN, true)).toBe("https://api.cuencada.com");
+    expect(resolveApiBaseUrl("/api", "http://localhost:4173", true)).toBe("http://localhost:4173/api");
+    expect(resolveApiBaseUrl("http://127.0.0.1:3006/api", ORIGIN, false)).toBe("http://127.0.0.1:3006/api");
+  });
 });

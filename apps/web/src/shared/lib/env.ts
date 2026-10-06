@@ -25,12 +25,17 @@ export class EnvConfigError extends Error {
  * relative `//host`, embedded credentials) is rejected. Resolving against the
  * page origin keeps relative bases working outside the browser (tests).
  *
+ * In production builds an absolute URL must be `https:` [SEC]: the Bearer
+ * token and cookies must never cross the network in cleartext. A same-origin
+ * path is always allowed (it inherits the page's scheme).
+ *
  * @param raw - The raw env value; `undefined` or empty means the default.
  * @param origin - The page origin used to resolve relative paths.
+ * @param production - True for production builds (`import.meta.env.PROD`).
  * @returns The absolute base URL without a trailing slash.
  * @throws {EnvConfigError} When the value is not an allowed URL.
  */
-export function resolveApiBaseUrl(raw: string | undefined, origin: string): string {
+export function resolveApiBaseUrl(raw: string | undefined, origin: string, production = false): string {
   const value = raw === undefined || raw.trim() === "" ? DEFAULT_API_BASE_URL : raw.trim();
 
   if (value.startsWith("//")) {
@@ -46,6 +51,9 @@ export function resolveApiBaseUrl(raw: string | undefined, origin: string): stri
 
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new EnvConfigError("VITE_API_BASE_URL debe usar http: o https:.");
+  }
+  if (production && url.protocol !== "https:" && !value.startsWith("/")) {
+    throw new EnvConfigError("En producción VITE_API_BASE_URL debe usar https: o ser una ruta del mismo origen.");
   }
   if (url.username !== "" || url.password !== "") {
     throw new EnvConfigError("VITE_API_BASE_URL no puede incluir credenciales.");
@@ -67,6 +75,6 @@ export interface ClientEnv {
 
 /** The validated environment for this build. */
 export const env: ClientEnv = {
-  apiBaseUrl: resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL, window.location.origin),
+  apiBaseUrl: resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL, window.location.origin, import.meta.env.PROD),
   isDev: import.meta.env.DEV
 };
