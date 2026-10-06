@@ -1,0 +1,63 @@
+id: cuencada
+domain: cuencada.com
+aliases:
+  - www.cuencada.com
+
+repo: git@github.com:abrahamcuenca/Cuencada.git
+branch: main
+
+vps: server_1
+
+deploy:
+  base_dir: /srv/cuencada
+  user: svc_cuencada
+  group: svc_cuencada
+  releases_dir: /srv/cuencada/releases
+  current_dir: /srv/cuencada/current
+  mode: bundle
+  build_command: pnpm turbo build --concurrency=1
+  build_env:
+    VITE_API_BASE_URL: /api
+    VITE_PLATFORM_DOMAIN: cuencada.com
+
+tls:
+  enabled: true
+  email: admin@cuencada.com
+  cert_name: cuencada.com
+  webroot: /var/www/_letsencrypt
+
+frontend:
+  enabled: true
+  kind: static
+  app: apps/web
+  artifact_dir: apps/web/dist
+  public_root: /srv/cuencada/web/current
+
+dashboard:
+  enabled: false
+
+server:
+  enabled: true
+  migrate_command: [pnpm, --filter, "@cuencada/server", "db:migrate"]
+  kind: node
+  app: apps/server
+  start_command: /usr/bin/node apps/server/dist/index.js
+  port: 3104
+  service_name: cuencada-server
+  websocket: true
+  api_max_body_size: 2m
+  env:
+    NODE_ENV: production
+    HOST: 127.0.0.1
+    PORT: "3104"
+    CORS_ORIGIN: https://cuencada.com
+    DATABASE_URL: "{{ vault_cuencada_database_url }}"
+    JWT_SECRET: "{{ vault_cuencada_jwt_secret }}"
+    SEED_ADMIN_EMAIL: admin@cuencada.com
+    SEED_ADMIN_TEMP_PASSWORD: "{{ vault_cuencada_seed_admin_temp_password }}"
+    S3_ENDPOINT: "{{ vault_cuencada_s3_endpoint }}"
+    S3_REGION: "{{ vault_cuencada_s3_region | default('us-southeast-1') }}"
+    S3_BUCKET: "{{ vault_cuencada_s3_bucket }}"
+    S3_ACCESS_KEY_ID: "{{ vault_cuencada_s3_access_key_id }}"
+    S3_SECRET_ACCESS_KEY: "{{ vault_cuencada_s3_secret_access_key }}"
+    S3_PUBLIC_BASE_URL: "{{ vault_cuencada_s3_public_base_url | default('') }}"

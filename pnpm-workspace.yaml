@@ -1,0 +1,24 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+allowBuilds:
+  '@biomejs/biome': true
+  argon2: true
+  esbuild: true
+
+minimumReleaseAge: 10080
+minimumReleaseAgeExclude:
+  - "@biomejs/biome"
+  - "typescript"
+  - "vite"
+  - "vitest"
+
+onlyBuiltDependencies:
+  - "@biomejs/biome"
+  - "@swc/core"
+  - "argon2"
+  - "esbuild"
+
+overrides:
+  drizzle-orm: "^0.45.2"
+  source-map-js: "^1.2.2"
