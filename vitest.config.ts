@@ -76,6 +76,16 @@ export default defineConfig({
         }
       },
       {
+        // Pure guards of the e2e harness (tests/e2e/harness/*.test.ts); the
+        // Playwright specs (*.spec.ts) run with `pnpm e2e`, not Vitest.
+        root: fromRoot("./tests/e2e"),
+        test: {
+          name: "e2e-harness",
+          environment: "node",
+          include: ["harness/**/*.test.ts"]
+        }
+      },
+      {
         root: fromRoot("./packages/emails"),
         // Templates are .tsx; compile JSX with the automatic runtime like tsc does.
         esbuild: { jsx: "automatic" },
