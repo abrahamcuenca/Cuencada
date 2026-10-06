@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { selectIsAdmin } from "../features/auth/authSlice";
 import { logout } from "../features/auth/session";
@@ -17,7 +17,7 @@ const MEMBER_LINKS: readonly MoreLink[] = [
   { to: "/directorio", label: "Directorio", icon: "🧭" },
   { to: "/arbol", label: "Árbol familiar", icon: "🌳" },
   { to: "/perfil", label: "Mi perfil", icon: "🙂" },
-  { to: "/perfil/sesiones", label: "Sesiones", icon: "🔐" }
+  { to: "/perfil/sesiones", label: "Sesiones y seguridad", icon: "🔐" }
 ];
 
 const ADMIN_LINK: MoreLink = { to: "/admin", label: "Administración", icon: "⭐" };
@@ -34,6 +34,20 @@ export function MorePage(): ReactNode {
   const navigate = useNavigate();
   const isAdmin = useAppSelector(selectIsAdmin);
   const links = isAdmin ? [...MEMBER_LINKS, ADMIN_LINK] : MEMBER_LINKS;
+  const logoutRequested = useRef(false);
+
+  // "Cerrar sesión" first leaves the guarded /mas, and logs out when this page
+  // unmounts, i.e. once the new route has committed (or an error boundary
+  // replaced it). Logging out while /mas was still rendered let RequireAuth's
+  // redirect to /entrar race the navigation to "/".
+  useEffect(
+    () => () => {
+      if (!logoutRequested.current) return;
+      logoutRequested.current = false;
+      dispatch(logout()).catch(reportUnexpected);
+    },
+    [dispatch]
+  );
 
   return (
     <section className={styles.page}>
@@ -52,9 +66,8 @@ export function MorePage(): ReactNode {
             size="lg"
             fullWidth
             onClick={() => {
-              dispatch(logout())
-                .then(() => navigate("/", { replace: true }))
-                .catch(reportUnexpected);
+              logoutRequested.current = true;
+              void navigate("/", { replace: true });
             }}
           >
             Cerrar sesión

@@ -25,7 +25,7 @@ describe("MorePage", () => {
     expect(main.getByRole("link", { name: /Directorio/ })).toHaveAttribute("href", "/directorio");
     expect(main.getByRole("link", { name: /Árbol familiar/ })).toHaveAttribute("href", "/arbol");
     expect(main.getByRole("link", { name: /Mi perfil/ })).toHaveAttribute("href", "/perfil");
-    expect(main.getByRole("link", { name: /Sesiones/ })).toHaveAttribute("href", "/perfil/sesiones");
+    expect(main.getByRole("link", { name: /Sesiones y seguridad/ })).toHaveAttribute("href", "/perfil/sesiones");
     expect(main.queryByRole("link", { name: /Administración/ })).not.toBeInTheDocument();
   });
 
@@ -40,8 +40,11 @@ describe("MorePage", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: "Cerrar sesión" }));
 
+    await vi.waitFor(() => expect(store.getState().auth.status).toBe("anonymous"));
     await vi.waitFor(() => expect(router.state.location.pathname).toBe("/"));
-    expect(store.getState().auth.status).toBe("anonymous");
+    // Still home after the logout settles: the guard's /entrar redirect no longer races it.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(router.state.location.pathname).toBe("/");
   });
 
   it("sends anonymous visitors to /entrar", async () => {

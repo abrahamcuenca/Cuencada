@@ -1,7 +1,14 @@
-import type { ReactNode } from "react";
-import { Link, Outlet, useLocation } from "react-router-dom";
-import { selectCurrentUser, selectIsAdmin, selectIsOffline, selectLogoutPending } from "../features/auth/authSlice";
+import { lazy, type ReactNode, Suspense } from "react";
+import { Link, Outlet, useLocation, useMatches } from "react-router-dom";
+import {
+  selectCurrentUser,
+  selectIsAdmin,
+  selectIsOffline,
+  selectLogoutPending,
+  type WithAuthState
+} from "../features/auth/authSlice";
 import { logout } from "../features/auth/session";
+import { wantsMinimalChrome } from "../shared/lib/featureRoutes";
 // Direct imports (not the shared/ui barrel) keep unused primitives' CSS out of the initial chunk.
 import { BottomNav } from "../shared/ui/BottomNav";
 import { Button } from "../shared/ui/Button";
@@ -21,6 +28,11 @@ export const LOGOUT_PENDING_NOTICE =
   "Cerraste sesión en este dispositivo, pero no pudimos confirmarlo con el servidor. Se completará al reconectar.";
 /** Shown while a refresh cannot reach the server. */
 export const OFFLINE_NOTICE = "Sin conexión. Reintentaremos al volver la conexión.";
+
+// Lazy: only unverified users ever download it (keeps authApi out of the initial chunk).
+const VerifyEmailBanner = lazy(async () => ({
+  default: (await import("../features/auth/components/VerifyEmailBanner")).VerifyEmailBanner
+}));
 
 /** Mobile tab bar destinations (Inicio, Programa, Fotos, Chat, Más). */
 export const BOTTOM_NAV_ITEMS: readonly NavItem[] = [
@@ -82,6 +94,11 @@ function StatusBanner(): ReactNode {
   return null;
 }
 
+/** True for a logged-in user whose email is not verified yet (shows the T1 banner). */
+function selectNeedsEmailVerification(state: WithAuthState): boolean {
+  return state.auth.status === "authenticated" && state.auth.user?.emailVerified === false;
+}
+
 /**
  * App shell built on the WP-0.7 primitives: `TopNav` (brand, links at
  * ≥900px, Entrar/Salir), the routed page inside `PageShell`'s `<main>`, and
@@ -93,13 +110,27 @@ function StatusBanner(): ReactNode {
 export function AppLayout(): ReactNode {
   const { pathname } = useLocation();
   const isAdmin = useAppSelector(selectIsAdmin);
-  const showBanner = useAppSelector((state) => selectIsOffline(state) || selectLogoutPending(state));
+  const showStatus = useAppSelector((state) => selectIsOffline(state) || selectLogoutPending(state));
+  const showVerify = useAppSelector(selectNeedsEmailVerification);
+  // Auth screens (route handle MINIMAL_CHROME) get no BottomNav; it is hidden at ≥900px anyway.
+  const minimalChrome = useMatches().some((match) => wantsMinimalChrome(match.handle));
   const topItems = isAdmin ? [...TOP_NAV_ITEMS, ADMIN_NAV_ITEM] : TOP_NAV_ITEMS;
 
   return (
     <PageShell
       layout="bleed"
-      banner={showBanner ? <StatusBanner /> : undefined}
+      banner={
+        showStatus || showVerify ? (
+          <>
+            {showStatus ? <StatusBanner /> : null}
+            {showVerify ? (
+              <Suspense fallback={null}>
+                <VerifyEmailBanner />
+              </Suspense>
+            ) : null}
+          </>
+        ) : undefined
+      }
       header={
         <TopNav
           items={topItems}
@@ -110,12 +141,9 @@ export function AppLayout(): ReactNode {
         />
       }
       bottomNav={
-        <BottomNav
-          items={BOTTOM_NAV_ITEMS}
-          currentPath={pathname}
-          renderLink={renderRouterLink}
-          label="Navegación inferior"
-        />
+        minimalChrome ? undefined : (
+          <BottomNav items={BOTTOM_NAV_ITEMS} currentPath={pathname} renderLink={renderRouterLink} label="Navegación inferior" />
+        )
       }
     >
       <Outlet />
