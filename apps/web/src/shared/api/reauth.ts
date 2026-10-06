@@ -24,10 +24,12 @@ import {
   passwordChangeRequired,
   refreshDeferredOffline,
   selectAccessToken,
+  selectSessionEpoch,
   tokenRefreshed,
   type WithAuthState
 } from "../../features/auth/authSlice";
 import { env } from "../lib/env";
+import { reportUnexpected } from "../lib/reportUnexpected";
 import { getApiErrorCode } from "./errors";
 
 /** Name of the Web Locks lock that serializes refreshes across tabs. */
@@ -128,11 +130,19 @@ async function runRefresh(api: BaseQueryApi): Promise<boolean> {
 }
 
 async function refreshOnce(api: BaseQueryApi): Promise<boolean> {
+  // [SEC] A logout (here or broadcast from another tab) bumps the epoch; a result that
+  // lands after it is discarded so it cannot revive the session.
+  const epoch = selectSessionEpoch(authState(api));
+  const loggedOutMeanwhile = (): boolean => selectSessionEpoch(authState(api)) !== epoch;
+
   let result = await requestRefresh(api);
+  if (loggedOutMeanwhile()) return false;
   if (isRefreshRace(result)) {
     // Another tab rotated the cookie inside the grace window; retry exactly once.
     await delay(REFRESH_RACE_RETRY_DELAY_MS);
+    if (loggedOutMeanwhile()) return false;
     result = await requestRefresh(api);
+    if (loggedOutMeanwhile()) return false;
   }
 
   if (result.error === undefined) {
@@ -142,27 +152,56 @@ async function refreshOnce(api: BaseQueryApi): Promise<boolean> {
       api.dispatch(tokenRefreshed({ accessToken: parsed.data.accessToken, user: parsed.data.user }));
       return true;
     }
-  } else if (isUnreachable(result.error)) {
-    // No usable answer from the server: keep the session and try again when back online.
+  }
+
+  if (result.error === undefined || isUnreachable(result.error)) {
+    // No usable answer (offline, 5xx, or a 200 that is not our JSON, e.g. a hotel captive
+    // portal): keep the session and try again when back online.
     api.dispatch(refreshDeferredOffline());
     scheduleOnlineRefreshRetry(api);
     return false;
   }
 
-  // The server answered and refused (401, 403 CSRF_FAILED, 409 after the retry) or sent a malformed body.
+  // The server answered with a refusal (401, 403 CSRF_FAILED, 409 after the retry, other 4xx).
   cancelOnlineRefreshRetry();
   api.dispatch(loggedOut());
   return false;
 }
 
+/** HTTP status of a `fetchBaseQuery` error, or `null` when there was no HTTP answer. */
+function httpStatusOf(error: FetchBaseQueryError): number | null {
+  if (typeof error.status === "number") return error.status;
+  return "originalStatus" in error ? error.originalStatus : null;
+}
+
 /**
- * True when the refresh got no HTTP answer (offline, DNS, timeout) or the
- * server/proxy is down (5xx). Those never log the user out.
+ * True when there was no usable answer from our API: no HTTP response
+ * (offline, DNS, timeout), a 5xx, or a body that is not JSON (captive portal
+ * HTML, `PARSING_ERROR`). Those never log the user out.
  */
-function isUnreachable(error: FetchBaseQueryError): boolean {
-  if (error.status === "FETCH_ERROR" || error.status === "TIMEOUT_ERROR") return true;
-  const httpStatus = typeof error.status === "number" ? error.status : "originalStatus" in error ? error.originalStatus : 0;
-  return httpStatus >= 500;
+export function isUnreachable(error: FetchBaseQueryError): boolean {
+  if (error.status === "FETCH_ERROR" || error.status === "TIMEOUT_ERROR" || error.status === "PARSING_ERROR") return true;
+  const status = httpStatusOf(error);
+  return status === null || status >= 500;
+}
+
+/** Outcome of {@link requestServerLogout}. */
+export type ServerLogoutOutcome = "confirmed" | "unconfirmed";
+
+/**
+ * `POST /auth/logout` with the CSRF header, under the same cross-tab lock as
+ * refresh so it never interleaves with a rotation of the same cookie.
+ * A 2xx, or a 401 (the session is already dead), counts as confirmed.
+ *
+ * @param api - Supplies `dispatch`/`getState`.
+ * @returns Whether the server confirmed the logout.
+ */
+export async function requestServerLogout(api: Pick<BaseQueryApi, "dispatch" | "getState">): Promise<ServerLogoutOutcome> {
+  const result = await withRefreshLock(async () =>
+    rawBaseQuery({ url: LOGOUT_PATH, method: "POST", headers: { ...CSRF_HEADERS } }, detachedApi(api, "logout"), {})
+  );
+  if (result.error === undefined) return "confirmed";
+  return httpStatusOf(result.error) === 401 && !isUnreachable(result.error) ? "confirmed" : "unconfirmed";
 }
 
 let onlineRetry: (() => void) | null = null;
@@ -171,9 +210,7 @@ function scheduleOnlineRefreshRetry(api: Pick<BaseQueryApi, "dispatch" | "getSta
   if (onlineRetry !== null || typeof window === "undefined") return;
   const retry = (): void => {
     onlineRetry = null;
-    refreshAccessToken(api).catch((error: unknown) => {
-      globalThis.reportError(error);
-    });
+    refreshAccessToken(api).catch(reportUnexpected);
   };
   onlineRetry = retry;
   window.addEventListener("online", retry, { once: true });
@@ -193,10 +230,11 @@ let refreshInFlight: Promise<boolean> | null = null;
  *
  * Single-flight: concurrent callers in this tab share one request. Across
  * tabs the request runs under {@link withRefreshLock}. On 409 `REFRESH_RACE`
- * it retries once. Success dispatches `tokenRefreshed`. A network error or
- * 5xx keeps the session, dispatches `refreshDeferredOffline` and retries on
- * the next `online` event. Any other answer (401, 403 `CSRF_FAILED`, 409
- * after the retry, malformed body) dispatches `loggedOut`.
+ * it retries once. Success dispatches `tokenRefreshed`. No usable answer
+ * (network error, 5xx, non-JSON or off-contract 200) keeps the session,
+ * dispatches `refreshDeferredOffline` and retries on the next `online` event.
+ * A refusal (401, 403 `CSRF_FAILED`, 409 after the retry) dispatches
+ * `loggedOut`. A result that arrives after a logout is discarded.
  *
  * @param api - Supplies `dispatch`/`getState`; its abort signal is not used.
  * @returns `true` when a new token is in the store.

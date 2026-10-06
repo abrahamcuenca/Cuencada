@@ -1,5 +1,5 @@
 import { screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { statusState } from "../../../test/auth";
 import { renderApp } from "../../../test/renderApp";
 import { clearFragmentToken } from "../../shared/lib/fragmentToken";
@@ -26,6 +26,16 @@ describe("fragment-token pages", () => {
     expect(screen.queryByText(/no es válido/)).not.toBeInTheDocument();
     expect(window.location.hash).toBe("");
     expect(window.location.href).not.toContain(TOKEN);
+  });
+
+  it("removes the hash from the router location after an in-app navigation that carried it", async () => {
+    window.history.replaceState(null, "", `/invitacion#t=${TOKEN}`);
+
+    const { router } = renderApp(`/invitacion#t=${TOKEN}`, statusState("anonymous"));
+
+    await screen.findByRole("heading", { name: "Únete a la familia" });
+    await vi.waitFor(() => expect(router.state.location.hash).toBe(""));
+    expect(router.state.location.pathname).toBe("/invitacion");
   });
 
   it("tells the user the link is invalid when /verificar has no token", async () => {

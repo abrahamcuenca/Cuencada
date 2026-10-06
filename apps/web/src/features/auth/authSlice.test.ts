@@ -6,6 +6,8 @@ import {
   credentialsReceived,
   initialAuthState,
   loggedOut,
+  logoutConfirmed,
+  logoutUnconfirmed,
   passwordChangeRequired,
   refreshDeferredOffline,
   selectIsAdmin,
@@ -14,6 +16,7 @@ import {
 } from "./authSlice";
 
 const authenticated: AuthState = {
+  ...initialAuthState,
   accessToken: "token-1",
   user: makeUser(),
   status: "authenticated",
@@ -37,6 +40,7 @@ describe("authReducer", () => {
     const user = makeUser({ displayName: "Tío Beto" });
     for (const action of [tokenRefreshed({ accessToken: "t2", user }), credentialsReceived({ accessToken: "t2", user })]) {
       expect(authReducer({ ...initialAuthState, status: "restoring" }, action)).toEqual({
+        ...initialAuthState,
         accessToken: "t2",
         user,
         status: "authenticated",
@@ -75,14 +79,24 @@ describe("authReducer", () => {
     expect(authReducer(authenticated, passwordChangeRequired()).passwordChangeRequired).toBe(true);
   });
 
-  it("clears the token and user and becomes anonymous on loggedOut", () => {
-    expect(authReducer({ ...authenticated, passwordChangeRequired: true }, loggedOut())).toEqual({
-      accessToken: null,
-      user: null,
+  it("clears the token and user, becomes anonymous and bumps the session epoch on loggedOut", () => {
+    expect(authReducer({ ...authenticated, passwordChangeRequired: true, sessionEpoch: 4 }, loggedOut())).toEqual({
+      ...initialAuthState,
       status: "anonymous",
-      passwordChangeRequired: false,
-      isOffline: false
+      sessionEpoch: 5
     });
+  });
+
+  it("keeps logoutPending across loggedOut and toggles it with logoutUnconfirmed and logoutConfirmed", () => {
+    const pending = authReducer(authenticated, logoutUnconfirmed());
+    expect(pending.logoutPending).toBe(true);
+    expect(authReducer(pending, loggedOut()).logoutPending).toBe(true);
+    expect(authReducer(pending, logoutConfirmed()).logoutPending).toBe(false);
+  });
+
+  it("clears logoutPending when new credentials arrive", () => {
+    const pending = { ...initialAuthState, status: "anonymous" as const, logoutPending: true };
+    expect(authReducer(pending, credentialsReceived({ accessToken: "t", user: makeUser() })).logoutPending).toBe(false);
   });
 });
 

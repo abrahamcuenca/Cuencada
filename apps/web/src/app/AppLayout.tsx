@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
-import { selectCurrentUser, selectIsAdmin, selectIsOffline } from "../features/auth/authSlice";
+import { selectCurrentUser, selectIsAdmin, selectIsOffline, selectLogoutPending } from "../features/auth/authSlice";
 import { logout } from "../features/auth/session";
 // Direct imports (not the shared/ui barrel) keep unused primitives' CSS out of the initial chunk.
 import { BottomNav } from "../shared/ui/BottomNav";
@@ -13,6 +13,14 @@ import styles from "./layout.module.css";
 
 // TODO(T2): point "Programa" at the current Cuencada from `GET /api/cuencadas/home`.
 const PROGRAMA_PATH = "/cuencada/2026";
+/** Mobile "Más" menu (Directorio, Árbol, Perfil, Sesiones, Admin, Cerrar sesión). */
+export const MORE_PATH = "/mas";
+
+/** Shown while the server has not confirmed a logout. */
+export const LOGOUT_PENDING_NOTICE =
+  "Cerraste sesión en este dispositivo, pero no pudimos confirmarlo con el servidor. Se completará al reconectar.";
+/** Shown while a refresh cannot reach the server. */
+export const OFFLINE_NOTICE = "Sin conexión. Reintentaremos al volver la conexión.";
 
 /** Mobile tab bar destinations (Inicio, Programa, Fotos, Chat, Más). */
 export const BOTTOM_NAV_ITEMS: readonly NavItem[] = [
@@ -20,7 +28,7 @@ export const BOTTOM_NAV_ITEMS: readonly NavItem[] = [
   { key: "programa", label: "Programa", href: PROGRAMA_PATH, icon: "📅" },
   { key: "fotos", label: "Fotos", href: "/galeria", icon: "📸" },
   { key: "chat", label: "Chat", href: "/chat", icon: "💬" },
-  { key: "mas", label: "Más", href: "/perfil", icon: "☰" }
+  { key: "mas", label: "Más", href: MORE_PATH, icon: "☰" }
 ];
 
 const TOP_NAV_ITEMS: readonly NavItem[] = [
@@ -66,6 +74,14 @@ function SessionAction(): ReactNode {
   );
 }
 
+function StatusBanner(): ReactNode {
+  const isOffline = useAppSelector(selectIsOffline);
+  const logoutPending = useAppSelector(selectLogoutPending);
+  if (logoutPending) return <output>{LOGOUT_PENDING_NOTICE}</output>;
+  if (isOffline) return <output>{OFFLINE_NOTICE}</output>;
+  return null;
+}
+
 /**
  * App shell built on the WP-0.7 primitives: `TopNav` (brand, links at
  * ≥900px, Entrar/Salir), the routed page inside `PageShell`'s `<main>`, and
@@ -77,13 +93,13 @@ function SessionAction(): ReactNode {
 export function AppLayout(): ReactNode {
   const { pathname } = useLocation();
   const isAdmin = useAppSelector(selectIsAdmin);
-  const isOffline = useAppSelector(selectIsOffline);
+  const showBanner = useAppSelector((state) => selectIsOffline(state) || selectLogoutPending(state));
   const topItems = isAdmin ? [...TOP_NAV_ITEMS, ADMIN_NAV_ITEM] : TOP_NAV_ITEMS;
 
   return (
     <PageShell
       layout="bleed"
-      banner={isOffline ? <output>Sin conexión. Reintentaremos al volver la conexión.</output> : undefined}
+      banner={showBanner ? <StatusBanner /> : undefined}
       header={
         <TopNav
           items={topItems}

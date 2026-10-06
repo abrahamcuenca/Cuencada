@@ -35,6 +35,18 @@ export function getApiErrorCode(error: unknown): ErrorCode | null {
   return parseApiError(error)?.error.code ?? null;
 }
 
+/**
+ * True for the error RTK Query reports when a request was aborted, most
+ * often because `loggedOut` reset the API cache while it was in flight.
+ * Callers must not show an error toast for it: the guards already redirect.
+ *
+ * @param error - The `error` from an RTK Query result, or what `.unwrap()` rejected with.
+ * @returns Whether it is an abort.
+ */
+export function isAbortError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "name" in error && error.name === "AbortError";
+}
+
 /** Shown when the server gave no usable message (network down, proxy page, etc.). */
 export const GENERIC_ERROR_MESSAGE = "Algo salió mal. Revisa tu conexión e inténtalo de nuevo.";
 

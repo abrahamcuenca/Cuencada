@@ -1,9 +1,11 @@
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { apiUrl, errorBody, makeUser, tokenBody } from "../../test/auth";
+import { apiUrl, authenticatedState, errorBody, makeUser, tokenBody } from "../../test/auth";
 import { LEGACY_DEMO_USER_KEY, removeLegacyDemoSession } from "../features/auth/legacy";
 import { cancelOnlineRefreshRetry } from "../shared/api/reauth";
+import { clearFragmentToken, readAndScrubFragmentToken } from "../shared/lib/fragmentToken";
+import { loggedOut } from "../features/auth/authSlice";
 import { bootstrapApp } from "./bootstrap";
 import { makeStore } from "./store";
 
@@ -75,6 +77,36 @@ describe("bootstrapApp", () => {
     await vi.waitFor(() =>
       expect(store.getState().auth).toMatchObject({ status: "authenticated", accessToken: "back-online", isOffline: false })
     );
+  });
+
+  it("scrubs a #t= token from the URL before the router starts and keeps it for its page", async () => {
+    const token = "Zt7".repeat(12);
+    window.history.replaceState(null, "", `/invitacion?x=1#t=${token}`);
+    server.use(http.post(apiUrl("/auth/refresh"), () => HttpResponse.json(errorBody("UNAUTHENTICATED"), { status: 401 })));
+    const store = makeStore();
+
+    stops.push(bootstrapApp(store));
+
+    expect(window.location.hash).toBe("");
+    expect(window.location.href).not.toContain(token);
+    expect(readAndScrubFragmentToken()).toBe(token);
+    await vi.waitFor(() => expect(store.getState().auth.status).toBe("anonymous"));
+    // The boot-time "not logged in" result must not wipe the stashed invite token.
+    expect(readAndScrubFragmentToken()).toBe(token);
+    clearFragmentToken();
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("forgets a stashed fragment token when an authenticated session logs out", () => {
+    const token = "Qx9".repeat(12);
+    window.history.replaceState(null, "", `/restablecer#t=${token}`);
+    readAndScrubFragmentToken();
+    const store = makeStore(authenticatedState());
+
+    store.dispatch(loggedOut());
+
+    expect(readAndScrubFragmentToken()).toBeNull();
+    window.history.replaceState(null, "", "/");
   });
 
   it("never writes the token or user to web storage", async () => {

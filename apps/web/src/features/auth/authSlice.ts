@@ -36,6 +36,18 @@ export interface AuthState {
    * event; only an HTTP 4xx answer logs the user out.
    */
   isOffline: boolean;
+  /**
+   * Incremented by every `loggedOut`. A refresh captures it before its request
+   * and discards its result if it changed meanwhile, so a refresh that lands
+   * after a logout (this tab or a broadcast) can never revive the session.
+   */
+  sessionEpoch: number;
+  /**
+   * The user logged out but the server has not confirmed it yet (offline or
+   * 5xx). The layout shows a notice; the logout is retried on `online` and at
+   * the next boot (see `pendingLogout.ts`).
+   */
+  logoutPending: boolean;
 }
 
 /** Credentials as returned by login, refresh, magic link, invite accept and change-password. */
@@ -46,7 +58,9 @@ export const initialAuthState: AuthState = {
   user: null,
   status: "idle",
   passwordChangeRequired: false,
-  isOffline: false
+  isOffline: false,
+  sessionEpoch: 0,
+  logoutPending: false
 };
 
 function applyCredentials(state: AuthState, action: PayloadAction<Credentials>): void {
@@ -55,6 +69,8 @@ function applyCredentials(state: AuthState, action: PayloadAction<Credentials>):
   state.status = "authenticated";
   state.passwordChangeRequired = action.payload.user.mustChangePassword;
   state.isOffline = false;
+  // A successful login replaced the refresh cookie, so the old unconfirmed logout no longer matters.
+  state.logoutPending = false;
 }
 
 const authSlice = createSlice({
@@ -77,9 +93,25 @@ const authSlice = createSlice({
     passwordChangeRequired(state) {
       state.passwordChangeRequired = true;
     },
-    /** Clears everything: explicit logout, another tab's logout, or a failed refresh. */
-    loggedOut() {
-      return { ...initialAuthState, status: "anonymous" };
+    /**
+     * Clears the session: explicit logout, another tab's logout, or a refused
+     * refresh. Bumps `sessionEpoch`; keeps `logoutPending`.
+     */
+    loggedOut(state) {
+      return {
+        ...initialAuthState,
+        status: "anonymous",
+        sessionEpoch: state.sessionEpoch + 1,
+        logoutPending: state.logoutPending
+      };
+    },
+    /** The server has not confirmed the logout yet. */
+    logoutUnconfirmed(state) {
+      state.logoutPending = true;
+    },
+    /** The server confirmed the logout (2xx, or 401 because the session was already dead). */
+    logoutConfirmed(state) {
+      state.logoutPending = false;
     }
   }
 });
@@ -90,7 +122,9 @@ export const {
   tokenRefreshed,
   refreshDeferredOffline,
   passwordChangeRequired,
-  loggedOut
+  loggedOut,
+  logoutUnconfirmed,
+  logoutConfirmed
 } = authSlice.actions;
 
 /** Reducer for the `auth` key of the store. */
@@ -109,6 +143,10 @@ export const selectCurrentUser = (state: WithAuthState): CurrentUser | null => s
 export const selectAuthStatus = (state: WithAuthState): AuthStatus => state.auth.status;
 /** @returns Whether the last refresh could not reach the server. */
 export const selectIsOffline = (state: WithAuthState): boolean => state.auth.isOffline;
+/** @returns The logout epoch (see {@link AuthState.sessionEpoch}). */
+export const selectSessionEpoch = (state: WithAuthState): number => state.auth.sessionEpoch;
+/** @returns Whether a logout still awaits the server's confirmation. */
+export const selectLogoutPending = (state: WithAuthState): boolean => state.auth.logoutPending;
 /** @returns Whether the router must force `/cambiar-contrasena`. */
 export const selectPasswordChangeRequired = (state: WithAuthState): boolean => state.auth.passwordChangeRequired;
 /**

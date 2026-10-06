@@ -55,5 +55,8 @@ export const baseApi = createApi({
   reducerPath: "api",
   baseQuery: baseQueryWithReauth,
   tagTypes: API_TAG_TYPES,
+  // Refetch active queries when the browser comes back online (needs `setupListeners`, wired in bootstrap).
+  // Pairs with the offline refresh retry: queries that failed while offline recover by themselves.
+  refetchOnReconnect: true,
   endpoints: () => ({})
 });

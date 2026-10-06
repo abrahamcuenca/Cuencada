@@ -10,6 +10,7 @@ import type { ReactNode } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import { Button } from "../../shared/ui/Button";
+import { reportUnexpected } from "../../shared/lib/reportUnexpected";
 import { Spinner } from "../../shared/ui/Spinner";
 import { selectAuthStatus, selectCurrentUser, selectIsOffline, selectPasswordChangeRequired } from "./authSlice";
 import type { LoginRedirectState } from "./redirect";
@@ -42,9 +43,7 @@ export function SessionOffline(): ReactNode {
       <p>No pudimos comprobar tu sesión. Lo intentaremos de nuevo en cuanto vuelva la conexión.</p>
       <Button
         onClick={() => {
-          dispatch(restoreSession()).catch((error: unknown) => {
-            globalThis.reportError(error);
-          });
+          dispatch(restoreSession()).catch(reportUnexpected);
         }}
       >
         Reintentar
