@@ -89,6 +89,17 @@ const authSlice = createSlice({
     refreshDeferredOffline(state) {
       state.isOffline = true;
     },
+    /**
+     * A fresh `GET /me` (T1). Updates the in-memory user (e.g. `emailVerified`
+     * after verification) without touching the token. Ignored without a
+     * session or for a different user, so a late response after a logout or
+     * account switch cannot resurrect or mix up state.
+     */
+    currentUserLoaded(state, action: PayloadAction<CurrentUser>) {
+      if (state.status !== "authenticated" || state.user?.id !== action.payload.id) return;
+      state.user = action.payload;
+      state.passwordChangeRequired = action.payload.mustChangePassword;
+    },
     /** The server answered 403 `PASSWORD_CHANGE_REQUIRED`. */
     passwordChangeRequired(state) {
       state.passwordChangeRequired = true;
@@ -120,6 +131,7 @@ export const {
   sessionRestoreStarted,
   credentialsReceived,
   tokenRefreshed,
+  currentUserLoaded,
   refreshDeferredOffline,
   passwordChangeRequired,
   loggedOut,
