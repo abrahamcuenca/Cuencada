@@ -1,67 +1,15 @@
-export const UserRole = {
-  Admin: "admin",
-  Member: "member"
-} as const;
-
-export type UserRole = (typeof UserRole)[keyof typeof UserRole];
-
-export const CuencadaStatus = {
-  Past: "past",
-  Upcoming: "upcoming",
-  Active: "active",
-  Draft: "draft"
-} as const;
-
-export type CuencadaStatus = (typeof CuencadaStatus)[keyof typeof CuencadaStatus];
-
-export const RsvpStatus = {
-  Yes: "yes",
-  Maybe: "maybe",
-  No: "no"
-} as const;
-
-export type RsvpStatus = (typeof RsvpStatus)[keyof typeof RsvpStatus];
-
-export interface PublicCuencada {
-  id: string;
-  year: number;
-  slug: string;
-  title: string;
-  status: CuencadaStatus;
-  startsAt: string;
-  endsAt: string;
-  city: string;
-  state: string;
-  country: string;
-  description: string;
-  heroImageUrl: string | null;
-  themeColor: string;
-  publicItinerary: ItineraryItem[];
-  publicLocations: LocationItem[];
-}
-
-export interface ItineraryItem {
-  id: string;
-  date: string;
-  time: string | null;
-  title: string;
-  description: string;
-  locationName: string | null;
-  visibility: "public" | "members";
-}
-
-export interface LocationItem {
-  id: string;
-  name: string;
-  kind: "hotel" | "venue" | "map" | "other";
-  address: string | null;
-  url: string | null;
-}
-
-export interface CurrentUser {
-  id: string;
-  email: string;
-  displayName: string;
-  role: UserRole;
-  mustChangePassword: boolean;
-}
+/**
+ * @cuencada/types: the API contract shared by apps/server and apps/web.
+ *
+ * FROZEN BARREL (WP-0.2): do not add or remove lines here after Phase 0.
+ * Phase-1 tracks extend their own `src/<module>.ts` file only.
+ */
+export * from "./common.js";
+export * from "./auth.js";
+export * from "./profile.js";
+export * from "./cuencadas.js";
+export * from "./rsvp.js";
+export * from "./media.js";
+export * from "./family.js";
+export * from "./chat.js";
+export * from "./admin.js";

@@ -5,6 +5,7 @@ allowBuilds:
   '@biomejs/biome': true
   argon2: true
   esbuild: true
+  msw: false
 
 minimumReleaseAge: 10080
 minimumReleaseAgeExclude:

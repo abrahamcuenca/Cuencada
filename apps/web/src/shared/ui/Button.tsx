@@ -51,6 +51,14 @@ export interface ButtonAsLinkProps extends ButtonBaseProps, Omit<LinkProps, Conf
   href?: undefined;
 }
 
+/** Ensures a `target="_blank"` link never exposes `window.opener` or the referrer. */
+function withNoopener(rel: string | undefined): string {
+  const tokens = new Set((rel ?? "").split(/\s+/).filter(Boolean));
+  tokens.add("noopener");
+  tokens.add("noreferrer");
+  return [...tokens].join(" ");
+}
+
 /** Props for {@link Button}: a button, an external anchor or a router link. */
 export type ButtonProps = ButtonAsButtonProps | ButtonAsAnchorProps | ButtonAsLinkProps;
 
@@ -109,13 +117,15 @@ export function Button(props: ButtonProps): React.ReactNode {
   }
 
   if (rest.href !== undefined) {
-    const { external = false, to: _to, ...anchorProps } = rest as Omit<ButtonAsAnchorProps, keyof ButtonBaseProps>; // narrowed by `href`
+    const { external = false, to: _to, target, rel, ...anchorProps } = rest as Omit<ButtonAsAnchorProps, keyof ButtonBaseProps>; // narrowed by `href`
+    const finalTarget = external ? "_blank" : target;
     return (
       <a
         {...anchorProps}
         className={classes}
         aria-busy={loading || undefined}
-        {...(external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+        target={finalTarget}
+        rel={finalTarget === "_blank" ? withNoopener(rel) : rel}
       >
         {content}
       </a>
