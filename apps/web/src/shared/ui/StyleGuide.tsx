@@ -168,7 +168,7 @@ function StyleGuideContent(): React.ReactNode {
             <Button variant="ghost" surface="dark" icon="🗺️">
               Ver lugares
             </Button>
-            <Button variant="whatsapp" icon="💬" href="https://chat.whatsapp.com/IvI6oayIIoEJ8Wn7EWQxO0?s=cl&p=i&mlu=0" external>
+            <Button variant="whatsapp" icon="💬" href="https://chat.whatsapp.com/EJEMPLO" external>
               Grupo WhatsApp
             </Button>
           </div>
