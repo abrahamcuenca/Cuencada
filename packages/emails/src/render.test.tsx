@@ -33,6 +33,22 @@ const inviteUrl = "https://cuencada.com/invitacion#t=abc123_DEF-456";
 const loginUrl = "https://cuencada.com/entrar/enlace#t=magic_TOKEN-1";
 const resetUrl = "https://cuencada.com/restablecer#t=reset_TOKEN-2";
 const verifyUrl = "https://cuencada.com/verificar#t=verify_TOKEN-3";
+const auditLogUrl = "https://cuencada.com/admin/bitacora";
+
+const adminChanged = (
+  name: string,
+  url: string = auditLogUrl,
+): EmailTemplate => ({
+  kind: EmailKind.AdminAccountChanged,
+  props: {
+    recipientName: name,
+    actorName: name,
+    targetName: name,
+    changes: ["demoted", "disabled"],
+    changedAt: EXPIRES,
+    auditLogUrl: url,
+  },
+});
 
 const cases: Case[] = [
   {
@@ -234,6 +250,74 @@ describe("renderEmail", () => {
         code: EmailRenderErrorCode.InvalidDate,
         field: "changedAt",
       });
+    });
+  });
+
+  describe("admin-account-changed", () => {
+    const template: EmailTemplate = {
+      kind: EmailKind.AdminAccountChanged,
+      props: {
+        recipientName: "Tía Lupita",
+        actorName: "Primo Beto",
+        targetName: "Tío Juan",
+        changes: ["demoted", "disabled", "demoted"],
+        changedAt: EXPIRES,
+        auditLogUrl,
+      },
+    };
+
+    it("says who changed whom, what and when, and links to the audit log", async () => {
+      const email = await renderEmail(template);
+      expect(email.subject).toBe("Cambio en una cuenta de administrador");
+      expect(email.text).toContain("¡Hola, Tía Lupita!");
+      expect(email.text).toMatch(
+        /Primo Beto hizo este cambio en la cuenta de Tío Juan el lunes 14 de septiembre ·\s7:40/,
+      );
+      expect(countOccurrences(email.text, "Le quitó el rol de administrador.")).toBe(1);
+      expect(email.text).toContain("Desactivó la cuenta.");
+      expect(email.text).toContain(`Revisar la bitácora:\n${auditLogUrl}`);
+      expect(email.text).toContain("IMPORTANTE: Si no reconoces este cambio");
+    });
+
+    it("is a security notice: it never says to ignore it", async () => {
+      const email = await renderEmail(template);
+      expect(email.html).not.toContain("ignorarlo");
+      expect(email.text).not.toContain("ignorarlo");
+      expect(email.text.trimEnd()).toMatch(/administras el portal de la Cuencada\.$/);
+    });
+
+    it("has the CTA in the button, the fallback and the text alternative", async () => {
+      const email = await renderEmail(adminChanged("Ana"));
+      expect(countOccurrences(email.html, auditLogUrl)).toBe(2);
+      expect(countOccurrences(email.text, auditLogUrl)).toBe(1);
+      expect(email.html).toContain("cu-btn");
+    });
+
+    it("requires an https audit-log link", async () => {
+      await expect(
+        renderEmail(adminChanged("Ana", "http://cuencada.com/admin/bitacora")),
+      ).rejects.toMatchObject({ code: EmailRenderErrorCode.InsecureUrl });
+    });
+
+    it("escapes HTML-like input in every name", async () => {
+      const email = await renderEmail(adminChanged(XSS));
+      expect(email.html).not.toContain("<script");
+      expect(countOccurrences(email.html, "&lt;script&gt;")).toBeGreaterThanOrEqual(3);
+    });
+
+    it("rejects an empty or unknown change list", async () => {
+      for (const changes of [[], ["deleted"]]) {
+        await expect(
+          renderEmail({
+            ...template,
+            // Deliberately invalid input, as untyped callers could send it.
+            props: { ...template.props, changes: changes as never },
+          }),
+        ).rejects.toMatchObject({
+          code: EmailRenderErrorCode.InvalidOption,
+          field: "changes",
+        });
+      }
     });
   });
 

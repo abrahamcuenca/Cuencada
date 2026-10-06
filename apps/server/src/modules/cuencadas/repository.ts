@@ -198,20 +198,29 @@ export async function ensureCuencadaChatRoom(db: DbOrTx, cuencada: Pick<Cuencada
 }
 
 /**
- * Why a draft cannot be deleted, or `null` when it can: it has a chat room
- * (it was published at some point, which created the room) or any media row
- * (deleting would orphan the bucket objects).
+ * Why a draft cannot be deleted, or `null` when it can. It was published at
+ * some point (`first_published_at` set, or it has a chat room, which only the
+ * first publish creates), or it has any media row (deleting would orphan the
+ * bucket objects). Every check must pass for the delete to go ahead.
  *
  * @param db - The deleting transaction.
- * @param cuencadaId - Edition.
+ * @param cuencada - The locked edition row.
  */
-export async function draftDeleteBlocker(db: DbOrTx, cuencadaId: string): Promise<string | null> {
+export async function draftDeleteBlocker(
+  db: DbOrTx,
+  cuencada: Pick<CuencadaRow, "id" | "firstPublishedAt">
+): Promise<string | null> {
+  const everPublished = "Esta Cuencada ya se publicó alguna vez; despublícala en lugar de eliminarla.";
+  if (cuencada.firstPublishedAt !== null) return everPublished;
+  const cuencadaId = cuencada.id;
   const [row] = await db.execute<{ has_room: boolean; has_media: boolean }>(sql`
     select
       exists (select 1 from ${chatRooms} where ${chatRooms.cuencadaId} = ${cuencadaId}) as has_room,
       exists (select 1 from ${mediaItems} where ${mediaItems.cuencadaId} = ${cuencadaId}) as has_media
   `);
-  if (row?.has_room === true) return "Esta Cuencada ya se publicó alguna vez; despublícala en lugar de eliminarla.";
+  // TODO(T2-BE): drop the chat-room check once migration 0002's first_published_at
+  // backfill and this deploy have run in production; first_published_at is then authoritative.
+  if (row?.has_room === true) return everPublished;
   if (row?.has_media === true) return "Esta Cuencada tiene fotos o videos; no se puede eliminar.";
   return null;
 }

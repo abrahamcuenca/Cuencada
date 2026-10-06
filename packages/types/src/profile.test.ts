@@ -32,7 +32,7 @@ describe("directoryEntrySchema", () => {
   it("rejects null contact fields: they must be absent when hidden", () => {
     const base = { userId, personId: null, displayName: "Ana", fullName: "Ana", familyBranch: null, avatarUrl: null, bio: null };
     expect(directoryEntrySchema.safeParse({ ...base, phone: null }).success).toBe(false);
-    expect(directoryEntrySchema.safeParse({ ...base, phone: "+52 999 123 4567" }).success).toBe(true);
+    expect(directoryEntrySchema.safeParse({ ...base, phone: "+52 555 010 0101" }).success).toBe(true);
   });
 });
 
@@ -46,7 +46,7 @@ describe("toDirectoryEntry", () => {
     avatarUrl: null,
     bio: null,
     email: "ana@familia.mx",
-    phone: "+52 999 123 4567",
+    phone: "+52 555 010 0101",
     city: null,
     visibility: { showEmail: false, showPhone: true, showCity: true }
   };
@@ -61,7 +61,7 @@ describe("toDirectoryEntry", () => {
       familyBranch: null,
       avatarUrl: null,
       bio: null,
-      phone: "+52 999 123 4567"
+      phone: "+52 555 010 0101"
     });
     expect("email" in entry).toBe(false);
     expect("city" in entry).toBe(false);
@@ -90,6 +90,29 @@ describe("updateProfileInputSchema", () => {
   it("rejects an empty patch and an invalid phone", () => {
     expect(updateProfileInputSchema.safeParse({}).success).toBe(false);
     expect(updateProfileInputSchema.safeParse({ phone: "llámame" }).success).toBe(false);
+  });
+
+  it("rejects keys outside the contract (mass assignment)", () => {
+    for (const key of ["role", "status", "userId", "email", "avatarKey", "emailVerifiedAt"]) {
+      expect(updateProfileInputSchema.safeParse({ bio: "Hola", [key]: "x" }).success).toBe(false);
+    }
+  });
+
+  it("bounds the phone to 7–15 digits", () => {
+    expect(updateProfileInputSchema.safeParse({ phone: "+52 (999) 123-4567" }).success).toBe(true);
+    expect(updateProfileInputSchema.safeParse({ phone: "123 456" }).success).toBe(false);
+    expect(updateProfileInputSchema.safeParse({ phone: "+1234567890123456" }).success).toBe(false);
+    expect(updateProfileInputSchema.safeParse({ phone: "---------" }).success).toBe(false);
+  });
+
+  it("rejects bidi controls in the family branch and city", () => {
+    expect(updateProfileInputSchema.safeParse({ city: "M\u202Eérida" }).success).toBe(false);
+    expect(updateProfileInputSchema.safeParse({ familyBranch: "Rama\u200B" }).success).toBe(false);
+  });
+
+  it("caps the bio at 500 characters", () => {
+    expect(updateProfileInputSchema.safeParse({ bio: "a".repeat(500) }).success).toBe(true);
+    expect(updateProfileInputSchema.safeParse({ bio: "a".repeat(501) }).success).toBe(false);
   });
 });
 

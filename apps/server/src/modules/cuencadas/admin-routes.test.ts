@@ -10,6 +10,7 @@ import {
   insertItineraryItem,
   insertLocation,
   insertMedia,
+  type MutableClock,
   mutableClock
 } from "../../../test/helpers/cuencadas.js";
 import { getTestDb } from "../../../test/helpers/db.js";
@@ -18,11 +19,13 @@ import type { App } from "../../app.js";
 import { auditLogs, chatRooms, cuencadaItineraryItems, cuencadas, dailyMessages } from "../../db/schema/index.js";
 
 let app: App;
+let clock: MutableClock;
 let admin: Awaited<ReturnType<typeof createUser>>;
 let adminAuth: AuthInjectOptions;
 
 beforeEach(async () => {
-  app = await createTestApp({ clock: mutableClock("2026-09-01T18:00:00Z") });
+  clock = mutableClock("2026-09-01T18:00:00Z");
+  app = await createTestApp({ clock });
   admin = await createUser({ role: "admin" });
   adminAuth = await loginAs(app, admin);
 });
@@ -151,6 +154,43 @@ describe("cuencada CRUD", () => {
     expect(invalid.statusCode).toBe(400);
   });
 
+  it("sets first_published_at on the first publish (app clock) and keeps it across unpublish/republish", async () => {
+    const draft = await insertCuencada({ year: 2027, isPublished: false });
+    const url = `/api/admin/cuencadas/${draft.id}`;
+    const firstPublishedAt = async (id: string): Promise<string | undefined> => {
+      const [row] = await getTestDb().select().from(cuencadas).where(eq(cuencadas.id, id));
+      return row?.firstPublishedAt?.toISOString();
+    };
+
+    await app.inject({ method: "PATCH", url, payload: { title: "Sigue en borrador" }, ...adminAuth });
+    expect(await firstPublishedAt(draft.id)).toBeUndefined();
+
+    await app.inject({ method: "PATCH", url, payload: { isPublished: true }, ...adminAuth });
+    expect(await firstPublishedAt(draft.id)).toBe("2026-09-01T18:00:00.000Z");
+
+    clock.set("2026-09-05T12:00:00Z");
+    // Access tokens are signed with the app clock: log in again after moving it.
+    adminAuth = await loginAs(app, admin);
+    const unpublish = await app.inject({ method: "PATCH", url, payload: { isPublished: false }, ...adminAuth });
+    expect(unpublish.json<AdminCuencada>().isPublished).toBe(false);
+    expect(await firstPublishedAt(draft.id)).toBe("2026-09-01T18:00:00.000Z");
+    const republish = await app.inject({ method: "PATCH", url, payload: { isPublished: true }, ...adminAuth });
+    const again = await app.inject({ method: "PATCH", url, payload: { isPublished: true, title: "Otra vez" }, ...adminAuth });
+    expect([republish.statusCode, again.statusCode]).toEqual([200, 200]);
+    expect(await firstPublishedAt(draft.id)).toBe("2026-09-01T18:00:00.000Z");
+
+    const createdPublished = await app.inject({
+      method: "POST",
+      url: "/api/admin/cuencadas",
+      payload: { ...newEdition, year: 2031, isPublished: true },
+      ...adminAuth
+    });
+    const createdDraft = await app.inject({ method: "POST", url: "/api/admin/cuencadas", payload: { ...newEdition, year: 2032 }, ...adminAuth });
+    expect([createdPublished.statusCode, createdDraft.statusCode]).toEqual([201, 201]);
+    expect(await firstPublishedAt(createdPublished.json<AdminCuencada>().id)).toBe("2026-09-05T12:00:00.000Z");
+    expect(await firstPublishedAt(createdDraft.json<AdminCuencada>().id)).toBeUndefined();
+  });
+
   it("publishes once: audits cuencada.published and creates the chat room idempotently", async () => {
     const draft = await insertCuencada({ year: 2027, isPublished: false });
     const url = `/api/admin/cuencadas/${draft.id}`;
@@ -244,10 +284,13 @@ describe("cuencada CRUD", () => {
     await getTestDb().insert(chatRooms).values({ kind: "cuencada", cuencadaId: wasPublished.id, title: "Cuencada 2028" });
     const withMedia = await insertCuencada({ year: 2029, isPublished: false });
     await insertMedia(withMedia.id, { uploadStatus: "pending_upload" });
+    // Published before (first_published_at set) but without a chat room: still blocked.
+    const stamped = await insertCuencada({ year: 2030, isPublished: false, firstPublishedAt: new Date("2026-01-01T00:00:00Z") });
 
     const blockedPublished = await app.inject({ method: "DELETE", url: `/api/admin/cuencadas/${published.id}`, ...adminAuth });
     const blockedWasPublished = await app.inject({ method: "DELETE", url: `/api/admin/cuencadas/${wasPublished.id}`, ...adminAuth });
     const blockedMedia = await app.inject({ method: "DELETE", url: `/api/admin/cuencadas/${withMedia.id}`, ...adminAuth });
+    const blockedStamped = await app.inject({ method: "DELETE", url: `/api/admin/cuencadas/${stamped.id}`, ...adminAuth });
     const deleted = await app.inject({ method: "DELETE", url: `/api/admin/cuencadas/${neverPublished.id}`, ...adminAuth });
     const again = await app.inject({ method: "DELETE", url: `/api/admin/cuencadas/${neverPublished.id}`, ...adminAuth });
     const invalid = await app.inject({ method: "DELETE", url: "/api/admin/cuencadas/123", ...adminAuth });
@@ -255,11 +298,12 @@ describe("cuencada CRUD", () => {
     expect(blockedPublished.statusCode).toBe(409);
     expect(blockedWasPublished.statusCode).toBe(409);
     expect(blockedMedia.statusCode).toBe(409);
+    expect(blockedStamped.statusCode).toBe(409);
     expect(deleted.statusCode).toBe(204);
     expect(deleted.body).toBe("");
     expect(again.statusCode).toBe(404);
     expect(invalid.statusCode).toBe(400);
-    expect(await getTestDb().select().from(cuencadas)).toHaveLength(3);
+    expect(await getTestDb().select().from(cuencadas)).toHaveLength(4);
     const rows = await audits("cuencada.deleted");
     expect(rows).toHaveLength(1);
     expect(rows[0]?.entityId).toBe(neverPublished.id);
@@ -267,6 +311,53 @@ describe("cuencada CRUD", () => {
 });
 
 describe("itinerary admin", () => {
+  it("persists tags on create and patch, normalized and de-duplicated, and shows them publicly and to members", async () => {
+    const edition = await insertCuencada();
+    const created = await app.inject({
+      method: "POST",
+      url: `/api/admin/cuencadas/${edition.id}/itinerary`,
+      payload: { date: "2026-09-14", title: "Cenote", tags: [" Incluye comida ", "incluye COMIDA", "Traer traje de baño"] },
+      ...adminAuth
+    });
+    const privateItem = await app.inject({
+      method: "POST",
+      url: `/api/admin/cuencadas/${edition.id}/itinerary`,
+      payload: { date: "2026-09-15", title: "Cena privada", visibility: "members", tags: ["Solo familia"] },
+      ...adminAuth
+    });
+    const unsafe = await app.inject({
+      method: "POST",
+      url: `/api/admin/cuencadas/${edition.id}/itinerary`,
+      payload: { date: "2026-09-15", title: "Mal", tags: ["\u202Eatnec"] },
+      ...adminAuth
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json<ItineraryItem>().tags).toEqual(["Incluye comida", "Traer traje de baño"]);
+    expect(unsafe.statusCode).toBe(400);
+
+    const id = created.json<ItineraryItem>().id;
+    const patched = await app.inject({ method: "PATCH", url: `/api/admin/itinerary/${id}`, payload: { tags: ["Playa", "playa"] }, ...adminAuth });
+    const untouched = await app.inject({ method: "PATCH", url: `/api/admin/itinerary/${id}`, payload: { title: "Cenote Santa Bárbara" }, ...adminAuth });
+    const tooMany = await app.inject({
+      method: "PATCH",
+      url: `/api/admin/itinerary/${id}`,
+      payload: { tags: ["a", "b", "c", "d", "e", "f", "g"] },
+      ...adminAuth
+    });
+    expect(patched.json<ItineraryItem>().tags).toEqual(["Playa"]);
+    expect(untouched.json<ItineraryItem>().tags).toEqual(["Playa"]);
+    expect(tooMany.statusCode).toBe(400);
+
+    const publicView = await app.inject({ method: "GET", url: "/api/cuencadas/2026" });
+    const memberView = await app.inject({ method: "GET", url: "/api/cuencadas/2026/members", ...(await loginAs(app, await createUser())) });
+    expect(publicView.json<{ publicItinerary: ItineraryItem[] }>().publicItinerary.map((item) => item.tags)).toEqual([["Playa"]]);
+    expect(memberView.json<{ itinerary: ItineraryItem[] }>().itinerary.map((item) => [item.title, item.tags])).toEqual([
+      ["Cenote Santa Bárbara", ["Playa"]],
+      ["Cena privada", ["Solo familia"]]
+    ]);
+    expect(privateItem.statusCode).toBe(201);
+  });
+
   it("appends items, enforces same-Cuencada locations and audits", async () => {
     const edition = await insertCuencada();
     const other = await insertCuencada({ year: 2027 });

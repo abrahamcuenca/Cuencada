@@ -22,6 +22,7 @@ import {
 } from "@cuencada/types";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { AdminAccountChange } from "@cuencada/emails";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { users } from "../../db/schema/index.js";
@@ -37,6 +38,7 @@ import {
   sendInBackground
 } from "../auth/emailTokens.js";
 import { revokeSessions } from "../auth/sessions.js";
+import { adminAlertMetadata, type AdminAlert, type AdminAlertPlan, planAdminAlert, queueAdminAlerts } from "./adminAlerts.js";
 import {
   AdminUserMessages,
   countOtherActiveAdmins,
@@ -88,6 +90,37 @@ function perAdminLimit(app: FastifyInstance): RateLimitHook {
   });
 }
 
+/** An alert decided inside a transaction, queued after commit. */
+interface PendingAlert {
+  plan: AdminAlertPlan;
+  alert: AdminAlert;
+}
+
+/** Inputs of {@link adminAccountChanges}. */
+interface AccountChangeFacts {
+  wasAdmin: boolean;
+  nextRole: "admin" | "member";
+  roleChanged: boolean;
+  statusChanged: boolean;
+  disabling: boolean;
+  mustChangeChanged: boolean;
+}
+
+/**
+ * The changes to an **administrator** account (before or after the patch)
+ * that the other admins must hear about. Empty for member-only changes.
+ *
+ * @param facts - What the PATCH changed.
+ */
+function adminAccountChanges(facts: AccountChangeFacts): AdminAccountChange[] {
+  if (!facts.wasAdmin && facts.nextRole !== "admin") return [];
+  const changes: AdminAccountChange[] = [];
+  if (facts.roleChanged) changes.push(facts.nextRole === "admin" ? "promoted" : "demoted");
+  if (facts.statusChanged) changes.push(facts.disabling ? "disabled" : "enabled");
+  if (facts.mustChangeChanged) changes.push("password_change_required");
+  return changes;
+}
+
 /** Admin user routes, mounted under `/api`. */
 const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
   const mutationConfig = { auth: "admin", rateLimit: rateLimitByIp(ADMIN_MUTATION_LIMIT) } as const;
@@ -129,7 +162,7 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
       const targetId = request.params.id;
       const now = app.clock.now();
 
-      const disabled = await app.db.transaction(async (tx) => {
+      const outcome = await app.db.transaction(async (tx) => {
         await lockAdminUserChanges(tx);
         const target = await lockTargetUser(tx, admin.id, targetId);
         const nextRole = input.role ?? target.role;
@@ -151,7 +184,7 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
         if (roleChanged) fields.push("role");
         if (statusChanged) fields.push("status");
         if (mustChangeChanged) fields.push("mustChangePassword");
-        if (fields.length === 0) return false;
+        if (fields.length === 0) return { disabled: false, alert: null };
 
         await tx
           .update(users)
@@ -171,12 +204,22 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
           metadata.revokedSessions = revoked.length;
           metadata.burnedEmailLinks = await burnPendingEmailTokens(tx, target.id, now);
         }
+        const changes = adminAccountChanges({
+          wasAdmin: target.role === "admin",
+          nextRole,
+          roleChanged,
+          statusChanged,
+          disabling,
+          mustChangeChanged
+        });
+        const plan = changes.length > 0 ? await planAdminAlert(app, tx, admin.id, now) : null;
+        if (plan !== null) Object.assign(metadata, adminAlertMetadata(plan));
         const action = disabling
           ? AuditAction.UserDisabled
           : statusChanged
             ? AuditAction.UserEnabled
             : AuditAction.UserUpdated;
-        await recordAudit(tx, {
+        const auditId = await recordAudit(tx, {
           actorUserId: admin.id,
           action,
           entityType: "user",
@@ -184,10 +227,15 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
           metadata,
           ip: request.ip
         });
-        return disabling;
+        const alert: PendingAlert | null =
+          plan === null
+            ? null
+            : { plan, alert: { auditId, actorName: admin.displayName, targetName: target.displayName, changes, changedAt: now } };
+        return { disabled: disabling, alert };
       });
 
-      if (disabled) closeChatSockets(app, targetId);
+      if (outcome.alert !== null) queueAdminAlerts(app, outcome.alert.plan, outcome.alert.alert);
+      if (outcome.disabled) closeChatSockets(app, targetId);
       return getAdminUser(app.db, targetId, app.clock.now());
     }
   );
@@ -257,18 +305,38 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
                 now
               })
             : null;
-        await recordAudit(tx, {
+        const plan = target.role === "admin" ? await planAdminAlert(app, tx, admin.id, now) : null;
+        const auditId = await recordAudit(tx, {
           actorUserId: admin.id,
           action: AuditAction.UserPasswordResetForced,
           entityType: "user",
           entityId: target.id,
-          metadata: { revokedSessions: revoked.length, burnedEmailLinks: burned, emailQueued: token !== null },
+          metadata: {
+            revokedSessions: revoked.length,
+            burnedEmailLinks: burned,
+            emailQueued: token !== null,
+            ...(plan === null ? {} : adminAlertMetadata(plan))
+          },
           ip: request.ip
         });
-        return { target, token };
+        const alert: PendingAlert | null =
+          plan === null
+            ? null
+            : {
+                plan,
+                alert: {
+                  auditId,
+                  actorName: admin.displayName,
+                  targetName: target.displayName,
+                  changes: ["password_reset_forced"],
+                  changedAt: now
+                }
+              };
+        return { target, token, alert };
       });
 
-      const { target, token } = outcome;
+      const { target, token, alert } = outcome;
+      if (alert !== null) queueAdminAlerts(app, alert.plan, alert.alert);
       if (token !== null) {
         sendInBackground(app, "mail.admin-password-reset", () =>
           sendTemplate(
@@ -306,6 +374,8 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request): Promise<AdminUserListItem> => {
       const admin = authUser(request);
       const targetId = request.params.id;
+      // Verifying your own address by hand would bypass the email proof (Security review, PR #24).
+      if (targetId === admin.id) throw new AppError("FORBIDDEN", AdminUserMessages.SelfVerify);
       const now = app.clock.now();
       await app.db.transaction(async (tx) => {
         await lockAdminUserChanges(tx);

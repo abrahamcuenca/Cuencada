@@ -1,4 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+/**
+ * Audit log viewer tests. Isolation: one app per file (cheap per-test hooks),
+ * and every test seeds its rows into its own time window and only queries
+ * inside it, so rows left by any other test can never change the results.
+ */
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestApp } from "../../../test/helpers/app.js";
 import { getTestDb } from "../../../test/helpers/db.js";
 import { createMember, type Member } from "../../../test/helpers/media.js";
@@ -22,22 +27,32 @@ interface AuditPage {
   nextCursor: string | null;
 }
 
-let app: App;
-let admin: Member;
-let member: Member;
+interface Fixture {
+  admin: Member;
+  member: Member;
+  /** `from`/`to` query covering exactly this test's rows. */
+  window: string;
+  base: number;
+}
 
-beforeEach(async () => {
+const MINUTE_MS = 60_000;
+let app: App;
+let windowIndex = 0;
+
+beforeAll(async () => {
   app = await createTestApp();
-  admin = await createMember({ role: "admin", displayName: "Admin Uno" });
-  member = await createMember({ displayName: "Prima Ana" });
 });
 
-afterEach(async () => {
+afterAll(async () => {
   await app.close();
 });
 
-async function seedAudits(): Promise<void> {
-  const base = Date.parse("2026-09-01T00:00:00Z");
+/** Seed 7 audit rows (one timestamp tie) inside a window no other test uses. */
+async function seed(): Promise<Fixture> {
+  windowIndex += 1;
+  const base = Date.UTC(2001, 0, windowIndex);
+  const admin = await createMember({ role: "admin", displayName: "Admin Uno" });
+  const member = await createMember({ displayName: "Prima Ana" });
   const rows: Array<typeof auditLogs.$inferInsert> = [];
   for (let index = 0; index < 6; index += 1) {
     rows.push({
@@ -47,30 +62,36 @@ async function seedAudits(): Promise<void> {
       entityId: index < 3 ? member.user.id : `c-${index}`,
       metadata: { fields: ["status"], index },
       ip: "203.0.113.7",
-      createdAt: new Date(base + index * 60_000)
+      createdAt: new Date(base + index * MINUTE_MS)
     });
   }
-  // Two rows with the same timestamp exercise the id tie-breaker.
-  rows.push({ actorUserId: null, action: "media.moderated", entityType: "media", entityId: null, createdAt: new Date(base + 5 * 60_000) });
+  // Same timestamp as index 5: exercises the id tie-breaker.
+  rows.push({ actorUserId: null, action: "media.moderated", entityType: "media", entityId: null, createdAt: new Date(base + 5 * MINUTE_MS) });
   await getTestDb().insert(auditLogs).values(rows);
+  const from = new Date(base).toISOString();
+  const to = new Date(base + 10 * MINUTE_MS).toISOString();
+  return { admin, member, base, window: `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}` };
 }
 
-async function list(query: string): Promise<AuditPage> {
-  const response = await app.inject({ method: "GET", url: `/api/admin/audit-logs${query}`, ...admin.auth });
+async function list(fixture: Fixture, query = ""): Promise<AuditPage> {
+  const response = await app.inject({
+    method: "GET",
+    url: `/api/admin/audit-logs?${fixture.window}${query}`,
+    ...fixture.admin.auth
+  });
   expect(response.statusCode, response.body).toBe(200);
   return response.json<AuditPage>();
 }
 
 describe("GET /api/admin/audit-logs", () => {
   it("returns entries newest first with the actor's name and metadata as stored", async () => {
-    await seedAudits();
-    const page = await list("");
+    const fixture = await seed();
+    const page = await list(fixture);
     expect(page.items).toHaveLength(7);
     const times = page.items.map((item) => Date.parse(item.createdAt));
     expect([...times].sort((a, b) => b - a)).toEqual(times);
-    const first = page.items.find((item) => item.metadata.index === 4);
-    expect(first).toMatchObject({
-      actorUserId: admin.user.id,
+    expect(page.items.find((item) => item.metadata.index === 4)).toMatchObject({
+      actorUserId: fixture.admin.user.id,
       actorName: "Admin Uno",
       action: "cuencada.published",
       entityType: "cuencada",
@@ -82,22 +103,32 @@ describe("GET /api/admin/audit-logs", () => {
   });
 
   it("filters by actor, action, entity and time range", async () => {
-    await seedAudits();
-    expect((await list(`?actorUserId=${admin.user.id}`)).items.map((item) => item.metadata.index)).toEqual([4, 2, 0]);
-    expect((await list("?action=user.disabled")).items).toHaveLength(3);
-    expect((await list(`?entityType=user&entityId=${member.user.id}`)).items).toHaveLength(3);
-    expect((await list("?entityType=cuencada&entityId=c-5")).items.map((item) => item.entityId)).toEqual(["c-5"]);
-    const range = await list(`?from=${encodeURIComponent("2026-09-01T00:01:00Z")}&to=${encodeURIComponent("2026-08-31T18:03:00-06:00")}`);
-    expect(range.items.map((item) => item.metadata.index)).toEqual([3, 2, 1]);
+    const fixture = await seed();
+    const indexes = (page: AuditPage): unknown[] => page.items.map((item) => item.metadata.index);
+    expect(indexes(await list(fixture, `&actorUserId=${fixture.admin.user.id}`))).toEqual([4, 2, 0]);
+    expect((await list(fixture, "&action=user.disabled")).items).toHaveLength(3);
+    expect((await list(fixture, `&entityType=user&entityId=${fixture.member.user.id}`)).items).toHaveLength(3);
+    expect((await list(fixture, "&entityType=cuencada&entityId=c-5")).items.map((item) => item.entityId)).toEqual(["c-5"]);
+
+    const from = new Date(fixture.base + MINUTE_MS).toISOString();
+    // Same instant as base + 3 min, written with a -06:00 offset.
+    const to = new Date(fixture.base + 3 * MINUTE_MS - 6 * 60 * MINUTE_MS).toISOString().replace("Z", "-06:00");
+    const narrow = await app.inject({
+      method: "GET",
+      url: `/api/admin/audit-logs?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      ...fixture.admin.auth
+    });
+    expect(narrow.statusCode).toBe(200);
+    expect(indexes(narrow.json<AuditPage>())).toEqual([3, 2, 1]);
   });
 
   it("pages with a keyset cursor across identical timestamps without gaps or duplicates", async () => {
-    await seedAudits();
+    const fixture = await seed();
     const seen: string[] = [];
     let cursor: string | null = null;
     let pages = 0;
     do {
-      const page: AuditPage = await list(cursor === null ? "?limit=2" : `?limit=2&cursor=${cursor}`);
+      const page: AuditPage = await list(fixture, cursor === null ? "&limit=2" : `&limit=2&cursor=${cursor}`);
       seen.push(...page.items.map((item) => item.id));
       cursor = page.nextCursor;
       pages += 1;
@@ -108,6 +139,8 @@ describe("GET /api/admin/audit-logs", () => {
   });
 
   it("answers 400 for invalid filters, 401 without a token and 403 for members", async () => {
+    const admin = await createMember({ role: "admin" });
+    const member = await createMember();
     for (const query of [
       "?from=2026-09-02T00:00:00Z&to=2026-09-01T00:00:00Z",
       "?actorUserId=nope",
@@ -124,6 +157,7 @@ describe("GET /api/admin/audit-logs", () => {
   });
 
   it("has no write or delete endpoint", async () => {
+    const admin = await createMember({ role: "admin" });
     for (const method of ["DELETE", "POST", "PATCH", "PUT"] as const) {
       const response = await app.inject({ method, url: "/api/admin/audit-logs", ...admin.auth });
       expect(response.statusCode, method).toBe(404);

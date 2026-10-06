@@ -7,6 +7,10 @@ import {
   resolveOptions,
 } from "./format.js";
 import {
+  type AdminAccountChangedEmailProps,
+  buildAdminAccountChangedContent,
+} from "./templates/AdminAccountChangedEmail.js";
+import {
   type InviteEmailProps,
   buildInviteContent,
 } from "./templates/InviteEmail.js";
@@ -34,6 +38,7 @@ export const EmailKind = {
   PasswordReset: "password-reset",
   PasswordChanged: "password-changed",
   VerifyEmail: "verify-email",
+  AdminAccountChanged: "admin-account-changed",
 } as const;
 
 export type EmailKind = (typeof EmailKind)[keyof typeof EmailKind];
@@ -44,7 +49,11 @@ export type EmailTemplate =
   | { kind: typeof EmailKind.MagicLink; props: MagicLinkEmailProps }
   | { kind: typeof EmailKind.PasswordReset; props: PasswordResetEmailProps }
   | { kind: typeof EmailKind.PasswordChanged; props: PasswordChangedEmailProps }
-  | { kind: typeof EmailKind.VerifyEmail; props: VerifyEmailProps };
+  | { kind: typeof EmailKind.VerifyEmail; props: VerifyEmailProps }
+  | {
+      kind: typeof EmailKind.AdminAccountChanged;
+      props: AdminAccountChangedEmailProps;
+    };
 
 /** A rendered email, ready for the Mailer (Resend `subject`/`html`/`text`). */
 export interface RenderedEmail {
@@ -68,6 +77,8 @@ function buildContent(
       return buildPasswordChangedContent(template.props, options);
     case EmailKind.VerifyEmail:
       return buildVerifyContent(template.props, options);
+    case EmailKind.AdminAccountChanged:
+      return buildAdminAccountChangedContent(template.props, options);
     default: {
       // Compile-time exhaustiveness check; reached at runtime only with untyped input.
       // The props are never echoed: they carry single-use tokens.

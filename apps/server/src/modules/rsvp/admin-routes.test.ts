@@ -180,6 +180,24 @@ describe("GET /api/admin/cuencadas/:id/rsvps.csv", () => {
   });
 });
 
+describe("admin RSVP views and unlisted members", () => {
+  it("shows unlisted members complete to admins in the table and the CSV", async () => {
+    const edition = await insertCuencada();
+    const hidden = await createUser({ displayName: "Herminia Oculta", profile: { listedInDirectory: false } });
+    const personId = await insertPerson("Herminia Cuenca", hidden.id);
+    await getTestDb().insert(cuencadaRsvps).values({ cuencadaId: edition.id, userId: hidden.id, status: "yes" });
+
+    const table = await app.inject({ method: "GET", url: `/api/admin/cuencadas/${edition.id}/rsvps`, ...adminAuth });
+    expect(table.json<AdminRsvpRow[]>()).toEqual([
+      expect.objectContaining({ userId: hidden.id, personId, displayName: "Herminia Oculta", email: hidden.email })
+    ]);
+
+    const csv = await app.inject({ method: "GET", url: `/api/admin/cuencadas/${edition.id}/rsvps.csv`, ...adminAuth });
+    expect(csv.statusCode).toBe(200);
+    expect(csv.body).toContain(`${hidden.id},${personId},Herminia Oculta,${hidden.email},yes,`);
+  });
+});
+
 describe("admin attendance", () => {
   it("adds and removes people with POST, ignoring duplicates, and audits counts only", async () => {
     const edition = await insertCuencada({ year: 2019 });

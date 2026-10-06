@@ -4,12 +4,13 @@ import { createTestApp } from "../../../test/helpers/app.js";
 import { linkToken, loginFull } from "../../../test/helpers/auth.js";
 import { getTestDb } from "../../../test/helpers/db.js";
 import { bearerFor, createSession, createUser } from "../../../test/helpers/factories.js";
-import { FakeMailer } from "../../../test/helpers/fakes.js";
+import { FakeMailer, type SentMail } from "../../../test/helpers/fakes.js";
 import { createMember, type Member } from "../../../test/helpers/media.js";
 import type { App } from "../../app.js";
 import { auditLogs, magicLinks, people, sessions, users } from "../../db/schema/index.js";
 import { hashToken } from "../../lib/tokens.js";
 import { mailQueue } from "../auth/mailQueue.js";
+import { ADMIN_ALERT_DAILY_CAP } from "./adminAlerts.js";
 import { ADMIN_MUTATION_LIMIT } from "./userRoutes.js";
 import { countOtherActiveAdmins, lockAdminUserChanges } from "./users.js";
 
@@ -246,8 +247,8 @@ describe("PATCH /api/admin/users/:id", () => {
     const audits = await auditsFor(member.user.id);
     expect(audits.map((row) => row.metadata)).toEqual(
       expect.arrayContaining([
-        { fields: ["role"], role: { from: "member", to: "admin" } },
-        { fields: ["role", "mustChangePassword"], role: { from: "admin", to: "member" } }
+        { fields: ["role"], role: { from: "member", to: "admin" }, adminAlertRecipients: 1 },
+        { fields: ["role", "mustChangePassword"], role: { from: "admin", to: "member" }, adminAlertRecipients: 0 }
       ])
     );
   });
@@ -458,6 +459,18 @@ describe("POST /api/admin/users/:id/verify-email", () => {
     expectNoPii(audits, unverified.email, unverified.displayName);
   });
 
+  it("refuses to let an admin verify their own address", async () => {
+    await getTestDb().update(users).set({ emailVerifiedAt: null }).where(eq(users.id, admin.user.id));
+    const response = await app.inject({ method: "POST", url: `/api/admin/users/${admin.user.id}/verify-email`, ...admin.auth });
+    expect(response.statusCode).toBe(403);
+    expect(response.json<{ error: { message: string } }>().error.message).toBe(
+      "No puedes verificar tu propio correo; usa el enlace de verificación que te enviamos."
+    );
+    const [row] = await getTestDb().select().from(users).where(eq(users.id, admin.user.id));
+    expect(row?.emailVerifiedAt).toBeNull();
+    expect(await auditsFor(admin.user.id)).toHaveLength(0);
+  });
+
   it("answers 400, 401, 403 and 404", async () => {
     expect((await app.inject({ method: "POST", url: "/api/admin/users/x/verify-email", ...admin.auth })).statusCode).toBe(400);
     expect((await app.inject({ method: "POST", url: `/api/admin/users/${member.user.id}/verify-email` })).statusCode).toBe(401);
@@ -465,5 +478,98 @@ describe("POST /api/admin/users/:id/verify-email", () => {
     expect(
       (await app.inject({ method: "POST", url: "/api/admin/users/6f1b2a3c-4d5e-4f60-8a7b-9c0d1e2f3a4b/verify-email", ...admin.auth })).statusCode
     ).toBe(404);
+  });
+});
+
+describe("admin-account change alerts", () => {
+  async function alertsTo(address: string): Promise<SentMail[]> {
+    await mailQueue(app).onIdle();
+    return mailer.outbox.filter((mail) => mail.to === address && mail.tags?.category === "admin-account-changed");
+  }
+
+  it("emails every other active admin, never the actor or members, when an admin is demoted or disabled", async () => {
+    const target = await createMember({ role: "admin", displayName: "Tío Juan" });
+    const watcher = await createMember({ role: "admin", displayName: "Tía Lupita" });
+    await createMember({ role: "admin", status: "disabled", email: "old-admin@example.test" });
+
+    const demote = await app.inject({
+      method: "PATCH",
+      url: `/api/admin/users/${target.user.id}`,
+      payload: { role: "member", status: "disabled" },
+      ...admin.auth
+    });
+    expect(demote.statusCode).toBe(200);
+
+    const received = await alertsTo(watcher.user.email);
+    expect(received).toHaveLength(1);
+    const mail = received[0];
+    expect(mail?.subject).toBe("Cambio en una cuenta de administrador");
+    expect(mail?.text).toContain("¡Hola, Tía Lupita!");
+    expect(mail?.text).toContain("Admin Uno hizo este cambio en la cuenta de Tío Juan");
+    expect(mail?.text).toContain("Le quitó el rol de administrador.");
+    expect(mail?.text).toContain("Desactivó la cuenta.");
+    expect(mail?.text).toContain("http://localhost:5173/admin/bitacora");
+    // Names only: no addresses of the actor or the target in the body.
+    expect(mail?.text).not.toContain(admin.user.email);
+    expect(mail?.text).not.toContain(target.user.email);
+
+    expect(await alertsTo(admin.user.email)).toHaveLength(0);
+    expect(await alertsTo(target.user.email)).toHaveLength(0);
+    expect(await alertsTo(member.user.email)).toHaveLength(0);
+    expect(await alertsTo("old-admin@example.test")).toHaveLength(0);
+
+    const [audit] = await auditsFor(target.user.id);
+    expect(audit?.metadata).toMatchObject({ adminAlertRecipients: 1 });
+  });
+
+  it("alerts on promotion and on a forced reset of an admin, but not on member-only changes", async () => {
+    const watcher = await createMember({ role: "admin" });
+    const target = await createMember({ role: "admin" });
+
+    await app.inject({ method: "PATCH", url: `/api/admin/users/${member.user.id}`, payload: { mustChangePassword: true }, ...admin.auth });
+    await app.inject({ method: "POST", url: `/api/admin/users/${member.user.id}/force-password-reset`, ...admin.auth });
+    expect(await alertsTo(watcher.user.email)).toHaveLength(0);
+
+    const reset = await app.inject({ method: "POST", url: `/api/admin/users/${target.user.id}/force-password-reset`, ...admin.auth });
+    expect(reset.statusCode).toBe(200);
+    const afterReset = await alertsTo(watcher.user.email);
+    expect(afterReset).toHaveLength(1);
+    expect(afterReset[0]?.text).toContain("Forzó el restablecimiento de la contraseña");
+
+    const promote = await app.inject({ method: "PATCH", url: `/api/admin/users/${member.user.id}`, payload: { role: "admin" }, ...admin.auth });
+    expect(promote.statusCode).toBe(200);
+    const afterPromote = await alertsTo(watcher.user.email);
+    expect(afterPromote).toHaveLength(2);
+    expect(afterPromote[1]?.text).toContain("Le dio el rol de administrador.");
+    expect(await alertsTo(admin.user.email)).toHaveLength(0);
+  });
+
+  it("is not limited by the per-recipient budget but stops at its own daily cap", async () => {
+    const watcher = await createMember({ role: "admin" });
+    const target = await createMember({ role: "admin" });
+    for (let index = 0; index < 4; index += 1) {
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/api/admin/users/${target.user.id}`,
+        payload: { status: index % 2 === 0 ? "disabled" : "active" },
+        ...admin.auth
+      });
+      expect(response.statusCode).toBe(200);
+    }
+    expect(await alertsTo(watcher.user.email)).toHaveLength(4);
+
+    await getTestDb()
+      .insert(auditLogs)
+      .values({ actorUserId: null, action: "user.updated", entityType: "user", metadata: { adminAlertRecipients: ADMIN_ALERT_DAILY_CAP } });
+    const capped = await app.inject({
+      method: "PATCH",
+      url: `/api/admin/users/${target.user.id}`,
+      payload: { status: "disabled" },
+      ...admin.auth
+    });
+    expect(capped.statusCode).toBe(200);
+    expect(await alertsTo(watcher.user.email)).toHaveLength(4);
+    const audits = await auditsFor(target.user.id);
+    expect(audits.some((row) => row.metadata.adminAlertSkipped === true)).toBe(true);
   });
 });

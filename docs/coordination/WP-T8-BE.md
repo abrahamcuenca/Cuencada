@@ -9,8 +9,10 @@ Based on `origin/main` (2bcb7a0, includes T1-BE, T2-BE, T3-BE, T4-BE, T6-BE, WP-
   - `userRoutes.ts`: list, PATCH, revoke-sessions, force-password-reset, verify-email
   - `auditRoutes.ts`: read-only audit log viewer
   - `summaryRoutes.ts`: dashboard counters (one SQL statement)
+  - `adminAlerts.ts`: admin-account change alerts (Security L1)
   - tests: `userRoutes.test.ts`, `auditRoutes.test.ts`, `summaryRoutes.test.ts` (real Postgres, `inject()`)
 - `packages/types/src/admin.ts`: contract amendments (below).
+- `packages/emails` (authorized): new `admin-account-changed` template (`templates/AdminAccountChangedEmail.tsx`, `EmailKind.AdminAccountChanged`, exports, tests in `render.test.tsx`).
 - Imported (not edited): `modules/auth` (`revokeSessions`, `burnPendingEmailTokens`, `issueBudgetedEmailToken`, `sendInBackground`, `EMAIL_TOKEN_TTL_MINUTES`), `modules/media/cursor.ts` (`encodeCursor`/`decodeCursor`, microsecond keyset cursor), `modules/family/repository.ts` (`escapeLike`).
 
 ## Interfaces exposed
@@ -22,7 +24,7 @@ Every route is `auth: "admin"` (role and status come from the DB on each request
 | `PATCH /api/admin/users/:id` | `AdminUserListItem` | `{ role?, status?, mustChangePassword?: true }`. 403 self role/status change · 409 last active admin · 404 · 400 |
 | `POST /api/admin/users/:id/revoke-sessions` | 204 | `admin_revoked`. 403 on the caller's own account (use T1's session list) |
 | `POST /api/admin/users/:id/force-password-reset` | `AdminForcePasswordResetResult` **(new)** | Sets `must_change_password`, revokes all sessions (`admin_revoked`), burns pending email links, issues a reset link through T1's `issueBudgetedEmailToken` (active accounts only) and queues the `password-reset` email. `emailQueued: false` for disabled accounts or when a budget/cap skipped it. 403 on self |
-| `POST /api/admin/users/:id/verify-email` | `AdminUserListItem` **(new)** | Sets `email_verified_at` if null. Idempotent: an already-verified address keeps its time and writes no audit row |
+| `POST /api/admin/users/:id/verify-email` | `AdminUserListItem` **(new)** | Sets `email_verified_at` if null. Idempotent: an already-verified address keeps its time and writes no audit row. **403 on the caller's own account** (it would bypass the email proof; PR #24 review) |
 | `GET /api/admin/audit-logs?actorUserId&action&entityType&entityId&from&to&cursor&limit` | `Page<AuditLogEntry>` | `created_at desc, id desc`, microsecond keyset cursor, `actorName` = actor's current display name (null for system rows or deleted actors), metadata as stored. **No write/delete endpoint** (tested: 404) |
 | `GET /api/admin/summary` | `AdminSummary` **(new)** | See below |
 
@@ -36,12 +38,21 @@ One transaction:
 
 **Disable:** `status = disabled`, every live session revoked with `revoked_reason = user_disabled`, `burnPendingEmailTokens()` (T1 Security L3 request). The auth guard already rejects disabled users, so the old access token gets 401 on the next request (tested). **Re-enable:** `status = active`; revoked sessions and burned links stay dead, so the user logs in again (tested). Role changes need no revocation (the guard reads the role from the DB).
 
-**Chat sockets:** T7's `closeSocketsForUser` is not on main. `userRoutes.ts#closeChatSockets` is called after disable, revoke-sessions and force-reset and is a documented `TODO(T7)` no-op.
+**Chat sockets (Security L2, PR #24): T7 MUST wire this.** T7's `closeSocketsForUser` is not on main. `userRoutes.ts#closeChatSockets` is called after disable, revoke-sessions and force-reset and is a documented `TODO(T7)` no-op: until it is wired, a socket opened before a disable keeps receiving messages until it reconnects (REST and the ticket guard already refuse). The T7 PR must replace the body of `closeChatSockets` with `closeSocketsForUser(app, userId)`; Security will check it there.
+
+### Admin-account change alerts (Security L1, PR #24)
+When an **administrator** account changes (the target was or becomes an admin), every **other** active admin gets the `admin-account-changed` email ("Cambio en una cuenta de administrador"): who changed whom, what changed and when, with a button to `/admin/bitacora`. Names only, no addresses, no secrets.
+- Triggers: promoted, demoted, disabled, re-enabled, `mustChangePassword` set (PATCH), and a forced password reset of an admin. Member-only changes send nothing.
+- Recipients: active admins except the actor, read inside the mutation transaction after the change (so a demoted or disabled target is not included; a target who stays admin, e.g. on a forced reset, is).
+- Sent after commit on T1's mail queue (`sendInBackground`), idempotency key `admin-account-changed:<auditId>:<recipientId>`.
+- **Budget:** it is a security notice, so the per-recipient budget does not apply. It uses the reserved tier of the global daily cap (`withinGlobalMailCap(…, MailTier.Reserved)`, like the password-changed notice) plus a dedicated cap of `ADMIN_ALERT_DAILY_CAP = 100` alert emails per UTC day, counted from the audit rows' `adminAlertRecipients`. The count runs under the admin-users lock, so it cannot be raced. Over a cap, nothing is sent, `mail.admin_alert_cap_reached` is logged and the audit row gets `adminAlertSkipped: true`.
+- Audit metadata gains `adminAlertRecipients` (count only).
+- Tested: the other admin receives it with the right copy and link; the actor, the demoted target, a disabled admin and members do not; promotion and forced reset alert; member-only changes don't; repeated alerts are not stopped by the per-recipient budget; the dedicated cap stops them.
 
 ### Audit rows (ids, field names and counts only)
 | Action | Metadata |
 |---|---|
-| `user.disabled` | `{ fields, revokedSessions, burnedEmailLinks, role? }` |
+| `user.disabled` | `{ fields, revokedSessions, burnedEmailLinks, role?, adminAlertRecipients? }` |
 | `user.enabled` **(new)** | `{ fields, role? }` |
 | `user.updated` | `{ fields, role?: { from, to } }` (`fields` ⊆ `role`, `status`, `mustChangePassword`) |
 | `user.sessions_revoked` | `{ revokedSessions }` |
@@ -70,15 +81,23 @@ Mutations: 60/min per IP (route `rateLimit`) **and** 60/min per admin (one `extr
 ## Decisions
 - **Self-change is 403, last admin is 409**, following the existing `adminUserPatchInputSchema` JSDoc in the contract ("403 to change the caller's own role or status", "409 to demote/disable the last active admin"). The brief grouped both under 409; the contract wins unless the orchestrator says otherwise. Because the caller is always an active admin, the 409 is only reachable when the actor re-check is bypassed; it is defence in depth. The concurrency test (two admins demote/disable each other simultaneously, 5 rounds) always leaves exactly one active admin: the loser gets 403 from the actor re-check.
 - **Advisory lock instead of `FOR UPDATE` on all admin rows:** no deadlock ordering concerns and it also covers the actor re-check. Cost: admin user mutations are serialized (fine at family scale).
-- **Self-service routes refuse self:** force-reset and revoke-sessions answer 403 on the caller's own account (they would log the admin out; T1 has change-password and the session list for that). Verify-email on self is allowed.
+- **Self-service routes refuse self:** force-reset, revoke-sessions and (since the PR #24 review) verify-email answer 403 on the caller's own account.
 - **Force reset uses the user tier** of the mail budget because it goes through T1's `issueBudgetedEmailToken` (as requested). If the recipient just requested a reset themselves, the per-recipient budget may skip the email: the admin sees `emailQueued: false` and the account is still forced to change.
 - `mustChangePassword: true` via PATCH only sets the flag (the guard enforces it on the next request); no revocation.
 
 ## Requests (→ orchestrator)
-- **T7:** export `closeSocketsForUser(app, userId)` from `modules/chat`; T8 will replace the `closeChatSockets` TODO (called on disable, revoke-sessions, force reset).
+- **T7 (Security L2, blocking for the T7 PR):** export `closeSocketsForUser(app, userId)` from `modules/chat` and wire it into `admin/userRoutes.ts#closeChatSockets` (called on disable, revoke-sessions, force reset).
+- **T1 / config:** admin alerts are not counted by `dailyMailCount` (it counts magic links, invites and password notices only); they are bounded by their own daily cap. Consider counting them there when `mailBudget.ts` is next touched, and moving `ADMIN_ALERT_DAILY_CAP` to config.
+- **T8-FE:** render audit metadata values as text only (never HTML).
 - **T8-FE:** consume `GET /admin/summary`, the two new user actions and `emailQueued`; T6-FE can switch `searchUsersForPersonLink` to `GET /admin/users`.
 - **WP-0.2 doc owner:** add the three new routes to the contract table.
 - **WP-2.3:** add the T8 routes to the authorization matrix.
 
+## Test isolation (PR #24 flake)
+The review's first full run hit 30 s hook timeouts in `auditRoutes`/`summaryRoutes` and then a summary assertion that saw an extra user and edition. A timed-out hook keeps running in the background, so its inserts can land after the next test's `resetDb`; the second failure was a consequence of the first. Fixes:
+- Both files build **one app per file** (`beforeAll`) instead of one per test, which was the heaviest part of each hook; per-test seeding is a handful of rows.
+- **Audit tests** seed into a per-test time window and query only inside it, so foreign rows cannot change results.
+- **Summary tests** assert **deltas** against a summary taken at the start of the same test; the edition under test starts one hour after the fixed clock (always the earliest upcoming); the null-edition case runs inside a rolled-back transaction.
+
 ## Verification
-See the final report of this WP (lint, `turbo run typecheck --force`, `pnpm test`, `pnpm build`).
+See the final report of this WP (lint, `turbo run typecheck --force`, `pnpm test`, `pnpm build`, `vitest --project server` ×3).

@@ -176,6 +176,8 @@ export interface AttendeeCandidate {
   nickname: string | null;
   fullName: string | null;
   avatarKey: string | null;
+  /** `profiles.listed_in_directory` of the linked account; `null` without an account/profile. */
+  listedInDirectory: boolean | null;
 }
 
 /**
@@ -192,7 +194,8 @@ export async function attendanceCandidates(db: DbOrTx, cuencadaId: string): Prom
       accountName: users.displayName,
       nickname: people.nickname,
       fullName: people.fullName,
-      avatarKey: profiles.avatarKey
+      avatarKey: profiles.avatarKey,
+      listedInDirectory: profiles.listedInDirectory
     })
     .from(cuencadaAttendance)
     .innerJoin(people, eq(people.id, cuencadaAttendance.personId))
@@ -215,7 +218,8 @@ export async function yesRsvpCandidates(db: DbOrTx, cuencadaId: string): Promise
       accountName: users.displayName,
       nickname: people.nickname,
       fullName: people.fullName,
-      avatarKey: profiles.avatarKey
+      avatarKey: profiles.avatarKey,
+      listedInDirectory: profiles.listedInDirectory
     })
     .from(cuencadaRsvps)
     .innerJoin(users, activeRsvpUser)
