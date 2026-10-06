@@ -28,6 +28,7 @@ Verifying an email proves that someone controls a mailbox, not that they belong 
     - Help text: "Por seguridad, los enlaces abiertos caducan en 72 horas y avisan a los administradores cada vez que alguien se une."
     - The option hint and the expiry hint mention 72 horas.
   - `admin.module.css`: `.securityNote`.
+  - `lib/metadata.ts` (after merging WP-0.8c's alert badges): `inviteAlertSkipped: true` also shows the "Aviso no enviado" badge in the bitácora.
 - **Screenshots:** `docs/ux/screenshots/t8/invitaciones-enlace-375.webp` and `-1280.webp`.
   - Taken with headless Chromium against `vite preview`, with `/api/**` stubbed with fictional data.
   - Horizontal overflow is 0 px at both widths.

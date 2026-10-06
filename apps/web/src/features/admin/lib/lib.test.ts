@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readAuditFilters, toAuditQuery, writeAuditFilters, zonedMidnight } from "./auditFilters";
 import { changeInviteDelivery, INVITE_FORM_DEFAULTS, normalizeInviteForm, validateInviteForm } from "./inviteForm";
 import { auditActionLabel, auditEntityLabel } from "./labels";
-import { formatMetadataValue, METADATA_VALUE_MAX, metadataRows } from "./metadata";
+import { alertFlags, formatMetadataValue, METADATA_VALUE_MAX, metadataRows } from "./metadata";
 import { LAST_ADMIN_MESSAGE, SELF_CHANGE_MESSAGE, userActionErrorMessage } from "./userErrors";
 
 describe("validateInviteForm", () => {
@@ -117,6 +117,13 @@ describe("audit filters", () => {
 });
 
 describe("metadata", () => {
+  it("badges an open-invite acceptance whose admin alert was skipped (WP-2.3b)", () => {
+    expect(alertFlags({ open: true, inviteAlertRecipients: 0, inviteAlertSkipped: true })).toEqual([
+      { key: "inviteAlertSkipped", label: "Aviso no enviado", tone: "danger" }
+    ]);
+    expect(alertFlags({ open: true, inviteAlertRecipients: 2, inviteAlertSkipped: "true" })).toEqual([]);
+  });
+
   it("formats every JSON value as plain text", () => {
     expect(formatMetadataValue(true)).toBe("Sí");
     expect(formatMetadataValue(false)).toBe("No");
