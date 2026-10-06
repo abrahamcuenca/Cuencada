@@ -1,8 +1,9 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { authenticatedState, statusState } from "../../../../test/auth";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { apiUrl, authenticatedState, errorBody, statusState } from "../../../../test/auth";
 import { type FakeRsvpDb, HOTEL_A, HOTEL_B, ME, makeAttendee, makeMyRsvp, makeRsvpDb, rsvpHandlers } from "../testing/fakeApi";
 import { renderWithStore } from "../testing/render";
 import { RsvpCard } from "./RsvpCard";
@@ -16,7 +17,10 @@ beforeEach(() => {
   db = makeRsvpDb();
   server.use(...rsvpHandlers(db));
 });
-afterEach(() => server.resetHandlers());
+afterEach(() => {
+  server.resetHandlers();
+  vi.useRealTimers();
+});
 
 function renderCard(year = 2027): void {
   renderWithStore(<RsvpCard year={year} />, authenticatedState(ME));
@@ -107,6 +111,40 @@ describe("RsvpCard", () => {
 
     expect(await screen.findByText(/Las confirmaciones cerraron el 1 de enero de 2020/)).toBeInTheDocument();
     expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+  });
+
+  it("locks the card at local midnight when the deadline's day ends with the page open", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["Date", "setTimeout", "clearTimeout"] });
+    // 23:59:58 on May 31 in Mérida; the deadline is that day.
+    vi.setSystemTime(new Date("2027-06-01T05:59:58Z"));
+    db.my = { rsvp: null, deadline: "2027-05-31T18:00:00Z", editable: true };
+    renderCard();
+
+    expect(await screen.findByRole("group", { name: "¿Vas a la Cuencada 2027?" })).toBeInTheDocument();
+    await vi.advanceTimersByTimeAsync(4_000);
+
+    expect(await screen.findByText(/Las confirmaciones cerraron el 31 de mayo de 2027/)).toBeInTheDocument();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+  });
+
+  it("re-saves with the saved hotel while the hotel list fails to load", async () => {
+    server.use(http.get(apiUrl("/cuencadas/:year/members"), () => HttpResponse.json(errorBody("INTERNAL"), { status: 500 })));
+    db.my = { ...db.my, rsvp: makeMyRsvp({ hotelLocationId: HOTEL_A }) };
+    const user = userEvent.setup();
+    renderCard();
+
+    await user.click(await screen.findByRole("button", { name: "Cambiar respuesta" }));
+    const select = await screen.findByRole("combobox", { name: /Hotel/ });
+    expect(select).toHaveValue(HOTEL_A);
+    expect(within(select).getByRole("option", { name: "El hotel que ya elegiste" })).toBeInTheDocument();
+    await waitFor(() => expect(select).toHaveAccessibleDescription(/No pudimos cargar la lista de hoteles/));
+    await user.clear(screen.getByRole("textbox", { name: /Notas/ }));
+    await user.type(screen.getByRole("textbox", { name: /Notas/ }), "Llegamos tarde");
+    await user.click(screen.getByRole("button", { name: "Guardar respuesta" }));
+
+    expect(await screen.findByText("¡Listo! Confirmaste tu asistencia.")).toBeInTheDocument();
+    expect(screen.queryByText("Elige uno de los hoteles de la lista.")).not.toBeInTheDocument();
+    expect(db.putBodies[0]).toMatchObject({ hotelLocationId: HOTEL_A, notes: "Llegamos tarde" });
   });
 
   it("blocks a departure before the arrival without calling the API", async () => {

@@ -86,7 +86,7 @@ describe("NAVIGATE_FALLBACK_DENYLIST", () => {
       "/canciones/Cancion_Oficial.mp3",
       "/canciones/",
       "/images/logo-96.webp",
-      "/images/fotos/missing.jpg",
+      "/images/subcarpeta/missing.jpg",
       "/icons/icon-192.png",
       "/sw.js",
       "/manifest.webmanifest",

@@ -5,5 +5,6 @@
  */
 export { GalleryPreview, type GalleryPreviewProps } from "./components/GalleryPreview";
 export { type PutOptions, putToPresignedUrl, type TransferFailure, UploadTransferError } from "./lib/putToPresignedUrl";
-export { isAllowedUploadUrl } from "./lib/uploadOrigin";
+export { AVATAR_RESIZE, ImageDecodeError, shrinkImageIfNeeded } from "./lib/resizeImage";
+export { isAllowedUploadUrl, uploadsConfigured } from "./lib/uploadOrigin";
 export { useExpiredUrlRefetch } from "./lib/useExpiredUrlRefetch";

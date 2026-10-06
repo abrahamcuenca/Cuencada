@@ -5,8 +5,40 @@ import { Field } from "../../../shared/ui/Field";
 import { TextInput } from "../../../shared/ui/TextInput";
 import { cx } from "../../../shared/ui/cx";
 import styles from "../gallery.module.css";
+import { env } from "../../../shared/lib/env";
+import { UPLOAD_ORIGIN_DEV_HINT, UPLOADS_UNAVAILABLE_MESSAGE, uploadsConfigured } from "../lib/uploadOrigin";
 import { type FileCheck, formatBytes, UPLOAD_ACCEPT, validateUploadFile } from "../lib/validateFile";
 import { useUploadManager } from "../upload/useUploadManager";
+
+/**
+ * The big "Subir fotos y videos" button, or the same button disabled with a
+ * Spanish explanation when this build can't upload (plus a dev-only hint).
+ */
+export function UploadButton({ available, onClick }: { available: boolean; onClick: () => void }): React.ReactNode {
+  if (available) {
+    return (
+      <Button size="lg" icon="📤" className={styles.uploadButton} onClick={onClick}>
+        Subir fotos y videos
+      </Button>
+    );
+  }
+  return (
+    <div className={styles.uploadUnavailable}>
+      <Button size="lg" icon="📤" className={styles.uploadButton} disabled aria-describedby="gallery-upload-unavailable">
+        Subir fotos y videos
+      </Button>
+      <p id="gallery-upload-unavailable" className={styles.hint}>
+        {UPLOADS_UNAVAILABLE_MESSAGE}
+        {env.isDev ? (
+          <>
+            <br />
+            <code>{UPLOAD_ORIGIN_DEV_HINT}</code>
+          </>
+        ) : null}
+      </p>
+    </div>
+  );
+}
 
 /** Imperative handle so other buttons (the empty state) can open the picker. */
 export interface UploaderHandle {
@@ -34,7 +66,10 @@ export function Uploader({ year, showButton = true, ref }: UploaderProps): React
   const [checks, setChecks] = useState<FileCheck[]>([]);
   const [captions, setCaptions] = useState<string[]>([]);
 
-  const openPicker = (): void => input.current?.click();
+  const available = uploadsConfigured();
+  const openPicker = (): void => {
+    if (available) input.current?.click();
+  };
   useImperativeHandle(ref, () => ({ openPicker }));
 
   const onChange = (event: ChangeEvent<HTMLInputElement>): void => {
@@ -80,11 +115,7 @@ export function Uploader({ year, showButton = true, ref }: UploaderProps): React
         data-testid="gallery-file-input"
         onChange={onChange}
       />
-      {showButton ? (
-        <Button size="lg" icon="📤" className={styles.uploadButton} onClick={openPicker}>
-          Subir fotos y videos
-        </Button>
-      ) : null}
+      {showButton ? <UploadButton available={available} onClick={openPicker} /> : null}
       <Dialog
         open={checks.length > 0}
         onClose={close}

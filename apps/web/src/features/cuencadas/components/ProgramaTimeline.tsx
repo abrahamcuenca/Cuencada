@@ -72,11 +72,17 @@ function ProgramaItem({ item, timeZone }: { item: ItineraryItem; timeZone: strin
 }
 
 /**
- * Tags under an activity. The contract has no free-form tags yet (see the
- * WP-T2-FE Requests), so they come from the fields it does have.
+ * Chips under an activity: the admin's own tags (`ItineraryItem.tags`, e.g.
+ * "Incluye comida"), then the ones derived from other fields (place, time to
+ * be confirmed, members only). Tags are plain text nodes, never HTML.
  */
 function ProgramaTags({ item }: { item: ItineraryItem }): ReactNode {
-  const tags: ReactNode[] = [];
+  const tags: ReactNode[] = item.tags.map((tag, index) => (
+    // Tags are deduplicated server-side; the index only guards legacy rows.
+    <Badge key={`tag-${index}-${tag}`} tone="neutral">
+      {tag}
+    </Badge>
+  ));
   if (item.locationName) tags.push(<Badge key="location" tone="brand">📍 {item.locationName}</Badge>);
   if (item.startTime === null) tags.push(<Badge key="time" tone="neutral">🕒 Horario por confirmar</Badge>);
   if (item.visibility === "members") tags.push(<Badge key="members" tone="accent">🔒 Solo familia</Badge>);

@@ -1,4 +1,29 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useAppSelector } from "../../../app/hooks";
+import { baseApi } from "../../../shared/api/baseApi";
+import { collectPersonNames } from "./tree";
+
+/** Endpoints whose cached data carries person names. */
+const NAME_ENDPOINTS: ReadonlySet<string> = new Set(["getFamilyTree", "searchPeople", "getPerson"]);
+
+/**
+ * Person id → full name from memory only: every tree view / people page in
+ * the RTK Query cache, plus the names seen while this component is mounted
+ * (so breadcrumbs survive the cache letting go of an old view). Nothing is
+ * read from or written to history or web storage.
+ *
+ * @returns The names known right now.
+ */
+export function useCachedPersonNames(): ReadonlyMap<string, string> {
+  const queries = useAppSelector((state) => state[baseApi.reducerPath].queries);
+  const seen = useRef(new Map<string, string>());
+  return useMemo(() => {
+    for (const entry of Object.values(queries)) {
+      if (entry?.status === "fulfilled" && NAME_ENDPOINTS.has(entry.endpointName)) collectPersonNames(entry.data, seen.current);
+    }
+    return new Map(seen.current);
+  }, [queries]);
+}
 
 /** Debounce delay for the people search boxes. */
 export const SEARCH_DEBOUNCE_MS = 300;

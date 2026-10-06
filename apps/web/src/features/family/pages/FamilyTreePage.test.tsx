@@ -56,6 +56,19 @@ describe("FamilyTreePage", { timeout: 15_000 }, () => {
     for (const svg of document.querySelectorAll("svg")) expect(svg).toHaveAttribute("aria-hidden", "true");
   });
 
+  it("shows no year at all when the server hides a living relative's birth year (WP-0.8b)", async () => {
+    const ines = db.people.get(IDS.ines);
+    if (!ines) throw new Error("fixture");
+    db.people.set(IDS.ines, { ...ines, birthYear: null, familyBranch: "Herrera Morales" });
+    renderApp(`/arbol/${IDS.ines}`, authenticatedState(me));
+
+    const heading = await focusHeading(/^Inés Herrera Morales/);
+    const card = heading.closest("article");
+    if (!card) throw new Error("no focus card");
+    expect(within(card).getByText("Rama Herrera Morales")).toBeInTheDocument();
+    expect(card.textContent).not.toMatch(/n\. |null|undefined/);
+  });
+
   it("shows empty states for groups without people", async () => {
     renderApp(`/arbol/${IDS.valeria}`, authenticatedState(me));
 
@@ -78,6 +91,9 @@ describe("FamilyTreePage", { timeout: 15_000 }, () => {
     await waitFor(() => expect(heading).toHaveFocus());
     const trail = screen.getByRole("navigation", { name: "Personas visitadas" });
     expect(within(trail).getByRole("button", { name: "José Herrera Navarro" })).toBeInTheDocument();
+    // [SEC] History state keeps ids only: no names persist in session history.
+    expect(router.state.location.state).toEqual({ trail: [IDS.jose] });
+    expect(JSON.stringify(window.history.state)).not.toContain("José");
     expect(within(group(/^Hijos/)).getAllByRole("button")).toHaveLength(5);
   });
 
@@ -139,6 +155,25 @@ describe("FamilyTreePage", { timeout: 15_000 }, () => {
 
     expect(await screen.findByRole("heading", { name: "Verifica tu correo para ver el árbol familiar" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: /^Padres/ })).not.toBeInTheDocument();
+  });
+
+  it("shows the verify-email state for EMAIL_UNVERIFIED even when the cached user looks verified", async () => {
+    server.use(
+      http.get(apiUrl("/family/tree"), () => HttpResponse.json({ error: { code: "EMAIL_UNVERIFIED", message: "Verifica tu correo." } }, { status: 403 }))
+    );
+    renderApp("/arbol", authenticatedState(makeUser()));
+
+    expect(await screen.findByRole("heading", { name: "Verifica tu correo para ver el árbol familiar" })).toBeInTheDocument();
+    expect(within(screen.getByRole("main")).getByRole("button", { name: "Reenviar enlace" })).toBeInTheDocument();
+  });
+
+  it("says access is closed for a 403 to a verified member, with no retry", async () => {
+    server.use(http.get(apiUrl("/family/tree"), () => HttpResponse.json(errorBody("FORBIDDEN", "No."), { status: 403 })));
+    renderApp("/arbol", authenticatedState(makeUser()));
+
+    expect(await screen.findByRole("heading", { name: "No tienes acceso al árbol familiar" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Verifica tu correo/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
   });
 
   it("shows the verify-email state on 403 EMAIL_UNVERIFIED (WP-0.8a server code)", async () => {

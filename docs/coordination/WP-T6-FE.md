@@ -88,3 +88,9 @@ Fixtures use fictional people only (public repo). Tests, the screenshot stub and
 7. **WP-0.7:** the screen would benefit from a shared `PersonChip` and a horizontal-scroll strip primitive; both are local to the family feature for now.
 
 ## Review log
+- 2026-10-06, **WP-0.8c**:
+  - [SEC] The breadcrumb's history state is `{ trail: personId[] }`; names are resolved from memory (RTK Query cache + names seen while mounted), so no names persist in session history. Legacy `{ id, name }` entries are read as ids; unknown ids are skipped.
+  - Admin pages for an unverified admin (the tree endpoints need a verified email) show the verify state, not "Reintentar"; the member tree shows "No tienes acceso al árbol familiar" for other 403s.
+  - "Quitar a …" is disabled for a person linked to an account, with the reason; a 409 shows the server's message.
+  - The linked account shows as "Nombre (correo)" (found with `GET /admin/users?q=<person name>`; a by-id endpoint would be exact).
+  - WP-0.8b hides living relatives' `birthYear` from other members: the focus card then shows no year (tested); the self-edit form still gets your own year.

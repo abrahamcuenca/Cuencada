@@ -112,7 +112,8 @@ const SWITCH_FIELDS: Record<ProfileSwitchField, SwitchSpec> = {
   showCity: { label: "Mostrar mi ciudad a la familia", hint: () => "Aparecerá en tu ficha y podrán encontrarte al buscar por ciudad." },
   listedInDirectory: {
     label: "Aparecer en el directorio",
-    hint: () => "Si lo apagas, no aparecerás en el directorio ni en su búsqueda. Seguirás en el árbol familiar."
+    hint: () =>
+      "Si lo apagas, no aparecerás en el directorio ni en su búsqueda. Seguirás en el árbol familiar. Tus mensajes en el chat seguirán mostrando tu nombre y foto."
   }
 };
 

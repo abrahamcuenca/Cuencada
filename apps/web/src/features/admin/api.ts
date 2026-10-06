@@ -36,6 +36,8 @@ export interface UserListFilter {
   q?: string;
   role?: UserRole;
   status?: UserStatus;
+  /** `false`: only unverified emails (`GET /admin/users?emailVerified=false`, WP-0.8b). */
+  emailVerified?: boolean;
 }
 
 /** Filters of the audit log (`GET /admin/audit-logs`); dates are ISO instants. */

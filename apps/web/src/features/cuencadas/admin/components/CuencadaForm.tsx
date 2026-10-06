@@ -2,6 +2,7 @@ import { type AdminCuencada, type CreateCuencadaInput, type CreateCuencadaReques
 import { type FormEvent, type ReactNode, useState } from "react";
 import { Button } from "../../../../shared/ui/Button";
 import type { SelectOption } from "../../../../shared/ui/Select";
+import { forecastUrl } from "../../components/WeatherWidget";
 import { blankToNull, type FieldErrors, isoToZonedLocal, issuesToFieldErrors, zonedLocalToIso } from "../forms";
 import styles from "../admin.module.css";
 import { FormError, type FormValues, SelectField, TextField } from "./fields";
@@ -98,6 +99,11 @@ interface Draft {
   errors: FieldErrors;
 }
 
+/** Hint under "Pronóstico del clima": the only URL shape the weather widget renders. */
+export const FORECAST_URL_HINT = "Copia la dirección de la ciudad en forecast7.com, p. ej. https://forecast7.com/es/20d97n89d59/merida/ (sin «www.»).";
+/** Shown when the forecast URL isn't an `https://forecast7.com/…` page. */
+export const FORECAST_URL_ERROR = "Usa una dirección que empiece con https://forecast7.com/ (sin «www.»).";
+
 /** Builds the API body. Wall-clock date-times are read in the chosen timezone. */
 function buildDraft(values: CuencadaValues): Draft {
   const errors: FieldErrors = {};
@@ -115,6 +121,9 @@ function buildDraft(values: CuencadaValues): Draft {
     if (iso === null) errors[field] = "Fecha y hora inválidas.";
     return iso;
   };
+
+  const forecast = values.weatherWidgetUrl.trim();
+  if (forecast !== "" && forecastUrl(forecast) === null) errors.weatherWidgetUrl = FORECAST_URL_ERROR;
 
   const startsAt = instant("startsAt", true);
   const endsAt = instant("endsAt", true);
@@ -241,7 +250,7 @@ export function CuencadaForm({ initial, onSubmit, submitLabel, onCancel }: Cuenc
         <legend>Enlaces</legend>
         <TextField {...bind(field, "heroImageUrl")} label="Imagen principal" type="url" inputMode="url" hint="https://… o /images/…" />
         <TextField {...bind(field, "songUrl")} label="Canción" type="url" inputMode="url" hint="https://… o /canciones/…" />
-        <TextField {...bind(field, "weatherWidgetUrl")} label="Pronóstico del clima" type="url" inputMode="url" hint="Página de forecast7.com." />
+        <TextField {...bind(field, "weatherWidgetUrl")} label="Pronóstico del clima" type="url" inputMode="url" hint={FORECAST_URL_HINT} />
         <TextField {...bind(field, "whatsappUrl")} label="Grupo de WhatsApp" type="url" inputMode="url" hint="Solo lo ve la familia con cuenta." />
         <TextField {...bind(field, "externalAlbumUrl")} label="Álbum compartido (OneDrive)" type="url" inputMode="url" hint="Solo lo ve la familia con cuenta." />
       </fieldset>

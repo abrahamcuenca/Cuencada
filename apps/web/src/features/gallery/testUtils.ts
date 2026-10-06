@@ -113,8 +113,6 @@ export interface FakeGalleryDb {
   holdUploads: Promise<void> | null;
   /** When set, confirm responses wait for it. */
   holdConfirm: Promise<void> | null;
-  /** Years whose `limit=1` probe fails with a 500. */
-  failingProbes: number[];
 }
 
 /** A fresh fake database. */
@@ -131,7 +129,6 @@ export function makeDb(overrides: Partial<FakeGalleryDb> = {}): FakeGalleryDb {
     uploadUrl: SIGNED_PUT_URL,
     holdUploads: null,
     holdConfirm: null,
-    failingProbes: [],
     ...overrides
   };
 }
@@ -160,14 +157,17 @@ export function galleryHandlers(db: FakeGalleryDb): HttpHandler[] {
   return [
     http.get(apiUrl("/cuencadas"), ({ request }) => {
       record(db, request);
-      return HttpResponse.json(db.editions);
+      // Like T2-BE: `hasMedia` is true when the edition has a visible item.
+      return HttpResponse.json(
+        db.editions.map((edition) => ({
+          ...edition,
+          hasMedia: db.media.some((m) => m.year === edition.year && m.uploadStatus === "ready" && m.moderationStatus === "approved")
+        }))
+      );
     }),
     http.get(apiUrl("/cuencadas/:year/media"), ({ request, params }) => {
       const url = record(db, request);
       const year = Number(params.year);
-      if (url.searchParams.get("limit") === "1" && db.failingProbes.includes(year)) {
-        return HttpResponse.json(errorBody("INTERNAL"), { status: 500 });
-      }
       return HttpResponse.json(paginate(db.media.filter((m) => m.year === year), url));
     }),
     http.post(apiUrl("/cuencadas/:year/media/uploads"), async ({ request }) => {

@@ -19,7 +19,8 @@ import { SongPlayer } from "../components/SongPlayer";
 import { forecastUrl, WeatherWidget } from "../components/WeatherWidget";
 import styles from "../components/content.module.css";
 import { useNow } from "../hooks/useNow";
-import { formatKicker, messageForToday, safeAssetUrl } from "../lib/format";
+import { useOnNewDay } from "../hooks/useZonedToday";
+import { countdownInstants, formatKicker, idFromHash, safeAssetUrl } from "../lib/format";
 
 /**
  * Parses the `:year` route param with the contract schema.
@@ -85,8 +86,9 @@ function useMembersState(year: number | null): MembersBlockState {
 function useScrollToHash(ready: boolean): void {
   const { hash } = useLocation();
   useEffect(() => {
-    if (!ready || hash.length < 2) return;
-    document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView();
+    const id = ready ? idFromHash(hash) : null;
+    if (id === null) return;
+    document.getElementById(id)?.scrollIntoView();
   }, [ready, hash]);
 }
 
@@ -104,7 +106,9 @@ function CuencadaYearContent({ cuencada, members, stale, onRetry }: ContentProps
   // Members get every item (public + members-only); visitors only the public ones.
   const itinerary = details?.itinerary ?? cuencada.publicItinerary;
   const locations = details?.locations ?? cuencada.publicLocations;
-  const todayMessage = messageForToday(cuencada.todayMessage, now, cuencada.timezone);
+  // After local midnight the server has the new day's message: refetch the page data.
+  const today = useOnNewDay(cuencada.timezone, onRetry);
+  const todayMessage = cuencada.todayMessage?.date === today ? cuencada.todayMessage : null;
   const weatherUrl = forecastUrl(cuencada.weatherWidgetUrl);
   const songUrl = safeAssetUrl(cuencada.songUrl);
 
@@ -136,9 +140,7 @@ function CuencadaYearContent({ cuencada, members, stale, onRetry }: ContentProps
         }
       >
         <Countdown
-          target={new Date(cuencada.startsAt)}
-          end={new Date(cuencada.endsAt)}
-          now={now}
+          {...countdownInstants(cuencada.status, cuencada.startsAt, cuencada.endsAt, now)}
           pastMessage={`La Cuencada ${cuencada.year} en ${cuencada.city} ya es parte de nuestra historia. ¡Gracias por acompañarnos!`}
         />
       </CuencadaHero>

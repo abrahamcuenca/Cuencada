@@ -1,4 +1,4 @@
-import { type LocationItem, RSVP_MAX_GUESTS, RSVP_NOTES_MAX_LENGTH, type RsvpStatus } from "@cuencada/types";
+import { RSVP_MAX_GUESTS, RSVP_NOTES_MAX_LENGTH, type RsvpStatus } from "@cuencada/types";
 import { type FormEvent, type ReactNode, useId } from "react";
 import { Button } from "../../../shared/ui/Button";
 import { Field } from "../../../shared/ui/Field";
@@ -6,7 +6,7 @@ import { IconButton } from "../../../shared/ui/IconButton";
 import { Select } from "../../../shared/ui/Select";
 import { TextArea } from "../../../shared/ui/TextArea";
 import { TextInput } from "../../../shared/ui/TextInput";
-import { clampGuests, type DateWindow, type RsvpDraft, type RsvpFieldErrors } from "../lib/rsvpForm";
+import { clampGuests, type DateWindow, type HotelChoice, type RsvpDraft, type RsvpFieldErrors } from "../lib/rsvpForm";
 import styles from "../rsvp.module.css";
 
 /** Props for {@link RsvpForm}. */
@@ -14,8 +14,10 @@ export interface RsvpFormProps {
   year: number;
   draft: RsvpDraft;
   errors: RsvpFieldErrors;
-  /** The edition's `hotel` locations (members details). */
-  hotels: readonly LocationItem[];
+  /** Hotels to offer (see `hotelChoices`). */
+  hotels: readonly HotelChoice[];
+  /** Shown under the hotel select, e.g. when the list couldn't load. */
+  hotelHint?: string | undefined;
   dateWindow: DateWindow;
   saving: boolean;
   onChange: (draft: RsvpDraft) => void;
@@ -35,7 +37,7 @@ const STATUS_OPTIONS: readonly { value: RsvpStatus; label: string; icon: string 
  * "No") a 0–20 guest stepper, arrival/departure native date inputs limited to
  * the edition's window, the hotel select, and notes.
  */
-export function RsvpForm({ year, draft, errors, hotels, dateWindow, saving, onChange, onSubmit, onCancel }: RsvpFormProps): ReactNode {
+export function RsvpForm({ year, draft, errors, hotels, hotelHint, dateWindow, saving, onChange, onSubmit, onCancel }: RsvpFormProps): ReactNode {
   const statusErrorId = useId();
   const attending = draft.status !== null && draft.status !== "no";
   const set = <TKey extends keyof RsvpDraft>(key: TKey, value: RsvpDraft[TKey]): void => onChange({ ...draft, [key]: value });
@@ -128,7 +130,7 @@ export function RsvpForm({ year, draft, errors, hotels, dateWindow, saving, onCh
           </div>
 
           {hotels.length > 0 ? (
-            <Field label="Hotel" error={errors.hotelLocationId} showOptional>
+            <Field label="Hotel" hint={hotelHint} error={errors.hotelLocationId} showOptional>
               {(control) => (
                 <Select
                   {...control}

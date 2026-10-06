@@ -104,8 +104,8 @@ export function makeInvite(overrides: Partial<InviteInspectResponse> = {}): Invi
     emailMasked: "t***@e***.com",
     role: "member",
     expiresAt: "2026-10-20T18:00:00.000Z",
-    invitedByName: "Jorge Cuenca",
-    suggestedDisplayName: "Lupe Cuenca",
+    invitedByName: "Jorge Ejemplo",
+    suggestedDisplayName: "Lupe Ejemplo",
     ...overrides
   });
 }

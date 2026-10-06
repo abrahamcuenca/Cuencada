@@ -2,7 +2,7 @@
  * Cuencada-specific formatting built on `shared/lib/dates.ts`. Every function
  * takes the Cuencada's IANA timezone; nothing here reads the device timezone.
  */
-import type { DailyMessage, ItineraryItem } from "@cuencada/types";
+import type { CuencadaStatus, DailyMessage, ItineraryItem } from "@cuencada/types";
 import { formatDate, formatTime, toZonedParts } from "../../../shared/lib/dates";
 
 /**
@@ -63,6 +63,53 @@ export function todayInTimezone(now: Date, timeZone: string): string {
 export function messageForToday(message: DailyMessage | null, now: Date, timeZone: string): DailyMessage | null {
   if (message === null) return null;
   return message.date === todayInTimezone(now, timeZone) ? message : null;
+}
+
+/**
+ * The element id in a URL fragment, or `null` when there is none or it is
+ * malformed (`decodeURIComponent` throws `URIError` on e.g. `#%E0%A4%A`).
+ *
+ * @param hash - `location.hash`, including the `#`.
+ * @returns The decoded id.
+ */
+export function idFromHash(hash: string): string | null {
+  if (hash.length < 2) return null;
+  try {
+    return decodeURIComponent(hash.slice(1));
+  } catch {
+    // A hand-typed or truncated fragment: nothing to scroll to, and nothing worth reporting.
+    return null;
+  }
+}
+
+/** Instants for the shared `Countdown` (`target`, `end`, `now`). */
+export interface CountdownInstants {
+  target: number;
+  end: number;
+  now: number;
+}
+
+/**
+ * Countdown instants driven by the server's `status`, not only by the device
+ * clock: the server decides the edition is `active` or `past` (in the
+ * edition's timezone), so a wrong device clock, or an edition that starts
+ * "today" before its `startsAt` hour, still shows "¡YA LLEGÓ!" / the past
+ * message. For `upcoming` the clock runs as usual, so the hero flips to live
+ * on its own when `startsAt` passes while the page is open.
+ *
+ * @param status - Server status of the edition.
+ * @param startsAt - ISO start.
+ * @param endsAt - ISO end.
+ * @param now - The current instant.
+ * @returns Props for `Countdown`.
+ */
+export function countdownInstants(status: CuencadaStatus, startsAt: string, endsAt: string, now: Date): CountdownInstants {
+  const nowMs = now.getTime();
+  const start = Date.parse(startsAt);
+  const end = Date.parse(endsAt);
+  if (status === "active") return { target: Math.min(start, nowMs), end: Math.max(end, nowMs + 1), now: nowMs };
+  if (status === "past") return { target: Math.min(start, nowMs - 1), end: Math.min(end, nowMs), now: nowMs };
+  return { target: start, end, now: nowMs };
 }
 
 /**
