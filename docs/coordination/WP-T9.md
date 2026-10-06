@@ -10,7 +10,7 @@ Built on `origin/main` (885b4e9). Inputs: docs/plan.md (Frontend → PWA), WP-0.
   - `devOptions.enabled: false`: dev has no service worker, so HMR and the `/api` proxy are untouched.
   - **Manifest** (`/manifest.webmanifest`, linked by the plugin at build): name and short_name "Cuencada", `lang: es-MX`, `start_url: /`, `scope: /`, `id: /`, `display: standalone`, `orientation: portrait`, `theme_color #0b5e55`, `background_color #fffaf0`, and the four WP-0.7 icons (any and maskable, 192 and 512).
 - **Caching policy** (`src/features/pwa/swRules.ts`; matchers and plugin are self-contained because Workbox serializes them):
-  - **Precache** (94 entries, about 1.06 MB): the app shell (`index.html`), every JS and CSS chunk, icons, `images/*.webp`, the manifest and `sw-purge.js`. Glob `**/*.{js,css,html,svg,png,webp,ico,webmanifest}`. Ignored: `**/canciones/**`, `**/api/**`, `**/*.map`. JPEG photos are not precached.
+  - **Precache** (105 entries, about 1.1 MB): the app shell (`index.html`), every JS and CSS chunk, icons, `images/*.webp`, the manifest and `sw-purge.js`. Glob `**/*.{js,css,html,svg,png,webp,ico,webmanifest}`. Ignored: `**/canciones/**`, `**/api/**`, `**/*.map`. JPEG photos are not precached.
   - **Runtime, NetworkFirst** (`cuencada-public-api`, 6 s network timeout, only 200s cached, 12 entries, 30 days): only same-origin `GET /api/cuencadas/home` and `GET /api/cuencadas/{4-digit year}`, with no query string.
     - I checked `packages/types/src/cuencadas.ts` and the server's `public-routes.ts`. `publicCuencadaSchema` and `cuencadaHomeSchema` carry only public items, and the server builds them from `ContentScope.Public` and strips extra fields through the response schema. `heroImageUrl` and `songUrl` are stored values, not presigned URLs.
     - `authorName` on public announcements is public by design.
@@ -81,10 +81,10 @@ location /assets/            { add_header Cache-Control "public, max-age=3153600
 - The page CSP already has `worker-src 'self'` and `manifest-src 'self'` (`security.ts`). Nothing new is required.
 - Keep `/api/**` and `/canciones/**` out of the SPA `try_files` fallback, as today.
 
-## Verification (2026-10-06)
+## Verification (2026-10-06, re-run after merging origin/main 4fd5b75)
 - `pnpm lint`: 0 diagnostics.
 - `pnpm turbo run typecheck --force`: 6/6 tasks succeed.
-- `pnpm test`: 121 files, 1362 tests, all pass. Under heavy machine load (40+ vitest workers from parallel agents), 4 existing app tests timed out once at 5 s; they pass when re-run.
+- `pnpm test`: 134 files, 1495 tests, all pass. Under heavy machine load (40+ vitest workers from parallel agents), 4 existing app tests timed out once at 5 s; they pass when re-run.
   - New PWA tests:
     - `swRules.test.ts`: public reads cached; `/members`, other APIs, chat ticket and ws, S3, weatherwidget, `/canciones` and writes not cached; navigation denylist; options; manifest; `sw-purge.js` sync; the plugin
     - `registerServiceWorker.test.ts`: prompt, apply, reload once, errors, hourly check
@@ -92,8 +92,8 @@ location /assets/            { add_header Cache-Control "public, max-age=3153600
     - `purge.test.ts`: page and SW purge, epoch watch, logout → purge
     - `pwaListeners.test.ts`: SW message origin check; install prompt capture
     - `InstallAppCard.test.tsx`: prompt, iOS hint, dismissal stored and honoured, hidden when standalone
-- `pnpm build`: succeeds. The precache has 94 entries, about 1057 KiB, and contains no mp3, jpg or api.
-- `pnpm --filter @cuencada/web size`: initial JS is **170.6 kB gzip**, under the 190 KB gate (this WP adds about 0.5 kB: the mount wrapper and the early listeners). `PwaStatus` is a lazy 1.9 kB chunk, and `workbox-window` a lazy 2.4 kB chunk.
+- `pnpm build`: succeeds. The precache has 105 entries, about 1112 KiB, and contains no mp3, jpg or api.
+- `pnpm --filter @cuencada/web size`: initial JS is **171.6 kB gzip**, under the 190 KB gate (this WP adds about 0.5 kB: the mount wrapper and the early listeners). `PwaStatus` is a lazy 1.9 kB chunk, and `workbox-window` a lazy 2.4 kB chunk.
 - **`check:sw` on the real build output.** It runs `dist/sw.js` and `sw-purge.js` in a `vm` with a fake Workbox, then exercises the routes it registered: 1 navigation route and 1 runtime route, every match and non-match above, the plugin, the purge (and that a foreign origin is ignored), `SKIP_WAITING`, and no inline scripts.
   - **It caught a real bug.** Workbox's production build (babel + terser) mangled a matcher written with destructured parameters into `function(){…s.search…}`, which never matched.
   - The matcher now takes a single parameter. The check guards against a regression.
