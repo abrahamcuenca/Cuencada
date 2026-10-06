@@ -142,7 +142,7 @@ Owner: Frontend · Reviewers: TL, Sec · Branch: wp/t2-fe-cuencadas · PR: # (no
   - HomePage chunk: 2.2 KB gzip
   - admin editor: 6.3 KB + forms 9.9 KB gzip (admin only)
 - **Screenshots** in `docs/ux/screenshots/t2/`, at 375 and 1280, taken with headless Chromium against `vite preview` with `/api/**` stubbed from `testing/fixtures.ts`, device timezone Europe/Madrid:
-  - `home-memories`
+  - `home-memories` (re-taken in WP-0.8c: no family photos, visitor teaser)
   - `cuencada-2026-anon`
   - `cuencada-2026-member`
   - `admin-programa`

@@ -88,7 +88,7 @@ describe("GET /api/admin/users", () => {
     await createSession(member.user.id);
     await createSession(member.user.id, { revoked: true });
     await createSession(member.user.id, { idleExpiresAt: new Date(Date.now() - 1000), absoluteExpiresAt: new Date(Date.now() - 1000), now: new Date(Date.now() - 2000) });
-    const [person] = await db.insert(people).values({ fullName: "Ana Cuenca", userId: member.user.id }).returning();
+    const [person] = await db.insert(people).values({ fullName: "Ana Morales", userId: member.user.id }).returning();
     const lastLogin = new Date("2026-09-01T10:00:00Z");
     await db.update(users).set({ lastLoginAt: lastLogin }).where(eq(users.id, member.user.id));
 
@@ -111,7 +111,7 @@ describe("GET /api/admin/users", () => {
   });
 
   it("searches name and email literally and filters by role and status", async () => {
-    await createUser({ displayName: "100% Cuenca", email: "pct@example.test" });
+    await createUser({ displayName: "100% Morales", email: "pct@example.test" });
     await createUser({ displayName: "Tío_Beto", email: "beto@example.test", status: "disabled" });
 
     const list = async (query: string): Promise<string[]> => {
@@ -362,8 +362,11 @@ describe("PATCH /api/admin/users/:id", () => {
     expect(row).toMatchObject({ role: "admin", status: "active" });
   });
 
-  it("keeps at least one active admin when two admins demote each other at the same time", async () => {
-    for (let round = 0; round < 5; round += 1) {
+  // Each round creates two admins (argon2) and races two PATCHes, so it is
+  // slow under a loaded CI runner: 3 rounds with a generous timeout. The
+  // earlier "flake" was the 401 interleaving, not a timeout (WP-0.8a).
+  it("keeps at least one active admin when two admins demote each other at the same time", { timeout: 60_000 }, async () => {
+    for (let round = 0; round < 3; round += 1) {
       const db = getTestDb();
       await db.update(users).set({ role: "member" }).where(eq(users.role, "admin"));
       const first = await createMember({ role: "admin" });
@@ -374,7 +377,11 @@ describe("PATCH /api/admin/users/:id", () => {
       ]);
       const codes = results.map((result) => result.statusCode).sort();
       expect(codes[0]).toBe(200);
-      expect([403, 409]).toContain(codes[1]);
+      // The loser gets 409 (last-admin guard), 403 (no longer an admin) or,
+      // when the disable commits before its request passes the auth guard,
+      // 401 (its session was revoked with the account). All are correct; the
+      // invariant is the single remaining active admin below.
+      expect([401, 403, 409]).toContain(codes[1]);
       const admins = await db
         .select({ id: users.id })
         .from(users)

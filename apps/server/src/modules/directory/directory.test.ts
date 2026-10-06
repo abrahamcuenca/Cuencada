@@ -61,34 +61,34 @@ function names(page: Page<DirectoryEntry>): string[] {
   return page.items.map((item) => item.fullName);
 }
 
-const CONTACT = { phone: "+52 999 123 4567", city: "Valladolid" } as const;
+const CONTACT = { phone: "+52 555 012 4567", city: "Valladolid" } as const;
 
 describe("GET /api/directory", () => {
   it("lists active members by name and omits hidden contact fields (absent, not null)", async () => {
     const ana = await createUser({
       displayName: "Ana",
-      profile: { fullName: "Ana Cuenca", ...CONTACT }
+      profile: { fullName: "Ana Morales", ...CONTACT }
     });
     await createUser({
       displayName: "Beto",
-      profile: { fullName: "Beto Cuenca", showCity: true, city: "Mérida" }
+      profile: { fullName: "Beto Morales", showCity: true, city: "Mérida" }
     });
     await createUser({
       displayName: "Caro",
       status: "disabled",
-      profile: { fullName: "Caro Cuenca", showPhone: true, phone: "+52 1" }
+      profile: { fullName: "Caro Morales", showPhone: true, phone: "+52 1" }
     });
 
     const page = await list();
 
-    expect(names(page)).toEqual(["Ana Cuenca", "Beto Cuenca", "Zz Visitante"]);
+    expect(names(page)).toEqual(["Ana Morales", "Beto Morales", "Zz Visitante"]);
     expect(page.nextCursor).toBeNull();
     const first = page.items[0];
     expect(first).toEqual({
       userId: ana.id,
       personId: null,
       displayName: "Ana",
-      fullName: "Ana Cuenca",
+      fullName: "Ana Morales",
       familyBranch: null,
       avatarUrl: null,
       bio: null
@@ -146,7 +146,7 @@ describe("GET /api/directory", () => {
       email: "oculto@familia.test",
       profile: {
         fullName: "Persona Oculta",
-        phone: "+52 999 765 4321",
+        phone: "+52 555 076 4321",
         city: "Tizimín",
         showPhone: false,
         showCity: false
@@ -156,7 +156,7 @@ describe("GET /api/directory", () => {
       email: "visible@familia.test",
       profile: {
         fullName: "Persona Visible",
-        phone: "+52 999 111 2222",
+        phone: "+52 555 011 2222",
         city: "Izamal",
         showPhone: true,
         showEmail: true,
@@ -197,12 +197,12 @@ describe("GET /api/directory", () => {
   });
 
   it("treats LIKE wildcards in q literally", async () => {
-    await createUser({ profile: { fullName: "Ana 100% Cuenca" } });
-    await createUser({ profile: { fullName: "Beto_Cuenca" } });
-    await createUser({ profile: { fullName: "Carlos Cuenca" } });
+    await createUser({ profile: { fullName: "Ana 100% Morales" } });
+    await createUser({ profile: { fullName: "Beto_Morales" } });
+    await createUser({ profile: { fullName: "Carlos Morales" } });
 
-    expect(names(await list("?q=%25"))).toEqual(["Ana 100% Cuenca"]);
-    expect(names(await list("?q=_"))).toEqual(["Beto_Cuenca"]);
+    expect(names(await list("?q=%25"))).toEqual(["Ana 100% Morales"]);
+    expect(names(await list("?q=_"))).toEqual(["Beto_Morales"]);
     expect(names(await list(`?q=${encodeURIComponent("\\")}`))).toEqual([]);
   });
 
@@ -313,7 +313,7 @@ describe("GET /api/directory", () => {
 
     expect(anonymous.statusCode).toBe(401);
     expect(forbidden.statusCode).toBe(403);
-    expect(errorCode(forbidden.body)).toBe("FORBIDDEN");
+    expect(errorCode(forbidden.body)).toBe("EMAIL_UNVERIFIED");
     expect(mustChange.statusCode).toBe(403);
   });
 
@@ -372,7 +372,7 @@ describe("GET /api/directory", () => {
       email: "secreto@familia.test",
       profile: {
         fullName: "Pariente Discreto",
-        phone: "+52 999 404 0404",
+        phone: "+52 555 040 0404",
         city: "Hunucmá",
         bio: "Biografía privada",
         showPhone: true
@@ -464,7 +464,7 @@ describe("unlisted members (profiles.listed_in_directory)", () => {
         fullName: "Prima Oculta",
         familyBranch: "Rama Este",
         city: "Motul",
-        phone: "+52 999 303 0303",
+        phone: "+52 555 030 0303",
         showEmail: true,
         showPhone: true,
         showCity: true,

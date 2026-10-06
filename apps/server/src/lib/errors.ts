@@ -13,6 +13,7 @@ export const defaultErrorMessages = {
   INVALID_CREDENTIALS: "Correo o contraseña incorrectos.",
   FORBIDDEN: "No tienes permiso para hacer esto.",
   PASSWORD_CHANGE_REQUIRED: "Debes cambiar tu contraseña antes de continuar.",
+  EMAIL_UNVERIFIED: "Confirma tu correo electrónico para ver esta sección.",
   CSRF_FAILED: "No pudimos verificar el origen de la solicitud.",
   NOT_FOUND: "No encontramos lo que buscas.",
   CONFLICT: "La operación entra en conflicto con datos existentes.",

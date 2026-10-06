@@ -176,6 +176,17 @@ describe("FamilyTreePage", { timeout: 15_000 }, () => {
     expect(screen.queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
   });
 
+  it("shows the verify-email state on 403 EMAIL_UNVERIFIED (WP-0.8a server code)", async () => {
+    server.use(
+      http.get(apiUrl("/family/tree"), () =>
+        HttpResponse.json(errorBody("EMAIL_UNVERIFIED", "Confirma tu correo electrónico para ver esta sección."), { status: 403 })
+      )
+    );
+    renderApp("/arbol", authenticatedState(makeUser({ emailVerified: false })));
+
+    expect(await screen.findByRole("heading", { name: "Verifica tu correo para ver el árbol familiar" })).toBeInTheDocument();
+  });
+
   it("prompts a search when I have no person node", async () => {
     server.use(...familyHandlers(db, { mePersonId: null }));
     renderApp("/arbol", authenticatedState(makeUser()));

@@ -51,6 +51,13 @@ export interface SeedLinks {
  * Legacy links from the old public `index.html`, used only when `NODE_ENV` is
  * `development` or `test` and the env var is unset. Production values are
  * rotated at cutover and must never be committed here.
+ *
+ * TODO(WP-2.4 cutover): these are the legacy production links, already public
+ * in the old `index.html` and git history. They are reset (new WhatsApp
+ * invite, new OneDrive shares) at cutover and production gets the new values
+ * only through the vault-backed `SEED_*_URL` variables or the admin UI; see
+ * docs/coordination/backlog.md. Do not copy these URLs anywhere else
+ * (fixtures, tests, docs): reference this constant instead.
  */
 export const LEGACY_DEV_LINKS = {
   whatsappUrl: "https://chat.whatsapp.com/IvI6oayIIoEJ8Wn7EWQxO0?s=cl&p=i&mlu=0",

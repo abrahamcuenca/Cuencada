@@ -26,6 +26,12 @@ export const ErrorCode = {
   FORBIDDEN: "FORBIDDEN",
   /** The user must change the temporary password before doing anything else (403). */
   PASSWORD_CHANGE_REQUIRED: "PASSWORD_CHANGE_REQUIRED",
+  /**
+   * The route needs a verified email (directory, family tree, other PII) and
+   * the caller's is not verified yet (403). The client offers "verify your
+   * email"; it must not show that for any other 403.
+   */
+  EMAIL_UNVERIFIED: "EMAIL_UNVERIFIED",
   /** Missing/invalid `X-Cuencada-CSRF` header or `Origin` on cookie-authenticated routes (403). */
   CSRF_FAILED: "CSRF_FAILED",
   /** Resource does not exist or is not visible to the caller (404). */
@@ -61,6 +67,7 @@ export const errorHttpStatus = {
   INVALID_CREDENTIALS: 401,
   FORBIDDEN: 403,
   PASSWORD_CHANGE_REQUIRED: 403,
+  EMAIL_UNVERIFIED: 403,
   CSRF_FAILED: 403,
   NOT_FOUND: 404,
   CONFLICT: 409,

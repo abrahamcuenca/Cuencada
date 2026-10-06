@@ -21,7 +21,7 @@ export interface AvatarCircleProps {
 
 const PARTICLES = new Set(["de", "del", "la", "las", "los", "y", "van", "von"]);
 
-/** Up to two initials from a Spanish full name, skipping particles ("María de la Luz Cuenca" → "MC"). */
+/** Up to two initials from a Spanish full name, skipping particles ("María de la Luz Vega" → "MV"). */
 export function getInitials(name: string): string {
   const words = name
     .trim()

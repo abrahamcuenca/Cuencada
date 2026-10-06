@@ -206,7 +206,7 @@ describe("auth guard", () => {
     const granted = await app.inject({ method: "GET", url: "/t/verified", ...(await loginAs(app, verified)) });
 
     expect(denied.statusCode).toBe(403);
-    expect(code(denied)).toBe("FORBIDDEN");
+    expect(code(denied)).toBe("EMAIL_UNVERIFIED");
     expect(granted.statusCode).toBe(200);
   });
 

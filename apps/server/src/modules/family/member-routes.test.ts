@@ -58,23 +58,23 @@ describe("verified-email gate", () => {
       expect(anonymous.statusCode, route.url).toBe(401);
       const forbidden = await app.inject({ ...route, ...unverifiedAuth });
       expect(forbidden.statusCode, route.url).toBe(403);
-      expect(forbidden.json<ApiError>().error.code).toBe("FORBIDDEN");
+      expect(forbidden.json<ApiError>().error.code).toBe("EMAIL_UNVERIFIED");
     }
   });
 });
 
 describe("GET /api/family/people", () => {
   it("searches name, nickname and branch case-insensitively and pages by name", async () => {
-    await insertPerson({ fullName: "Ana Cuenca" });
-    await insertPerson({ fullName: "Beto Pérez", nickname: "El Cuenca Chico" });
-    await insertPerson({ fullName: "Carla Ruiz", familyBranch: "Rama CUENCA Mérida" });
+    await insertPerson({ fullName: "Ana Morales" });
+    await insertPerson({ fullName: "Beto Pérez", nickname: "El Morales Chico" });
+    await insertPerson({ fullName: "Carla Ruiz", familyBranch: "Rama MORALES Mérida" });
     await insertPerson({ fullName: "Dora Sosa" });
 
     const collected: string[] = [];
     let cursor: string | null = null;
     let pages = 0;
     do {
-      const query: string = cursor === null ? "?q=cuenca&limit=2" : `?q=cuenca&limit=2&cursor=${cursor}`;
+      const query: string = cursor === null ? "?q=morales&limit=2" : `?q=morales&limit=2&cursor=${cursor}`;
       const response = await app.inject({ method: "GET", url: `/api/family/people${query}`, ...memberAuth });
       expect(response.statusCode).toBe(200);
       const page = response.json<Page<PersonSummary>>();
@@ -84,7 +84,7 @@ describe("GET /api/family/people", () => {
       pages += 1;
     } while (cursor !== null && pages < 5);
 
-    expect(collected).toEqual(["Ana Cuenca", "Beto Pérez", "Carla Ruiz"]);
+    expect(collected).toEqual(["Ana Morales", "Beto Pérez", "Carla Ruiz"]);
     expect(pages).toBe(2);
   });
 

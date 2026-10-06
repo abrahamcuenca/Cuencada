@@ -274,7 +274,7 @@ describe("POST /api/invites/inspect", () => {
   it("returns only the masked email, role, expiry and names", async () => {
     app = await createTestApp();
     const { auth } = await adminAuth(app);
-    const [person] = await getTestDb().insert(people).values({ fullName: "Ana Cuenca Pérez" }).returning();
+    const [person] = await getTestDb().insert(people).values({ fullName: "Ana Morales Pérez" }).returning();
     const bound = await createInvite(app, auth, { email: "tia.ana@familia.mx", sendEmail: false, personId: person?.id });
     const open = await createInvite(app, auth, { sendEmail: false, maxUses: 3 });
 
@@ -287,7 +287,7 @@ describe("POST /api/invites/inspect", () => {
       role: "member",
       expiresAt: expect.any(String),
       invitedByName: "Tía Lupe",
-      suggestedDisplayName: "Ana Cuenca Pérez"
+      suggestedDisplayName: "Ana Morales Pérez"
     });
     expect(boundView.body).not.toContain("tia.ana");
     expect(openView.json<{ emailMasked: string | null }>().emailMasked).toBeNull();
@@ -323,7 +323,7 @@ describe("POST /api/invites/accept", () => {
     const mailer = new FakeMailer();
     app = await createTestApp({ mailer });
     const { auth } = await adminAuth(app);
-    const [person] = await getTestDb().insert(people).values({ fullName: "Primo Nuevo Cuenca" }).returning();
+    const [person] = await getTestDb().insert(people).values({ fullName: "Primo Nuevo Morales" }).returning();
     const created = await createInvite(app, auth, { email: "nuevo@familia.mx", personId: person?.id });
     const token = linkToken(mailer.lastTo("nuevo@familia.mx"));
 

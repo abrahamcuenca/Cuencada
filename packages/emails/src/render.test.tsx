@@ -429,6 +429,14 @@ describe("renderEmail", () => {
     expect(email.html).toContain('bgcolor="#ffffff"');
   });
 
+  it("gives the container a fixed 600px width attribute for Outlook desktop and a fluid style for everyone else", async () => {
+    const email = await renderEmail(cases[0]?.template ?? passwordChanged);
+    const container = /<table[^>]*width="600"[^>]*>/.exec(email.html)?.[0];
+    expect(container).toBeDefined();
+    expect(container).toContain("width:100%");
+    expect(container).toContain("max-width:600px");
+  });
+
   it("rejects a non-https logoUrl and renders a valid one as the only image", async () => {
     await expect(
       renderEmail(passwordChanged, { logoUrl: "http://cuencada.com/logo.png" }),

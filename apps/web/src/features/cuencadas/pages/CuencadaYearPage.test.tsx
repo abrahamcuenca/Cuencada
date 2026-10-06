@@ -3,7 +3,7 @@ import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { apiUrl, authenticatedState, errorBody, makeUser, statusState } from "../../../../test/auth";
-import { renderApp } from "../../../../test/renderApp";
+import { renderApp, warmRoutes } from "../../../../test/renderApp";
 import { LINKS, makeAnnouncement, makeMemberDetails, makePublicCuencada } from "../testing/fixtures";
 
 let memberRequests = 0;
@@ -23,12 +23,9 @@ const server = setupServer(
   http.get(apiUrl("/cuencadas/1999"),() => HttpResponse.json(errorBody("NOT_FOUND", "No encontramos esa Cuencada."), { status: 404 }))
 );
 
-beforeAll(async () => {
-  server.listen({ onUnhandledRequest: "error" });
-  // Warm the lazily imported route module so the first test's findByRole doesn't race a cold
-  // transform under a loaded machine (it timed out once in a full parallel run).
-  await import("./CuencadaYearPage");
-}, 30_000);
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+// Load the lazy page before the first test so its findBy* does not race a cold transform (WP-0.8a).
+beforeAll(() => warmRoutes("/cuencada/2026"), 30_000);
 afterEach(() => {
   server.resetHandlers();
   memberRequests = 0;

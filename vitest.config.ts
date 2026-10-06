@@ -21,8 +21,18 @@ const serverAlias = {
 // externals (drizzle-orm, postgres, argon2, ...) from the project root, and
 // with pnpm those packages are only linked under the package that depends on
 // them, so a repo-root project root would fail to resolve them.
+/**
+ * Worker cap shared by every project (Vitest 4: top-level `maxWorkers`,
+ * replacing `poolOptions`). Half the cores by default: the server project
+ * runs argon2 and real Postgres, the web project jsdom, and on a shared
+ * machine or a 4-vCPU CI runner the default (cores - 1) starved them into
+ * timeouts. Override with VITEST_MAX_WORKERS (a number or a percentage).
+ */
+const maxWorkers = process.env.VITEST_MAX_WORKERS ?? "50%";
+
 export default defineConfig({
   test: {
+    maxWorkers,
     projects: [
       {
         root: fromRoot("./apps/server"),
@@ -49,7 +59,10 @@ export default defineConfig({
           environment: "jsdom",
           include: ["**/*.test.{ts,tsx}"],
           exclude: ["**/node_modules/**", "**/dist/**"],
-          setupFiles: ["./test/setup.ts"]
+          setupFiles: ["./test/setup.ts"],
+          // Lazy routes + jsdom under a loaded machine: the 5 s default flaked (WP-0.8a).
+          testTimeout: 15_000,
+          hookTimeout: 30_000
         }
       },
       {

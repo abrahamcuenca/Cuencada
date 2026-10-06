@@ -1,4 +1,4 @@
-import type { CurrentUser } from "@cuencada/types";
+import { type CurrentUser, ErrorCode } from "@cuencada/types";
 import { useAppSelector } from "../../app/hooks";
 import { isFetchBaseQueryError } from "../../shared/api/errors";
 import { selectCurrentUser } from "./authSlice";
@@ -10,12 +10,8 @@ import { selectCurrentUser } from "./authSlice";
  */
 export type AccessDenial = "unverified" | "forbidden";
 
-/**
- * Error code the server uses for "verify your email first" (WP-0.8a).
- * TODO(WP-0.8a): switch to `ErrorCode.EMAIL_UNVERIFIED` from `@cuencada/types`
- * once it is on main; the literal keeps this working before and after.
- */
-export const EMAIL_UNVERIFIED_CODE = "EMAIL_UNVERIFIED";
+/** Error code the server uses for "verify your email first" (WP-0.8a). */
+export const EMAIL_UNVERIFIED_CODE: string = ErrorCode.EMAIL_UNVERIFIED;
 
 /**
  * Just the `error.code` string of an error envelope. Deliberately looser than
@@ -54,7 +50,7 @@ export function classifyAccessDenial(error: unknown, user: Pick<CurrentUser, "em
   if (httpStatus(error) !== 403) return null;
   const code = rawErrorCode(error);
   if (code === EMAIL_UNVERIFIED_CODE) return "unverified";
-  if (code === "FORBIDDEN" && user?.emailVerified === false) return "unverified";
+  if (code === ErrorCode.FORBIDDEN && user?.emailVerified === false) return "unverified";
   return "forbidden";
 }
 

@@ -94,7 +94,7 @@ async function jpegWithGps(width = 120, height = 60): Promise<Buffer> {
   })
     .withMetadata({ orientation: 6 })
     .withExif({
-      IFD0: { Make: "SecretCam", Copyright: "Familia Cuenca" },
+      IFD0: { Make: "SecretCam", Copyright: "Familia Morales" },
       IFD3: {
         GPSLatitudeRef: "N",
         GPSLatitude: "20/1 58/1 0/1",
@@ -448,7 +448,7 @@ describe("POST /api/profile/me/avatar/confirm", () => {
 
     const [upload] = await getTestDb().select().from(avatarUploads).where(eq(avatarUploads.id, intent.uploadId));
     expect(upload?.confirmedAt).not.toBeNull();
-    expect(Buffer.from(storedObject(keys.large)).includes("Familia Cuenca")).toBe(false);
+    expect(Buffer.from(storedObject(keys.large)).includes("Familia Morales")).toBe(false);
     const [audit] = await getTestDb().select().from(auditLogs).where(eq(auditLogs.action, "profile.avatar_updated"));
     expect(audit).toMatchObject({
       actorUserId: user.id,

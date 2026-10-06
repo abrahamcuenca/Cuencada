@@ -85,7 +85,7 @@ Changes made in response to the Security and Tech Lead reviews. Most are already
 - **Deliberately not changed:**
   - `AuditLogEntry.entityType` stays a free string, so legacy rows still serialize.
   - Display names reject ZWJ, so emoji sequences are not allowed in names; chat bodies keep ZWJ.
-- **Decided (T1, 2026-10-06):** unverified members (copy-link and open invites) get **403 `FORBIDDEN`** on the directory, the family tree and every other PII read. Those routes declare `config.requireVerifiedEmail: true` (the WP-0.4 guard reads `users.email_verified_at` from the database). T5 (directory, profile reads of other members) and T6 (family tree) enforce it. A member verifies through `POST /api/auth/email/verify-request` → `/verificar#t=…` → `POST /api/auth/email/verify`; a magic-link login or a password reset sent to the current address also verifies it. Own-profile routes and `/me` stay open to unverified members so they can see the prompt.
+- **Decided (T1, 2026-10-06):** unverified members (copy-link and open invites) get **403 `EMAIL_UNVERIFIED`** (403 `FORBIDDEN` until WP-0.8a, which split the code so the client shows "verify your email" only for this case) on the directory, the family tree and every other PII read. Those routes declare `config.requireVerifiedEmail: true` (the WP-0.4 guard reads `users.email_verified_at` from the database). T5 (directory, profile reads of other members) and T6 (family tree) enforce it. A member verifies through `POST /api/auth/email/verify-request` → `/verificar#t=…` → `POST /api/auth/email/verify`; a magic-link login or a password reset sent to the current address also verifies it. Own-profile routes and `/me` stay open to unverified members so they can see the prompt.
 
 ## Consequences
 

@@ -15,7 +15,7 @@
  *   temporary password through (`/me`, change-password). Everything else
  *   answers 403 `PASSWORD_CHANGE_REQUIRED` for them.
  * - `requireVerifiedEmail: true` (directory, family tree, other PII) answers
- *   403 `FORBIDDEN` while `users.email_verified_at` is null.
+ *   403 `EMAIL_UNVERIFIED` while `users.email_verified_at` is null.
  *
  * Role, status and must-change-password always come from the database, never
  * from token claims, so revocation, disabling and demotion apply immediately.
@@ -191,7 +191,7 @@ export function registerAuthGuard(app: FastifyInstance): void {
       throw new AppError("FORBIDDEN");
     }
     if (config.requireVerifiedEmail === true && row.emailVerifiedAt === null) {
-      throw new AppError("FORBIDDEN", "Confirma tu correo electrónico para ver esta sección.");
+      throw new AppError("EMAIL_UNVERIFIED");
     }
 
     if (now.getTime() - row.lastUsedAt.getTime() >= SESSION_TOUCH_INTERVAL_MS) {

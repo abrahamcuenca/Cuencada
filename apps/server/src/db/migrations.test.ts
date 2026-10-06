@@ -224,7 +224,7 @@ describe("migration 0002", () => {
     const userId = await insertId(sql`
       insert into users (email, display_name) values ('tia@example.test', 'Tía') returning id
     `);
-    await sql`insert into profiles (user_id, full_name) values (${userId}, 'Tía Cuenca')`;
+    await sql`insert into profiles (user_id, full_name) values (${userId}, 'Tía Morales')`;
     const editionRow = (year: number, published: boolean): Promise<{ id: string }[]> => sql`
       insert into cuencadas (year, slug, title, starts_at, ends_at, city, state, description, is_published, created_at)
       values (${year}, ${String(year)}, ${`Cuencada ${year}`}, ${`${year}-09-13T00:00:00-06:00`},

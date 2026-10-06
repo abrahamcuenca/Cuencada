@@ -36,7 +36,8 @@
   justify-content: center;
   gap: 2px;
   min-height: var(--bottom-nav-height);
-  padding: var(--space-2) var(--space-1);
+  /* 2px sides: at 320px each of the five tabs is 64px wide and "Programa" needs the room. */
+  padding: var(--space-2) 2px;
   color: var(--color-text-muted);
   text-decoration: none;
   touch-action: manipulation;
@@ -79,6 +80,16 @@
 
 .active .label {
   font-weight: var(--weight-black);
+}
+
+/* Narrowest phones (320px, e.g. iPhone SE 1st gen): shrink the labels a
+   little so the longest one, "Programa" in its bold active state, fits
+   without an ellipsis. The ellipsis above stays as a last resort. */
+@media (max-width: 359px) {
+  .label {
+    font-size: 0.6875rem;
+    letter-spacing: -0.01em;
+  }
 }
 
 .badge {
