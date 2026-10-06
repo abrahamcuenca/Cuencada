@@ -200,7 +200,7 @@ const rsvpMemberRoutes: FastifyPluginAsyncZod = async (app) => {
         yesRsvpCandidates(app.db, edition.id),
         attendanceCandidates(app.db, edition.id)
       ]);
-      return toAttendees(mergeAttendees(rsvps, attendance), user.id, app.storage, request.log);
+      return toAttendees(mergeAttendees(rsvps, attendance, user.id), app.storage, request.log);
     }
   );
 };

@@ -466,6 +466,73 @@ describe("GET /api/cuencadas/:year/attendees", () => {
       ]);
   });
 
+  it("anonymizes unlisted people for others, keeps them complete for themselves and keeps the count", async () => {
+    const edition = await insertCuencada();
+    const hidden = await createUser({
+      emailVerified: true,
+      displayName: "Herminia Oculta",
+      profile: { listedInDirectory: false, avatarKey: "avatars/herminia.webp" }
+    });
+    const hiddenPerson = await insertPerson("Herminia Cuenca Oculta", hidden.id);
+    const historicHidden = await createUser({ displayName: "Tío Escondido", profile: { listedInDirectory: false } });
+    const historicHiddenPerson = await insertPerson("Tío Escondido Cuenca", historicHidden.id);
+    const unlinked = await insertPerson("Abuela Rosa");
+    await getTestDb()
+      .insert(cuencadaRsvps)
+      .values([
+        { cuencadaId: edition.id, userId: hidden.id, status: "yes" },
+        { cuencadaId: edition.id, userId: member.id, status: "yes" }
+      ]);
+    await getTestDb()
+      .insert(cuencadaAttendance)
+      .values([
+        { cuencadaId: edition.id, personId: hiddenPerson },
+        { cuencadaId: edition.id, personId: historicHiddenPerson },
+        { cuencadaId: edition.id, personId: unlinked }
+      ]);
+
+    const asOther = await app.inject({ method: "GET", url: "/api/cuencadas/2026/attendees", ...memberAuth });
+    expect(asOther.statusCode).toBe(200);
+    const others = asOther.json<Attendee[]>();
+    // 4 people: the hidden RSVP (deduped with its attendance), the hidden historic one, Rosa, the caller.
+    expect(others).toHaveLength(4);
+    const anonymous = others.filter((row) => row.displayName === "Familiar");
+    expect(anonymous).toHaveLength(2);
+    for (const row of anonymous) {
+      expect(row).toMatchObject({ personId: null, userId: null, avatarUrl: null, isMe: false });
+    }
+    expect(others.find((row) => row.displayName === "Abuela Rosa")).toMatchObject({ personId: unlinked });
+    for (const leak of [
+      hidden.id,
+      hiddenPerson,
+      historicHidden.id,
+      historicHiddenPerson,
+      "Herminia",
+      "Escondido",
+      "herminia.webp"
+    ]) {
+      expect(asOther.body).not.toContain(leak);
+    }
+
+    const asSelf = await app.inject({
+      method: "GET",
+      url: "/api/cuencadas/2026/attendees",
+      ...(await loginAs(app, hidden))
+    });
+    const self = asSelf.json<Attendee[]>();
+    expect(self).toHaveLength(4);
+    const mine = self.find((row) => row.isMe);
+    expect(mine).toMatchObject({
+      personId: hiddenPerson,
+      userId: hidden.id,
+      displayName: "Herminia Oculta",
+      source: "rsvp"
+    });
+    expect(mine?.avatarUrl).toContain("avatars/herminia.webp");
+    expect(self.filter((row) => row.displayName === "Familiar")).toHaveLength(1);
+    expect(asSelf.body).not.toContain(historicHiddenPerson);
+  });
+
   it("answers 403 for unverified members, 401 without a token, 400 for a bad year and 404 for drafts", async () => {
     await insertCuencada();
     await insertCuencada({ year: 2027, isPublished: false });
