@@ -122,6 +122,10 @@ describe("metadata", () => {
       { key: "inviteAlertSkipped", label: "Aviso no enviado", tone: "danger" }
     ]);
     expect(alertFlags({ open: true, inviteAlertRecipients: 2, inviteAlertSkipped: "true" })).toEqual([]);
+    expect(alertFlags({ inviteAlertRecipients: 2, inviteAlertLimitNotice: true, inviteAlertSkipped: true }).map((flag) => flag.key)).toEqual([
+      "inviteAlertLimitNotice",
+      "inviteAlertSkipped"
+    ]);
   });
 
   it("formats every JSON value as plain text", () => {

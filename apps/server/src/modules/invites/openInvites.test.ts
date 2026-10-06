@@ -16,7 +16,7 @@ import { auditLogs, invites, users } from "../../db/schema/index.js";
 import type { MailMessage, MailSendResult } from "../../lib/mailer/index.js";
 import { createOpaqueToken, hashToken } from "../../lib/tokens.js";
 import { mailQueue } from "../auth/mailQueue.js";
-import { INVITE_ALERT_DAILY_CAP, INVITE_ALERT_METADATA_KEY } from "./acceptAlerts.js";
+import { INVITE_ALERT_DAILY_CAP, INVITE_ALERT_LIMIT_KEY, INVITE_ALERT_METADATA_KEY } from "./acceptAlerts.js";
 
 const PASSWORD = "contraseña-muy-segura";
 const ALERT = "admin-invite-accepted";
@@ -303,10 +303,11 @@ describe("admin alert on open-invite acceptance (WP-2.3b)", () => {
     expect(row?.useCount).toBe(1);
   });
 
-  it("skips the alert once today's invite-alert cap is reached, and records it", async () => {
+  it("past today's cap, sends one limit notice per admin, then nothing, and records both (Security L2)", async () => {
     const mailer = new FakeMailer();
     app = await createTestApp({ mailer });
     const { admin, auth } = await adminAuth(app);
+    const other = await createUser({ role: "admin", displayName: "Tío Beto", emailVerified: true });
     await getTestDb()
       .insert(auditLogs)
       .values({
@@ -318,13 +319,49 @@ describe("admin alert on open-invite acceptance (WP-2.3b)", () => {
     const created = await createInvite(app, auth, { sendEmail: false });
 
     expect((await accept(app, created.token, "tope@familia.mx")).statusCode).toBe(201);
+    expect((await accept(app, created.token, "tope2@familia.mx")).statusCode).toBe(201);
 
     expect(await alertsTo(mailer, admin)).toHaveLength(0);
-    const [accepted] = await getTestDb()
+    for (const recipient of [admin, other]) {
+      const notices = mailer.outbox.filter((mail) => mail.to === recipient.email && mail.tags?.category === "admin-alert-limit");
+      expect(notices).toHaveLength(1);
+      expect(notices[0]?.subject).toBe("Se alcanzó el límite de avisos de seguridad de hoy");
+      expect(notices[0]?.text).toContain("se unieron al portal de la Cuencada con enlaces de invitación abiertos");
+      expect(notices[0]?.text).toContain("http://localhost:5173/admin/bitacora?accion=invite.accepted");
+    }
+    const rows = await getTestDb()
       .select()
       .from(auditLogs)
-      .where(and(eq(auditLogs.action, "invite.accepted"), eq(auditLogs.entityId, created.inviteId)));
-    expect(accepted?.metadata).toMatchObject({ [INVITE_ALERT_METADATA_KEY]: 0, inviteAlertSkipped: true });
+      .where(and(eq(auditLogs.action, "invite.accepted"), eq(auditLogs.entityId, created.inviteId)))
+      .orderBy(auditLogs.createdAt);
+    const metadata = rows.map((row) => row.metadata);
+    expect(metadata).toHaveLength(2);
+    const notice = metadata.find((entry) => entry?.[INVITE_ALERT_LIMIT_KEY] === true);
+    const skipped = metadata.find((entry) => entry?.[INVITE_ALERT_LIMIT_KEY] === undefined);
+    expect(notice).toMatchObject({ [INVITE_ALERT_METADATA_KEY]: 2, inviteAlertSkipped: true });
+    expect(skipped).toMatchObject({ [INVITE_ALERT_METADATA_KEY]: 0, inviteAlertSkipped: true });
+  });
+
+  it("keeps the admin-account alert quota separate from the open-invite cap", async () => {
+    const mailer = new FakeMailer();
+    app = await createTestApp({ mailer });
+    const { auth } = await adminAuth(app);
+    const other = await createUser({ role: "admin", displayName: "Tío Beto", emailVerified: true });
+    await getTestDb()
+      .insert(auditLogs)
+      .values({
+        actorUserId: null,
+        action: "invite.accepted",
+        entityType: "invite",
+        metadata: { [INVITE_ALERT_METADATA_KEY]: INVITE_ALERT_DAILY_CAP, [INVITE_ALERT_LIMIT_KEY]: true }
+      });
+    const member = await createUser({ displayName: "Prima Ana" });
+
+    const promoted = await app.inject({ method: "PATCH", url: `/api/admin/users/${member.id}`, payload: { role: "admin" }, ...auth });
+
+    expect(promoted.statusCode).toBe(200);
+    await mailQueue(app).onIdle();
+    expect(mailer.outbox.filter((mail) => mail.to === other.email && mail.tags?.category === "admin-account-changed")).toHaveLength(1);
   });
 });
 

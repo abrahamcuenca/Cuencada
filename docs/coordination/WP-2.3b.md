@@ -118,3 +118,10 @@ Verifying an email proves that someone controls a mailbox, not that they belong 
     - All three admin alert templates (`admin-account-changed`, `admin-alert-limit`, `admin-invite-accepted`) now use it for every user-controlled name and label.
     - Non-admin emails are unchanged: there the name shown is the sender's (an admin's) or the reader's own.
     - Tests (`render.test.tsx`): each admin template, in text, HTML and subject; plus `defangLinks` unit cases.
+  - **L2: daily-limit notice for open-invite alerts**, mirroring the admin-account alerts.
+    - The first capped acceptance of the UTC day sends ONE `admin-alert-limit` email to every active admin, using the new `topic: "open-invites"` copy ("Hoy muchas personas se unieron… con enlaces de invitación abiertos…"). It links to `/admin/bitacora?accion=invite.accepted`.
+    - That audit row gets `inviteAlertLimitNotice: true` and `inviteAlertSkipped: true`. Later capped acceptances that day send nothing.
+    - The counter stays separate from the admin-account alert quota (tested: a promotion still alerts when the invite cap is exhausted).
+    - The admin-account copy now also says that a new admin is always announced (P1).
+    - The bitácora shows a "Límite de avisos alcanzado" badge for `inviteAlertLimitNotice`.
+    - Supersedes decision 5's "no separate limit email".

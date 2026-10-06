@@ -351,6 +351,23 @@ describe("renderEmail", () => {
       expect(email.text).not.toContain("ignorarlo");
     });
 
+    it("says new admins are still announced (WP-2.3b P1)", async () => {
+      const email = await renderEmail(limit);
+      expect(email.text).toContain("cuando alguien se una como administrador");
+    });
+
+    it("has an open-invites variant for the open-invite alert cap (WP-2.3b L2)", async () => {
+      const email = await renderEmail({ ...limit, props: { ...limit.props, topic: "open-invites" } });
+      expect(email.subject).toBe("Se alcanzó el límite de avisos de seguridad de hoy");
+      expect(email.text).toMatch(
+        /Hoy muchas personas se unieron al portal de la Cuencada con enlaces de invitación abiertos y el lunes 14 de septiembre ·\s7:40/,
+      );
+      expect(email.text).toContain("no te avisaremos de cada persona que se una con un enlace abierto");
+      expect(email.text).not.toContain("cuentas de administrador");
+      expect(countOccurrences(email.text, auditLogUrl)).toBe(1);
+      expect(email.text).not.toContain("ignorarlo");
+    });
+
     it("escapes names and requires an https link", async () => {
       const escaped = await renderEmail({ ...limit, props: { ...limit.props, recipientName: XSS } });
       expect(escaped.html).not.toContain("<script");

@@ -40,6 +40,7 @@ export {
 } from "./templates/AdminAccountChangedEmail.js";
 export {
   AdminAlertLimitEmail,
+  AdminAlertLimitTopic,
   type AdminAlertLimitEmailProps,
   buildAdminAlertLimitContent,
 } from "./templates/AdminAlertLimitEmail.js";

@@ -20,9 +20,13 @@
  *   each open invite's 10-use / 72 h limit, and by the per-IP and per-token
  *   accept rate limits. The counter is separate from `adminAlertRecipients`
  *   on purpose: acceptances are triggered by whoever holds a link, and must
- *   not use up the quota that protects admin-account change alerts. Past the
- *   cap the alert is skipped, `mail.invite_alert_cap_reached` is logged and
- *   the audit row says `inviteAlertSkipped: true`.
+ *   not use up the quota that protects admin-account change alerts.
+ * - **Limit notice** (Security L2 on PR #36), mirroring the admin-account
+ *   alerts: the first acceptance of the day that no longer fits sends ONE
+ *   "admin-alert-limit" email (open-invites variant) to every active admin
+ *   instead (`inviteAlertLimitNotice: true`); later acceptances that day send
+ *   nothing. Both say `inviteAlertSkipped: true`, and
+ *   `mail.invite_alert_cap_reached` is logged.
  * - Planned inside the accept transaction; queued on T1's mail queue
  *   (`sendInBackground`) only after commit, so a rolled-back acceptance sends
  *   nothing and a mail failure never fails the acceptance.
@@ -40,6 +44,8 @@ import { sendInBackground } from "../auth/emailTokens.js";
 export const INVITE_ALERT_DAILY_CAP = 100;
 /** Audit metadata key holding how many alert emails an acceptance queued. */
 export const INVITE_ALERT_METADATA_KEY = "inviteAlertRecipients";
+/** Audit metadata key marking the day's single open-invite "limit reached" notice. */
+export const INVITE_ALERT_LIMIT_KEY = "inviteAlertLimitNotice";
 /** Characters of the invite id shown in the email. */
 const SHORT_ID_LENGTH = 8;
 
@@ -53,7 +59,9 @@ interface AlertRecipient {
 /** What {@link planInviteAcceptedAlert} decides (inside the transaction). */
 export type InviteAcceptedAlertPlan =
   | { kind: "send"; recipients: AlertRecipient[] }
-  /** Today's cap is reached: nothing is sent. */
+  /** Today's cap is reached: send the day's single limit notice to `recipients` instead. */
+  | { kind: "limit"; recipients: AlertRecipient[] }
+  /** Today's cap is reached and the limit notice already went out: nothing is sent. */
   | { kind: "skipped" };
 
 /** What to tell the admins (after commit). */
@@ -94,7 +102,10 @@ export async function planInviteAcceptedAlert(
   if (recipients.length === 0) return { kind: "send", recipients };
 
   const [row] = await tx
-    .select({ sent: sql<number>`coalesce(sum((${auditLogs.metadata} ->> ${INVITE_ALERT_METADATA_KEY})::int), 0)::int` })
+    .select({
+      sent: sql<number>`coalesce(sum((${auditLogs.metadata} ->> ${INVITE_ALERT_METADATA_KEY})::int), 0)::int`,
+      limitNoticeSent: sql<boolean>`coalesce(bool_or(${auditLogs.metadata} ? ${INVITE_ALERT_LIMIT_KEY}), false)`
+    })
     .from(auditLogs)
     .where(
       and(
@@ -106,7 +117,7 @@ export async function planInviteAcceptedAlert(
   const sent = row?.sent ?? 0;
   if (sent + recipients.length <= INVITE_ALERT_DAILY_CAP) return { kind: "send", recipients };
   app.log.warn({ event: "mail.invite_alert_cap_reached", sentToday: sent, cap: INVITE_ALERT_DAILY_CAP }, "invite alert capped");
-  return { kind: "skipped" };
+  return row?.limitNoticeSent === true ? { kind: "skipped" } : { kind: "limit", recipients };
 }
 
 /**
@@ -115,9 +126,14 @@ export async function planInviteAcceptedAlert(
  * @param plan - Result of {@link planInviteAcceptedAlert}.
  */
 export function inviteAlertMetadata(plan: InviteAcceptedAlertPlan): Record<string, unknown> {
-  return plan.kind === "send"
-    ? { [INVITE_ALERT_METADATA_KEY]: plan.recipients.length }
-    : { [INVITE_ALERT_METADATA_KEY]: 0, inviteAlertSkipped: true };
+  switch (plan.kind) {
+    case "send":
+      return { [INVITE_ALERT_METADATA_KEY]: plan.recipients.length };
+    case "limit":
+      return { [INVITE_ALERT_METADATA_KEY]: plan.recipients.length, [INVITE_ALERT_LIMIT_KEY]: true, inviteAlertSkipped: true };
+    case "skipped":
+      return { [INVITE_ALERT_METADATA_KEY]: 0, inviteAlertSkipped: true };
+  }
 }
 
 /**
@@ -145,6 +161,24 @@ export function queueInviteAcceptedAlerts(
   alert: InviteAcceptedAlert
 ): void {
   if (plan.kind === "skipped") return;
+  if (plan.kind === "limit") {
+    const query = new URLSearchParams({ accion: AuditAction.InviteAccepted });
+    const auditLogUrl = appLink(app.config, `${AUDIT_LOG_PATH}?${query.toString()}`);
+    for (const recipient of plan.recipients) {
+      sendInBackground(app, "mail.admin-alert-limit", () =>
+        sendTemplate(
+          app,
+          recipient.email,
+          {
+            kind: "admin-alert-limit",
+            props: { recipientName: recipient.displayName, reachedAt: alert.acceptedAt, auditLogUrl, topic: "open-invites" }
+          },
+          { idempotencyKey: `admin-alert-limit:${alert.auditId}:${recipient.id}` }
+        )
+      );
+    }
+    return;
+  }
   const reviewUrl = inviteAcceptedReviewUrl(app, alert.memberUserId);
   const inviteShortId = alert.inviteId.replaceAll("-", "").slice(0, SHORT_ID_LENGTH);
   for (const recipient of plan.recipients) {
