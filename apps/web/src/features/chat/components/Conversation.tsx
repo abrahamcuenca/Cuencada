@@ -12,6 +12,7 @@ import { discardChatMessage, loadOlderMessages, retryChatMessage, sendChatMessag
 import { conversationApi, useDeleteChatMessageMutation, useGetMessagesQuery, useMarkRoomReadMutation } from "../conversationApi";
 import styles from "../chat.module.css";
 import { sendChatFrame, setViewingRoom, subscribeChatEvents } from "../events";
+import { type ChatDenial, chatDenial } from "../lib/access";
 import { buildConversation } from "../lib/format";
 import type { ChatRoomView } from "../lib/rooms";
 import { applyDeletedMessage, firstUnreadMessageId, lastServerMessage, type ThreadMessage } from "../lib/thread";
@@ -38,8 +39,8 @@ export interface ConversationProps {
   connection: ChatConnectionStatus;
   timeZone: string;
   now: Date;
-  /** The messages request answered 403 (unverified). */
-  onForbidden: () => void;
+  /** The messages request answered 403 (unverified email, or another refusal). */
+  onForbidden: (denial: ChatDenial) => void;
   /** Reopens the socket after it was taken over by another tab. */
   onReconnect: () => void;
 }
@@ -150,8 +151,9 @@ export function Conversation({ roomId, room, connection, timeZone, now, onForbid
 
   const status = errorStatus(error);
   useEffect(() => {
-    if (status === 403) onForbidden();
-  }, [status, onForbidden]);
+    if (status !== 403) return;
+    onForbidden(chatDenial(error, me?.emailVerified) ?? "forbidden");
+  }, [status, error, me?.emailVerified, onForbidden]);
 
   // Focus: the composer with a physical keyboard; the room title on touch (no keyboard pop-up).
   useEffect(() => {

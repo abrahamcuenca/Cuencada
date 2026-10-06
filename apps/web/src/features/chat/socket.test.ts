@@ -232,11 +232,11 @@ describe("ChatConnection lifecycle", { timeout: 15_000 }, () => {
     await socketCount(2);
   });
 
-  it("stops for good on a 403 ticket (unverified email)", async () => {
+  it("stops for good on a 403 ticket (EMAIL_UNVERIFIED → unverified, other 403 → forbidden)", async () => {
     db.ticketStatus = 403;
     const connection = getChatConnection(store);
     connection.acquire();
-    await vi.waitFor(() => expect(connection.getStatus()).toBe("forbidden"));
+    await vi.waitFor(() => expect(connection.getStatus()).toBe("unverified"));
     await vi.advanceTimersByTimeAsync(60_000);
     expect(FakeSocket.instances).toHaveLength(0);
   });

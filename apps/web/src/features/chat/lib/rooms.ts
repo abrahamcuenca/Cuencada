@@ -4,7 +4,7 @@
  * Part of the initial chunk (the Chat tab badge): keep it small and free of
  * value imports from `@cuencada/types` (see `limits.ts`).
  */
-import type { ChatMessage, ChatRoom } from "@cuencada/types";
+import type { ChatMessage, ChatRoom, ChatRoomLastMessage } from "@cuencada/types";
 import { UNREAD_COUNT_MAX } from "./limits";
 
 /** One-line preview of a room's latest message (from the server, frames or loaded history). */
@@ -56,7 +56,41 @@ export function previewOf(message: ChatMessage): RoomPreview {
 function previewFromRoom(room: ChatRoom): RoomPreview | null {
   const last = room.lastMessage;
   if (last === null) return null;
-  return { messageId: last.id, senderName: last.senderDisplayName, senderId: null, body: last.preview, createdAt: last.createdAt, deleted: false };
+  return previewFromLastMessage(last);
+}
+
+function previewFromLastMessage(last: ChatRoomLastMessage): RoomPreview {
+  return {
+    messageId: last.id,
+    senderName: last.senderDisplayName,
+    senderId: last.senderUserId,
+    body: last.preview,
+    createdAt: last.createdAt,
+    deleted: false
+  };
+}
+
+/**
+ * Applies a `room_preview` frame (sent after the previewed message was
+ * deleted): the room's preview and `lastMessageAt` become the server's,
+ * `null` when no live message is left. Unread counts are untouched.
+ *
+ * @param rooms - Cached rooms.
+ * @param roomId - The room.
+ * @param lastMessageAt - The room's new `lastMessageAt`.
+ * @param lastMessage - The room's new last live message, or `null`.
+ * @returns The updated, re-sorted list.
+ */
+export function applyRoomPreview(
+  rooms: ChatRoomView[],
+  roomId: string,
+  lastMessageAt: string | null,
+  lastMessage: ChatRoomLastMessage | null
+): ChatRoomView[] {
+  if (!rooms.some((room) => room.id === roomId)) return rooms;
+  return sortRooms(
+    rooms.map((room) => (room.id === roomId ? { ...room, lastMessageAt, preview: lastMessage === null ? null : previewFromLastMessage(lastMessage) } : room))
+  );
 }
 
 function newerPreview(a: RoomPreview | null, b: RoomPreview | null): RoomPreview | null {

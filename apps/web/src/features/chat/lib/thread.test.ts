@@ -169,7 +169,7 @@ describe("room list updates", () => {
   });
 
   it("uses the server preview, but keeps a newer one learnt from a frame across a refetch", () => {
-    expect(rooms.find((room) => room.id === ROOMS.familia)?.preview).toMatchObject({ body: "Mensaje 5", senderName: "Lucía Ramírez Solís", senderId: null });
+    expect(rooms.find((room) => room.id === ROOMS.familia)?.preview).toMatchObject({ body: "Mensaje 5", senderName: "Lucía Ramírez Solís", senderId: PEOPLE.lucia.userId });
     const message = makeMessage(21, { createdAt: "2026-10-01T10:00:00.000Z" });
     const withPreview = applyMessageToRooms(rooms, message, { meId: ME.userId, viewingRoomId: null }).rooms;
     const refetched = mergeRoomLists(withPreview, roomsFromResponse(makeRooms()));

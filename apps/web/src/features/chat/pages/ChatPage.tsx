@@ -2,7 +2,6 @@ import { idSchema } from "@cuencada/types";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useMatch } from "react-router-dom";
 import { useAppSelector } from "../../../app/hooks";
-import { isFetchBaseQueryError } from "../../../shared/api/errors";
 import { Button } from "../../../shared/ui/Button";
 import { cx } from "../../../shared/ui/cx";
 import { EmptyState } from "../../../shared/ui/EmptyState";
@@ -11,6 +10,7 @@ import { useGetRoomsQuery } from "../api";
 import styles from "../chat.module.css";
 import { Conversation } from "../components/Conversation";
 import { RoomList } from "../components/RoomList";
+import { type ChatDenial, chatDenial } from "../lib/access";
 import { readerTimeZone } from "../lib/format";
 import { useChatViewport } from "../lib/useChatViewport";
 import { useChatConnection } from "../socket";
@@ -18,7 +18,7 @@ import { useChatConnection } from "../socket";
 /** Relative times ("ayer", "9:41") are recomputed this often. */
 const CLOCK_TICK_MS = 60_000;
 
-/** Shown when the server refuses chat to an unverified account (403). */
+/** Shown when the server refuses chat to an unverified account (403 `EMAIL_UNVERIFIED`). */
 export function ChatForbidden(): ReactNode {
   return (
     <div className={styles.forbidden}>
@@ -42,8 +42,19 @@ function useMinuteClock(): Date {
   return now;
 }
 
-function is403(error: unknown): boolean {
-  return isFetchBaseQueryError(error) && error.status === 403;
+/** Shown for any other 403 on chat (never "verify your email"). */
+export function ChatNoAccess(): ReactNode {
+  return (
+    <div className={styles.forbidden}>
+      <EmptyState
+        tone="lock"
+        icon="🔒"
+        title="No tienes acceso al chat"
+        description="Si crees que es un error, escríbele a quien administra la página de la familia."
+        action={<Button to="/">Ir al inicio</Button>}
+      />
+    </div>
+  );
 }
 
 /**
@@ -57,8 +68,9 @@ export function ChatPage(): ReactNode {
   const validRoomId = roomId !== null && idSchema.safeParse(roomId).success;
   const me = useAppSelector(selectCurrentUser);
   const rooms = useGetRoomsQuery();
-  const [messagesForbidden, setMessagesForbidden] = useState(false);
-  const forbidden = is403(rooms.error) || messagesForbidden;
+  const [messagesDenial, setMessagesDenial] = useState<ChatDenial | null>(null);
+  const roomsDenial = chatDenial(rooms.error, me?.emailVerified);
+  const forbidden = roomsDenial !== null || messagesDenial !== null;
   // Connect only once the server let us list the rooms (an unverified account gets a 403 there first).
   const { status: connection, reconnect } = useChatConnection(rooms.isSuccess && !forbidden);
   const layoutRef = useRef<HTMLDivElement>(null);
@@ -66,9 +78,11 @@ export function ChatPage(): ReactNode {
   const now = useMinuteClock();
   const [timeZone] = useState(readerTimeZone);
   useChatViewport(layoutRef, markerRef);
-  const onForbidden = useCallback(() => setMessagesForbidden(true), []);
+  const onForbidden = useCallback((denial: ChatDenial) => setMessagesDenial(denial), []);
 
-  if (forbidden || connection === "forbidden") return <ChatForbidden />;
+  const denial = roomsDenial ?? messagesDenial ?? (connection === "unverified" || connection === "forbidden" ? connection : null);
+  if (denial === "unverified") return <ChatForbidden />;
+  if (denial === "forbidden") return <ChatNoAccess />;
 
   const room = rooms.data?.find((entry) => entry.id === roomId);
 

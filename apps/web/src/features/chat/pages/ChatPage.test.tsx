@@ -86,7 +86,7 @@ describe("ChatPage", { timeout: 20_000 }, () => {
     renderApp("/chat", authenticatedState());
     const room = await screen.findByRole("link", { name: /Toda la familia/ });
     expect(within(room).getByText("999+")).toBeInTheDocument();
-    expect(within(room).getByText("Más de 999 mensajes sin leer")).toBeInTheDocument();
+    expect(within(room).getByText("999 o más mensajes sin leer")).toBeInTheDocument();
   });
 
   it("updates unread counts, previews and the tab badge from live frames", async () => {
@@ -318,6 +318,39 @@ describe("ChatPage", { timeout: 20_000 }, () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(db.tickets).toEqual([]);
     expect(FakeSocket.instances).toHaveLength(0);
+  });
+
+  it("shows a generic no-access state (not 'verify your email') for other 403s", async () => {
+    db.readStatus = 403;
+    db.forbiddenCode = "FORBIDDEN";
+    renderApp("/chat", authenticatedState());
+    expect(await screen.findByRole("heading", { name: "No tienes acceso al chat" })).toBeInTheDocument();
+    expect(screen.queryByText(/Verifica tu correo/)).not.toBeInTheDocument();
+  });
+
+  it("treats a plain FORBIDDEN as unverified only for a user known to be unverified", async () => {
+    db.readStatus = 403;
+    db.forbiddenCode = "FORBIDDEN";
+    renderApp("/chat", authenticatedState(makeUser({ emailVerified: false })));
+    expect(await screen.findByRole("heading", { name: "Verifica tu correo para usar el chat" })).toBeInTheDocument();
+  });
+
+  it("applies room_preview frames and shows Tú: from the server's senderUserId", async () => {
+    renderApp("/chat", authenticatedState());
+    await screen.findByRole("list", { name: "Salas" });
+    const socket = await openSocket();
+    act(() =>
+      socket.receive({
+        type: "room_preview",
+        roomId: ROOMS.familia,
+        lastMessageAt: "2026-09-14T15:04:00.000Z",
+        lastMessage: { id: makeMessage(4).id, senderUserId: ME.userId, senderDisplayName: ME.displayName, preview: "Lo que yo dije", createdAt: "2026-09-14T15:04:00.000Z" }
+      })
+    );
+    const room = await screen.findByRole("link", { name: /Toda la familia/ });
+    await waitFor(() => expect(within(room).getByText("Tú: Lo que yo dije")).toBeInTheDocument());
+    act(() => socket.receive({ type: "room_preview", roomId: ROOMS.familia, lastMessageAt: null, lastMessage: null }));
+    await waitFor(() => expect(within(room).queryByText("Tú: Lo que yo dije")).not.toBeInTheDocument());
   });
 
   it("shows the verify-email state when the ticket is refused", async () => {
