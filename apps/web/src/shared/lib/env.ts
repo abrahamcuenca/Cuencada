@@ -65,10 +65,52 @@ export function resolveApiBaseUrl(raw: string | undefined, origin: string, produ
   return url.toString().replace(/\/+$/, "");
 }
 
+/**
+ * Validates `VITE_MEDIA_UPLOAD_ORIGIN`: the bucket origin that presigned
+ * upload URLs must point to [SEC]. The gallery refuses to PUT a file anywhere
+ * else, even if an API response names another host.
+ *
+ * Accepted values: an absolute `http:`/`https:` origin (a bare trailing `/`
+ * is allowed), with no credentials, path, query or fragment. In production
+ * it must be `https:`. Unset or blank means "not configured": uploads are
+ * refused (fail closed).
+ *
+ * @param raw - The raw env value.
+ * @param production - True for production builds (`import.meta.env.PROD`).
+ * @returns The normalised origin (e.g. `https://cuencada.us-southeast-1.linodeobjects.com`), or `null` when unset.
+ * @throws {EnvConfigError} When the value is not an allowed origin.
+ */
+export function resolveMediaUploadOrigin(raw: string | undefined, production = false): string | null {
+  const value = raw?.trim() ?? "";
+  if (value === "") return null;
+
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new EnvConfigError(`VITE_MEDIA_UPLOAD_ORIGIN no es una URL válida: ${value}`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new EnvConfigError("VITE_MEDIA_UPLOAD_ORIGIN debe usar http: o https:.");
+  }
+  if (production && url.protocol !== "https:") {
+    throw new EnvConfigError("En producción VITE_MEDIA_UPLOAD_ORIGIN debe usar https:.");
+  }
+  if (url.username !== "" || url.password !== "") {
+    throw new EnvConfigError("VITE_MEDIA_UPLOAD_ORIGIN no puede incluir credenciales.");
+  }
+  if (url.pathname !== "/" || url.search !== "" || url.hash !== "") {
+    throw new EnvConfigError("VITE_MEDIA_UPLOAD_ORIGIN debe ser solo un origen (sin ruta, query ni fragmento).");
+  }
+  return url.origin;
+}
+
 /** Typed, validated client environment. */
 export interface ClientEnv {
   /** Absolute API base URL without a trailing slash, e.g. `https://cuencada.com/api`. */
   apiBaseUrl: string;
+  /** Bucket origin for presigned media uploads, or `null` when not configured (uploads refused). */
+  mediaUploadOrigin: string | null;
   /** True in `vite dev`; dev-only routes such as `/_ui` depend on it. */
   isDev: boolean;
 }
@@ -76,5 +118,6 @@ export interface ClientEnv {
 /** The validated environment for this build. */
 export const env: ClientEnv = {
   apiBaseUrl: resolveApiBaseUrl(import.meta.env.VITE_API_BASE_URL, window.location.origin, import.meta.env.PROD),
+  mediaUploadOrigin: resolveMediaUploadOrigin(import.meta.env.VITE_MEDIA_UPLOAD_ORIGIN, import.meta.env.PROD),
   isDev: import.meta.env.DEV
 };
