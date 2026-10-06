@@ -39,6 +39,7 @@ family, profile, admin, chat, media, cuencadas) · **0.8c** web features
 | WP-0.8a: privacy sweep forward (wireframes, StyleGuide, test helpers, server/types tests outside `features/**`); StyleGuide uses generated placeholder photos and a placeholder WhatsApp link | WP-0.8a |
 | WP-0.8a: Vitest 4.1.11 (tinypool/vitest advisories), esbuild override for drizzle-kit; full `pnpm audit` clean | WP-0.8a |
 | WP-0.8a: flaky tests: web `testTimeout` 15 s / `hookTimeout` 30 s, `maxWorkers` 50 %, admin "two admins demote each other" (root cause: the legitimate 401 interleaving, now accepted; 3 rounds / 60 s), `warmRoutes()` for lazy pages (CuencadaYearPage) | WP-0.8a |
+| WP-2.3: route inventory drift guard, authorization matrix (99 routes × 7 principals + IDOR/CSRF/WS), PII leak scans, header/CSP tests, threat model, OWASP/ASVS checklist, dependency review, SPA CSP verified in Chromium; M1 `Cache-Control: no-store` on every `/api/` response | WP-2.3 (`docs/security/`) |
 | WP-0.8a: Toast never evicts an action toast, clears evicted timers; Badge `max` ("999+"); BottomNav "Programa" fits at 320 px | WP-0.8a |
 | WP-0.8a: emails Container `width="600"`, Button no-VML JSDoc, LICENSE title + repo URL, test script `--config` | WP-0.8a |
 
@@ -83,6 +84,47 @@ family, profile, admin, chat, media, cuencadas) · **0.8c** web features
 - Observability: alert on `mail.cap_reached` and `mail.queue_full` (Loki/Grafana).
 - Process: lint/review rule for "no PII interpolated into Error messages" (Security L7, PR #8). AGENTS.md states the rule; an automated check is still open.
 
+### WP-2.3 findings
+
+Source: the security audit in [`docs/security/`](../security/README.md).
+M1 (Medium) was fixed in WP-2.3: `/api/` responses now send
+`Cache-Control: no-store`. These Lows remain:
+
+- **L1 (0.8c, web):** zod 4 probes `new Function("")` once per page load.
+  CSP blocks it, so the app works, but it emits a `securitypolicyviolation`
+  (and a report, once a `report-to` endpoint exists).
+  - Fix: call `z.config({ jitless: true })` in `apps/web/src/main.tsx` before
+    any schema runs.
+  - Then remove the `isKnownZodEvalProbe` allowance from
+    `docs/security/csp-check.mjs`.
+- **L2 (owner / orchestrator decision):** unverified members can read
+  `GET /api/cuencadas/:year/media` and `GET /api/media/:id`. Both carry photos
+  and `uploaderName`, so they reveal family membership exactly like the
+  attendees list, which is gated. They can also read
+  `/api/cuencadas/:year/members` (WhatsApp group and album links),
+  `/api/announcements` and the RSVP summary.
+  - ADR 0001 says "every other PII read" is verified-only.
+  - Either decide:
+    - add `requireVerifiedEmail` to the media reads, with web 403
+      `EMAIL_UNVERIFIED` handling on the gallery; or
+    - record the exception in ADR 0001. Email verification proves the
+      mailbox, not family membership.
+  - The authorization matrix (`routeMatrix.ts`) and `routes.md` must change
+    with it.
+- **L3 (WP-2.4):** `contentSecurityPolicy(config)` in
+  `apps/server/src/plugins/security.ts` renders `base-uri 'self'` and
+  `frame-src 'self' https://weatherwidget.io`. That is looser than the SPA
+  policy in `docs/security/csp.md` (`base-uri 'none'`,
+  `frame-src https://weatherwidget.io`). Either paste the documented string
+  into nginx, or align the function first (and update `headers.test.ts`).
+- **L4 (platform):** the CI `services.postgres.image` is `postgres:16-alpine`,
+  pinned by tag. Actions are SHA-pinned; pin this image by digest too.
+- **L5 (backend):** there is no breached-password check (ASVS 2.1.7) on
+  password set, change or reset.
+  - Option 1: an offline list of the top 100k passwords, shipped with the
+    server.
+  - Option 2: HIBP range queries (k-anonymity) with a timeout that fails open.
+
 ## Cutover checklist (WP-2.4–2.5)
 
 - [ ] Reset the WhatsApp group invite link and the OneDrive share links (public in the legacy `index.html` and git history; the dev fallbacks live only in `apps/server/src/seed-data.ts` `LEGACY_DEV_LINKS`). Set the new values only via vault `SEED_*_URL` or the admin UI.
@@ -91,7 +133,7 @@ family, profile, admin, chat, media, cuencadas) · **0.8c** web features
 - [ ] Separate DB roles: owner for `MIGRATE_DATABASE_URL`, least-privilege runtime `DATABASE_URL`.
 - [ ] Recreate any local dev DB that applied the pre-review 0001.
 - [ ] Not behind Cloudflare: nginx sets `X-Forwarded-For $remote_addr` (overwrite) and ignores `CF-Connecting-IP`; TLS terminates on the VPS (verify cert + HSTS); rate limits rely on the direct IP.
-- [ ] nginx CSP for the SPA (weatherwidget, S3 origin, `wss:`), `Referrer-Policy`.
+- [ ] nginx CSP and headers for the SPA, exactly as in [`docs/security/csp.md`](../security/csp.md). That covers the weather widget frame, the bucket host only, `wss:`, `base-uri 'none'`, HSTS, nosniff, DENY, `Referrer-Policy`, `Permissions-Policy`, and `always` on every `add_header`. Then re-run `node docs/security/csp-check.mjs` against staging and repeat the OWASP sign-off.
 - [ ] nginx access logs redact `?q=`, `?search=`, `?ticket=` (and ideally mirror the API allowlist in `apps/server/src/logging.ts`).
 - [ ] `VITE_MEDIA_UPLOAD_ORIGIN=https://<bucket>.us-southeast-1.linodeobjects.com` in infra `build_env` for every environment (uploads are refused if unset); T5 avatar uploads apply the same origin check.
 - [ ] Real-bucket check that a PUT with the wrong length/type is rejected; bucket CORS XML from `WP-T4-BE.md`.
