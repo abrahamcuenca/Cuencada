@@ -178,7 +178,13 @@ export interface AvatarUrlDeps {
  * Presigned GET (1 h) for a member's avatar, or `null` when they have none.
  *
  * Use this everywhere an avatar is shown (directory, RSVP attendees, family
- * tree, chat). It refuses keys this module did not write (`null`), and a
+ * tree, chat).
+ *
+ * **Security: callers must check visibility first.** This function does no
+ * authorization: whoever receives the URL can fetch the image for an hour.
+ * Only call it for a member the viewer may see (e.g. not for an unlisted
+ * member in an attendee list shown to others, nor for a disabled account),
+ * and never presign a key taken from client input. It refuses keys this module did not write (`null`), and a
  * storage failure degrades to `null` (logged without the key) rather than
  * failing the whole response.
  *

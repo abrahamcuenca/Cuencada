@@ -225,25 +225,60 @@ describe("GET /api/directory", () => {
     expect(new Set(seen).size).toBe(6);
   });
 
-  it("falls back to an id cursor for very long names and still pages correctly", async () => {
+  it("uses an id-only cursor that never contains a name, even for very long names", async () => {
     for (const letter of ["a", "b", "c"])
-      await createUser({
-        profile: { fullName: `${letter}${"ñ".repeat(199)}` }
-      });
+      await createUser({ profile: { fullName: `${letter}${"ñ".repeat(150)} Secreto` } });
 
     const first = await list("?limit=1");
-    expect(first.nextCursor?.startsWith("i.")).toBe(true);
     const second = await list(`?limit=1&cursor=${encodeURIComponent(first.nextCursor ?? "")}`);
     const third = await list(`?limit=1&cursor=${encodeURIComponent(second.nextCursor ?? "")}`);
+
     expect([...names(first), ...names(second), ...names(third)].map((name) => name[0])).toEqual(["a", "b", "c"]);
+    for (const [page, cursor] of [
+      [first, first.nextCursor],
+      [second, second.nextCursor]
+    ] as const) {
+      const decoded = Buffer.from(cursor ?? "", "base64url").toString("utf8");
+      expect(decoded).toBe(page.items[0]?.userId);
+      expect(decoded).not.toContain("ñ");
+      expect(decoded.toLowerCase()).not.toContain("secreto");
+    }
+  });
+
+  it("answers the same generic 400 for a cursor at an unlisted, disabled or unknown user", async () => {
+    const hidden = await createUser({ profile: { fullName: "Oculto", listedInDirectory: false } });
+    const disabled = await createUser({ status: "disabled", profile: { fullName: "Baja" } });
+    const ids = [hidden.id, disabled.id, "1b2c3d4e-5f60-4b7c-9d8e-0f1a2b3c4d5e"];
+
+    const responses = await Promise.all(
+      ids.map((id) =>
+        app.inject({
+          method: "GET",
+          url: `/api/directory?cursor=${Buffer.from(id).toString("base64url")}`,
+          ...viewer.auth
+        })
+      )
+    );
+
+    for (const response of responses) {
+      expect(response.statusCode).toBe(400);
+      expect(response.body).toBe(responses[2]?.body);
+    }
+    expect(responses[0]?.json()).toEqual({
+      error: {
+        code: "VALIDATION",
+        message: "Cursor inválido.",
+        details: [{ path: "cursor", message: "Cursor inválido." }]
+      }
+    });
   });
 
   it.each([
     ["a forged cursor", "?cursor=bm90LWEtY3Vyc29y"],
-    ["a cursor with a bad id", `?cursor=n.${Buffer.from("x:abc").toString("base64url")}`],
+    ["a cursor that is not a uuid", `?cursor=${Buffer.from("x:abc").toString("base64url")}`],
     [
-      "an id cursor for an unknown user",
-      `?cursor=i.${Buffer.from("1b2c3d4e-5f60-4b7c-9d8e-0f1a2b3c4d5e").toString("base64url")}`
+      "an old name cursor",
+      `?cursor=n.${Buffer.from("1b2c3d4e-5f60-4b7c-9d8e-0f1a2b3c4d5e:ana").toString("base64url")}`
     ],
     ["q over 100 characters", `?q=${"a".repeat(101)}`],
     ["a limit over 100", "?limit=101"]

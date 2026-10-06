@@ -40,7 +40,7 @@ All routes declare params/query/body **and response** schemas; errors use `apiEr
 - **Search (`q`)**: trimmed, NFC, ≤ 100. Matches `users.display_name`, `profiles.full_name`, `people.nickname` (linked person) and `profiles.family_branch` always; `profiles.city` **only when `show_city`**; **never email or phone**, even when shown (stricter than the contract JSDoc, which allowed visible email/phone). `ILIKE '%…%' ESCAPE '\'` with `%`, `_` and `\` escaped. Blank `q` = no filter.
 - `familyBranch`: case-insensitive equality. `city`: case-insensitive equality **and `show_city`**.
 - Every entry is built with `toDirectoryEntry()` and serialized through `directoryEntrySchema`, so hidden `email`/`phone`/`city` keys are **absent**.
-- **Keyset**: `(lower(full_name), users.id)` ascending; the DB computes the sort key and the cursor carries it verbatim, so ties and accents page exactly. Cursor `n.<base64url(id:sortName)>`; if that would exceed the contract's 512 chars (very long non-ASCII names), `i.<base64url(id)>` and the server reads that user's sort key (a position only). Anything else → 400 `VALIDATION`.
+- **Keyset**: `(lower(full_name), users.id)` ascending. The cursor is **base64url of the last user id only** (like T6; never a name). The server looks up that user's sort key restricted to listed, active members; an unlisted, disabled or unknown id, or a malformed cursor, all get the same generic 400 `VALIDATION` "Cursor inválido." (no existence oracle).
 
 ## `avatarUrlFor` (for T3 RSVP, T6 family tree, T7 chat)
 ```ts
@@ -51,6 +51,7 @@ const thumb = await avatarUrlFor(app, row.avatarKey, AvatarSize.Small); // 64 px
 ```
 - `app` only needs `{ storage, log }` (`AvatarUrlDeps`), so a job or service can pass its deps.
 - Returns `null` when the key is `null` **or not one this module wrote** (`avatars/{uuid}/{uuid}-256.webp`; legacy `photo_url` values, originals and anything else are refused). A storage failure is logged (error name only, no key) and degrades to `null` instead of failing the response.
+- **Callers must check visibility first**: it does no authorization (anyone holding the URL can fetch the image for 1 h). Don't call it for unlisted members shown to others or disabled accounts.
 - Select `profiles.avatar_key` and call this per row (presigning is local HMAC, no network). Never put the key itself in a response.
 
 ## Cleanup
@@ -82,3 +83,4 @@ Every 15 min (unref'd, cleared on close, passes never overlap): (1) unconfirmed 
 
 ## Review log
 - 2026-10-06: merged `origin/main` (WP-2.1 migration 0002, T1/T3/T4/T6 backends). Flipped the three WP-2.1 lines, replaced the 6 `it.todo`s with tests, deduped helpers with media, extended the log test for `q`.
+- PR #20 Security review (approved with Lows): L1+L2 fixed: id-only directory cursor resolved against listed+active members with one generic 400; JSDoc warning on `avatarUrlFor`. L3 (city/familyBranch query values in logs) deferred to WP-0.8's logging allowlist, per orchestrator.

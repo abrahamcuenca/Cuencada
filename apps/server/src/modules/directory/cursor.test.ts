@@ -1,4 +1,3 @@
-import { cursorSchema } from "@cuencada/types";
 import { describe, expect, it } from "vitest";
 import { decodeDirectoryCursor, encodeDirectoryCursor } from "./cursor.js";
 import { escapeLikePattern } from "./repository.js";
@@ -6,31 +5,20 @@ import { escapeLikePattern } from "./repository.js";
 const id = "1b2c3d4e-5f60-4b7c-9d8e-0f1a2b3c4d5e";
 
 describe("encodeDirectoryCursor", () => {
-  it("round-trips the sort name and id, including colons and accents", () => {
-    const cursor = encodeDirectoryCursor(id, "pérez: la güera");
-    expect(cursorSchema.safeParse(cursor).success).toBe(true);
-    expect(decodeDirectoryCursor(cursor)).toEqual({
-      kind: "name",
-      id,
-      sortName: "pérez: la güera"
-    });
-  });
-
-  it("falls back to an id-only cursor when the name would exceed 512 characters", () => {
-    const cursor = encodeDirectoryCursor(id, "ñ".repeat(200));
-    expect(cursor.length).toBeLessThanOrEqual(512);
-    expect(cursorSchema.safeParse(cursor).success).toBe(true);
-    expect(decodeDirectoryCursor(cursor)).toEqual({ kind: "id", id });
+  it("encodes only the user id and round-trips it", () => {
+    const cursor = encodeDirectoryCursor(id);
+    expect(Buffer.from(cursor, "base64url").toString("utf8")).toBe(id);
+    expect(decodeDirectoryCursor(cursor)).toEqual({ id });
   });
 });
 
 describe("decodeDirectoryCursor", () => {
   it.each([
     "",
-    "x.abc",
-    "n.",
-    `n.${Buffer.from("not-a-uuid:name").toString("base64url")}`,
-    `i.${Buffer.from("123").toString("base64url")}`
+    "abc",
+    Buffer.from("not-a-uuid").toString("base64url"),
+    `n.${Buffer.from(`${id}:ana`).toString("base64url")}`,
+    `i.${Buffer.from(id).toString("base64url")}`
   ])("throws VALIDATION for %j", (raw) => {
     expect(() => decodeDirectoryCursor(raw)).toThrow(expect.objectContaining({ code: "VALIDATION" }));
   });

@@ -12,9 +12,8 @@ import { type DirectoryEntry, toDirectoryEntry } from "@cuencada/types";
 import { type AnyColumn, and, eq, or, type SQL, sql } from "drizzle-orm";
 import { people, profiles, users } from "../../db/schema/index.js";
 import type { DbOrTx } from "../../lib/audit.js";
-import { AppError } from "../../lib/errors.js";
 import { type AvatarUrlDeps, avatarUrlFor } from "../profile/avatar.js";
-import type { DirectoryCursor } from "./cursor.js";
+import { type DirectoryCursor, invalidDirectoryCursor } from "./cursor.js";
 
 /** Normalized sort name: the keyset's first column. */
 const sortNameSql = sql<string>`lower(${profiles.fullName})`;
@@ -88,23 +87,21 @@ function searchCondition(q: string): SQL | undefined {
 }
 
 /**
- * Resolve a cursor to its `(sortName, id)` position.
+ * Resolve an id-only cursor to its `(sortName, id)` position, looking only at
+ * listed, active members.
  *
- * @throws AppError `VALIDATION` when an id-only cursor names no profile.
+ * @throws AppError `VALIDATION` (the same generic error) when the id is
+ *   unknown, disabled or unlisted, so the cursor is no existence oracle.
  */
 async function cursorPosition(db: DbOrTx, cursor: DirectoryCursor): Promise<{ sortName: string; id: string }> {
-  if (cursor.kind === "name") return { sortName: cursor.sortName, id: cursor.id };
   const [row] = await db
-    .select({ sortName: sortNameSql })
-    .from(profiles)
-    .where(eq(profiles.userId, cursor.id))
+    .select({ sortName: sortNameSql, id: users.id })
+    .from(users)
+    .innerJoin(profiles, eq(profiles.userId, users.id))
+    .where(and(listedSql, eq(users.id, cursor.id)))
     .limit(1);
-  if (row === undefined) {
-    throw new AppError("VALIDATION", "Cursor inválido.", {
-      details: [{ path: "cursor", message: "Cursor inválido." }]
-    });
-  }
-  return { sortName: row.sortName, id: cursor.id };
+  if (row === undefined) throw invalidDirectoryCursor();
+  return row;
 }
 
 /**

@@ -54,8 +54,7 @@ const directoryModule: FastifyPluginAsyncZod = async (app) => {
       );
       const page = rows.slice(0, limit);
       const last = page.at(-1);
-      const nextCursor =
-        rows.length > limit && last !== undefined ? encodeDirectoryCursor(last.userId, last.sortName) : null;
+      const nextCursor = rows.length > limit && last !== undefined ? encodeDirectoryCursor(last.userId) : null;
       return {
         items: await Promise.all(page.map((row) => toEntry(app, row))),
         nextCursor
