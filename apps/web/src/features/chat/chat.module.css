@@ -1,0 +1,601 @@
+/* Chat (T7): room list, conversation, composer. Mobile-first. */
+
+/* Zero-height marker: where the fixed chat panes start (below the TopNav and banners). */
+.marker {
+  height: 0;
+}
+
+/* ---------------------------------------------------------------- layout */
+
+/* Phones, room list: a normal page in the flow, above the BottomNav. */
+.layout {
+  display: block;
+  padding-inline: var(--gutter, var(--space-4));
+  padding-top: var(--space-4);
+}
+
+/* Phones, conversation: fills the *visual* viewport, so the composer sits above the keyboard. */
+.layout.hasRoom {
+  position: fixed;
+  top: var(--chat-top, var(--top-nav-height));
+  left: 0;
+  right: 0;
+  height: var(--chat-height, calc(100dvh - var(--top-nav-height)));
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  z-index: var(--z-base);
+}
+
+.listPane {
+  min-width: 0;
+}
+
+.layout.hasRoom .listPane {
+  display: none;
+}
+
+.conversationPane {
+  display: none;
+}
+
+.layout.hasRoom .conversationPane {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.placeholder {
+  display: none;
+}
+
+@media (min-width: 900px) {
+  /* Two panes: rooms 320px, conversation the rest. */
+  .layout,
+  .layout.hasRoom {
+    position: fixed;
+    top: var(--chat-top, var(--top-nav-height));
+    left: 0;
+    right: 0;
+    height: var(--chat-height, calc(100dvh - var(--top-nav-height)));
+    max-width: var(--content-max);
+    margin-inline: auto;
+    padding: var(--space-4) var(--space-6) var(--space-6);
+    display: grid;
+    grid-template-columns: 320px minmax(0, 1fr);
+    gap: var(--space-4);
+    background: var(--color-bg);
+  }
+
+  .layout.hasRoom .listPane,
+  .listPane {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: var(--space-1);
+  }
+
+  .conversationPane,
+  .layout.hasRoom .conversationPane {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+
+  .placeholder {
+    display: grid;
+    place-items: center;
+    flex: 1;
+    padding: var(--space-6);
+  }
+}
+
+/* ---------------------------------------------------------------- room list */
+
+.listTitle {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-2xl);
+  line-height: var(--leading-tight);
+}
+
+.rooms {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.rooms li + li {
+  border-top: 1px solid var(--color-border);
+}
+
+.roomLink {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 72px;
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.roomLink:hover {
+  background: var(--color-surface-sunken);
+}
+
+.roomLink:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -3px;
+}
+
+.roomLink[aria-current="page"] {
+  background: var(--color-primary-soft);
+}
+
+.roomIcon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-round);
+  background: var(--color-accent-soft);
+  font-size: 1.375rem;
+}
+
+.roomText {
+  min-width: 0;
+}
+
+.roomTitle {
+  display: block;
+  font-weight: var(--weight-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roomPreview {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roomMeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.roomUnread .roomTitle {
+  font-weight: var(--weight-bold);
+}
+
+.roomUnread .roomMeta {
+  color: var(--color-festive);
+  font-weight: var(--weight-semibold);
+}
+
+/* ---------------------------------------------------------------- conversation */
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 56px;
+  padding: var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.back {
+  display: inline-grid;
+  place-items: center;
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  border-radius: var(--radius-round);
+  color: var(--color-primary);
+  font-size: 1.5rem;
+  text-decoration: none;
+}
+
+.back:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+@media (min-width: 900px) {
+  .back {
+    display: none;
+  }
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-lg);
+  line-height: var(--leading-snug);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title:focus {
+  outline: none;
+}
+
+.status {
+  display: block;
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-warning-soft);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+}
+
+.statusOffline {
+  background: var(--color-danger-soft);
+}
+
+.listWrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-3) var(--space-3) var(--space-4);
+  -webkit-overflow-scrolling: touch;
+}
+
+.list:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -3px;
+}
+
+.older {
+  display: flex;
+  justify-content: center;
+  padding-bottom: var(--space-2);
+}
+
+.day {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-4) 0 var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  text-align: center;
+}
+
+.day::before,
+.day::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--color-border);
+}
+
+.unreadMarker {
+  color: var(--color-festive);
+}
+
+.unreadMarker::before,
+.unreadMarker::after {
+  border-top-color: currentcolor;
+}
+
+/* One message row: avatar column + bubble. */
+.row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  margin-top: 2px;
+}
+
+.row.groupStart {
+  margin-top: var(--space-3);
+}
+
+.row.mine {
+  justify-content: flex-end;
+}
+
+.avatarSlot {
+  flex: 0 0 32px;
+  width: 32px;
+  align-self: flex-start;
+}
+
+.bubbleWrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: min(80%, 34rem);
+  min-width: 0;
+}
+
+.mine .bubbleWrap {
+  align-items: flex-end;
+}
+
+.bubbleLine {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+}
+
+.mine .bubbleLine {
+  flex-direction: row-reverse;
+}
+
+.sender {
+  margin: 0 0 2px var(--space-2);
+  color: var(--color-primary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+}
+
+.bubble {
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--color-border);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  line-height: var(--leading-body);
+  -webkit-touch-callout: none;
+}
+
+.row:not(.groupStart):not(.mine) .bubble {
+  border-top-left-radius: var(--radius-xs);
+}
+
+.row:not(.groupEnd):not(.mine) .bubble {
+  border-bottom-left-radius: var(--radius-xs);
+}
+
+.mine .bubble {
+  background: var(--color-primary-soft);
+  border-color: transparent;
+}
+
+.mine:not(.groupStart) .bubble {
+  border-top-right-radius: var(--radius-xs);
+}
+
+.mine:not(.groupEnd) .bubble {
+  border-bottom-right-radius: var(--radius-xs);
+}
+
+.pending .bubble {
+  opacity: 0.75;
+}
+
+.failed .bubble {
+  border-color: var(--color-danger);
+}
+
+.bubble a {
+  color: var(--color-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+
+.tombstone {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.meta {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* The ⋯ button: always reachable by keyboard; shown on hover/focus with a mouse. */
+.more {
+  flex: none;
+  opacity: 0.55;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .more {
+    opacity: 0;
+  }
+
+  .row:hover .more,
+  .row:focus-within .more {
+    opacity: 1;
+  }
+}
+
+.failure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  margin-top: var(--space-1);
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+.linkButton {
+  min-height: var(--tap-min);
+  padding: 0 var(--space-2);
+  border: 0;
+  background: none;
+  color: var(--color-primary);
+  font: inherit;
+  font-weight: var(--weight-semibold);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.linkButton:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
+}
+
+.empty {
+  margin: var(--space-8) auto;
+  max-width: 22rem;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.pill {
+  position: absolute;
+  left: 50%;
+  bottom: var(--space-3);
+  transform: translateX(-50%);
+  min-height: var(--tap-min);
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pill:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+.typing {
+  min-height: 1.5em;
+  margin: 0;
+  padding: 0 var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-style: italic;
+}
+
+/* ---------------------------------------------------------------- composer */
+
+.composer {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) calc(var(--space-2) + var(--safe-bottom));
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+/* With the on-screen keyboard up, the home-indicator inset is under the keyboard. */
+.layout[data-keyboard="open"] .composer {
+  padding-bottom: var(--space-2);
+}
+
+.field {
+  flex: 1;
+  min-width: 0;
+}
+
+.textarea {
+  display: block;
+  width: 100%;
+  min-height: var(--tap-min);
+  padding: var(--space-2) var(--space-3);
+  border: 1.5px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: max(16px, var(--text-md));
+  line-height: var(--leading-snug);
+  resize: none;
+  overflow-y: hidden;
+}
+
+.textarea::placeholder {
+  color: var(--color-text-muted);
+  opacity: 1;
+}
+
+.textarea:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
+  border-color: var(--color-primary);
+}
+
+.counter {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  text-align: right;
+}
+
+.counterOver {
+  color: var(--color-danger);
+  font-weight: var(--weight-semibold);
+}
+
+.composerError {
+  margin: 2px 0 0;
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+/* ---------------------------------------------------------------- menus */
+
+.menu {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.quote {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--color-border-strong);
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.forbidden {
+  padding: var(--space-6) var(--gutter, var(--space-4));
+}
