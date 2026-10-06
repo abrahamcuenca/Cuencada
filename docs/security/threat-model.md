@@ -206,7 +206,6 @@ These come from [`backlog.md`](../coordination/backlog.md), plus the WP-2.3 find
 
 **Web:**
 
-- `/cuencada/:year` shows a generic "unavailable, retry" state for the member block when `/members` answers 403 `EMAIL_UNVERIFIED`. It should show the verify-email prompt instead (`useAccessDenial`), as the gallery already does (WP-2.3 L2 follow-up).
 - `z.config({ jitless: true })` (WP-2.3 L1).
 - Privacy sweep inside `features/**`.
 

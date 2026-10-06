@@ -190,12 +190,17 @@ function GalleryYear({ year }: { year: number }): React.ReactNode {
           ) : null}
         </div>
       </header>
-      <Uploader ref={uploader} year={year} />
-      <p className={styles.hint}>
-        {UPLOAD_RULES_TEXT} {LARGE_PHOTO_NOTE} {UPLOAD_LOCATION_NOTE}
-      </p>
+      {/* Uploads need a verified email like the album itself (WP-2.3 M2): no upload button over a 403. */}
+      {denial === null ? (
+        <>
+          <Uploader ref={uploader} year={year} />
+          <p className={styles.hint}>
+            {UPLOAD_RULES_TEXT} {LARGE_PHOTO_NOTE} {UPLOAD_LOCATION_NOTE}
+          </p>
+        </>
+      ) : null}
       {content}
-      <UploadPanel year={year} />
+      {denial === null ? <UploadPanel year={year} /> : null}
       <GalleryLightbox items={viewable} openId={openId} onOpenIdChange={setOpenId} onMediaError={onMediaError} />
     </div>
   );

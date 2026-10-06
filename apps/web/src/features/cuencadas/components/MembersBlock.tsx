@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { Button } from "../../../shared/ui/Button";
 import { EmptyState } from "../../../shared/ui/EmptyState";
+import type { AccessDenial } from "../../auth/accessDenied";
+import { AccessDeniedState } from "../../auth/components/AccessDeniedState";
 import { Skeleton } from "../../../shared/ui/Skeleton";
 import { safeHttpsUrl } from "../lib/format";
 import { AnnouncementList } from "./AnnouncementList";
@@ -16,6 +18,8 @@ export type MembersBlockState =
   | { kind: "anonymous" }
   | { kind: "loading" }
   | { kind: "unavailable"; offline: boolean; retry: () => void }
+  /** 403 from `/members` (WP-2.3 M2: verified email required). Retrying cannot help, so no retry. */
+  | { kind: "denied"; denial: AccessDenial }
   | { kind: "member"; details: MemberCuencadaDetails };
 
 /** Props for {@link MembersBlock}. */
@@ -91,6 +95,16 @@ function MembersBlockBody({ year, timeZone, state }: MembersBlockProps): ReactNo
               Reintentar
             </Button>
           }
+        />
+      );
+    case "denied":
+      return (
+        <AccessDeniedState
+          denial={state.denial}
+          headingLevel={3}
+          verifyTitle="Verifica tu correo para ver la sección de la familia"
+          verifyDescription="El grupo de WhatsApp, el álbum, las fotos y quién va son solo para la familia. Abre el enlace que te enviamos por correo para confirmar que eres tú; si no lo encuentras, pide otro."
+          forbiddenTitle="No tienes acceso a la sección de la familia"
         />
       );
     case "member":

@@ -96,15 +96,13 @@ Fixed in WP-2.3 (PR #35):
   route and on `/cuencadas/:year/members`. Announcements and the RSVP summary
   stay open to unverified members.
 - L6: stored photos and avatars are cached privately for at most 1 h.
+- M2 web follow-up: `/cuencada/:year` shows the verify-email prompt (or the
+  no-access copy) instead of a dead "Reintentar" when `/members` answers 403.
+  `/galeria` hides the upload button and the upload panel over the 403.
+  Screenshot: `docs/ux/screenshots/t2/cuencada-2026-unverified-375.webp`.
 
 Still open:
 
-- **M2 follow-up (0.8c, web):** on `/cuencada/:year`, a 403
-  `EMAIL_UNVERIFIED` from `/members` lands in the generic "unavailable, retry"
-  state of the member block (`useMembersState` in `CuencadaYearPage.tsx`).
-  Map it with `useAccessDenial` to the verify-email prompt, keep the public
-  content, and don't offer a retry. The gallery and Home preview already
-  handle it.
 - **Open invites (separate WP, planned mitigation for threat-model A2):**
   - Today a leaked open invite lets a stranger create an account and verify
     their **own** mailbox, which unlocks every member-only area.

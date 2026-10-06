@@ -38,7 +38,8 @@ Owner: Security Engineer · Reviewers: TL · Branch: wp/2.3-security-audit · PR
 - **M1 (fixed):** no `Cache-Control` on API responses (ASVS 8.2.1).
 - **M2, formerly L2 (fixed, owner decision):** the gallery, every media route and `/cuencadas/:year/members` now need a verified email (ADR 0001).
 - **L6 (fixed):** stored photo and avatar `Cache-Control` was a year with `immutable`; it is now `private, max-age=3600`.
-- **L1, L3, L4, L5** and the M2 web follow-up are in `backlog.md` → "WP-2.3 findings".
+- **M2 web follow-up (fixed in this PR):** the year page shows the verify-email or no-access prompt instead of a dead Retry, and the gallery hides upload controls over a 403.
+- **L1, L3, L4, L5** are in `backlog.md` → "WP-2.3 findings".
 
 ## Open questions (→ orchestrator)
 - None. L2 was decided by the owner (see the review log).
