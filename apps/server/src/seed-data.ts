@@ -4,9 +4,11 @@
  * against the admin input contracts before it is written.
  */
 import {
+  type CreateAnnouncementInput,
   type CreateCuencadaInput,
   type CreateItineraryItemInput,
   type CreateLocationInput,
+  createAnnouncementInputSchema,
   createCuencadaInputSchema,
   createItineraryItemInputSchema,
   createLocationInputSchema
@@ -27,12 +29,45 @@ export interface SeedItineraryItem {
   input: CreateItineraryItemInput;
 }
 
+/** A seeded announcement (the Cuencada id and author are filled in by the seed). */
+export type SeedAnnouncement = Omit<CreateAnnouncementInput, "cuencadaId">;
+
+/**
+ * Member-only links of the 2026 edition. They are credentials-like (group
+ * invite, shared OneDrive items), so outside dev/test they come only from
+ * `SEED_*_URL` env vars (vault) and are rotated at cutover; `null` = not seeded.
+ */
+export interface SeedLinks {
+  whatsappUrl: string | null;
+  externalAlbumUrl: string | null;
+  /** "Ver letra oficial" (legacy OneDrive lyrics document). */
+  lyricsUrl: string | null;
+  /** "Ver programa completo" (legacy OneDrive program image). */
+  programUrl: string | null;
+}
+
+/**
+ * Legacy links from the old public `index.html`, used only when `NODE_ENV` is
+ * `development` or `test` and the env var is unset. Production values are
+ * rotated at cutover and must never be committed here.
+ */
+export const LEGACY_DEV_LINKS = {
+  whatsappUrl: "https://chat.whatsapp.com/IvI6oayIIoEJ8Wn7EWQxO0?s=cl&p=i&mlu=0",
+  externalAlbumUrl: "https://1drv.ms/f/c/b0c7d5955d4a8581/IgAC5vDMrmIvTJwWwOjkJJM7AT3DxtBo9OFj8FSXJI_GQY0?e=ASBPLY",
+  lyricsUrl:
+    "https://onedrive.live.com/?redeem=aHR0cHM6Ly8xZHJ2Lm1zL2IvYy9iMGM3ZDU5NTVkNGE4NTgxL0lRQ2NwY0UtdWNFblI2djlNNVFIVlBoRkFaOWNUQlVEY0JDYVh0ZlFERFJQcG9n&cid=B0C7D5955D4A8581&id=B0C7D5955D4A8581%21s3ec1a59cc1b94727abfd33940754f845&parId=B0C7D5955D4A8581%21s77e6d760e3954e818d2a0ba22da1c9e7&o=OneUp",
+  programUrl: "https://1drv.ms/i/c/b0c7d5955d4a8581/IQBP_0Olz3lRQ67Vc187M744AXk6A96moN_SdRcg6Lw8y50?e=nGbr9g"
+} as const satisfies Record<keyof SeedLinks, string>;
+
 /** The full 2026 edition. */
 export interface SeedCuencada {
   cuencada: CreateCuencadaInput;
   locations: SeedLocation[];
   itinerary: SeedItineraryItem[];
-  chatRoomTitle: string;
+  /** Pinned, member-only link announcements (only for configured links). */
+  announcements: SeedAnnouncement[];
+  globalChatRoomTitle: string;
+  cuencadaChatRoomTitle: string;
 }
 
 const MAPS = "https://www.google.com/maps/search/?api=1&query=";
@@ -45,8 +80,21 @@ function itinerary(locationKey: SeedLocationKey | null, input: Record<string, un
   return { locationKey, input: createItineraryItemInputSchema.parse(input) };
 }
 
-/** Build (and validate) the 2026 seed content. Throws if any value breaks a contract. */
-export function cuencada2026(): SeedCuencada {
+function linkAnnouncement(title: string, label: string, url: string): SeedAnnouncement {
+  return createAnnouncementInputSchema.omit({ cuencadaId: true }).parse({
+    title,
+    body: `${label}: ${url}`,
+    visibility: "members",
+    pinned: true
+  });
+}
+
+/**
+ * Build (and validate) the 2026 seed content. Throws if any value breaks a contract.
+ *
+ * @param links - Member-only links resolved from the environment.
+ */
+export function cuencada2026(links: SeedLinks): SeedCuencada {
   const cuencada = createCuencadaInputSchema.parse({
     year: 2026,
     title: "Cuencada 2026",
@@ -62,9 +110,9 @@ export function cuencada2026(): SeedCuencada {
     heroImageUrl: "/images/Logo_Cuencada2026.jpg",
     themeColor: "#0b5e55",
     songUrl: "/canciones/Cancion_Oficial.mp3",
-    whatsappUrl: "https://chat.whatsapp.com/IvI6oayIIoEJ8Wn7EWQxO0?s=cl&p=i&mlu=0",
+    whatsappUrl: links.whatsappUrl,
     weatherWidgetUrl: "https://forecast7.com/es/20d97n89d59/merida/",
-    externalAlbumUrl: "https://1drv.ms/f/c/b0c7d5955d4a8581/IgAC5vDMrmIvTJwWwOjkJJM7AT3DxtBo9OFj8FSXJI_GQY0?e=ASBPLY",
+    externalAlbumUrl: links.externalAlbumUrl,
     rsvpDeadline: null,
     isPublished: true
   });
@@ -155,5 +203,20 @@ export function cuencada2026(): SeedCuencada {
     })
   ];
 
-  return { cuencada, locations, itinerary: items, chatRoomTitle: "Familia Cuenca" };
+  const announcements: SeedAnnouncement[] = [];
+  if (links.lyricsUrl) {
+    announcements.push(linkAnnouncement("Letra oficial de la canción", "📖 Ver letra oficial", links.lyricsUrl));
+  }
+  if (links.programUrl) {
+    announcements.push(linkAnnouncement("Programa completo", "🔍 Ver programa completo", links.programUrl));
+  }
+
+  return {
+    cuencada,
+    locations,
+    itinerary: items,
+    announcements,
+    globalChatRoomTitle: "Familia Cuenca",
+    cuencadaChatRoomTitle: "Cuencada 2026"
+  };
 }

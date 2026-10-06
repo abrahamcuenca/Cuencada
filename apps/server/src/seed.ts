@@ -8,11 +8,12 @@
  */
 import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { emailSchema, parseDailyMessagesText, passwordSchema } from "@cuencada/types";
+import { emailSchema, httpsUrlSchema, parseDailyMessagesText, passwordSchema } from "@cuencada/types";
 import argon2 from "argon2";
 import { and, eq, sql } from "drizzle-orm";
 import { type Database, createDatabase } from "./db/client.js";
 import {
+  announcements,
   chatRooms,
   cuencadaItineraryItems,
   cuencadaLocations,
@@ -21,19 +22,38 @@ import {
   profiles,
   users
 } from "./db/schema/index.js";
-import { cuencada2026, type SeedLocationKey } from "./seed-data.js";
+import {
+  cuencada2026,
+  LEGACY_DEV_LINKS,
+  type SeedCuencada,
+  type SeedLinks,
+  type SeedLocationKey
+} from "./seed-data.js";
 
 /** Default location of the legacy daily-messages file (repo root). */
 export const DEFAULT_DAILY_MESSAGES_FILE = fileURLToPath(new URL("../../../mensajes.txt", import.meta.url));
 
-/** Temporary password used only outside production when none is configured. */
+/** Temporary password used only when `NODE_ENV` is explicitly `development` or `test`. */
 const DEV_FALLBACK_PASSWORD = "Password123!";
 
-/** Well-known or placeholder passwords that are never accepted in production. */
+/** Minimum admin temporary-password length outside development and test. */
+export const SEED_PASSWORD_MIN_LENGTH = 16;
+
+/**
+ * Well-known passwords and `.env.example` placeholders that are never accepted
+ * outside development and test (compared case-insensitively).
+ */
 const WEAK_PASSWORDS = new Set(
-  [DEV_FALLBACK_PASSWORD, "password1234", "changeme1234", "cuencada2026", "admin1234567", "123456789012"].map((p) =>
-    p.toLowerCase()
-  )
+  [
+    DEV_FALLBACK_PASSWORD,
+    "replace-with-vault-value",
+    "change-me-in-vault",
+    "password1234",
+    "changeme1234",
+    "cuencada2026",
+    "admin1234567",
+    "123456789012"
+  ].map((p) => p.toLowerCase())
 );
 
 /** Validated seed settings. */
@@ -41,6 +61,8 @@ export interface SeedOptions {
   adminEmail: string;
   adminTempPassword: string;
   dailyMessagesFile: string;
+  /** Member-only links for the 2026 edition; `null` when not configured. */
+  links: SeedLinks;
 }
 
 /** What one seed run inserted (all zeros on a repeat run). */
@@ -50,8 +72,9 @@ export interface SeedResult {
   cuencadaCreated: boolean;
   locationsCreated: number;
   itineraryCreated: number;
+  announcementsCreated: number;
   dailyMessagesCreated: number;
-  chatRoomCreated: boolean;
+  chatRoomsCreated: number;
 }
 
 /** Thrown when the environment is unsafe or incomplete for seeding. */
@@ -60,41 +83,79 @@ export class SeedConfigError extends Error {
 }
 
 /**
- * Read and validate seed settings from the environment. In production the
- * admin password must be set, satisfy the password policy and not be a known
- * placeholder; elsewhere a development fallback is used when it is missing.
+ * Read one optional link env var. Values come from vault at cutover and are
+ * never committed; dev/test fall back to the (already public) legacy link.
+ */
+function readLink(env: NodeJS.ProcessEnv, name: string, devOrTest: boolean, legacy: string): string | null {
+  const raw = env[name];
+  if (!raw) return devOrTest ? legacy : null;
+  const parsed = httpsUrlSchema.safeParse(raw);
+  if (!parsed.success) throw new SeedConfigError(`${name} must be an https:// URL.`);
+  return parsed.data;
+}
+
+/** Resolve the member-only links of the 2026 edition from `SEED_*_URL` env vars. */
+function resolveLinks(env: NodeJS.ProcessEnv, devOrTest: boolean): SeedLinks {
+  return {
+    whatsappUrl: readLink(env, "SEED_WHATSAPP_URL", devOrTest, LEGACY_DEV_LINKS.whatsappUrl),
+    externalAlbumUrl: readLink(env, "SEED_EXTERNAL_ALBUM_URL", devOrTest, LEGACY_DEV_LINKS.externalAlbumUrl),
+    lyricsUrl: readLink(env, "SEED_LYRICS_URL", devOrTest, LEGACY_DEV_LINKS.lyricsUrl),
+    programUrl: readLink(env, "SEED_PROGRAM_URL", devOrTest, LEGACY_DEV_LINKS.programUrl)
+  };
+}
+
+/**
+ * Read and validate seed settings from the environment. Fails closed: the
+ * development fallback password (and weak passwords) are allowed only when
+ * `NODE_ENV` is explicitly `development` or `test`. With any other value,
+ * including unset, `SEED_ADMIN_TEMP_PASSWORD` must be set, pass the password
+ * policy, be at least {@link SEED_PASSWORD_MIN_LENGTH} characters and not be a
+ * known placeholder.
  *
  * @throws SeedConfigError when the settings are unsafe.
  */
 export function resolveSeedOptions(env: NodeJS.ProcessEnv = process.env): SeedOptions {
-  const isProduction = env.NODE_ENV === "production";
+  const devOrTest = env.NODE_ENV === "development" || env.NODE_ENV === "test";
   const email = emailSchema.safeParse(env.SEED_ADMIN_EMAIL ?? "admin@cuencada.com");
   if (!email.success) throw new SeedConfigError("SEED_ADMIN_EMAIL is not a valid email address.");
 
   const configured = env.SEED_ADMIN_TEMP_PASSWORD;
-  if (!configured && isProduction) {
-    throw new SeedConfigError("SEED_ADMIN_TEMP_PASSWORD is required in production.");
-  }
-  const password = configured || DEV_FALLBACK_PASSWORD;
-  if (isProduction) {
-    if (!passwordSchema.safeParse(password).success || WEAK_PASSWORDS.has(password.toLowerCase())) {
+  let password: string;
+  if (devOrTest) {
+    password = configured || DEV_FALLBACK_PASSWORD;
+  } else {
+    if (!configured) {
       throw new SeedConfigError(
-        "SEED_ADMIN_TEMP_PASSWORD is too weak for production (12–128 characters, not a placeholder)."
+        "SEED_ADMIN_TEMP_PASSWORD is required unless NODE_ENV is development or test."
       );
     }
+    const weak =
+      configured.length < SEED_PASSWORD_MIN_LENGTH ||
+      !passwordSchema.safeParse(configured).success ||
+      WEAK_PASSWORDS.has(configured.trim().toLowerCase());
+    if (weak) {
+      throw new SeedConfigError(
+        `SEED_ADMIN_TEMP_PASSWORD is too weak (at least ${SEED_PASSWORD_MIN_LENGTH} characters, not a placeholder).`
+      );
+    }
+    password = configured;
   }
 
   return {
     adminEmail: email.data,
     adminTempPassword: password,
-    dailyMessagesFile: env.SEED_DAILY_MESSAGES_FILE || DEFAULT_DAILY_MESSAGES_FILE
+    dailyMessagesFile: env.SEED_DAILY_MESSAGES_FILE || DEFAULT_DAILY_MESSAGES_FILE,
+    links: resolveLinks(env, devOrTest)
   };
 }
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 /** Insert the admin (must change password on first login) and its profile if missing. */
-async function seedAdmin(tx: Transaction, options: SeedOptions): Promise<Pick<SeedResult, "adminCreated" | "profileCreated">> {
+async function seedAdmin(
+  tx: Transaction,
+  options: SeedOptions
+): Promise<{ adminId: string } & Pick<SeedResult, "adminCreated" | "profileCreated">> {
   const [existing] = await tx
     .select({ id: users.id })
     .from(users)
@@ -126,14 +187,14 @@ async function seedAdmin(tx: Transaction, options: SeedOptions): Promise<Pick<Se
     .onConflictDoNothing({ target: profiles.userId })
     .returning({ id: profiles.id });
 
-  return { adminCreated, profileCreated: insertedProfile.length > 0 };
+  return { adminId, adminCreated, profileCreated: insertedProfile.length > 0 };
 }
 
 /** Insert the 2026 edition and any of its missing locations and itinerary items. */
 async function seedCuencada2026(
-  tx: Transaction
+  tx: Transaction,
+  data: SeedCuencada
 ): Promise<{ cuencadaId: string } & Pick<SeedResult, "cuencadaCreated" | "locationsCreated" | "itineraryCreated">> {
-  const data = cuencada2026();
   const inserted = await tx
     .insert(cuencadas)
     .values({
@@ -214,14 +275,43 @@ async function seedDailyMessages(tx: Transaction, cuencadaId: string, file: stri
   return inserted.length;
 }
 
-/** Insert the single global chat room if it does not exist. */
-async function seedGlobalChatRoom(tx: Transaction, title: string): Promise<boolean> {
-  const inserted = await tx
+/** Insert the member-only link announcements of the edition that are missing (matched by title). */
+async function seedAnnouncements(
+  tx: Transaction,
+  cuencadaId: string,
+  adminId: string,
+  announcementsToSeed: SeedCuencada["announcements"]
+): Promise<number> {
+  let created = 0;
+  for (const input of announcementsToSeed) {
+    const [found] = await tx
+      .select({ id: announcements.id })
+      .from(announcements)
+      .where(and(eq(announcements.cuencadaId, cuencadaId), eq(announcements.title, input.title)))
+      .limit(1);
+    if (found) continue;
+    await tx.insert(announcements).values({ ...input, cuencadaId, createdByUserId: adminId });
+    created += 1;
+  }
+  return created;
+}
+
+/**
+ * Insert the global room and the 2026 room if missing. The 2026 edition is
+ * seeded already published, so T2's "create on first publish" never fires for it.
+ */
+async function seedChatRooms(tx: Transaction, cuencadaId: string, data: SeedCuencada): Promise<number> {
+  const global = await tx
     .insert(chatRooms)
-    .values({ kind: "global", cuencadaId: null, title })
+    .values({ kind: "global", cuencadaId: null, title: data.globalChatRoomTitle })
     .onConflictDoNothing({ target: chatRooms.kind, where: sql`kind = 'global'` })
     .returning({ id: chatRooms.id });
-  return inserted.length > 0;
+  const edition = await tx
+    .insert(chatRooms)
+    .values({ kind: "cuencada", cuencadaId, title: data.cuencadaChatRoomTitle })
+    .onConflictDoNothing({ target: chatRooms.cuencadaId, where: sql`kind = 'cuencada'` })
+    .returning({ id: chatRooms.id });
+  return global.length + edition.length;
 }
 
 /**
@@ -232,12 +322,14 @@ async function seedGlobalChatRoom(tx: Transaction, title: string): Promise<boole
  * @returns Counts of what this run inserted.
  */
 export async function runSeed(db: Database, options: SeedOptions): Promise<SeedResult> {
+  const data = cuencada2026(options.links);
   return db.transaction(async (tx) => {
-    const admin = await seedAdmin(tx, options);
-    const { cuencadaId, ...edition } = await seedCuencada2026(tx);
+    const { adminId, ...admin } = await seedAdmin(tx, options);
+    const { cuencadaId, ...edition } = await seedCuencada2026(tx, data);
+    const announcementsCreated = await seedAnnouncements(tx, cuencadaId, adminId, data.announcements);
     const dailyMessagesCreated = await seedDailyMessages(tx, cuencadaId, options.dailyMessagesFile);
-    const chatRoomCreated = await seedGlobalChatRoom(tx, cuencada2026().chatRoomTitle);
-    return { ...admin, ...edition, dailyMessagesCreated, chatRoomCreated };
+    const chatRoomsCreated = await seedChatRooms(tx, cuencadaId, data);
+    return { ...admin, ...edition, announcementsCreated, dailyMessagesCreated, chatRoomsCreated };
   });
 }
 

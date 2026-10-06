@@ -1,7 +1,6 @@
-import { type KeyboardEvent, type PointerEvent, type ReactNode, useCallback, useId, useRef } from "react";
+import { type KeyboardEvent, type PointerEvent, type ReactNode, useCallback, useEffect, useId, useRef } from "react";
 import { IconButton } from "./IconButton";
 import styles from "./Lightbox.module.css";
-import { cx } from "./cx";
 import { useModalDialog } from "./useModalDialog";
 
 /** One photo or video in a {@link Lightbox}. */
@@ -36,21 +35,43 @@ export interface LightboxProps {
 /** Horizontal distance (px) a pointer must travel to count as a swipe. */
 export const SWIPE_THRESHOLD = 50;
 
+/** True when a pointer/key event originates on (or inside) a video/audio element and its native controls. */
+function isFromMedia(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest("video, audio") !== null;
+}
+
 /**
  * Full-screen, thumb-friendly media viewer on native `<dialog>`.
- * Swipe left/right (pointer events: touch, pen, mouse), ←/→ keys, Esc to close.
- * Does not wrap around; the counter ("3 de 12") is announced politely.
+ * Swipe left/right (pointer events with capture: touch, pen, mouse), ←/→ keys, Esc to close.
+ * Gestures that start on a video (seek bar, volume) never navigate.
+ * Does not wrap around; the counter ("3 de 12") is announced politely, and focus
+ * moves off a nav button that becomes disabled at either end.
  */
 export function Lightbox({ items, index, onIndexChange, onClose, actions, label = "Visor de fotos" }: LightboxProps): React.ReactNode {
   const ref = useRef<HTMLDialogElement>(null);
+  const prevRef = useRef<HTMLButtonElement>(null);
+  const nextRef = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const counterId = useId();
-  const open = index !== null && items.length > 0;
+  const current = index === null ? undefined : items[index];
+  const open = index !== null && current !== undefined;
   const bindings = useModalDialog(ref, open, onClose, false);
   const pointer = useRef<{ id: number; x: number; y: number } | null>(null);
 
-  const current = index === null ? undefined : items[index];
   const hasPrev = index !== null && index > 0;
   const hasNext = index !== null && index < items.length - 1;
+
+  // The list shrank under us (item deleted/hidden): close instead of rendering an empty modal.
+  useEffect(() => {
+    if (index !== null && current === undefined) onClose();
+  }, [index, current, onClose]);
+
+  // Keep keyboard focus inside the viewer when a nav button turns disabled at an end.
+  useEffect(() => {
+    const active = document.activeElement;
+    if (active === nextRef.current && !hasNext) (hasPrev ? prevRef.current : closeRef.current)?.focus();
+    else if (active === prevRef.current && !hasPrev) (hasNext ? nextRef.current : closeRef.current)?.focus();
+  }, [hasPrev, hasNext]);
 
   const go = useCallback(
     (delta: -1 | 1): void => {
@@ -63,13 +84,13 @@ export function Lightbox({ items, index, onIndexChange, onClose, actions, label 
 
   const onKeyDown = (event: KeyboardEvent<HTMLDialogElement>): void => {
     // Let native video controls keep their arrow-key seeking.
-    const inVideo = event.target instanceof HTMLVideoElement;
-    if (event.key === "ArrowRight" && !inVideo) {
+    const inMedia = isFromMedia(event.target);
+    if (event.key === "ArrowRight" && !inMedia) {
       event.preventDefault();
       go(1);
       return;
     }
-    if (event.key === "ArrowLeft" && !inVideo) {
+    if (event.key === "ArrowLeft" && !inMedia) {
       event.preventDefault();
       go(-1);
       return;
@@ -78,8 +99,20 @@ export function Lightbox({ items, index, onIndexChange, onClose, actions, label 
   };
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>): void => {
-    if (!event.isPrimary) return;
+    // Scrubbing the seek bar or volume must not be read as a swipe.
+    if (!event.isPrimary || isFromMedia(event.target)) {
+      pointer.current = null;
+      return;
+    }
     pointer.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    // Capture so a drag released outside the stage still ends here.
+    if (typeof event.currentTarget.setPointerCapture === "function") {
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        // Synthetic/inactive pointers cannot be captured; the gesture still works.
+      }
+    }
   };
 
   const onPointerUp = (event: PointerEvent<HTMLDivElement>): void => {
@@ -96,6 +129,7 @@ export function Lightbox({ items, index, onIndexChange, onClose, actions, label 
     <dialog
       ref={ref}
       aria-label={label}
+      aria-modal="true"
       aria-describedby={open ? counterId : undefined}
       className={styles.lightbox}
       tabIndex={-1}
@@ -110,7 +144,7 @@ export function Lightbox({ items, index, onIndexChange, onClose, actions, label 
             </p>
             <div className={styles.actions}>
               {actions}
-              <IconButton label="Cerrar visor" icon="✕" variant="inverse" onClick={onClose} data-autofocus="" />
+              <IconButton ref={closeRef} label="Cerrar visor" icon="✕" variant="inverse" onClick={onClose} data-autofocus="" />
             </div>
           </div>
 
@@ -149,9 +183,9 @@ export function Lightbox({ items, index, onIndexChange, onClose, actions, label 
           </div>
 
           <div className={styles.bottomBar}>
-            <IconButton label="Anterior" icon="‹" size="lg" variant="inverse" onClick={() => go(-1)} disabled={!hasPrev} className={styles.nav} />
+            <IconButton ref={prevRef} label="Anterior" icon="‹" size="lg" variant="inverse" onClick={() => go(-1)} disabled={!hasPrev} className={styles.nav} />
             <div className={styles.caption}>{current.caption}</div>
-            <IconButton label="Siguiente" icon="›" size="lg" variant="inverse" onClick={() => go(1)} disabled={!hasNext} className={cx(styles.nav)} />
+            <IconButton ref={nextRef} label="Siguiente" icon="›" size="lg" variant="inverse" onClick={() => go(1)} disabled={!hasNext} className={styles.nav} />
           </div>
         </div>
       ) : null}

@@ -43,8 +43,9 @@ function toneFor(name: string): (typeof TONES)[number] {
 
 /** Round avatar with a photo or coloured initials fallback (legacy "attendee circle"). */
 export function AvatarCircle({ name, src, size = "md", highlight = false, decorative = false, className }: AvatarCircleProps): React.ReactNode {
-  const [failed, setFailed] = useState(false);
-  const showImage = Boolean(src) && !failed;
+  // Remember WHICH src failed, so a new src (e.g. a refreshed presigned URL) is tried again.
+  const [failedSrc, setFailedSrc] = useState<string | undefined>(undefined);
+  const showImage = Boolean(src) && failedSrc !== src;
   return (
     <span
       className={cx(styles.avatar, styles[size], styles[toneFor(name)], highlight && styles.highlight, className)}
@@ -53,7 +54,7 @@ export function AvatarCircle({ name, src, size = "md", highlight = false, decora
       aria-hidden={decorative ? true : undefined}
     >
       {showImage ? (
-        <img src={src} alt="" loading="lazy" decoding="async" className={styles.image} onError={() => setFailed(true)} />
+        <img src={src} alt="" loading="lazy" decoding="async" className={styles.image} onError={() => setFailedSrc(src)} />
       ) : (
         <span aria-hidden="true">{getInitials(name)}</span>
       )}

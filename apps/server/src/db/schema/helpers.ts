@@ -3,7 +3,12 @@
  * Not a table module: nothing here creates database objects on its own.
  */
 import { type SQL, sql } from "drizzle-orm";
-import { check, timestamp } from "drizzle-orm/pg-core";
+import { type CheckBuilder, check, timestamp } from "drizzle-orm/pg-core";
+
+// The column builders below deliberately infer their return types: Drizzle's
+// builder types (`NotNull<HasDefault<PgTimestampBuilderInitial<…>>>` plus the
+// `$onUpdate` brand) are internal generics, and spelling them out would couple
+// the schema to Drizzle's private type layout without adding safety.
 
 /** `created_at timestamptz not null default now()`. */
 export function createdAt() {
@@ -53,6 +58,6 @@ export function inList(column: string, values: readonly string[]): SQL {
  * @param column - Database column name.
  * @param union - The `as const` object from `@cuencada/types` (its values are used).
  */
-export function checkIn(name: string, column: string, union: Readonly<Record<string, string>>) {
+export function checkIn(name: string, column: string, union: Readonly<Record<string, string>>): CheckBuilder {
   return check(name, inList(column, Object.values(union)));
 }

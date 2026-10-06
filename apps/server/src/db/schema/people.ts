@@ -29,6 +29,8 @@ export const people = pgTable(
   (table) => [
     uniqueIndex("people_user_id_unique").on(table.userId),
     index("people_created_by_user_id_idx").on(table.createdByUserId),
+    // Serves equality lookups on lower(full_name) only; `ILIKE '%q%'` search does not use it
+    // (fine at family scale; add a pg_trgm GIN index in a later migration if needed).
     index("people_full_name_lower_idx").on(sql`lower(${table.fullName})`),
     check("people_birth_year_check", sql`"birth_year" is null or "birth_year" between 1800 and 2200`),
     check("people_death_year_check", sql`"death_year" is null or "death_year" between 1800 and 2200`),

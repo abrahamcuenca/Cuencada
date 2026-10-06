@@ -1,6 +1,6 @@
 import { type ReactNode, useId } from "react";
 import styles from "./Field.module.css";
-import { cx } from "./cx";
+import { cx, hasContent } from "./cx";
 
 /** Accessibility wiring handed to the control rendered inside a {@link Field}. */
 export interface FieldControlProps {
@@ -44,9 +44,10 @@ export function Field({ label, hint, error, required = false, showOptional = fal
   const controlId = id ?? `field-${generated}`;
   const hintId = `${controlId}-hint`;
   const errorId = `${controlId}-error`;
-  const hasError = error !== undefined && error !== null && error !== false && error !== "";
+  const hasError = hasContent(error);
+  const hasHint = hasContent(hint);
 
-  const describedBy = [hint ? hintId : null, hasError ? errorId : null].filter(Boolean).join(" ");
+  const describedBy = [hasHint ? hintId : null, hasError ? errorId : null].filter(Boolean).join(" ");
   const control: FieldControlProps = { id: controlId };
   if (describedBy) control["aria-describedby"] = describedBy;
   if (hasError) control["aria-invalid"] = true;
@@ -61,7 +62,7 @@ export function Field({ label, hint, error, required = false, showOptional = fal
         {label}
         {!required && showOptional ? <span className={styles.optional}> (opcional)</span> : null}
       </label>
-      {hint ? (
+      {hasHint ? (
         <p id={hintId} className={styles.hint}>
           {hint}
         </p>
