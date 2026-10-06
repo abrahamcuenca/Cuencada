@@ -70,48 +70,57 @@ const trustProxy = z
       .filter((entry) => entry.length > 0);
   });
 
-const configSchema = z
-  .object({
-    /** Required, no default: a missing value must not fail open into development behaviour. */
-    NODE_ENV: z.enum(["development", "test", "production"], {
-      error: "is required: development, test or production"
-    }),
-    HOST: z.string().default("127.0.0.1"),
-    PORT: z.coerce.number().int().positive().default(3006),
-    LOG_LEVEL: z
-      .preprocess(blankAsUndefined, z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).optional())
-      .default("info"),
-    /**
-     * Public base URL of the SPA (links in emails, CSP `connect-src` for
-     * `wss:`). Defaults to the Vite dev origin outside production.
-     */
-    APP_BASE_URL: z.preprocess(blankAsUndefined, z.url().optional()),
-    /** Exact origins allowed for CORS and the CSRF `Origin` check. Defaults to `APP_BASE_URL`'s origin. */
-    CORS_ORIGIN: z.preprocess(blankAsUndefined, originList.optional()),
-    /** Extra origins allowed **only outside production** (the Vite dev server). */
-    DEV_ALLOWED_ORIGINS: z.preprocess(blankAsUndefined, originList.optional()).default([VITE_DEV_ORIGIN]),
-    /** Defaults to `loopback` in production (nginx on the same host), otherwise `false`. */
-    TRUST_PROXY: z.preprocess(blankAsUndefined, trustProxy.optional()),
-    DATABASE_URL: z.string().min(1),
-    JWT_SECRET: z.string().min(16),
-    ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
-    REFRESH_IDLE_DAYS: z.coerce.number().int().min(1).max(365).default(30),
-    REFRESH_ABSOLUTE_DAYS: z.coerce.number().int().min(1).max(365).default(90),
-    /** Defaults to `true` in production, `false` otherwise (plain-http localhost). */
-    COOKIE_SECURE: z.preprocess(blankAsUndefined, envBoolean.optional()),
-    RESEND_API_KEY: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
-    /** Sender, e.g. `Cuencada <no-reply@cuencada.com>`. */
-    MAIL_FROM: z.preprocess(blankAsUndefined, z.string().min(3).max(200).optional()),
-    SUPPORT_EMAIL: z.preprocess(blankAsUndefined, z.email().optional()).default("admin@cuencada.com"),
-    /** When true, new gallery uploads start as `pending_review` instead of `approved`. */
-    MEDIA_REQUIRE_APPROVAL: z.preprocess(blankAsUndefined, envBoolean.optional()).default(false),
-    S3_ENDPOINT: z.string().optional().default(""),
-    S3_REGION: z.string().optional().default("us-southeast-1"),
-    S3_BUCKET: z.string().optional().default(""),
-    S3_ACCESS_KEY_ID: z.string().optional().default(""),
-    S3_SECRET_ACCESS_KEY: z.string().optional().default(""),
-    S3_PUBLIC_BASE_URL: z.string().optional().default("")
-  })
+/** Every environment variable the server reads, before production rules and defaults. */
+const configObject = z.object({
+  /** Required, no default: a missing value must not fail open into development behaviour. */
+  NODE_ENV: z.enum(["development", "test", "production"], {
+    error: "is required: development, test or production"
+  }),
+  HOST: z.string().default("127.0.0.1"),
+  PORT: z.coerce.number().int().positive().default(3006),
+  LOG_LEVEL: z
+    .preprocess(blankAsUndefined, z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).optional())
+    .default("info"),
+  /**
+   * Public base URL of the SPA (links in emails, CSP `connect-src` for
+   * `wss:`). Defaults to the Vite dev origin outside production.
+   */
+  APP_BASE_URL: z.preprocess(blankAsUndefined, z.url().optional()),
+  /** Exact origins allowed for CORS and the CSRF `Origin` check. Defaults to `APP_BASE_URL`'s origin. */
+  CORS_ORIGIN: z.preprocess(blankAsUndefined, originList.optional()),
+  /** Extra origins allowed **only outside production** (the Vite dev server). */
+  DEV_ALLOWED_ORIGINS: z.preprocess(blankAsUndefined, originList.optional()).default([VITE_DEV_ORIGIN]),
+  /** Defaults to `loopback` in production (nginx on the same host), otherwise `false`. */
+  TRUST_PROXY: z.preprocess(blankAsUndefined, trustProxy.optional()),
+  DATABASE_URL: z.string().min(1),
+  JWT_SECRET: z.string().min(16),
+  ACCESS_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
+  REFRESH_IDLE_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+  REFRESH_ABSOLUTE_DAYS: z.coerce.number().int().min(1).max(365).default(90),
+  /** Defaults to `true` in production, `false` otherwise (plain-http localhost). */
+  COOKIE_SECURE: z.preprocess(blankAsUndefined, envBoolean.optional()),
+  RESEND_API_KEY: z.preprocess(blankAsUndefined, z.string().min(1).optional()),
+  /** Sender, e.g. `Cuencada <no-reply@cuencada.com>`. */
+  MAIL_FROM: z.preprocess(blankAsUndefined, z.string().min(3).max(200).optional()),
+  SUPPORT_EMAIL: z.preprocess(blankAsUndefined, z.email().optional()).default("admin@cuencada.com"),
+  /** When true, new gallery uploads start as `pending_review` instead of `approved`. */
+  MEDIA_REQUIRE_APPROVAL: z.preprocess(blankAsUndefined, envBoolean.optional()).default(false),
+  S3_ENDPOINT: z.string().optional().default(""),
+  S3_REGION: z.string().optional().default("us-southeast-1"),
+  S3_BUCKET: z.string().optional().default(""),
+  S3_ACCESS_KEY_ID: z.string().optional().default(""),
+  S3_SECRET_ACCESS_KEY: z.string().optional().default(""),
+  S3_PUBLIC_BASE_URL: z.string().optional().default("")
+});
+
+/**
+ * Names of every environment variable {@link loadConfig} reads. The deploy
+ * preflight (`apps/server/deploy/preflight.ts`) checks that each one is mapped
+ * in `infra/project.yml`, so a new key can't ship with only its dev default.
+ */
+export const CONFIG_ENV_KEYS: readonly string[] = Object.keys(configObject.shape);
+
+const configSchema = configObject
   .superRefine((env, ctx) => {
     if (env.REFRESH_IDLE_DAYS > env.REFRESH_ABSOLUTE_DAYS) {
       ctx.addIssue({

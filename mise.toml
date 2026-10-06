@@ -39,15 +39,29 @@ description = "Fail on high/critical production dependency advisories"
 depends = ["lint", "typecheck", "test", "audit"]
 description = "Pre-deploy quality gate"
 
+[tasks.deploy-preflight]
+run = "pnpm --filter @cuencada/server deploy:preflight"
+description = "No secrets, no SSH: project.yml env vs config.ts, vault refs, build_env, nginx site vs csp.md"
+
 [tasks.build-bundle]
+depends = ["deploy-preflight"]
 run = "bash ../acleron-platform/acleron-platform/scripts/build-bundle.sh --project-config $(pwd)/infra/project.yml"
-description = "Build locally and pack an Acleron deployable bundle"
+description = "Preflight, then verify, build, migrate (owner role, tunnel) and pack an Acleron bundle"
 
 [tasks.deploy]
 depends = ["build-bundle"]
 run = "ansible-playbook ../acleron-platform/acleron-platform/ansible/playbooks/deploy.yml -e project_config=$(pwd)/infra/project.yml -e artifact_bundle=$HOME/.acleron/bundles/cuencada/latest.tar.gz"
 description = "Build a bundle, then deploy it to the VPS"
 
+# Local and secret-free: safe to run anywhere, any time.
 [tasks.deploy-check]
-run = "ansible-playbook ../acleron-platform/acleron-platform/ansible/playbooks/deploy.yml -e project_config=$(pwd)/infra/project.yml -e artifact_bundle=$HOME/.acleron/bundles/cuencada/latest.tar.gz --check --diff"
-description = "Dry-run deploy"
+depends = ["deploy-preflight"]
+run = ["pnpm build", "pnpm --filter @cuencada/web check:sw", "pnpm --filter @cuencada/web size"]
+description = "Deploy gate without secrets: preflight, production build, service-worker rules, bundle size"
+
+# Ansible --check against server_1 (needs the vault and SSH; changes nothing).
+# No --diff: the diff of the rendered systemd unit would print every vault
+# secret in its Environment= lines.
+[tasks.deploy-dryrun]
+run = "ansible-playbook ../acleron-platform/acleron-platform/ansible/playbooks/deploy.yml -e project_config=$(pwd)/infra/project.yml -e artifact_bundle=$HOME/.acleron/bundles/cuencada/latest.tar.gz --check"
+description = "Dry-run deploy on server_1 (vault + SSH, no changes, no secret-printing diff)"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowedOrigins, ConfigError, loadConfig } from "./config.js";
+import { allowedOrigins, CONFIG_ENV_KEYS, ConfigError, loadConfig } from "./config.js";
 
 const DEV_ENV = {
   NODE_ENV: "development",
@@ -145,5 +145,14 @@ describe("loadConfig", () => {
 
     expect(error).toBeInstanceOf(ConfigError);
     expect(String(error)).not.toContain(secret);
+  });
+});
+
+describe("CONFIG_ENV_KEYS", () => {
+  it("lists every key loadConfig returns, so the deploy preflight sees new keys", () => {
+    const config = loadConfig(PROD_ENV);
+    expect([...CONFIG_ENV_KEYS].sort()).toEqual(Object.keys(config).sort());
+    expect(CONFIG_ENV_KEYS).toContain("DATABASE_URL");
+    expect(CONFIG_ENV_KEYS).not.toContain("MIGRATE_DATABASE_URL");
   });
 });
