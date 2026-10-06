@@ -19,7 +19,8 @@ const ADMIN_USERS_LOCK = "cuencada:admin-users";
 export const AdminUserMessages = {
   SelfChange: "No puedes cambiar tu propio rol ni desactivar tu propia cuenta.",
   LastAdmin: "Debe quedar al menos un administrador activo.",
-  ActorNotAdmin: "Tu cuenta ya no tiene permisos de administración."
+  ActorNotAdmin: "Tu cuenta ya no tiene permisos de administración.",
+  SelfVerify: "No puedes verificar tu propio correo; usa el enlace de verificación que te enviamos."
 } as const;
 
 /** A user row plus the admin-only aggregates. */
