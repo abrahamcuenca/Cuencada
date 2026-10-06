@@ -140,8 +140,19 @@ export function makeAuditEntries(count: number): AuditLogEntry[] {
       entityId: index === 0 ? IDS.mateo : IDS.inviteBound,
       metadata:
         index === 0
-          ? { fields: ["status"], revokedSessions: 2, burnedEmailLinks: 0, note: XSS_STRING }
-          : { role: "member", sendEmail: true },
+          ? {
+              fields: ["status"],
+              revokedSessions: 2,
+              burnedEmailLinks: 0,
+              note: XSS_STRING,
+              adminAlertRecipients: 2,
+              adminAlertExempt: true,
+              adminAlertLimitNotice: true,
+              adminAlertSkipped: true
+            }
+          : index === 2
+            ? { adminAlertExempt: "true", adminAlertSkipped: 1 }
+            : { role: "member", sendEmail: true },
       ip: "203.0.113.7",
       createdAt: new Date(Date.UTC(2026, 9, 6, 18, 0) - index * 60_000).toISOString()
     })
@@ -266,7 +277,8 @@ export function adminHandlers(db: AdminDb): HttpHandler[] {
         (candidate) =>
           (q === undefined || candidate.displayName.toLowerCase().includes(q) || candidate.email.includes(q)) &&
           (query.role === undefined || candidate.role === query.role) &&
-          (query.status === undefined || candidate.status === query.status)
+          (query.status === undefined || candidate.status === query.status) &&
+          (query.emailVerified === undefined || String(candidate.emailVerified) === query.emailVerified)
       );
       return HttpResponse.json(userPage.parse(paginate(items, query)));
     }),

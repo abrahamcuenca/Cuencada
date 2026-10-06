@@ -96,7 +96,9 @@ export type AuditQueryResult = { ok: true; filter: AuditLogFilter } | { ok: fals
 
 /**
  * Turns the form values into the API filter. `desde` is the start of that day
- * and `hasta` the end of that day, both in the portal timezone.
+ * and `hasta` is sent as the start of the NEXT day, both in the portal
+ * timezone: the server treats `to` as exclusive (WP-0.8b), so the whole
+ * `hasta` day is included without a "−1 ms" end.
  *
  * @param values - Validated filter values.
  * @param timeZone - The portal timezone.
@@ -113,7 +115,7 @@ export function toAuditQuery(values: AuditFilterValues, timeZone: string): Audit
     return { ok: false, error: "La fecha «hasta» debe ser igual o posterior a «desde»." };
   }
   if (from !== null) filter.from = new Date(from).toISOString();
-  if (nextDay !== null) filter.to = new Date(nextDay - 1).toISOString();
+  if (nextDay !== null) filter.to = new Date(nextDay).toISOString();
   return { ok: true, filter };
 }
 

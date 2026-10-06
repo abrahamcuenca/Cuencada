@@ -42,6 +42,36 @@ describe("UsersPage", { timeout: 15_000 }, () => {
     expect(db.log.at(-1)).toMatchObject({ path: "/admin/users", query: { q: "lucía", role: "member", limit: "25" } });
   });
 
+  it("filters unverified emails with ?correo=sin-verificar (emailVerified=false)", async () => {
+    const user = userEvent.setup();
+    const { router } = renderApp("/admin/usuarios?correo=sin-verificar", authenticatedState(ADMIN_USER));
+
+    expect(await screen.findByRole("button", { name: /^Lucía Ramírez Soto/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Mateo Ortega Vidal/ })).not.toBeInTheDocument();
+    expect(db.log.at(-1)).toMatchObject({ path: "/admin/users", query: { emailVerified: "false" } });
+    expect(screen.getByRole("combobox", { name: "Correo" })).toHaveValue("sin-verificar");
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Correo" }), "");
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    expect(await screen.findByRole("button", { name: /^Mateo Ortega Vidal/ })).toBeInTheDocument();
+  });
+
+  it("shows the server's Spanish message for the per-account change limit (429)", async () => {
+    server.use(
+      http.patch(apiUrl("/admin/users/:id"), () =>
+        HttpResponse.json(errorBody("RATE_LIMITED", "Esta cuenta ya cambió 3 veces en la última hora. Espera un poco."), { status: 429 })
+      )
+    );
+    const user = userEvent.setup();
+    renderApp("/admin/usuarios", authenticatedState(ADMIN_USER));
+    const sheet = await openSheet(user, "Lucía Ramírez Soto");
+
+    await user.click(within(sheet).getByRole("button", { name: "Deshabilitar cuenta" }));
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Deshabilitar cuenta" }));
+
+    expect(await within(sheet).findByText("Esta cuenta ya cambió 3 veces en la última hora. Espera un poco.")).toBeInTheDocument();
+  });
+
   it("disables an account only after a confirmation that explains the consequences", async () => {
     const user = userEvent.setup();
     renderApp("/admin/usuarios", authenticatedState(ADMIN_USER));

@@ -28,8 +28,8 @@ function statCards(summary: AdminSummary): StatCard[] {
   return [
     { key: "usersActive", value: summary.usersActive, label: "Usuarios activos", to: "/admin/usuarios?estado=active" },
     { key: "usersDisabled", value: summary.usersDisabled, label: "Usuarios deshabilitados", to: "/admin/usuarios?estado=disabled" },
-    // The users list has no "unverified" filter; the rows carry a "Sin verificar" badge.
-    { key: "usersUnverified", value: summary.usersUnverified, label: "Sin verificar correo", to: "/admin/usuarios?estado=active" },
+    // `GET /admin/users?emailVerified=false` (WP-0.8b), via the users page's `?correo=` filter.
+    { key: "usersUnverified", value: summary.usersUnverified, label: "Sin verificar correo", to: "/admin/usuarios?estado=active&correo=sin-verificar" },
     { key: "invitesPending", value: summary.invitesPending, label: "Invitaciones pendientes", to: "/admin/invitaciones?estado=pending" },
     { key: "mediaPendingReview", value: summary.mediaPendingReview, label: "Fotos por revisar", to: "/admin/media?cola=pending", needsAttention: true },
     { key: "mediaReported", value: summary.mediaReported, label: "Fotos reportadas", to: "/admin/media?cola=reported", needsAttention: true }

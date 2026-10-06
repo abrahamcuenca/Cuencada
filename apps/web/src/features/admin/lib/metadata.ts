@@ -4,6 +4,42 @@
  * text node, never as HTML, so a stored `<img onerror>` stays inert text.
  */
 
+/** A badge derived from T8-BE's admin-alert audit metadata. */
+export interface AlertFlag {
+  key: "adminAlertExempt" | "adminAlertLimitNotice" | "adminAlertSkipped";
+  label: string;
+  tone: "accent" | "danger" | "festive";
+}
+
+/**
+ * Badges for the admin-alert flags T8-BE writes on admin-account changes:
+ * - `adminAlertExempt`: always announced, even past the daily cap;
+ * - `adminAlertLimitNotice`: this change sent the day's single "límite de avisos" email instead;
+ * - `adminAlertSkipped`: no alert email went out for this change.
+ * Only literal `true` counts (metadata is free-form JSON).
+ *
+ * @param metadata - An audit entry's metadata.
+ * @returns The badges to show, in a fixed order.
+ */
+export function alertFlags(metadata: Record<string, unknown>): AlertFlag[] {
+  const flags: AlertFlag[] = [];
+  if (metadata.adminAlertExempt === true) flags.push({ key: "adminAlertExempt", label: "Aviso obligatorio", tone: "festive" });
+  if (metadata.adminAlertLimitNotice === true) flags.push({ key: "adminAlertLimitNotice", label: "Límite de avisos alcanzado", tone: "accent" });
+  if (metadata.adminAlertSkipped === true) flags.push({ key: "adminAlertSkipped", label: "Aviso no enviado", tone: "danger" });
+  return flags;
+}
+
+/** Characters of an entity id shown on phones (the full id stays in `title` and on wider screens). */
+export const SHORT_ID_LENGTH = 8;
+
+/**
+ * @param id - An entity id (UUID or other short string).
+ * @returns The first {@link SHORT_ID_LENGTH} characters plus "…" when longer.
+ */
+export function shortId(id: string): string {
+  return id.length > SHORT_ID_LENGTH + 1 ? `${id.slice(0, SHORT_ID_LENGTH)}…` : id;
+}
+
 /** One metadata row. */
 export interface MetadataRow {
   key: string;
