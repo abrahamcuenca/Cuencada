@@ -30,6 +30,29 @@ globalThis.Request = class JsdomSafeRequest extends NodeRequest {
   }
 };
 
+// jsdom has no matchMedia. Provide one that never matches, so code behaves
+// exactly as with the API missing (`typeof matchMedia === "function" &&
+// … .matches` is false) while tests can still `vi.spyOn(window,
+// "matchMedia")`: Vitest 4 refuses to spy on an undefined property.
+if (typeof window.matchMedia !== "function") {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: (query: string): MediaQueryList =>
+      // A minimal, never-matching MediaQueryList; listeners are never called.
+      ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+        addListener: () => undefined,
+        removeListener: () => undefined,
+        dispatchEvent: () => false
+      }) satisfies MediaQueryList
+  });
+}
+
 // Lazy route chunks can take over a second to load on a busy CI machine; the
 // 1 s default made route-level `findBy*` queries flaky (R10, WP-T2-FE).
 configure({ asyncUtilTimeout: 5000 });
