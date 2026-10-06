@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { profiles, users } from "../../src/db/schema.js";
-import { workerDatabaseName } from "../env.js";
-import { getTestDb, resetDb } from "./db.js";
+import { currentWorkerDatabaseName, getTestDb, resetDb } from "./db.js";
 import { createUser } from "./factories.js";
 
 describe("getTestDb", () => {
-  it("connects to the current worker's cloned database", async () => {
+  it("connects to the current worker's run-scoped cloned database", async () => {
     const rows = await getTestDb().$client<{ name: string }[]>`select current_database() as name`;
 
-    expect(rows[0]?.name).toBe(workerDatabaseName());
+    expect(rows[0]?.name).toBe(currentWorkerDatabaseName());
+    expect(rows[0]?.name).toMatch(/^cuencada_test_\d{10}_[0-9a-f]{6}_\d+$/);
   });
 });
 

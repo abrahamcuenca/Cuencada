@@ -24,12 +24,31 @@ export interface PresignPutInput {
   expiresInSeconds?: number;
 }
 
+/**
+ * Constraints baked into a presigned PUT's signature. These are enforced by
+ * the storage provider, not set by the client. Browsers compute
+ * `Content-Length` themselves (it is a forbidden request header), so the
+ * declared size is enforced by signing it and sending the exact `File` body.
+ * The post-upload `head()` size check is the backstop if the provider does
+ * not enforce it.
+ */
+export interface SignedPutConstraints {
+  contentType: string;
+  contentLength: number;
+}
+
 /** A presigned upload the browser can perform without credentials. */
 export interface PresignedPut {
   url: string;
   method: "PUT";
-  /** Headers the client must send verbatim for the signature to match. */
-  headers: Record<string, string>;
+  /**
+   * Headers the client must set itself, verbatim, for the signature to match:
+   * `content-type` plus any `x-amz-*` headers (e.g. checksums). Never
+   * includes forbidden headers such as `content-length`.
+   */
+  requiredHeaders: Record<string, string>;
+  /** Server-side record of what was signed. Do not send it to the client as headers. */
+  signed: SignedPutConstraints;
   expiresAt: Date;
 }
 

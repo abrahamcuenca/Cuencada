@@ -19,6 +19,13 @@ export interface MailMessage {
   replyTo?: string;
   /** Optional provider tags for analytics, e.g. `{ category: "magic-link" }`. */
   tags?: Record<string, string>;
+  /**
+   * Optional idempotency key (Resend `Idempotency-Key`), so a retried send,
+   * such as a double-submit or a retry after a timeout, delivers at most once.
+   * Derive it from the operation, e.g. `magic-link:<magicLinkId>`, and never
+   * from the token itself.
+   */
+  idempotencyKey?: string;
 }
 
 /** Provider acknowledgement for an accepted message. */

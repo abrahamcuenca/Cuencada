@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { buildApp } from "../../src/app.js";
 import { type AppConfig, loadConfig } from "../../src/config.js";
-import { workerDatabaseUrl } from "../env.js";
+import { workerDatabaseUrl } from "./db.js";
 
 /** Overrides accepted by {@link createTestApp}. WP-0.4 adds `mailer` / `storage` fakes here. */
 export interface TestAppOverrides {
