@@ -1,0 +1,467 @@
+/*
+ * Family tree (T6). Mobile-first (375 → 320 safe), `min-width` queries only.
+ * Lines are SVG/pseudo-elements and always aria-hidden. Nothing here may push
+ * the page wider than the viewport: the sibling strip scrolls inside itself.
+ */
+.page {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+  padding-block: var(--space-6) var(--space-section);
+}
+
+.header {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.title {
+  margin: 0; /* overrides the legacy global h1 margin in styles.css */
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  line-height: var(--leading-tight);
+  letter-spacing: -0.02em;
+}
+
+/* ---------- Search ---------- */
+.search {
+  position: relative;
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.searchLabel {
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-sm);
+}
+
+.searchStatus {
+  min-height: 1.25em;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.searchStatus:empty {
+  display: none;
+}
+
+.searchResults {
+  display: grid;
+  gap: var(--space-1);
+  max-height: 20rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--space-2);
+  list-style: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
+}
+
+.searchResult {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--tap-min);
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.searchResult:hover:not(:disabled) {
+  background: var(--color-primary-soft);
+}
+
+.searchResult:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: calc(-1 * var(--focus-offset));
+}
+
+.searchResult:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.searchResultName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.searchResultNote {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+/* ---------- Breadcrumbs + expand ---------- */
+.breadcrumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+}
+
+.breadcrumbs li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.crumb {
+  min-height: var(--tap-min);
+  max-width: 12rem;
+  padding: 0 var(--space-1);
+  overflow: hidden;
+  border: 0;
+  background: none;
+  color: var(--color-primary);
+  font: inherit;
+  font-weight: var(--weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.crumbSep {
+  color: var(--color-text-muted);
+}
+
+.crumbCurrent {
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.expand {
+  justify-self: center;
+}
+
+/* ---------- Tree ---------- */
+.tree {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* Re-centre transition. JS adds `.reducedMotion` instead when the OS asks
+ * for less motion; the media query is a second guard. */
+.animated {
+  animation: recentre var(--duration-slow) var(--ease-out) both;
+}
+
+.reducedMotion {
+  animation: none;
+}
+
+@keyframes recentre {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animated {
+    animation: none;
+  }
+}
+
+.band {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: center;
+  width: 100%;
+  max-width: calc(var(--band-columns, 1) * 11rem);
+  min-width: 0;
+  margin-inline: auto;
+}
+
+.bandTitle {
+  margin: 0;
+  justify-self: start;
+  color: var(--color-text-muted);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-kicker);
+  text-transform: uppercase;
+}
+
+.band > .bandTitle {
+  justify-self: center;
+}
+
+.count {
+  font-weight: var(--weight-regular);
+}
+
+.bandList {
+  display: grid;
+  grid-template-columns: repeat(var(--band-columns, 1), minmax(0, 1fr));
+  gap: var(--space-2);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.extendedBand {
+  opacity: 0.92;
+}
+
+.empty {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.connector {
+  display: block;
+  width: 100%;
+  height: 24px;
+  overflow: visible;
+  fill: none;
+  stroke: var(--color-border-strong);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+/* One relative: a 44px+ button, avatar over the name. */
+.person {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: var(--space-1);
+  width: 100%;
+  min-width: 0;
+  min-height: var(--tap-min);
+  padding: var(--space-2) var(--space-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.person:hover {
+  background: var(--color-primary-soft);
+}
+
+.person:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+.personName {
+  max-width: 100%;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-snug);
+  overflow-wrap: anywhere;
+}
+
+.personMeta {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.dagger {
+  color: var(--color-text-muted);
+  font-weight: var(--weight-regular);
+}
+
+/* ---------- Focus ---------- */
+.focusRow {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.focus {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  max-width: 24rem;
+  margin-inline: auto;
+  padding: var(--space-5) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
+  text-align: center;
+}
+
+.focusName {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  line-height: var(--leading-tight);
+  overflow-wrap: anywhere;
+}
+
+.focusName:focus {
+  outline: none;
+}
+
+.focusName:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+.focusNickname {
+  color: var(--color-text-muted);
+}
+
+.focusMeta {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.focusActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+/* Partners: under the card on phones, joined by a short dashed line. */
+.partners {
+  position: relative;
+  padding-top: var(--space-3);
+}
+
+.partners::before {
+  content: "";
+  position: absolute;
+  top: calc(-1 * var(--space-4));
+  left: 50%;
+  height: calc(var(--space-4) + var(--space-2));
+  border-left: 2px dashed var(--color-border-strong);
+}
+
+/* ---------- Siblings strip ---------- */
+.siblings {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.strip {
+  display: flex;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0 0 var(--space-2);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  list-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.strip > li {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+}
+
+.stripPerson {
+  width: 6.5rem;
+}
+
+/* ---------- Forms (self-edit, admin) ---------- */
+.form {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.formError {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  font-weight: var(--weight-semibold);
+}
+
+.formActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+@media (min-width: 600px) {
+  .stripPerson {
+    width: 8rem;
+  }
+}
+
+@media (min-width: 900px) {
+  .header {
+    grid-template-columns: minmax(0, 1fr) minmax(16rem, 24rem);
+    align-items: start;
+  }
+
+  .headerSearch {
+    position: relative;
+  }
+
+  /* Partner beside the focus card: card in the middle column. */
+  .focusRow {
+    grid-template-columns: minmax(0, 1fr) minmax(18rem, 24rem) minmax(0, 1fr);
+    align-items: center;
+  }
+
+  .focusRow > .focus {
+    grid-column: 2;
+  }
+
+  .partners {
+    grid-column: 3;
+    justify-self: start;
+    max-width: 14rem;
+    margin-inline: 0;
+    padding-top: 0;
+    padding-left: var(--space-6);
+  }
+
+  .partners::before {
+    top: 50%;
+    left: calc(-1 * var(--space-4));
+    width: calc(var(--space-4) + var(--space-5));
+    height: 0;
+    border-left: 0;
+    border-top: 2px dashed var(--color-border-strong);
+  }
+
+  .partners > .bandList {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
