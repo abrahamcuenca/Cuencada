@@ -1,7 +1,7 @@
 /**
  * Own-profile routes: `GET`/`PATCH /api/profile/me`.
  */
-import { ownProfileSchema, updateProfileInputSchema } from "@cuencada/types";
+import { AuditAction, ownProfileSchema, updateProfileInputSchema } from "@cuencada/types";
 import { eq } from "drizzle-orm";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { profiles, users } from "../../db/schema/index.js";
@@ -12,7 +12,7 @@ import { loadOwnProfile, splitProfilePatch, toOwnProfile } from "./service.js";
 import { rateLimitByUser, t5ErrorResponses } from "./shared.js";
 
 /** Audit action for a profile edit (metadata: changed field names only). */
-export const PROFILE_UPDATED_ACTION = "profile.updated";
+export const PROFILE_UPDATED_ACTION = AuditAction.ProfileUpdated;
 
 /** Own-profile routes under `/api`. */
 const profileRoutes: FastifyPluginAsyncZod = async (app) => {

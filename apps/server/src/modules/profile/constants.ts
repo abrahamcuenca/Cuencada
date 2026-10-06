@@ -37,8 +37,15 @@ export const AvatarSize = {
 } as const;
 export type AvatarSize = (typeof AvatarSize)[keyof typeof AvatarSize];
 
-/** Decompression-bomb guard for sharp (width × height). */
-export const AVATAR_MAX_INPUT_PIXELS = 50_000_000;
+/**
+ * Decompression-bomb guard for sharp (width × height): ~24 MP covers any
+ * phone camera (a 24 MP shot is 6000 × 4000) while halving the worst-case
+ * decode of the generic 50 MP media limit.
+ */
+export const AVATAR_MAX_INPUT_PIXELS = 24_000_000;
+
+/** Avatars decoded at once in this process (sharp is CPU and memory heavy). */
+export const AVATAR_PROCESSING_CONCURRENCY = 2;
 
 /** WebP quality of the derivatives. */
 export const AVATAR_WEBP_QUALITY = 82;

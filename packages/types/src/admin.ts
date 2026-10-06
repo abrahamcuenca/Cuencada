@@ -59,6 +59,14 @@ export const AuditAction = {
   MagicLinkRequested: "auth.magic_link_requested",
   EmailVerificationRequested: "auth.email_verification_requested",
   EmailVerified: "auth.email_verified",
+  /** T5: a member edited their own profile (metadata: changed field names only). */
+  ProfileUpdated: "profile.updated",
+  /** T5: a confirmed avatar upload replaced the member's avatar. */
+  ProfileAvatarUpdated: "profile.avatar_updated",
+  /** T5: the member removed their avatar. */
+  ProfileAvatarRemoved: "profile.avatar_removed",
+  /** T5: an avatar upload was refused at confirm (`metadata.reason`). */
+  ProfileAvatarRejected: "profile.avatar_rejected",
   InviteCreated: "invite.created",
   InviteRevoked: "invite.revoked",
   /** A new token was issued and emailed. */
