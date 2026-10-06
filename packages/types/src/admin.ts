@@ -34,7 +34,13 @@ export const auditEntityTypeSchema = z.enum(AuditEntityType);
 export const AuditAction = {
   UserUpdated: "user.updated",
   UserDisabled: "user.disabled",
+  /** T8: an admin re-enabled a disabled account. */
+  UserEnabled: "user.enabled",
   UserSessionsRevoked: "user.sessions_revoked",
+  /** T8: an admin forced a password change (sessions revoked, reset email queued). */
+  UserPasswordResetForced: "user.password_reset_forced",
+  /** T8: an admin marked the account's email as verified by hand. */
+  UserEmailVerifiedByAdmin: "user.email_verified_by_admin",
   RefreshReuseDetected: "auth.refresh_reuse_detected",
   /** A used refresh token was presented again inside the grace window (409, nothing revoked). */
   RefreshRace: "auth.refresh_race",
@@ -166,6 +172,79 @@ export const adminUserPatchInputSchema = z
   .refine((value) => Object.keys(value).length > 0, { error: "No hay cambios que guardar." });
 export type AdminUserPatchInput = z.infer<typeof adminUserPatchInputSchema>;
 export type AdminUserPatchRequest = z.input<typeof adminUserPatchInputSchema>;
+
+/**
+ * `POST /api/admin/users/:id/force-password-reset` (T8 amendment). Sets
+ * `mustChangePassword`, revokes every session, burns pending email tokens and
+ * queues a password-reset email (subject to the email budgets).
+ */
+export interface AdminForcePasswordResetResult {
+  user: AdminUserListItem;
+  /** `false` when the account is disabled or an email budget/cap skipped the send. */
+  emailQueued: boolean;
+}
+
+export const adminForcePasswordResetResultSchema = z.object({
+  user: adminUserListItemSchema,
+  emailQueued: z.boolean()
+}) satisfies z.ZodType<AdminForcePasswordResetResult>;
+
+/* -------------------------------------------------------------------------- */
+/* Dashboard summary                                                           */
+/* -------------------------------------------------------------------------- */
+
+/** RSVP counts of the next (or current) published edition. */
+export interface AdminSummaryEdition {
+  cuencadaId: string;
+  year: number;
+  title: string;
+  startsAt: string;
+  rsvpYes: number;
+  rsvpMaybe: number;
+  rsvpNo: number;
+  /** Extra guests on `yes` RSVPs. */
+  rsvpGuests: number;
+}
+
+/** `GET /api/admin/summary` (T8 amendment): dashboard counters, computed in SQL. */
+export interface AdminSummary {
+  usersActive: number;
+  usersDisabled: number;
+  /** Active accounts without a verified email. */
+  usersUnverified: number;
+  activeAdmins: number;
+  /** Pending, unexpired invites. */
+  invitesPending: number;
+  mediaPendingReview: number;
+  /** Live media with a report newer than its last moderation. */
+  mediaReported: number;
+  /** Earliest published edition that has not ended, or `null`. */
+  upcomingEdition: AdminSummaryEdition | null;
+}
+
+const countSchema = z.number().int().min(0);
+
+export const adminSummaryEditionSchema = z.object({
+  cuencadaId: idSchema,
+  year: z.number().int(),
+  title: z.string().max(200),
+  startsAt: dateTimeSchema,
+  rsvpYes: countSchema,
+  rsvpMaybe: countSchema,
+  rsvpNo: countSchema,
+  rsvpGuests: countSchema
+}) satisfies z.ZodType<AdminSummaryEdition>;
+
+export const adminSummarySchema = z.object({
+  usersActive: countSchema,
+  usersDisabled: countSchema,
+  usersUnverified: countSchema,
+  activeAdmins: countSchema,
+  invitesPending: countSchema,
+  mediaPendingReview: countSchema,
+  mediaReported: countSchema,
+  upcomingEdition: adminSummaryEditionSchema.nullable()
+}) satisfies z.ZodType<AdminSummary>;
 
 /* -------------------------------------------------------------------------- */
 /* Audit log                                                                   */
