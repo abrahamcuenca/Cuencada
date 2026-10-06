@@ -28,6 +28,8 @@ export const profiles = pgTable(
     showEmail: boolean("show_email").notNull().default(false),
     showPhone: boolean("show_phone").notNull().default(false),
     showCity: boolean("show_city").notNull().default(false),
+    /** "Aparecer en el directorio": `false` hides the member from directory and attendee lists. */
+    listedInDirectory: boolean("listed_in_directory").notNull().default(true),
     createdAt: createdAt(),
     updatedAt: updatedAt()
   },

@@ -12,6 +12,7 @@ import {
   reorderInputSchema,
   updateAnnouncementInputSchema,
   updateCuencadaInputSchema,
+  updateItineraryItemInputSchema,
   updateLocationInputSchema
 } from "./cuencadas.js";
 
@@ -125,6 +126,36 @@ describe("createItineraryItemInputSchema", () => {
 
   it("rejects 12h time strings", () => {
     expect(createItineraryItemInputSchema.safeParse({ date: "2028-07-01", title: "Cena", startTime: "7:30 PM" }).success).toBe(false);
+  });
+
+  it("defaults tags to an empty list when omitted", () => {
+    expect(createItineraryItemInputSchema.parse({ date: "2028-07-01", title: "Cena" }).tags).toEqual([]);
+  });
+
+  it("trims tags and accepts up to 6 tags of up to 24 chars", () => {
+    const tags = ["  Incluye comida ", "x".repeat(24), "c", "d", "e", "f"];
+    expect(createItineraryItemInputSchema.parse({ date: "2028-07-01", title: "Cena", tags }).tags).toEqual([
+      "Incluye comida",
+      "x".repeat(24),
+      "c",
+      "d",
+      "e",
+      "f"
+    ]);
+  });
+
+  it("rejects a 7th tag, a 25-char tag and a blank tag", () => {
+    const base = { date: "2028-07-01", title: "Cena" };
+    expect(createItineraryItemInputSchema.safeParse({ ...base, tags: ["a", "b", "c", "d", "e", "f", "g"] }).success).toBe(false);
+    expect(createItineraryItemInputSchema.safeParse({ ...base, tags: ["x".repeat(25)] }).success).toBe(false);
+    expect(createItineraryItemInputSchema.safeParse({ ...base, tags: ["   "] }).success).toBe(false);
+  });
+});
+
+describe("updateItineraryItemInputSchema", () => {
+  it("accepts a tags-only patch and leaves tags absent when not sent", () => {
+    expect(updateItineraryItemInputSchema.parse({ tags: ["Familia"] })).toEqual({ tags: ["Familia"] });
+    expect(updateItineraryItemInputSchema.parse({ title: "Cena" })).not.toHaveProperty("tags");
   });
 });
 

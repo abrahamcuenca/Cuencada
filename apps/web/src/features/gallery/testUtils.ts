@@ -14,7 +14,11 @@ export function uuid(n: number): string {
 
 /** A ready, approved photo. */
 export function makeMedia(n: number, overrides: Partial<MediaItem> = {}): MediaItem {
+  // Like the server: the uploader may manage their item (admins get the flags via overrides).
+  const ownsItem = overrides.isMine ?? false;
   return {
+    canEdit: ownsItem,
+    canDelete: ownsItem,
     id: uuid(n),
     cuencadaId: uuid(9000),
     year: 2026,
@@ -178,7 +182,7 @@ export function galleryHandlers(db: FakeGalleryDb): HttpHandler[] {
         {
           mediaId,
           uploadUrl: db.uploadUrl,
-          headers: { "Content-Type": body.mimeType, "Content-Length": String(body.byteSize) },
+          headers: { "Content-Type": body.mimeType },
           expiresAt: new Date(Date.now() + 3_600_000).toISOString()
         },
         { status: 201 }

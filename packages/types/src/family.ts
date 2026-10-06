@@ -103,10 +103,18 @@ export const familyTreeViewSchema = z.object({
   })
 }) satisfies z.ZodType<FamilyTreeView>;
 
-/** `GET /api/family/tree` query. Without `personId` the caller's own person is the focus. */
+/**
+ * `GET /api/family/tree` query. Without `personId` the caller's own person is the focus.
+ * `depth` above {@link FAMILY_TREE_MAX_DEPTH} is clamped to it (T6 amendment), not rejected.
+ */
 export const familyTreeQuerySchema = z.object({
   personId: idSchema.exactOptional(),
-  depth: z.coerce.number<number | string>().int().min(1).max(FAMILY_TREE_MAX_DEPTH).default(1)
+  depth: z.coerce
+    .number<number | string>()
+    .int()
+    .min(1)
+    .default(1)
+    .transform((value) => Math.min(value, FAMILY_TREE_MAX_DEPTH))
 });
 export type FamilyTreeQuery = z.infer<typeof familyTreeQuerySchema>;
 export type FamilyTreeQueryRequest = z.input<typeof familyTreeQuerySchema>;
@@ -184,7 +192,7 @@ export type CreateRelationshipInput = z.infer<typeof createRelationshipInputSche
 export type CreateRelationshipRequest = z.input<typeof createRelationshipInputSchema>;
 
 /**
- * `PATCH /api/family/me`: a member edits limited fields of their *own* linked
+ * `PATCH /api/family/me` (alias `PATCH /api/family/people/me`): a member edits limited fields of their *own* linked
  * person. Relationships remain admin-only.
  */
 export const selfEditPersonInputSchema = z
