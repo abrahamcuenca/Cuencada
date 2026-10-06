@@ -77,7 +77,8 @@ describe("AppLayout", () => {
         HttpResponse.json({ mode: "upcoming", featured: makePublicCuencada({ year: 2027, status: "upcoming" }), latestPast: null, announcements: [] })
       )
     );
-    renderApp("/chat", statusState("anonymous"));
+    // Logged in: /chat for an anonymous visitor redirects to /entrar, which has no BottomNav (minimal chrome).
+    renderApp("/chat", authenticatedState());
 
     const bottom = await screen.findByRole("navigation", { name: "Navegación inferior" });
     await waitFor(() => expect(within(bottom).getByRole("link", { name: /Programa/ })).toHaveAttribute("href", "/cuencada/2027"));

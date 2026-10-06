@@ -10,6 +10,7 @@ import {
 import { logout } from "../features/auth/session";
 import { useGetCuencadaHomeQuery } from "../features/cuencadas/api";
 import { wantsMinimalChrome } from "../shared/lib/featureRoutes";
+import { reportUnexpected } from "../shared/lib/reportUnexpected";
 // Direct imports (not the shared/ui barrel) keep unused primitives' CSS out of the initial chunk.
 import { BottomNav } from "../shared/ui/BottomNav";
 import { Button } from "../shared/ui/Button";
@@ -30,10 +31,23 @@ export const LOGOUT_PENDING_NOTICE =
 /** Shown while a refresh cannot reach the server. */
 export const OFFLINE_NOTICE = "Sin conexión. Reintentaremos al volver la conexión.";
 
+/** Renders nothing: what the banner becomes when its chunk cannot load. */
+function NoBanner(): ReactNode {
+  return null;
+}
+
 // Lazy: only unverified users ever download it (keeps authApi out of the initial chunk).
-const VerifyEmailBanner = lazy(async () => ({
-  default: (await import("../features/auth/components/VerifyEmailBanner")).VerifyEmailBanner
-}));
+// Fails soft: a chunk that cannot load (offline, stale tab after a deploy) renders
+// nothing instead of reaching the layout's error boundary and taking down the shell.
+const VerifyEmailBanner = lazy(() =>
+  import("../features/auth/components/VerifyEmailBanner").then(
+    (module) => ({ default: module.VerifyEmailBanner }),
+    (error: unknown) => {
+      reportUnexpected(error);
+      return { default: NoBanner };
+    }
+  )
+);
 
 /**
  * Mobile tab bar destinations (Inicio, Programa, Fotos, Chat, Más).
@@ -86,8 +100,11 @@ function Brand(): ReactNode {
 function SessionAction(): ReactNode {
   const dispatch = useAppDispatch();
   const user = useAppSelector(selectCurrentUser);
+  const { pathname } = useLocation();
 
   if (user === null) {
+    // Already on the login screens: an "Entrar" button there is noise.
+    if (pathname === "/entrar" || pathname.startsWith("/entrar/")) return null;
     return (
       <Button to="/entrar" size="sm">
         Entrar

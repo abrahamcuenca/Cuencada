@@ -1,13 +1,13 @@
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { apiUrl, authenticatedState, makeUser, statusState } from "../../test/auth";
 import { renderApp } from "../../test/renderApp";
 import { cancelOnlineLogoutRetry } from "../features/auth/session";
+import { createTestServer } from "../../test/msw";
 
-const server = setupServer(http.post(apiUrl("/auth/logout"), () => new HttpResponse(null, { status: 204 })));
+const server = createTestServer(http.post(apiUrl("/auth/logout"), () => new HttpResponse(null, { status: 204 })));
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
