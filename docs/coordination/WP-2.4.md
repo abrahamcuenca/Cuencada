@@ -177,16 +177,24 @@ What this means here:
     secret.
 - **D13. Postgres 18 runs on a separate server, reached over the VPC
   (owner).**
-  - The runtime `DATABASE_URL` points at `<DB_VPC_HOST>:5432`, with
-    `?sslmode=require`.
+  - The runtime `DATABASE_URL` points at the DB's VPC address on port 5432
+    (by name, see below).
   - **The address isn't committed** (the repo is public); it lives only in the
     vault URL.
   - **`pg_hba`:** `hostssl cuencada cuencada_app <server_1 VPC IP>/32 scram-sha-256`
     and `host cuencada cuencada_owner 127.0.0.1/32 scram-sha-256`. The owner
     tunnel lands on the DB server's loopback, so the owner role can't be
     tried from `server_1` at all.
-  - TLS on the VPC is recommended. `verify-full` works with
-    `NODE_EXTRA_CA_CERTS`, which the preflight now allows in `server.env`.
+  - **TLS on the VPC: `sslmode=verify-full` is the default** (Security
+    review, info).
+    - It needs a VPC host name for the DB on `server_1`, for example
+      `db.cuencada.internal` in `/etc/hosts`. postgres.js only sends a TLS
+      server name for a host name, so a bare IP isn't verified by name.
+    - It needs a DB certificate whose SAN includes that name, issued by a
+      private CA.
+    - It needs `NODE_EXTRA_CA_CERTS` in `server.env`, which the preflight
+      allows.
+    - `sslmode=require` (encryption only) is the documented fallback.
 - **D14. Migrations stay on the operator's machine through the tunnel, not on
   `server_1`.** That is simpler (it is the path Acleron bundle mode already
   takes) and safer:
@@ -249,7 +257,9 @@ The `acleron-platform` repo was checked out at
 - **How the branch was made:** the work happened in a scratch clone, then the
   branch was fetched into the owner's checkout. Only a new ref was added:
   their working tree and `main` are untouched.
-- **Branch:** `cuencada-nginx-credentials`, commit **`03f8049`**. Not pushed.
+- **Branch:** `cuencada-nginx-credentials`, commits **`03f8049`**, **`1023ab9`**
+  (the review follow-ups P-L1–P-L3) and **`46d71eb`** (the systemd ≥ 247
+  assert). Not pushed.
 - **Files:**
   - `ansible/roles/nginx/tasks/{main.yml,site_source.yml}`
   - `ansible/roles/app_node/tasks/main.yml`
@@ -258,7 +268,7 @@ The `acleron-platform` repo was checked out at
   - `tests/run-tests.sh` (+7 tests)
   - `tests/resolve-nginx-site.yml`
   - three fixtures
-- **Tests:** `bash tests/run-tests.sh` passes 54/54.
+- **Tests:** `bash tests/run-tests.sh` passes 66/66.
 - **Lint:** `ansible-lint` adds no new rule categories. The FQCN/short-name
   style matches the existing roles, and the new registered variables use the
   role prefix.
@@ -271,7 +281,7 @@ The `acleron-platform` repo was checked out at
 |---|---|
 | `deploy-preflight` (strict): env and credentials completeness against `config.ts`, secrets only as vault refs under `server.credentials`, forbidden vars, production `loadConfig()`, `build_env` against the bucket, the migrate/seed contract, nginx against `csp.md`, XFF/CF, log format, WS timeout, platform `site_template` + `LoadCredential=` support | Review, merge and push the Acleron branch `cuencada-nginx-credentials` |
 | `deploy-check`: the same preflight (a missing platform only warns), production build, `check:sw`, bundle size | Bucket name; create the bucket with a short-lived admin key (ACL, CORS, lifecycle), then delete that key; run `check-presigned-put.mjs` with the runtime key |
-| `build-bundle`: verify, build, migrate (owner role through the tunnel), pack | Vault values (list in runbook step 1.4) |
+| `build-bundle`: verify, build, migrate (owner role through the tunnel), pack | Vault values (list in runbook step 1.5) |
 | Ansible deploy: install, swap, credentials files, systemd, certbot, nginx | DB roles on the PG18 server (`\password`), `pg_hba`, TLS, firewall |
 | `verify-roles.sh` (local proof: roles, SCRAM, grants, API via `CREDENTIALS_DIRECTORY`) | Rotate the WhatsApp and OneDrive links; the one-time seed |
 | `deploy-smoke.mjs` (post-deploy checks, including the WS through nginx) | Resend DNS and domain verification; a mailbox for `admin@cuencada.com` |

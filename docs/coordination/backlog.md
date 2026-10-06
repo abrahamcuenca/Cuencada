@@ -137,7 +137,7 @@ WP-2.4 prepared every item below; **the owner applies them** following
 [`docs/deploy/runbook.md`](../deploy/runbook.md). [x] = done in the repo,
 [ ] = owner action (or a later WP) still to do.
 
-- [x] **Platform:** Acleron `nginx.site_template` + `server.credentials` (LoadCredential=, Security M1), on branch `cuencada-nginx-credentials` (commit `03f8049`) in the local `acleron-platform` checkout; tests 54/54. [ ] Owner reviews it, merges it and pushes it. `deploy-preflight` blocks on a platform without it.
+- [x] **Platform:** Acleron `nginx.site_template` + `server.credentials` (LoadCredential=, Security M1), on branch `cuencada-nginx-credentials` (commits `03f8049`, `1023ab9`, `46d71eb`: project sites copied verbatim, rejected nginx sites rolled back, stale credstores removed, systemd ≥ 247 asserted) in the local `acleron-platform` checkout; tests 66/66. [ ] Owner reviews it, merges it and pushes it. `deploy-preflight` blocks on a platform without it.
 - [ ] **Bucket name:** replace `<bucket>` in `infra/project.yml` (2 lines) and `infra/nginx/cuencada.conf` (3 CSP lines).
 - [ ] Reset the WhatsApp group invite link and the OneDrive share links; new values only in the vault (`vault_cuencada_seed_*_url`) or the admin UI. [x] The legacy links are gone from `seed-data.ts` (dev uses example.com placeholders).
 - [x] The production seed refuses to run unless **all** `SEED_*_URL` are set (links only reach the edition row on first insert). [ ] Owner runs the seed once, manually, over the tunnel, after the first migration (runbook § 6).

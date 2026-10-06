@@ -56,7 +56,7 @@ unset VAR
 | **Breached-password check** on set, change and reset (WP-2.3 L5, ASVS 2.1.7) | **In progress in a separate WP.** Launch waits for it | that WP |
 | Threat model updated for #35/#36 and WP-2.4 | Done in WP-2.4 | — |
 | WP-2.3 open findings: L1 (zod `jitless`, web), L4 (CI image digest) | Low. Not blocking, backlog | — |
-| **Acleron platform:** `nginx.site_template` and `server.credentials`, on branch `cuencada-nginx-credentials` in the local `acleron-platform` checkout (commit `03f8049`) | Written and tested (54/54). **O reviews it, merges or checks it out, and pushes it** | O |
+| **Acleron platform:** `nginx.site_template` and `server.credentials`, on branch `cuencada-nginx-credentials` in the local `acleron-platform` checkout (head `46d71eb`) | Written and tested (66/66); Security and TL approved. **O reviews it, merges or checks it out, and pushes it** | O |
 | Bucket name filled in (`<bucket>` in `infra/project.yml`: 2 lines; `infra/nginx/cuencada.conf`: 3 CSP lines) | **Open** | O gives the name; A edits it in a PR |
 | `server_1` resized to 2 GB | **Open** (owner decision) | O |
 | Video cap 150 MB (it can return to 300 MB after the resize; see the runtime notes) | Done in WP-2.4 | — |
@@ -83,46 +83,51 @@ unset VAR
    - Point `ACLERON_PLATFORM_DIR` at the platform if it isn't at
      `../acleron-platform/acleron-platform`. That checkout must be on
      `cuencada-nginx-credentials`, or on `main` after the merge.
-2. **O:** port check. Read-only. 3104 was free on 2026-10-06.
+2. **O:** systemd version on `server_1`, read-only: `ssh server_1 systemctl --version | head -1`.
+   It must be **≥ 247** for `LoadCredential=`. Ubuntu 22.04 ships 249 and
+   24.04 ships 255. The platform also asserts it at deploy time whenever
+   `server.credentials` is used; with an older systemd the API would start
+   without its secrets.
+3. **O:** port check. Read-only. 3104 was free on 2026-10-06.
    ```sh
    cd ../acleron-platform/acleron-platform && ansible-playbook -i ansible/inventory.ini \
      ansible/playbooks/ports.yml -e vps=server_1 -e range_start=3100 -e range_end=3199
    ```
-3. **O: resize `server_1` to 2 GB** in the Linode console (it needs a reboot
+4. **O: resize `server_1` to 2 GB** in the Linode console (it needs a reboot
    of the Linode). Then run `free -m`.
    - On 2026-10-06 it had 961 MB in total, with nine other Node services.
    - The drop-in's `MemoryHigh=700M`/`MemoryMax=900M` assumes 2 GB.
    - **Don't install the drop-in on the 1 GB plan.**
    - Record the new `total` and `available` in WP-2.4.md.
-4. **O:** vault values in `~/.acleron/vault-server_1.yml` (`ansible-vault edit`).
+5. **O:** vault values in `~/.acleron/vault-server_1.yml` (`ansible-vault edit`).
    - Generate every secret as hex: `openssl rand -hex 32`.
    - The five VPS secrets go to `server.credentials`, so they become root-only
      files. They never become `Environment=` lines.
 
    | Vault key | Used by | Value |
    |---|---|---|
-   | `vault_cuencada_database_url` | VPS credential `DATABASE_URL` | `postgresql://cuencada_app:<app pw>@<DB_VPC_HOST>:5432/cuencada?sslmode=require`: the **runtime** role over the VPC (§ 3) |
+   | `vault_cuencada_database_url` | VPS credential `DATABASE_URL` | `postgresql://cuencada_app:<app pw>@db.cuencada.internal:5432/cuencada?sslmode=verify-full`: the **runtime** role over the VPC, with the server certificate verified (§ 3; fallback `@<DB_VPC_HOST>…?sslmode=require`) |
    | `vault_cuencada_jwt_secret` | VPS credential | `openssl rand -hex 48` (at least 32 chars) |
    | `vault_cuencada_resend_api_key` | VPS credential | Resend API key: **sending access, cuencada.com domain only** |
    | `vault_cuencada_s3_access_key_id` / `vault_cuencada_s3_secret_access_key` | VPS credentials | Linode **limited** key: read/write on this bucket only (§ Bucket) |
    | `vault_cuencada_migrate_database_url` | operator only | `postgresql://cuencada_owner:<owner pw>@127.0.0.1:${TUNNEL_PORT}/cuencada`: the **owner** role through the tunnel |
    | `vault_cuencada_seed_admin_temp_password` | operator only | at least 16 chars, passes the password policy |
-   | `vault_cuencada_seed_whatsapp_url`, `…_external_album_url`, `…_lyrics_url`, `…_program_url` | operator only | the **new** links from step 2 |
+   | `vault_cuencada_seed_whatsapp_url`, `…_external_album_url`, `…_lyrics_url`, `…_program_url` | operator only | the **new** links from § 2 |
 
    `mise run deploy-preflight` prints the list of keys `infra/project.yml`
    references. It never reads the values.
-5. **O:** DNS.
+6. **O:** DNS.
    - `cuencada.com` and `www.cuencada.com` A records point at `server_1`.
      Both already did on 2026-10-06.
    - No AAAA record: nginx doesn't listen on IPv6.
    - The first deploy issues the Let's Encrypt certificate (HTTP-01 on
      port 80). Until then, `https://cuencada.com` shows `acleron.com`'s
      certificate.
-6. **O:** Resend domain verified (§ Resend DNS). The status is "Verified" for
+7. **O:** Resend domain verified (§ Resend DNS). The status is "Verified" for
    SPF and DKIM.
-7. **O:** bucket created, private, with CORS and lifecycle applied, and the
+8. **O:** bucket created, private, with CORS and lifecycle applied, and the
    real-bucket check passing (§ Bucket).
-8. **O:** DB roles, `pg_hba` and TLS done (§ 3), and the tunnel works:
+9. **O:** DB roles, `pg_hba` and TLS done (§ 3), and the tunnel works:
    ```sh
    ssh -N -L ${TUNNEL_PORT}:127.0.0.1:5432 <db server> &   # see § 3 for the alternative through server_1
    pg_isready -h 127.0.0.1 -p ${TUNNEL_PORT}
@@ -199,12 +204,25 @@ host      cuencada  cuencada_owner  127.0.0.1/32               scram-sha-256
 
 - **`cuencada_app`** is accepted only from `server_1`'s VPC address, over
   TLS. Use `host` instead of `hostssl` only if the DB has no TLS.
-  - With TLS, end the URL with `?sslmode=require`. That encrypts the
-    connection but doesn't authenticate the server, which is acceptable
-    inside the private VPC.
-  - For full verification, use `?sslmode=verify-full` and add
-    `NODE_EXTRA_CA_CERTS: /etc/ssl/certs/<db-ca>.pem` to `server.env`
-    (allowed by the preflight).
+  - **Default: `?sslmode=verify-full`.** It encrypts the connection *and*
+    authenticates the DB server. Three things are needed:
+    1. **A host name, not the bare IP.** postgres.js only sends a TLS server
+       name for a host name, and Node then checks the certificate against
+       it. So give the DB a VPC name on `server_1`, for example an
+       `/etc/hosts` line `<DB_VPC_HOST>  db.cuencada.internal`, and use
+       `@db.cuencada.internal:5432` in the URL.
+    2. **A DB certificate** whose SAN includes that name, issued by a private
+       CA. A self-signed certificate also works when it is its own CA.
+    3. **That CA's public certificate** on `server_1`, for example
+       `/etc/ssl/certs/cuencada-db-ca.pem`, referenced from `server.env` as
+       `NODE_EXTRA_CA_CERTS: /etc/ssl/certs/cuencada-db-ca.pem`. The preflight
+       allows it. It's a path, not a secret.
+  - **Fallback: `?sslmode=require`**, only if the certificate can't carry a
+    usable name. It still encrypts, but doesn't authenticate the server.
+    Inside the private VPC that is acceptable, not ideal. Record which one
+    you chose in WP-2.4.md.
+  - Neither mode was tested against the real DB (no prod access in WP-2.4).
+    The first `/health/ready` after the deploy proves it.
 - **`cuencada_owner`** is accepted only from the DB server's own loopback,
   which is where a tunnel lands with
   `ssh -N -L ${TUNNEL_PORT}:127.0.0.1:5432 <db server>`. The owner role is
@@ -213,9 +231,20 @@ host      cuencada  cuencada_owner  127.0.0.1/32               scram-sha-256
     the owner line must allow `<server_1 VPC IP>/32` instead. That is weaker:
     a compromised `server_1` could then try the owner password. Prefer the
     direct tunnel.
-- Reload with `sudo systemctl reload postgresql`, then test from `server_1`:
-  `PGPASSWORD=… psql "postgresql://cuencada_app@<DB_VPC_HOST>/cuencada?sslmode=require" -c 'select 1'`.
-  Paste the password with `read -rs`.
+- Reload with `sudo systemctl reload postgresql`, then test from `server_1`.
+  The password is pasted with `read -rs` and lives only in a temporary 0600
+  `.pgpass` that is removed on exit. It never appears on a command line or in
+  `ps`.
+  ```sh
+  umask 077; PGPASSFILE="$(mktemp)"; export PGPASSFILE; trap 'rm -f "$PGPASSFILE"' EXIT
+  read -rsp 'cuencada_app password: ' PW; echo
+  printf 'db.cuencada.internal:5432:cuencada:cuencada_app:%s\n' "$PW" > "$PGPASSFILE"; unset PW
+  PGSSLROOTCERT=/etc/ssl/certs/cuencada-db-ca.pem \
+    psql "postgresql://cuencada_app@db.cuencada.internal:5432/cuencada?sslmode=verify-full" -c 'select 1'
+  rm -f "$PGPASSFILE"; unset PGPASSFILE; trap - EXIT
+  ```
+  With the `require` fallback, use `<DB_VPC_HOST>` and `sslmode=require` in
+  both the `.pgpass` line and the URL, and drop `PGSSLROOTCERT`.
 
 **Proof:** [`infra/db/verify-roles.sh`](../../infra/db/verify-roles.sh) runs
 the whole cycle on the disposable podman Postgres (see WP-2.4.md):
@@ -313,8 +342,10 @@ ssh server_1 'journalctl -u cuencada-server -n 50 --no-pager'
 
 If `/health/ready` reports `db:false`, check, in order:
 
-1. the `vault_cuencada_database_url` value: host `<DB_VPC_HOST>`, and
-   `sslmode` matching `hostssl`/`host`;
+1. the `vault_cuencada_database_url` value: the host (`db.cuencada.internal`
+   in `/etc/hosts`, or `<DB_VPC_HOST>`), `sslmode` matching `hostssl`/`host`,
+   and, for `verify-full`, `NODE_EXTRA_CA_CERTS` plus a certificate SAN that
+   matches the host;
 2. `pg_hba.conf` (`server_1`'s VPC IP);
 3. the DB server's firewall on 5432, open to that IP only;
 4. the role grants (`\dp` as the owner).

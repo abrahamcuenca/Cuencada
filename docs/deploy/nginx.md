@@ -30,7 +30,7 @@ close as the stock template can get. It still breaks chat.
 
 The owner approved patching Acleron. The change sits on branch
 **`cuencada-nginx-credentials`** of the local `acleron-platform` checkout,
-commit `03f8049`. It is not pushed: the owner reviews it, merges it and pushes
+commits `03f8049`, `1023ab9` and `46d71eb` (Security and TL approved). They are not pushed: the owner reviews it, merges it and pushes
 it. The same commit also carries `server.credentials`, the Security M1 fix,
 for secrets (see the runbook § 4).
 
@@ -38,13 +38,20 @@ for secrets (see the runbook § 4).
   - The new `ansible/roles/nginx/tasks/site_source.yml` resolves the path
     against the project root (`project_config | dirname | dirname`).
   - It rejects absolute paths and `..`.
-  - The role renders that file instead of `templates/nginx-https-site.conf.j2`,
-    through the same `nginx -t` gate.
+  - The role installs that file **verbatim** (`copy`, never rendered, so no vault
+    variable can leak into a world-readable file) instead of
+    `templates/nginx-https-site.conf.j2`.
+  - Every site, stock or project, goes through `site_install.yml`. It backs up
+    the current file, writes and enables the new one and runs `nginx -t`. On
+    failure it restores the previous file (or removes the new one and its
+    link), re-tests and fails the deploy, so a rejected site never waits
+    enabled for the next nginx restart.
   - Certbot's first-run HTTP bootstrap is unchanged.
   - Projects that don't declare the key get the stock template.
-- **Tests** (`tests/run-tests.sh`, 54/54 pass): the template path resolves
-  inside the project root, the stock template is used when the key is absent,
-  and `..` is rejected.
+- **Tests** (`tests/run-tests.sh`, 66/66 pass): path resolution and the `..`
+  rejection, copy vs template, a verbatim copy of a file with Jinja markers,
+  restore after a rejected site, no leftovers after a rejected first install,
+  credential store cleanup, and the systemd ≥ 247 assert.
 
 `mise run deploy-preflight` reads the platform checkout. It **fails** when
 the nginx role has no `site_template` support, when the systemd template has
