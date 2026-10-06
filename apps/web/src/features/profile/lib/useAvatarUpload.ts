@@ -9,13 +9,14 @@
  * - the signed URL never reaches the UI or a log.
  *
  * The preview is an object URL, revoked when it is replaced, when the upload
- * ends (success or failure) and on unmount. Unmounting also aborts the upload.
+ * ends (success or failure) and on unmount. Unmounting also aborts the intent
+ * request, the upload and the confirm request.
  */
 import { type AvatarUploadInput, type AvatarUploadResponse, avatarUploadInputSchema, avatarUploadResponseSchema } from "@cuencada/types";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getApiErrorCode, isAbortError } from "../../../shared/api/errors";
 import { env } from "../../../shared/lib/env";
-import { isAllowedUploadUrl, putToPresignedUrl, UploadTransferError } from "../../gallery";
+import { isAllowedUploadUrl, putToPresignedUrl, UploadTransferError, uploadsConfigured } from "../../gallery";
 import { useConfirmAvatarMutation, useCreateAvatarUploadMutation } from "../api";
 
 /** Exactly the contract allowlist (`avatarMimeTypeSchema`). */
@@ -23,6 +24,9 @@ export const AVATAR_ACCEPT = "image/jpeg,image/png,image/webp";
 
 /** Shown for every failure after the file was accepted (wireframe copy). */
 export const AVATAR_UPLOAD_FAILED = "No pudimos subir la foto. Inténtalo otra vez.";
+
+/** Shown when this build has no bucket origin (`VITE_MEDIA_UPLOAD_ORIGIN`). */
+export const AVATAR_UPLOADS_UNAVAILABLE = "Por ahora no se pueden subir fotos. Avísale a un administrador.";
 
 /** Where the upload is. */
 export type AvatarUploadPhase = "idle" | "uploading" | "confirming" | "done" | "error";
@@ -149,7 +153,9 @@ export function useAvatarUpload(): AvatarUploadApi {
 
         setState((current) => ({ ...current, phase: "confirming", progress: 1 }));
         const confirm = confirmAvatar({ uploadId: intent.uploadId });
-        await confirm.unwrap();
+        const abortConfirm = (): void => confirm.abort();
+        controller.signal.addEventListener("abort", abortConfirm, { once: true });
+        await confirm.unwrap().finally(() => controller.signal.removeEventListener("abort", abortConfirm));
         if (controller.signal.aborted) return;
         setPreview(null);
         setState({ ...IDLE, phase: "done" });
@@ -169,6 +175,13 @@ export function useAvatarUpload(): AvatarUploadApi {
       if (!checked.ok) {
         setPreview(null);
         setState({ ...IDLE, phase: "error", error: checked.error });
+        return;
+      }
+      // Same gate as the gallery: without a bucket origin the intent would be refused after the
+      // server created it, so don't ask for one.
+      if (!uploadsConfigured()) {
+        setPreview(null);
+        setState({ ...IDLE, phase: "error", error: AVATAR_UPLOADS_UNAVAILABLE });
         return;
       }
       const controller = new AbortController();

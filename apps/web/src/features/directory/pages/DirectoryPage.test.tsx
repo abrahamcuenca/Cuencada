@@ -16,7 +16,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
 beforeEach(() => {
   db = makeDirectoryDb([
-    makeEntry(1, { fullName: "Rosa Elena Ejemplo", city: "Mérida", phone: "555 010 0101", email: "rosa@example.com" }),
+    makeEntry(1, { fullName: "Rosa Elena Ejemplo", city: "Mérida", phone: "+52 555 010 0101", email: "rosa@example.com" }),
     makeEntry(2, { fullName: "Tomás Ejemplo", familyBranch: "Rama Sur", city: "Monterrey" }),
     makeEntry(3, { fullName: "Rosario Ejemplo" })
   ]);
@@ -85,6 +85,50 @@ describe("DirectoryPage list", () => {
     await waitFor(() => expect(within(list()).getAllByRole("link")).toHaveLength(DIRECTORY_PAGE_SIZE + 2));
     expect(db.log).toEqual([`limit=${DIRECTORY_PAGE_SIZE}`, `limit=${DIRECTORY_PAGE_SIZE}&cursor=${DIRECTORY_PAGE_SIZE}`]);
     expect(screen.queryByRole("button", { name: "Cargar más" })).not.toBeInTheDocument();
+  });
+
+  it("reloads page 1 when Cargar más gets a 400 for a stale cursor (e.g. after hiding myself)", async () => {
+    db.entries = Array.from({ length: DIRECTORY_PAGE_SIZE + 2 }, (_, index) => makeEntry(index + 1));
+    const user = userEvent.setup();
+    renderApp("/directorio", authenticatedState());
+
+    await screen.findByRole("link", { name: /Primo 1 Ejemplo/ });
+    // I unlisted myself meanwhile: the server refuses the old cursor once.
+    db.entries = db.entries.slice(1);
+    db.staleCursorOnce = true;
+    await user.click(screen.getByRole("button", { name: "Cargar más" }));
+
+    await waitFor(() =>
+      expect(db.log).toEqual([`limit=${DIRECTORY_PAGE_SIZE}`, `limit=${DIRECTORY_PAGE_SIZE}&cursor=${DIRECTORY_PAGE_SIZE}`, `limit=${DIRECTORY_PAGE_SIZE}`])
+    );
+    await waitFor(() => expect(screen.queryByRole("link", { name: /Primo 1 Ejemplo/ })).not.toBeInTheDocument());
+    expect(within(list()).getAllByRole("link")).toHaveLength(DIRECTORY_PAGE_SIZE);
+    // The fresh first page has a valid cursor again.
+    await user.click(screen.getByRole("button", { name: "Cargar más" }));
+    await waitFor(() => expect(within(list()).getAllByRole("link")).toHaveLength(DIRECTORY_PAGE_SIZE + 1));
+  });
+
+  it("suggests cities from the loaded rows by prefix, ignoring accents", async () => {
+    db.entries = [
+      makeEntry(1, { fullName: "Rosa Elena Ejemplo", city: "Mérida" }),
+      makeEntry(2, { fullName: "Tomás Ejemplo", city: "Monterrey" }),
+      makeEntry(3, { fullName: "Lía Ejemplo", city: "Oaxaca" })
+    ];
+    const user = userEvent.setup();
+    renderApp("/directorio", authenticatedState());
+
+    await screen.findByRole("link", { name: /Rosa Elena Ejemplo/ });
+    await user.click(screen.getByRole("button", { name: "Filtros" }));
+    const sheet = await screen.findByRole("dialog", { name: "Filtros" });
+    const city = within(sheet).getByLabelText(/Ciudad/);
+    await user.type(city, "me");
+
+    const options = (): string[] => Array.from(document.querySelectorAll("[data-testid='city-suggestions'] option")).map((option) => option.getAttribute("value") ?? "");
+    expect(options()).toEqual(["Mérida"]);
+    expect(city).toHaveAttribute("list");
+    await user.clear(city);
+    await user.type(city, "m");
+    expect(options()).toEqual(["Mérida", "Monterrey"]);
   });
 
   it("sends the branch and city filters to the server", async () => {
@@ -217,10 +261,22 @@ describe("DirectoryPage detail", () => {
     expect(within(card).getByRole("heading", { name: "Rosa Elena Ejemplo" })).toHaveFocus();
     expect(within(card).getByText("Mérida")).toBeInTheDocument();
     expect(within(card).getByText("rosa@example.com")).toBeInTheDocument();
-    expect(within(card).getByRole("link", { name: /WhatsApp/ })).toHaveAttribute("href", "https://wa.me/525550100101");
+    // The buttons show the actual number.
+    expect(within(card).getByRole("link", { name: /WhatsApp \+52 555 010 0101/ })).toHaveAttribute("href", "https://wa.me/525550100101");
     expect(within(card).getByRole("link", { name: /WhatsApp/ })).toHaveAttribute("rel", expect.stringContaining("noopener"));
-    expect(within(card).getByRole("link", { name: /Llamar/ })).toHaveAttribute("href", "tel:+525550100101");
+    expect(within(card).getByRole("link", { name: /Llamar al \+52 555 010 0101/ })).toHaveAttribute("href", "tel:+525550100101");
     expect(within(card).getByRole("link", { name: /Correo/ })).toHaveAttribute("href", "mailto:rosa@example.com");
+  });
+
+  it("never guesses a country code: a 10-digit number gets Llamar but no WhatsApp link", async () => {
+    db.entries = [makeEntry(5, { fullName: "Iván Ejemplo", phone: "555 010 0101" })];
+    renderApp(`/directorio/${memberId(5)}`, authenticatedState());
+
+    const card = await screen.findByRole("article", { name: "Iván Ejemplo" });
+    expect(within(card).getByRole("link", { name: /Llamar al 555 010 0101/ })).toHaveAttribute("href", "tel:5550100101");
+    expect(within(card).queryByRole("link", { name: /WhatsApp/ })).not.toBeInTheDocument();
+    expect(card.querySelector('a[href*="wa.me"]')).toBeNull();
+    expect(within(card).getByText(/no tiene código de país/)).toBeInTheDocument();
   });
 
   it("shows no contact field or link the member did not share", async () => {

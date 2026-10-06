@@ -166,6 +166,7 @@ describe("ProfilePage privacy", () => {
     const listed = screen.getByRole("switch", { name: "Aparecer en el directorio" });
     expect(listed).toBeChecked();
     expect(listed).toHaveAccessibleDescription(/no aparecerás en el directorio ni en su búsqueda/);
+    expect(listed).toHaveAccessibleDescription(/Tus mensajes en el chat seguirán mostrando tu nombre y foto\./);
     await user.click(listed);
     await user.click(screen.getByRole("switch", { name: "Mostrar mi ciudad a la familia" }));
     await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
@@ -224,13 +225,14 @@ describe("ProfilePage avatar", () => {
     expect(document.body.innerHTML).not.toContain("evil.example");
   });
 
-  it("refuses every upload when the upload origin is not configured", async () => {
+  it("refuses every upload when the upload origin is not configured, before asking for an intent", async () => {
     env.mediaUploadOrigin = null;
     const user = await openProfile();
 
     await user.upload(screen.getByTestId("avatar-file-input"), fileOf("yo.webp", "image/webp"));
 
-    expect(await screen.findByText("No pudimos subir la foto. Inténtalo otra vez.")).toBeInTheDocument();
+    expect(await screen.findByText("Por ahora no se pueden subir fotos. Avísale a un administrador.")).toBeInTheDocument();
+    expect(db.intents).toEqual([]);
     expect(FakeXhr.instances).toHaveLength(0);
   });
 
@@ -276,6 +278,46 @@ describe("ProfilePage avatar", () => {
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:http://localhost/preview-1");
     expect(xhr.aborted).toBe(true);
     expect(db.confirms).toEqual([]);
+  });
+});
+
+describe("ProfilePage avatar on unmount", () => {
+  it("cancels the confirm request when the page unmounts mid-confirm", async () => {
+    let confirmStarted = false;
+    let meRequests = 0;
+    let releaseConfirm = (): void => {};
+    server.use(
+      http.post(apiUrl("/profile/me/avatar/confirm"), async () => {
+        confirmStarted = true;
+        await new Promise<void>((resolve) => {
+          releaseConfirm = resolve;
+        });
+        return HttpResponse.json(db.profile);
+      }),
+      // A confirm that is still awaited refreshes `/me` (header avatar) when it lands.
+      http.get(apiUrl("/me"), () => {
+        meRequests += 1;
+        return HttpResponse.json(errorBody("INTERNAL"), { status: 500 });
+      })
+    );
+    const user = userEvent.setup();
+    const { router } = renderApp("/perfil", authenticatedState());
+    await screen.findByLabelText(/Nombre completo/);
+
+    await user.upload(screen.getByTestId("avatar-file-input"), fileOf("yo.jpg", "image/jpeg"));
+    const xhr = await waitForXhr();
+    act(() => xhr.respond(200));
+    await waitFor(() => expect(confirmStarted).toBe(true));
+    await act(async () => {
+      await router.navigate("/mas");
+    });
+    await waitFor(() => expect(screen.queryByLabelText(/Nombre completo/)).not.toBeInTheDocument());
+
+    // The aborted mutation ignores the late answer: no cache update, no `/me` refresh.
+    releaseConfirm();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(meRequests).toBe(0);
+    expect(screen.queryByText("Foto actualizada.")).not.toBeInTheDocument();
   });
 });
 

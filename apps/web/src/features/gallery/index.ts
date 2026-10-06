@@ -5,5 +5,5 @@
  */
 export { GalleryPreview, type GalleryPreviewProps } from "./components/GalleryPreview";
 export { type PutOptions, putToPresignedUrl, type TransferFailure, UploadTransferError } from "./lib/putToPresignedUrl";
-export { isAllowedUploadUrl } from "./lib/uploadOrigin";
+export { isAllowedUploadUrl, uploadsConfigured } from "./lib/uploadOrigin";
 export { useExpiredUrlRefetch } from "./lib/useExpiredUrlRefetch";

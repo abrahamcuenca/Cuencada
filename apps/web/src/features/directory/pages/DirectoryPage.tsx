@@ -5,7 +5,8 @@ import { Button } from "../../../shared/ui/Button";
 import { cx } from "../../../shared/ui/cx";
 import { EmptyState } from "../../../shared/ui/EmptyState";
 import { useExpiredUrlRefetch } from "../../gallery";
-import { useListDirectoryInfiniteQuery } from "../api";
+import { useAppDispatch } from "../../../app/hooks";
+import { directoryApi, useListDirectoryInfiniteQuery } from "../api";
 import { DirectoryError } from "../components/AccessStates";
 import { DirectoryDetail } from "../components/DirectoryDetail";
 import { DirectoryList, DirectoryListSkeleton } from "../components/DirectoryList";
@@ -13,6 +14,7 @@ import { FiltersSheet } from "../components/FiltersSheet";
 import styles from "../directory.module.css";
 import {
   type DirectorySheetFilters,
+  isStaleCursorError,
   knownBranches,
   NO_FILTERS,
   SEARCH_DEBOUNCE_MS,
@@ -31,6 +33,7 @@ import { useDebouncedValue } from "../lib/useDebouncedValue";
  */
 export function DirectoryPage(): ReactNode {
   const { userId } = useParams();
+  const dispatch = useAppDispatch();
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<DirectorySheetFilters>(NO_FILTERS);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -49,6 +52,25 @@ export function DirectoryPage(): ReactNode {
   const activeFilters = (filters.familyBranch !== "" ? 1 : 0) + (filters.city !== "" ? 1 : 0);
   const searching = query.q !== undefined;
   const tooShort = search.trim().length > 0 && search.trim().length < SEARCH_MIN_CHARS;
+
+  /**
+   * "Cargar más". A 400 means the cursor went stale (e.g. I just hid myself
+   * from the directory): drop the extra pages and reload page 1 instead of
+   * leaving the list stuck on an error.
+   */
+  const loadMore = (): void => {
+    if (isFetching) return;
+    void fetchNextPage().then((result) => {
+      if (!isStaleCursorError(result.error)) return;
+      dispatch(
+        directoryApi.util.updateQueryData("listDirectory", query, (draft) => {
+          draft.pages.splice(1);
+          draft.pageParams.splice(1);
+        })
+      );
+      void refetch();
+    });
+  };
 
   const clearAll = (): void => {
     setSearch("");
@@ -81,9 +103,7 @@ export function DirectoryPage(): ReactNode {
         selectedId={userId}
         hasMore={hasNextPage}
         loadingMore={isFetchingNextPage}
-        onLoadMore={() => {
-          if (!isFetching) void fetchNextPage();
-        }}
+        onLoadMore={loadMore}
       />
     );
   };
@@ -150,6 +170,7 @@ export function DirectoryPage(): ReactNode {
         onClose={() => setSheetOpen(false)}
         value={filters}
         branches={branches}
+        entries={entries}
         onApply={(next) => {
           setFilters(next);
           setSheetOpen(false);

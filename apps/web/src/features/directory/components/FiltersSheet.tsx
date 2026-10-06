@@ -3,7 +3,8 @@ import { Button } from "../../../shared/ui/Button";
 import { Dialog } from "../../../shared/ui/Dialog";
 import { Field } from "../../../shared/ui/Field";
 import { TextInput } from "../../../shared/ui/TextInput";
-import { type DirectorySheetFilters, NO_FILTERS } from "../lib/filters";
+import type { DirectoryEntry } from "@cuencada/types";
+import { citySuggestions, type DirectorySheetFilters, NO_FILTERS } from "../lib/filters";
 import styles from "../directory.module.css";
 
 /** Props for {@link FiltersSheet}. */
@@ -14,24 +15,28 @@ export interface FiltersSheetProps {
   onApply: (filters: DirectorySheetFilters) => void;
   /** Branch suggestions (from the rows seen so far; memory only). */
   branches: readonly string[];
+  /** Loaded rows, for city prefix suggestions (memory only). */
+  entries: readonly DirectoryEntry[];
 }
 
 /**
  * "Filtros" bottom sheet (a centred card from 600px): family branch and city.
  * Edits are a draft until "Ver resultados".
  */
-export function FiltersSheet({ open, onClose, value, onApply, branches }: FiltersSheetProps): ReactNode {
+export function FiltersSheet({ open, onClose, value, onApply, branches, entries }: FiltersSheetProps): ReactNode {
   return (
     <Dialog open={open} onClose={onClose} title="Filtros" description="Encuentra a tu familia por rama o por ciudad.">
       {/* Remount on open so the draft starts from the applied filters. */}
-      {open ? <FiltersForm value={value} onApply={onApply} branches={branches} /> : null}
+      {open ? <FiltersForm value={value} onApply={onApply} branches={branches} entries={entries} /> : null}
     </Dialog>
   );
 }
 
-function FiltersForm({ value, onApply, branches }: Omit<FiltersSheetProps, "open" | "onClose">): ReactNode {
+function FiltersForm({ value, onApply, branches, entries }: Omit<FiltersSheetProps, "open" | "onClose">): ReactNode {
   const [draft, setDraft] = useState(value);
   const listId = useId();
+  const cityListId = useId();
+  const cities = citySuggestions(entries, draft.city);
 
   const onSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -64,6 +69,7 @@ function FiltersForm({ value, onApply, branches }: Omit<FiltersSheetProps, "open
         {(control) => (
           <TextInput
             {...control}
+            list={cities.length > 0 ? cityListId : undefined}
             autoComplete="off"
             enterKeyHint="search"
             maxLength={120}
@@ -72,6 +78,13 @@ function FiltersForm({ value, onApply, branches }: Omit<FiltersSheetProps, "open
           />
         )}
       </Field>
+      {cities.length > 0 ? (
+        <datalist id={cityListId} data-testid="city-suggestions">
+          {cities.map((city) => (
+            <option key={city} value={city} />
+          ))}
+        </datalist>
+      ) : null}
       <div className={styles.filtersActions}>
         <Button type="submit" fullWidth>
           Ver resultados

@@ -53,6 +53,9 @@ function NotFound(): ReactNode {
   );
 }
 
+/** Under "Llamar" when the number has no country code (so no WhatsApp link). */
+export const NO_COUNTRY_CODE_NOTE = "Este número no tiene código de país, así que no podemos abrirlo en WhatsApp.";
+
 function EntryCard({ entry, onImageError }: { entry: DirectoryEntry; onImageError: () => void }): ReactNode {
   const heading = useRef<HTMLHeadingElement>(null);
   const name = entry.fullName || entry.displayName;
@@ -107,16 +110,17 @@ function EntryCard({ entry, onImageError }: { entry: DirectoryEntry; onImageErro
 
       {call !== null || whatsapp !== null || mail !== null ? (
         <div className={styles.actions}>
-          {whatsapp !== null ? (
+          {whatsapp !== null && phone !== undefined ? (
             <Button variant="whatsapp" href={whatsapp} external icon="💬" fullWidth>
-              WhatsApp
+              WhatsApp <span translate="no">{phone}</span>
             </Button>
           ) : null}
-          {call !== null ? (
+          {call !== null && phone !== undefined ? (
             <Button variant="secondary" href={call} icon="📞" fullWidth>
-              Llamar
+              Llamar al <span translate="no">{phone}</span>
             </Button>
           ) : null}
+          {call !== null && whatsapp === null ? <p className={styles.contactNote}>{NO_COUNTRY_CODE_NOTE}</p> : null}
           {mail !== null ? (
             <Button variant="secondary" href={mail} icon="✉️" fullWidth>
               Correo

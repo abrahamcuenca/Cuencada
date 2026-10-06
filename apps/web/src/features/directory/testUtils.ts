@@ -50,11 +50,13 @@ export interface FakeDirectoryDb {
   log: string[];
   /** Status the list answers with (200 by default). */
   listError: "FORBIDDEN" | "INTERNAL" | null;
+  /** When true, the next request that carries a cursor gets 400 VALIDATION (stale cursor), once. */
+  staleCursorOnce: boolean;
 }
 
 /** A fresh fake database. */
 export function makeDirectoryDb(entries: DirectoryEntry[] = []): FakeDirectoryDb {
-  return { entries, log: [], listError: null };
+  return { entries, log: [], listError: null, staleCursorOnce: false };
 }
 
 /**
@@ -70,6 +72,10 @@ export function directoryHandlers(db: FakeDirectoryDb): HttpHandler[] {
       const url = new URL(request.url);
       db.log.push(url.searchParams.toString());
       if (db.listError !== null) return HttpResponse.json(errorBody(db.listError), { status: errorHttpStatus[db.listError] });
+      if (db.staleCursorOnce && url.searchParams.has("cursor")) {
+        db.staleCursorOnce = false;
+        return HttpResponse.json(errorBody("VALIDATION", "Cursor inválido."), { status: 400 });
+      }
       const parsed = directoryQuerySchema.safeParse(Object.fromEntries(url.searchParams));
       if (!parsed.success) return HttpResponse.json(errorBody("VALIDATION"), { status: 400 });
       const { q, familyBranch, cursor, limit } = parsed.data;
