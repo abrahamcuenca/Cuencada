@@ -86,6 +86,13 @@ Changes made in response to the Security and Tech Lead reviews. Most are already
   - `AuditLogEntry.entityType` stays a free string, so legacy rows still serialize.
   - Display names reject ZWJ, so emoji sequences are not allowed in names; chat bodies keep ZWJ.
 - **Decided (T1, 2026-10-06):** unverified members (copy-link and open invites) get **403 `EMAIL_UNVERIFIED`** (403 `FORBIDDEN` until WP-0.8a, which split the code so the client shows "verify your email" only for this case) on the directory, the family tree and every other PII read. Those routes declare `config.requireVerifiedEmail: true` (the WP-0.4 guard reads `users.email_verified_at` from the database). T5 (directory, profile reads of other members) and T6 (family tree) enforce it. A member verifies through `POST /api/auth/email/verify-request` → `/verificar#t=…` → `POST /api/auth/email/verify`; a magic-link login or a password reset sent to the current address also verifies it. Own-profile routes and `/me` stay open to unverified members so they can see the prompt.
+- **Decided (owner, WP-2.3 L2, 2026-10-06):** the gallery and the member edition details are also verified-only.
+  - Covered routes: every media route (`GET /api/cuencadas/:year/media`, `GET|PATCH|DELETE /api/media/:id`, `POST /api/media/:id/confirm`, `POST /api/media/:id/report`, `POST /api/cuencadas/:year/media/uploads`) and `GET /api/cuencadas/:year/members` (WhatsApp group and album links).
+  - Why: photos and uploader names reveal family membership just as the attendees list does.
+  - Still open to unverified members: announcements, the RSVP summary (counts only), their own RSVP, their own profile and avatar, and `/me`.
+  - Thumbnail and display images are presigned bucket URLs that only these routes hand out, so the gate covers them too.
+  - Residual risk: email verification proves control of a mailbox, not family membership. A stranger holding a leaked open invite can verify their own address. A separate WP will tighten open invites (about 5 uses, 72 h lifetime, an admin alert on each acceptance).
+  - Enforced and tested by `apps/server/src/__tests__/security/verified-gating.test.ts` and the authorization matrix.
 
 ## Consequences
 

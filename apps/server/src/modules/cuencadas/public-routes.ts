@@ -123,11 +123,15 @@ const cuencadaPublicRoutes: FastifyPluginAsyncZod = async (app) => {
     }
   );
 
-  /** `GET /api/cuencadas/:year/members`: member-only links and every item/announcement. */
+  /**
+   * `GET /api/cuencadas/:year/members`: member-only links (WhatsApp group,
+   * album) and every item/announcement. Verified members only (ADR 0001,
+   * WP-2.3 L2 owner decision).
+   */
   app.get(
     "/cuencadas/:year/members",
     {
-      config: { auth: "user" },
+      config: { auth: "user", requireVerifiedEmail: true },
       schema: { params: yearParamSchema, response: { 200: memberCuencadaDetailsSchema, 404: apiErrorSchema } }
     },
     async (request): Promise<MemberCuencadaDetails> => {
