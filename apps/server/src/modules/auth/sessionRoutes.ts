@@ -20,6 +20,7 @@ import { AppError } from "../../lib/errors.js";
 import { hashPassword, needsRehash, verifyDummyPassword, verifyPassword } from "../../lib/passwords.js";
 import { credentialRateLimits, rateLimitByIp } from "../../lib/rateLimit.js";
 import { authUser } from "../../plugins/auth.js";
+import { closeChatSockets } from "./chatSockets.js";
 import { clearRefreshCookie, readRefreshCookie } from "./cookies.js";
 import { issueAuthResponse, loadCurrentUser } from "./currentUser.js";
 import { AuthAuditAction } from "./emailTokens.js";
@@ -159,6 +160,7 @@ const sessionRoutes: FastifyPluginAsyncZod = async (app) => {
           throw new AppError("REFRESH_RACE");
         case "reuse":
           request.log.warn({ sessionId: outcome.sessionId }, "refresh token reuse detected; session revoked");
+          closeChatSockets(app, { sessionIds: [outcome.sessionId] });
           clearRefreshCookie(reply, app.config);
           throw new AppError("UNAUTHENTICATED");
         case "invalid":
@@ -182,7 +184,7 @@ const sessionRoutes: FastifyPluginAsyncZod = async (app) => {
       const now = app.clock.now();
       const revoked = await app.db.transaction(async (tx) => {
         const session = await findCookieSession(tx, rawToken, now);
-        if (session === null) return false;
+        if (session === null) return null;
         await revokeSessions(tx, { userId: session.userId, sessionId: session.sessionId }, "logout", now);
         await recordAudit(tx, {
           actorUserId: session.userId,
@@ -191,9 +193,10 @@ const sessionRoutes: FastifyPluginAsyncZod = async (app) => {
           entityId: session.sessionId,
           ip: request.ip
         });
-        return true;
+        return session.sessionId;
       });
-      if (!revoked) throw new AppError("UNAUTHENTICATED");
+      if (revoked === null) throw new AppError("UNAUTHENTICATED");
+      closeChatSockets(app, { sessionIds: [revoked] });
       return reply.code(204).send(null);
     }
   );
@@ -219,6 +222,7 @@ const sessionRoutes: FastifyPluginAsyncZod = async (app) => {
           ip: request.ip
         });
       });
+      closeChatSockets(app, { userId: user.id });
       clearRefreshCookie(reply, app.config);
       return reply.code(204).send(null);
     }
@@ -290,7 +294,7 @@ const sessionRoutes: FastifyPluginAsyncZod = async (app) => {
       const now = app.clock.now();
       const revoked = await app.db.transaction(async (tx) => {
         const ids = await revokeSessions(tx, { userId: user.id, sessionId: request.params.id }, "user_revoked", now);
-        if (ids.length === 0) return false;
+        if (ids.length === 0) return null;
         await recordAudit(tx, {
           actorUserId: user.id,
           action: AuthAuditAction.SessionRevoked,
@@ -299,9 +303,10 @@ const sessionRoutes: FastifyPluginAsyncZod = async (app) => {
           metadata: { current: request.params.id === user.sessionId },
           ip: request.ip
         });
-        return true;
+        return ids;
       });
-      if (!revoked) throw new AppError("NOT_FOUND");
+      if (revoked === null) throw new AppError("NOT_FOUND");
+      closeChatSockets(app, { sessionIds: revoked });
       return reply.code(204).send(null);
     }
   );
@@ -316,7 +321,7 @@ const sessionRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       const user = authUser(request);
       const now = app.clock.now();
-      await app.db.transaction(async (tx) => {
+      const revokedIds = await app.db.transaction(async (tx) => {
         const revoked = await revokeSessions(
           tx,
           { userId: user.id, exceptSessionId: user.sessionId },
@@ -331,7 +336,9 @@ const sessionRoutes: FastifyPluginAsyncZod = async (app) => {
           metadata: { scope: "others", count: revoked.length },
           ip: request.ip
         });
+        return revoked;
       });
+      closeChatSockets(app, { sessionIds: revokedIds });
       return reply.code(204).send(null);
     }
   );

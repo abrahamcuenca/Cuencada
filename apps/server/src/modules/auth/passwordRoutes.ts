@@ -20,6 +20,7 @@ import { AppLinkPath, appLink, sendTemplate } from "../../lib/mailer/index.js";
 import { hashPassword, verifyDummyPassword, verifyPassword } from "../../lib/passwords.js";
 import { credentialRateLimits, extraRateLimitHook, ipKey, rateLimitByIp } from "../../lib/rateLimit.js";
 import { authUser } from "../../plugins/auth.js";
+import { closeChatSockets } from "./chatSockets.js";
 import { issueAuthResponse } from "./currentUser.js";
 import {
   AuthAuditAction,
@@ -139,6 +140,8 @@ const passwordRoutes: FastifyPluginAsyncZod = async (app) => {
         });
         return started;
       });
+      // Every old session is revoked; the new one has no socket yet (its token is not sent until below).
+      closeChatSockets(app, { userId: current.id });
       await queuePasswordChangedEmail(app, user.email, user.displayName, now, issued.sessionId);
       return issueAuthResponse(app, reply, issued, current.id, now);
     }
@@ -233,9 +236,10 @@ const passwordRoutes: FastifyPluginAsyncZod = async (app) => {
           metadata: { revokedSessions: revoked.length },
           ip: request.ip
         });
-        return { ...user, operationId: consumed.tokenId };
+        return { ...user, userId: consumed.userId, operationId: consumed.tokenId };
       });
       if (result === null) throw new AppError("TOKEN_INVALID");
+      closeChatSockets(app, { userId: result.userId });
       await queuePasswordChangedEmail(app, result.email, result.displayName, now, result.operationId);
       return reply.code(204).send(null);
     }

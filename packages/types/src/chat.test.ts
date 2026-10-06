@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { wsClientMessageSchema, wsServerMessageSchema } from "./chat.js";
+import {
+  CHAT_PREVIEW_MAX_LENGTH,
+  CHAT_UNREAD_COUNT_MAX,
+  chatHistoryQuerySchema,
+  chatRoomSchema,
+  wsClientMessageSchema,
+  wsServerMessageSchema
+} from "./chat.js";
 
 const roomId = "6f1b2a3c-4d5e-4f60-8a7b-9c0d1e2f3a4b";
 const messageId = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
@@ -79,5 +86,34 @@ describe("wsServerMessageSchema", () => {
 
   it("rejects error frames with unknown codes", () => {
     expect(wsServerMessageSchema.safeParse({ type: "error", code: "NOPE", message: "x", clientMessageId: null }).success).toBe(false);
+  });
+});
+
+describe("chatHistoryQuerySchema", () => {
+  it("defaults to 50 and caps the limit at 50", () => {
+    expect(chatHistoryQuerySchema.parse({})).toEqual({ limit: 50 });
+    expect(chatHistoryQuerySchema.parse({ limit: "50" }).limit).toBe(50);
+    expect(chatHistoryQuerySchema.safeParse({ limit: "51" }).success).toBe(false);
+  });
+});
+
+describe("chatRoomSchema", () => {
+  it("carries a bounded last-message preview and unread count", () => {
+    const lastMessage = { id: messageId, senderDisplayName: "Ana", preview: "hola", createdAt: "2026-09-13T19:30:00.000Z" };
+    const room = {
+      id: roomId,
+      kind: "global",
+      cuencadaId: null,
+      year: null,
+      title: "Chat familiar",
+      unreadCount: 3,
+      lastMessageAt: "2026-09-13T19:30:00.000Z",
+      lastReadMessageId: null,
+      lastMessage
+    };
+    expect(chatRoomSchema.parse(room).lastMessage?.preview).toBe("hola");
+    const tooLong = { ...room, lastMessage: { ...lastMessage, preview: "x".repeat(CHAT_PREVIEW_MAX_LENGTH + 1) } };
+    expect(chatRoomSchema.safeParse(tooLong).success).toBe(false);
+    expect(chatRoomSchema.safeParse({ ...room, unreadCount: CHAT_UNREAD_COUNT_MAX + 1 }).success).toBe(false);
   });
 });

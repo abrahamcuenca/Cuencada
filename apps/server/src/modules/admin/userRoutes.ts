@@ -39,6 +39,7 @@ import {
   issueBudgetedEmailToken,
   sendInBackground
 } from "../auth/emailTokens.js";
+import { closeChatSockets as closeUserChatSockets } from "../auth/chatSockets.js";
 import { revokeSessions } from "../auth/sessions.js";
 import { adminAlertMetadata, type AdminAlert, type AdminAlertPlan, planAdminAlert, queueAdminAlerts } from "./adminAlerts.js";
 import {
@@ -66,17 +67,14 @@ const errorResponses = {
 } as const;
 
 /**
- * Close the user's live chat sockets after a disable or revocation.
+ * Close the user's live chat sockets after a disable or revocation (after
+ * commit). Non-fatal: the chat hub's 5-minute re-check is the backstop.
  *
- * TODO(T7): call `closeSocketsForUser(app, userId)` from `modules/chat` once
- * T7 lands on main. Until then a socket opened before the disable keeps
- * running until it reconnects (the ticket and REST guard already refuse it).
- *
- * @param _app - The app.
- * @param _userId - The user whose sockets should close.
+ * @param app - The app.
+ * @param userId - The user whose sockets should close.
  */
-function closeChatSockets(_app: FastifyInstance, _userId: string): void {
-  // Intentionally empty until T7's helper exists (see TODO above).
+function closeChatSockets(app: FastifyInstance, userId: string): void {
+  closeUserChatSockets(app, { userId });
 }
 
 /**
