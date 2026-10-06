@@ -202,7 +202,11 @@ function startWebServer() {
     upstream.on("error", () => socket.destroy());
     socket.on("error", () => upstream.destroy());
   });
-  return new Promise((resolve) => server.listen(WEB_PORT, "127.0.0.1", () => resolve(server)));
+  // Reject (instead of crashing) on EADDRINUSE etc., so main()'s cleanup still stops the API.
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(WEB_PORT, "127.0.0.1", () => resolve(server));
+  });
 }
 
 async function api(method, url, { token, body } = {}) {
