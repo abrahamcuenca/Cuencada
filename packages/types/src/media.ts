@@ -46,10 +46,15 @@ export const MediaKind = {
 export type MediaKind = (typeof MediaKind)[keyof typeof MediaKind];
 export const mediaKindSchema = z.enum(MediaKind);
 
-/** Maximum upload size in bytes per media kind. */
+/**
+ * Maximum upload size in bytes per media kind. Videos are 150 MB (WP-2.4):
+ * the processing job holds a whole video in memory until storage streaming
+ * lands, and `server_1` has under 1 GB of RAM shared with other services. The
+ * database CHECK still allows 300 MB, so raising this back needs no migration.
+ */
 export const MEDIA_SIZE_LIMITS = {
   image: 25 * MB,
-  video: 300 * MB
+  video: 150 * MB
 } as const satisfies Record<MediaKind, number>;
 
 /** Avatars are images only and smaller. */

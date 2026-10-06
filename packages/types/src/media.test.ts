@@ -32,14 +32,14 @@ describe("createUploadInputSchema", () => {
     expect(result.error?.issues[0]?.path).toEqual(["byteSize"]);
   });
 
-  it("accepts a video at 300 MB and rejects one byte more", () => {
-    expect(createUploadInputSchema.safeParse({ fileName: "v.mp4", mimeType: "video/mp4", byteSize: 300 * MB }).success).toBe(true);
-    expect(createUploadInputSchema.safeParse({ fileName: "v.mp4", mimeType: "video/mp4", byteSize: 300 * MB + 1 }).success).toBe(false);
+  it("accepts a video at 150 MB and rejects one byte more", () => {
+    expect(createUploadInputSchema.safeParse({ fileName: "v.mp4", mimeType: "video/mp4", byteSize: 150 * MB }).success).toBe(true);
+    expect(createUploadInputSchema.safeParse({ fileName: "v.mp4", mimeType: "video/mp4", byteSize: 150 * MB + 1 }).success).toBe(false);
   });
 
-  it("accepts iPhone .mov videos up to 300 MB", () => {
-    expect(createUploadInputSchema.safeParse({ fileName: "IMG_0002.MOV", mimeType: "video/quicktime", byteSize: 300 * MB }).success).toBe(true);
-    expect(createUploadInputSchema.safeParse({ fileName: "IMG_0002.MOV", mimeType: "video/quicktime", byteSize: 300 * MB + 1 }).success).toBe(false);
+  it("accepts iPhone .mov videos up to 150 MB", () => {
+    expect(createUploadInputSchema.safeParse({ fileName: "IMG_0002.MOV", mimeType: "video/quicktime", byteSize: 150 * MB }).success).toBe(true);
+    expect(createUploadInputSchema.safeParse({ fileName: "IMG_0002.MOV", mimeType: "video/quicktime", byteSize: 150 * MB + 1 }).success).toBe(false);
   });
 
   it("accepts an empty or missing confirm body but rejects extra keys", () => {

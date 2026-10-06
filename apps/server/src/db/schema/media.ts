@@ -3,7 +3,6 @@
  * server-generated; URLs are presigned on read.
  */
 import {
-  MEDIA_SIZE_LIMITS,
   MediaKind,
   MediaMimeType,
   MediaReportReason,
@@ -16,8 +15,13 @@ import { users } from "./auth.js";
 import { cuencadas } from "./cuencadas.js";
 import { checkIn, createdAt, timestamptz, updatedAt } from "./helpers.js";
 
-/** Largest accepted upload in bytes (the video cap; fits `integer`). */
-const MEDIA_MAX_BYTES = Math.max(MEDIA_SIZE_LIMITS.image, MEDIA_SIZE_LIMITS.video);
+/**
+ * Database bound on `byte_size` (300 MB, as created by migration 0001). It is
+ * deliberately looser than the contract's `MEDIA_SIZE_LIMITS` (videos 150 MB
+ * since WP-2.4), so the app cap can move without a migration. Keep it a
+ * literal so the schema never drifts from the migrations.
+ */
+const MEDIA_MAX_BYTES = 300 * 1024 * 1024;
 
 export const mediaItems = pgTable(
   "media_items",
