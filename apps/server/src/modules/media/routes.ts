@@ -3,7 +3,9 @@
  * caption edit, delete and report. Mounted under `/api`.
  *
  * IDOR rule: an item the caller may not see — or may not act on, for
- * owner-only actions — answers 404, never 403, so ids reveal nothing.
+ * owner-only actions — answers 404, never 403, so ids reveal nothing. *
+ * Every route requires a verified email (ADR 0001, WP-2.3 L2 owner decision):
+ * photos and uploader names reveal who belongs to the family, like attendees.
  */
 import { randomUUID } from "node:crypto";
 import {
@@ -130,7 +132,7 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     "/cuencadas/:year/media/uploads",
     {
-      config: { auth: "user", rateLimit: rateLimitByUser("media-upload", UPLOAD_INTENT_RATE_LIMIT) },
+      config: { auth: "user", requireVerifiedEmail: true, rateLimit: rateLimitByUser("media-upload", UPLOAD_INTENT_RATE_LIMIT) },
       schema: {
         params: yearParamSchema,
         body: createUploadInputSchema,
@@ -207,7 +209,7 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     "/media/:id/confirm",
     {
-      config: { auth: "user", rateLimit: rateLimitByUser("media-confirm", CONFIRM_RATE_LIMIT) },
+      config: { auth: "user", requireVerifiedEmail: true, rateLimit: rateLimitByUser("media-confirm", CONFIRM_RATE_LIMIT) },
       schema: {
         params: idParamSchema,
         body: confirmUploadInputSchema,
@@ -280,7 +282,7 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/cuencadas/:year/media",
     {
-      config: { auth: "user" },
+      config: { auth: "user", requireVerifiedEmail: true },
       schema: {
         params: yearParamSchema,
         querystring: mediaListQuerySchema,
@@ -306,7 +308,7 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/media/:id",
     {
-      config: { auth: "user" },
+      config: { auth: "user", requireVerifiedEmail: true },
       schema: { params: idParamSchema, response: { 200: mediaItemSchema, ...mediaErrorResponses } }
     },
     async (request): Promise<MediaItem> => {
@@ -321,7 +323,7 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
   app.patch(
     "/media/:id",
     {
-      config: { auth: "user" },
+      config: { auth: "user", requireVerifiedEmail: true },
       schema: {
         params: idParamSchema,
         body: updateMediaInputSchema,
@@ -364,7 +366,7 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
   app.delete(
     "/media/:id",
     {
-      config: { auth: "user" },
+      config: { auth: "user", requireVerifiedEmail: true },
       schema: { params: idParamSchema, response: { 204: noContentSchema, ...mediaErrorResponses } }
     },
     async (request, reply) => {
@@ -408,7 +410,7 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     "/media/:id/report",
     {
-      config: { auth: "user", rateLimit: rateLimitByUser("media-report", REPORT_RATE_LIMIT) },
+      config: { auth: "user", requireVerifiedEmail: true, rateLimit: rateLimitByUser("media-report", REPORT_RATE_LIMIT) },
       schema: { params: idParamSchema, body: reportMediaInputSchema, response: { 204: noContentSchema, ...mediaErrorResponses } }
     },
     async (request, reply) => {

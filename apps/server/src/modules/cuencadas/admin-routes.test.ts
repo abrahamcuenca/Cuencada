@@ -349,7 +349,7 @@ describe("itinerary admin", () => {
     expect(tooMany.statusCode).toBe(400);
 
     const publicView = await app.inject({ method: "GET", url: "/api/cuencadas/2026" });
-    const memberView = await app.inject({ method: "GET", url: "/api/cuencadas/2026/members", ...(await loginAs(app, await createUser())) });
+    const memberView = await app.inject({ method: "GET", url: "/api/cuencadas/2026/members", ...(await loginAs(app, await createUser({ emailVerified: true }))) });
     expect(publicView.json<{ publicItinerary: ItineraryItem[] }>().publicItinerary.map((item) => item.tags)).toEqual([["Playa"]]);
     expect(memberView.json<{ itinerary: ItineraryItem[] }>().itinerary.map((item) => [item.title, item.tags])).toEqual([
       ["Cenote Santa Bárbara", ["Playa"]],

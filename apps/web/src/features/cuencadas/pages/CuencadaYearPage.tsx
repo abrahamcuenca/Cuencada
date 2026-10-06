@@ -5,6 +5,7 @@ import { useAppSelector } from "../../../app/hooks";
 import { isFetchBaseQueryError } from "../../../shared/api/errors";
 import { Button } from "../../../shared/ui/Button";
 import { Countdown } from "../../../shared/ui/Countdown";
+import { useAccessDenial } from "../../auth/accessDenied";
 import { selectAuthStatus, selectCurrentUser, selectPasswordChangeRequired } from "../../auth/authSlice";
 import { useGetCuencadaMembersQuery, useGetCuencadaQuery } from "../api";
 import { AnnouncementList } from "../components/AnnouncementList";
@@ -71,10 +72,13 @@ function useMembersState(year: number | null): MembersBlockState {
   const mustChange = useAppSelector(selectPasswordChangeRequired);
   const isMember = status === "authenticated" && user !== null && !mustChange;
   const query = useGetCuencadaMembersQuery(year ?? 0, { skip: !isMember || year === null });
+  // A 403 (unverified email or no access) is final: show why instead of a retry that cannot succeed.
+  const denial = useAccessDenial(query.error);
 
   if (status === "idle" || status === "restoring") return { kind: "checking" };
   if (!isMember) return { kind: "anonymous" };
   if (query.data !== undefined) return { kind: "member", details: query.data };
+  if (denial !== null) return { kind: "denied", denial };
   if (query.error !== undefined) {
     const offline = isFetchBaseQueryError(query.error) && query.error.status === "FETCH_ERROR";
     return { kind: "unavailable", offline, retry: () => void query.refetch() };
