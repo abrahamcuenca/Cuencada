@@ -10,7 +10,7 @@
  * Caveat: `vite preview` serves without gzip/brotli (nginx compresses in
  * production), so performance here is a lower bound.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromium, expect, test } from "@playwright/test";
@@ -37,6 +37,23 @@ interface PageScores {
   scores: Record<(typeof CATEGORIES)[number], number>;
   metrics: { lcpMs: number | null; tbtMs: number | null; cls: number | null; fcpMs: number | null };
   failedAudits: string[];
+}
+
+/** Markdown table for the GitHub Actions job summary (`$GITHUB_STEP_SUMMARY`). */
+function markdownSummary(results: readonly PageScores[]): string {
+  const mark = (score: number): string => `${score >= TARGET ? "✅" : "⚠️"} ${score}`;
+  const rows = results.map((result) => {
+    const lcp = result.metrics.lcpMs === null ? "—" : `${(result.metrics.lcpMs / 1000).toFixed(2)} s`;
+    return `| ${result.page}${result.cold ? "" : " (warm)"} | ${mark(result.scores.performance)} | ${mark(result.scores.accessibility)} | ${mark(result.scores["best-practices"])} | ${lcp} |`;
+  });
+  return [
+    `### Lighthouse mobile (target ≥ ${TARGET}, non-blocking)`,
+    "",
+    "| Page | Performance | Accessibility | Best practices | LCP |",
+    "|---|---|---|---|---|",
+    ...rows,
+    ""
+  ].join("\n");
 }
 
 test.describe("lighthouse mobile", () => {
@@ -104,6 +121,8 @@ test.describe("lighthouse mobile", () => {
     );
     writeFileSync(testInfo.outputPath("lighthouse-summary.json"), summary);
     await testInfo.attach("lighthouse-summary.json", { body: summary, contentType: "application/json" });
+    const stepSummary = process.env.GITHUB_STEP_SUMMARY;
+    if (stepSummary !== undefined && stepSummary !== "") appendFileSync(stepSummary, markdownSummary(results));
     if (process.env.E2E_UPDATE_DOCS === "1") {
       const dir = join(REPO_ROOT, "docs/ux/lighthouse");
       mkdirSync(dir, { recursive: true });
