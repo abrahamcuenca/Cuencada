@@ -1,10 +1,12 @@
 import { Link, useParams } from "react-router-dom";
-import { useAuth } from "../app/auth";
-import { cuencada2026 } from "../data/cuencada2026";
+import { useAppSelector } from "../../../app/hooks";
+// TODO(T2): replace the hardcoded 2026 data with `GET /api/cuencadas/:year` and delete src/data/cuencada2026.ts.
+import { cuencada2026 } from "../../../data/cuencada2026";
+import { selectCurrentUser } from "../../auth/authSlice";
 
 export function CuencadaYearPage(): React.ReactNode {
   const { year } = useParams();
-  const { user } = useAuth();
+  const user = useAppSelector(selectCurrentUser);
 
   if (year !== "2026") {
     return <section className="shell"><h1>No encontramos esa Cuencada</h1><p>Por ahora los eventos anteriores se capturarán manualmente desde administración.</p></section>;
@@ -19,7 +21,7 @@ export function CuencadaYearPage(): React.ReactNode {
           <p className="hero-copy">{cuencada2026.description}</p>
           <div className="actions">
             <a className="btn primary" href="#programa">📅 Ver programa</a>
-            {user ? <Link className="btn light" to="/galeria">📸 Subir fotos</Link> : <Link className="btn light" to="/panel">✅ Iniciar sesión para RSVP</Link>}
+            {user ? <Link className="btn light" to="/galeria">📸 Subir fotos</Link> : <Link className="btn light" to="/entrar">✅ Iniciar sesión para RSVP</Link>}
             <a className="btn ghost" href="#mapa">🗺️ Ver lugares</a>
           </div>
         </div>

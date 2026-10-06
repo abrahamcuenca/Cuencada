@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
-import { cuencada2026 } from "../data/cuencada2026";
+// TODO(T2): replace the hardcoded 2026 data with `GET /api/cuencadas/home` and delete src/data/cuencada2026.ts.
+import { cuencada2026 } from "../../../data/cuencada2026";
 
 export function HomePage(): React.ReactNode {
   return (
@@ -13,7 +14,7 @@ export function HomePage(): React.ReactNode {
           <div className="actions">
             <Link className="btn primary" to="/cuencada/2026">📅 Ver programa</Link>
             <Link className="btn light" to="/galeria">📸 Subir fotos</Link>
-            <Link className="btn ghost" to="/panel">👨‍👩‍👧‍👦 Entrar al portal</Link>
+            <Link className="btn ghost" to="/entrar">👨‍👩‍👧‍👦 Entrar al portal</Link>
             <a className="btn whatsapp" href="https://chat.whatsapp.com/IvI6oayIIoEJ8Wn7EWQxO0?s=cl&p=i&mlu=0" rel="noreferrer" target="_blank">💬 Grupo WhatsApp</a>
           </div>
           <div className="countdown" aria-label="Cuenta regresiva">
@@ -33,7 +34,7 @@ export function HomePage(): React.ReactNode {
           <Link className="card" to="/galeria"><div className="icon">📸</div><h3>Álbum vivo</h3><p>Fotos y videos por año, privados para la familia.</p></Link>
           <Link className="card" to="/directorio"><div className="icon">🧭</div><h3>Directorio</h3><p>Perfiles familiares con privacidad para correo y teléfono.</p></Link>
           <Link className="card" to="/arbol"><div className="icon">🌳</div><h3>Árbol familiar</h3><p>Generaciones, parentescos e historia de la Familia Cuenca.</p></Link>
-          <Link className="card" to="/panel"><div className="icon">✅</div><h3>RSVP</h3><p>Confirma asistencia y mira quién va a cada reunión.</p></Link>
+          <Link className="card" to="/cuencada/2026"><div className="icon">✅</div><h3>RSVP</h3><p>Confirma asistencia y mira quién va a cada reunión.</p></Link>
           <Link className="card" to="/admin"><div className="icon">⭐</div><h3>Admin</h3><p>Crear Cuencadas, editar itinerarios e invitar familiares.</p></Link>
         </div>
       </section>
@@ -52,7 +53,7 @@ export function HomePage(): React.ReactNode {
         <h2 className="section-title">Últimos momentos</h2>
         <p className="intro">Una pequeña muestra de las fotografías de la Cuencada.</p>
         <div className="photo-mosaic">
-          {['foto01', 'foto02', 'foto03', 'foto04'].map((photo) => <img key={photo} src={`/images/fotos/${photo}.jpg`} alt="Cuencada 2026" />)}
+          {["foto01", "foto02", "foto03", "foto04"].map((photo) => <img key={photo} src={`/images/fotos/${photo}.jpg`} alt="Cuencada 2026" />)}
         </div>
       </section>
     </>

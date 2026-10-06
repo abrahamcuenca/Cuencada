@@ -1,0 +1,116 @@
+/* Minimal mobile-first shell. Swapped for the WP-0.7 PageShell/BottomNav primitives later. */
+.layout {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: calc(8px + env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 8px
+    max(16px, env(safe-area-inset-left));
+  background: var(--green, #0b5e55);
+  color: #fff;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.brand img {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: #fff;
+  object-fit: contain;
+}
+
+.topNav {
+  display: none;
+}
+
+.topNav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 8px;
+  font-weight: 800;
+}
+
+.topNav a[aria-current="page"] {
+  color: #ffe39a;
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--green, #0b5e55);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.main {
+  flex: 1;
+  padding-bottom: calc(64px + env(safe-area-inset-bottom));
+}
+
+.bottomNav {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  padding-bottom: env(safe-area-inset-bottom);
+  border-top: 1px solid rgb(11 94 85 / 15%);
+  background: #fff;
+}
+
+.bottomNav a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 56px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #4a5c58;
+}
+
+.bottomNav a[aria-current="page"] {
+  color: var(--green, #0b5e55);
+}
+
+@media (min-width: 900px) {
+  .topNav {
+    display: flex;
+    gap: 8px;
+  }
+
+  .bottomNav {
+    display: none;
+  }
+
+  .main {
+    padding-bottom: 0;
+  }
+}
