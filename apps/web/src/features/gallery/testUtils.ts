@@ -67,8 +67,26 @@ export function makeEdition(year: number, startsAt = `${year}-09-13T12:00:00.000
   };
 }
 
+/** The bucket origin tests configure as `env.mediaUploadOrigin`. */
+export const BUCKET_ORIGIN = "https://bucket.example";
+
 /** The signed upload URL the fake API hands out (tests assert it never leaks). */
-export const SIGNED_PUT_URL = "https://bucket.example/uploads/obj-1?X-Amz-Signature=supersecret";
+export const SIGNED_PUT_URL = `${BUCKET_ORIGIN}/uploads/obj-1?X-Amz-Signature=supersecret`;
+
+/** A promise the test resolves by hand, to hold a fake response in flight. */
+export interface Gate {
+  promise: Promise<void>;
+  release: () => void;
+}
+
+/** Creates a {@link Gate}. */
+export function makeGate(): Gate {
+  let release = (): void => {};
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
 
 /** Mutable state behind {@link galleryHandlers}. */
 export interface FakeGalleryDb {
@@ -83,6 +101,14 @@ export interface FakeGalleryDb {
   nextId: number;
   /** Request bodies by `METHOD path`. */
   bodies: Record<string, unknown>;
+  /** `uploadUrl` returned by the intent. */
+  uploadUrl: string;
+  /** When set, intent responses wait for it. */
+  holdUploads: Promise<void> | null;
+  /** When set, confirm responses wait for it. */
+  holdConfirm: Promise<void> | null;
+  /** Years whose `limit=1` probe fails with a 500. */
+  failingProbes: number[];
 }
 
 /** A fresh fake database. */
@@ -96,6 +122,10 @@ export function makeDb(overrides: Partial<FakeGalleryDb> = {}): FakeGalleryDb {
     confirmStatus: "processing",
     nextId: 1000,
     bodies: {},
+    uploadUrl: SIGNED_PUT_URL,
+    holdUploads: null,
+    holdConfirm: null,
+    failingProbes: [],
     ...overrides
   };
 }
@@ -129,6 +159,9 @@ export function galleryHandlers(db: FakeGalleryDb): HttpHandler[] {
     http.get(apiUrl("/cuencadas/:year/media"), ({ request, params }) => {
       const url = record(db, request);
       const year = Number(params.year);
+      if (url.searchParams.get("limit") === "1" && db.failingProbes.includes(year)) {
+        return HttpResponse.json(errorBody("INTERNAL"), { status: 500 });
+      }
       return HttpResponse.json(paginate(db.media.filter((m) => m.year === year), url));
     }),
     http.post(apiUrl("/cuencadas/:year/media/uploads"), async ({ request }) => {
@@ -137,18 +170,21 @@ export function galleryHandlers(db: FakeGalleryDb): HttpHandler[] {
       const body = (await request.json()) as { fileName: string; mimeType: string; byteSize: number; caption: string | null };
       db.bodies[`POST uploads ${body.fileName}`] = body;
       db.nextId += 1;
+      const mediaId = uuid(db.nextId);
+      if (db.holdUploads) await db.holdUploads;
       return HttpResponse.json(
         {
-          mediaId: uuid(db.nextId),
-          uploadUrl: SIGNED_PUT_URL,
+          mediaId,
+          uploadUrl: db.uploadUrl,
           headers: { "Content-Type": body.mimeType, "Content-Length": String(body.byteSize) },
           expiresAt: new Date(Date.now() + 3_600_000).toISOString()
         },
         { status: 201 }
       );
     }),
-    http.post(apiUrl("/media/:id/confirm"), ({ request, params }) => {
+    http.post(apiUrl("/media/:id/confirm"), async ({ request, params }) => {
       record(db, request);
+      if (db.holdConfirm) await db.holdConfirm;
       const id = String(params.id);
       const item = makeMedia(Number(id.slice(-6)), {
         id,

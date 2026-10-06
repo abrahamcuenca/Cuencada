@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useAppSelector } from "../../../app/hooks";
 import { isAbortError } from "../../../shared/api/errors";
@@ -8,7 +8,7 @@ import { Select } from "../../../shared/ui/Select";
 import { Skeleton } from "../../../shared/ui/Skeleton";
 import { cx } from "../../../shared/ui/cx";
 import { selectIsAdmin } from "../../auth/authSlice";
-import { useGalleryYearsQuery, useListMediaInfiniteQuery } from "../api";
+import { MEDIA_PAGE_SIZE, useGalleryYearsQuery, useListMediaInfiniteQuery, useMediaHeadQuery } from "../api";
 import { GalleryLightbox } from "../components/GalleryLightbox";
 import { isViewable, MediaGrid, MediaGridSkeleton } from "../components/MediaGrid";
 import { UploadPanel } from "../components/UploadPanel";
@@ -17,10 +17,9 @@ import styles from "../gallery.module.css";
 import { parseYearParam } from "../lib/mediaText";
 import { UPLOAD_RULES_TEXT } from "../lib/validateFile";
 import { useExpiredUrlRefetch } from "../lib/useExpiredUrlRefetch";
+import { PROCESSING_POLL_MS } from "../upload/uploadManager";
 import { useUploadManager } from "../upload/useUploadManager";
 
-/** While any listed item is processing, the list is polled this often. */
-export const PROCESSING_POLL_MS = 5000;
 
 /**
  * `/galeria/:year?` (members only). Without a year, redirects to the newest
@@ -103,24 +102,23 @@ function YearSwitcher({ year }: { year: number }): React.ReactNode {
 function GalleryYear({ year }: { year: number }): React.ReactNode {
   const isAdmin = useAppSelector(selectIsAdmin);
   const uploader = useRef<UploaderHandle>(null);
-  const { manager } = useUploadManager();
-  const [poll, setPoll] = useState(false);
+  const { uploads } = useUploadManager();
   const [openId, setOpenId] = useState<string | null>(null);
 
-  const { data, isLoading, isError, error, refetch, fetchNextPage, hasNextPage, isFetchingNextPage, fulfilledTimeStamp } = useListMediaInfiniteQuery(year, {
-    pollingInterval: poll ? PROCESSING_POLL_MS : 0,
-    skipPollingIfUnfocused: true
-  });
+  const { data, isLoading, isError, error, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } = useListMediaInfiniteQuery(year);
 
   const items = useMemo(() => data?.pages.flatMap((page) => page.items) ?? [], [data]);
   const viewable = useMemo(() => items.filter(isViewable), [items]);
-  const processing = items.some((item) => item.uploadStatus === "processing");
   const onMediaError = useExpiredUrlRefetch(refetch);
 
-  useEffect(() => setPoll(processing), [processing]);
-  useEffect(() => {
-    if (data && fulfilledTimeStamp !== undefined) manager.syncFromList(year, items, fulfilledTimeStamp);
-  }, [data, items, fulfilledTimeStamp, manager, year]);
+  // The upload manager polls for its own uploads; the page polls only for processing items it
+  // doesn't track (e.g. from an earlier visit). Only the first page is fetched and patched in.
+  const managerPolls = uploads.some((upload) => upload.year === year && upload.phase === "processing");
+  const processing = !managerPolls && items.some((item) => item.uploadStatus === "processing");
+  useMediaHeadQuery(
+    { year, limit: MEDIA_PAGE_SIZE },
+    { skip: !processing, pollingInterval: processing ? PROCESSING_POLL_MS : 0, skipPollingIfUnfocused: true }
+  );
 
   let content: React.ReactNode;
   if (isLoading) {

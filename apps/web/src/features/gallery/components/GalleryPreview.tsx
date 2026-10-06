@@ -2,8 +2,8 @@ import { Link } from "react-router-dom";
 import { useAppSelector } from "../../../app/hooks";
 import { Button } from "../../../shared/ui/Button";
 import { Skeleton } from "../../../shared/ui/Skeleton";
-import { selectCurrentUser } from "../../auth/authSlice";
-import { PREVIEW_SIZE, useMediaPreviewQuery } from "../api";
+import { selectCurrentUser, selectPasswordChangeRequired } from "../../auth/authSlice";
+import { PREVIEW_SIZE, useMediaHeadQuery } from "../api";
 import styles from "../gallery.module.css";
 import { mediaAlt } from "../lib/mediaText";
 import { useExpiredUrlRefetch } from "../lib/useExpiredUrlRefetch";
@@ -25,9 +25,11 @@ export interface GalleryPreviewProps {
  */
 export function GalleryPreview({ year, headingLevel = 2 }: GalleryPreviewProps): React.ReactNode {
   const user = useAppSelector(selectCurrentUser);
-  const { data, isLoading, isError, refetch } = useMediaPreviewQuery(year, { skip: user === null || user.mustChangePassword });
+  const passwordChangeRequired = useAppSelector(selectPasswordChangeRequired);
+  const blocked = user === null || passwordChangeRequired;
+  const { data, isLoading, isError, refetch } = useMediaHeadQuery({ year, limit: PREVIEW_SIZE }, { skip: blocked });
   const onMediaError = useExpiredUrlRefetch(refetch);
-  if (user === null || user.mustChangePassword) return null;
+  if (blocked) return null;
 
   const Heading = headingLevel === 3 ? "h3" : "h2";
   const items = (data?.items ?? []).filter((item) => item.uploadStatus === "ready" && item.thumbUrl !== null);

@@ -1,8 +1,9 @@
+import { useId } from "react";
 import { Button } from "../../../shared/ui/Button";
 import { IconButton } from "../../../shared/ui/IconButton";
 import { cx } from "../../../shared/ui/cx";
 import styles from "../gallery.module.css";
-import type { UploadEntry, UploadPhase } from "../upload/uploadManager";
+import { CANCELABLE_PHASES, type UploadEntry, type UploadPhase } from "../upload/uploadManager";
 import { useUploadManager } from "../upload/useUploadManager";
 
 const DONE: ReadonlySet<UploadPhase> = new Set(["ready", "review"]);
@@ -43,16 +44,25 @@ export interface UploadPanelProps {
  */
 export function UploadPanel({ year }: UploadPanelProps): React.ReactNode {
   const { manager, uploads } = useUploadManager();
+  const titleId = useId();
   if (uploads.length === 0) return null;
 
   const done = uploads.filter((u) => DONE.has(u.phase)).length;
   const failed = uploads.filter((u) => u.phase === "failed" || u.phase === "processing_failed").length;
   const finished = uploads.filter((u) => FINISHED.has(u.phase)).length;
+  const failures = uploads
+    .filter((u) => u.phase === "failed" || u.phase === "processing_failed")
+    .map((u) => (u.phase === "failed" ? `No se pudo subir ${u.fileName}.` : `No se pudo procesar ${u.fileName}.`))
+    .join(" ");
 
   return (
-    <section className={styles.panel} aria-labelledby="upload-panel-title">
+    <section className={styles.panel} aria-labelledby={titleId}>
+      {/* Per-file failures are announced by name; the visible rows carry the details. */}
+      <output aria-live="polite" className="visually-hidden">
+        {failures}
+      </output>
       <div className={styles.panelHeader}>
-        <h2 id="upload-panel-title" className={styles.panelTitle} aria-live="polite">
+        <h2 id={titleId} className={styles.panelTitle} aria-live="polite">
           {done} de {uploads.length} {uploads.length === 1 ? "lista" : "listas"}
           {failed > 0 ? ` · ${failed} con error` : ""}
         </h2>
@@ -66,7 +76,7 @@ export function UploadPanel({ year }: UploadPanelProps): React.ReactNode {
         {uploads.map((entry) => {
           const isError = entry.phase === "failed" || entry.phase === "processing_failed";
           const isTransferring = entry.phase === "uploading";
-          const canCancel = ["queued", "creating", "uploading", "confirming", "failed"].includes(entry.phase);
+          const canCancel = CANCELABLE_PHASES.has(entry.phase);
           return (
             <li key={entry.id} className={styles.uploadRow}>
               <div className={styles.uploadInfo}>

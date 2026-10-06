@@ -51,7 +51,7 @@ export function EditCaptionDialog({ item, open, onClose }: ItemDialogProps): Rea
       return;
     }
     try {
-      await update({ id: item.id, caption: trimmed === "" ? null : trimmed }).unwrap();
+      await update({ id: item.id, year: item.year, caption: trimmed === "" ? null : trimmed }).unwrap();
       toast.show({ message: "Descripción guardada.", tone: "success" });
       onClose();
     } catch (failure) {
