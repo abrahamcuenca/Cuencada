@@ -192,13 +192,13 @@ Built against the WP-0.2 chat contract with MSW and a fake WebSocket. Mid-task, 
 
 Fixtures, tests and screenshots use invented people only ("Lucía Ramírez Solís", "Tomás Herrera Vidal", "Rosa Herrera Soto", "Inés Navarro Soto"…), with initials avatars.
 
-## Verification (2026-10-06, after merging `origin/main` at 931319d)
-- `pnpm lint`: clean (568 files).
+## Verification (2026-10-06, `origin/main` and `origin/wp/t7-be-chat` @ eee980d merged in)
+- `pnpm lint`: clean (572 files).
 - `pnpm turbo run typecheck --force`: 6/6 tasks pass.
-- `pnpm test`: 131 files, 1493 tests pass. The chat feature has 83.
+- `pnpm test`: 134 files, 1513 tests pass. The chat feature has 86.
 - `pnpm build`: succeeds.
 - `pnpm --filter @cuencada/web size`: initial JS is **173.02 kB gzip** (budget 190). The badge's share is about 1.3 kB.
-- Lazy chat chunk: `ChatPage` 14.21 kB gzip JS + 2.33 kB CSS. It holds the socket, the zod frame validation (zod itself is already in the entry chunk), the conversation endpoints and the UI.
+- Lazy chat chunk: `ChatPage` 14.51 kB gzip JS + 2.33 kB CSS. It holds the socket, the zod frame validation (zod itself is already in the entry chunk), the conversation endpoints and the UI.
 - **Screenshots** (`docs/ux/screenshots/t7/`): `salas`, `conversacion-teclado` (375), `conversacion` (1280) and `eliminar`, at 375 and 1280.
   - Taken with headless Chromium against the Vite dev server, with `/api/**` stubbed by `page.route` and the WebSocket mocked by `page.routeWebSocket` (it answers pings and sends a typing frame).
   - The keyboard shot overrides `window.visualViewport` to 300px shorter than the window and paints a grey "Teclado en pantalla (simulado)" block there: the composer sits right above it, and the list stays on the newest message.
