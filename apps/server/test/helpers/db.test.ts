@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { profiles, users } from "../../src/db/schema.js";
+import { profiles, users } from "../../src/db/schema/index.js";
 import { currentWorkerDatabaseName, getTestDb, resetDb } from "./db.js";
 import { createUser } from "./factories.js";
 

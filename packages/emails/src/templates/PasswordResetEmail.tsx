@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import { EmailLayout } from "../components/EmailLayout.js";
-import type { EmailContent } from "../content.js";
+import { type EmailContent, FOOTER_IGNORE } from "../content.js";
 import {
   type EmailRenderOptions,
   type ResolvedEmailOptions,
@@ -41,14 +41,24 @@ export function buildPasswordResetContent(
     heading: "Restablece tu contraseña",
     greeting: name === null ? "¡Hola!" : `¡Hola, ${name}!`,
     paragraphs: [
-      "Recibimos una solicitud para cambiar la contraseña de tu cuenta en el portal de la Cuencada. Toca el botón para crear una nueva.",
+      {
+        id: "intro",
+        text: "Recibimos una solicitud para cambiar la contraseña de tu cuenta en el portal de la Cuencada. Toca el botón para crear una nueva.",
+      },
     ],
     cta: { label: "Crear contraseña nueva", url },
     notes: [
-      `El enlace funciona una sola vez y vence en ${ttl}. Al cambiarla, cerraremos tu sesión en todos tus dispositivos.`,
-      "Si no lo pediste tú, ignora este correo: tu contraseña actual no cambia.",
+      {
+        id: "expiry",
+        text: `El enlace funciona una sola vez y vence en ${ttl}. Al cambiarla, cerraremos tu sesión en todos tus dispositivos.`,
+      },
+      {
+        id: "not-you",
+        text: "Si no lo pediste tú, ignora este correo: tu contraseña actual no cambia.",
+      },
     ],
     warning: null,
+    footerNote: FOOTER_IGNORE,
   };
 }
 

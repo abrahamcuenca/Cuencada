@@ -39,14 +39,19 @@ export function buildPasswordChangedContent(
     heading: "Tu contraseña cambió",
     greeting: name === null ? "¡Hola!" : `¡Hola, ${name}!`,
     paragraphs: [
-      endSentence(
-        `Te avisamos que la contraseña de tu cuenta en el portal de la Cuencada se cambió el ${changed}`,
-      ),
-      "Si fuiste tú, no tienes que hacer nada más.",
+      {
+        id: "changed",
+        text: endSentence(
+          `Te avisamos que la contraseña de tu cuenta en el portal de la Cuencada se cambió el ${changed}`,
+        ),
+      },
+      { id: "was-you", text: "Si fuiste tú, no tienes que hacer nada más." },
     ],
     cta: null,
     notes: [],
     warning: `Si no fuiste tú, escríbele de inmediato a ${support} para proteger tu cuenta.`,
+    // A security notice must never tell the reader to ignore it.
+    footerNote: `Si no reconoces este cambio, escríbenos a ${support} de inmediato.`,
   };
 }
 

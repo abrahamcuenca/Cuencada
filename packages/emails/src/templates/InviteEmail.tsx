@@ -1,6 +1,10 @@
 import type { ReactElement } from "react";
 import { EmailLayout } from "../components/EmailLayout.js";
-import type { EmailContent } from "../content.js";
+import {
+  type EmailBlock,
+  type EmailContent,
+  FOOTER_IGNORE,
+} from "../content.js";
 import {
   type EmailRenderOptions,
   type ResolvedEmailOptions,
@@ -43,17 +47,24 @@ export function buildInviteContent(
   const invitee = cleanName(props.inviteeName);
   const eventTitle = cleanName(props.eventTitle);
   const expires = formatDateTime(props.expiresAt, "expiresAt", options);
-  const paragraphs = [
-    `${inviter} te invitó a unirte al portal familiar de la Cuencada, donde compartimos fotos, confirmamos asistencia y nos mantenemos en contacto toda la familia.`,
+  const paragraphs: EmailBlock[] = [
+    {
+      id: "intro",
+      text: `${inviter} te invitó a unirte al portal familiar de la Cuencada, donde compartimos fotos, confirmamos asistencia y nos mantenemos en contacto toda la familia.`,
+    },
   ];
   if (eventTitle !== null) {
-    paragraphs.push(
-      endSentence(`Ya estamos preparando la próxima reunión: ${eventTitle}`),
-    );
+    paragraphs.push({
+      id: "event",
+      text: endSentence(
+        `Ya estamos preparando la próxima reunión: ${eventTitle}`,
+      ),
+    });
   }
-  paragraphs.push(
-    "Crea tu cuenta con el botón de abajo; solo toma un par de minutos.",
-  );
+  paragraphs.push({
+    id: "action",
+    text: "Crea tu cuenta con el botón de abajo; solo toma un par de minutos.",
+  });
   return {
     subject: `${inviter} te invitó al portal de la Cuencada`,
     preview: `${inviter} te invitó al portal familiar de la Cuencada.`,
@@ -62,10 +73,17 @@ export function buildInviteContent(
     paragraphs,
     cta: { label: "Aceptar invitación", url },
     notes: [
-      endSentence(`Esta invitación vence el ${expires}`),
-      "La invitación es personal, por favor no la reenvíes.",
+      {
+        id: "expiry",
+        text: endSentence(`Esta invitación vence el ${expires}`),
+      },
+      {
+        id: "personal",
+        text: "La invitación es personal, por favor no la reenvíes.",
+      },
     ],
     warning: null,
+    footerNote: FOOTER_IGNORE,
   };
 }
 

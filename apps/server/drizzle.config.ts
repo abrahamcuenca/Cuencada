@@ -9,7 +9,7 @@ const repoRoot = resolve(serverRoot, "../..");
 loadDotEnv({ path: [resolve(repoRoot, ".env"), resolve(serverRoot, ".env")], quiet: true });
 
 export default defineConfig({
-  schema: "./src/db/schema.ts",
+  schema: "./src/db/schema/index.ts",
   out: "./drizzle",
   dialect: "postgresql",
   dbCredentials: {

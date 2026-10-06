@@ -53,6 +53,17 @@ export default defineConfig({
           include: ["**/*.test.ts"],
           exclude: ["**/node_modules/**", "**/dist/**"]
         }
+      },
+      {
+        root: fromRoot("./packages/emails"),
+        // Templates are .tsx; compile JSX with the automatic runtime like tsc does.
+        esbuild: { jsx: "automatic" },
+        test: {
+          name: "emails",
+          environment: "node",
+          include: ["**/*.test.{ts,tsx}"],
+          exclude: ["**/node_modules/**", "**/dist/**"]
+        }
       }
     ]
   }
