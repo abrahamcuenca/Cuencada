@@ -72,7 +72,7 @@ Owner: Frontend · Reviewers: TL, Sec · Branch: wp/t3-fe-rsvp · PR: # (not ope
 
 ## Verification (2026-10-06, after merging T3-BE / T6-BE)
 - `pnpm lint`: biome, 0 diagnostics. `pnpm turbo run typecheck --force`: 6/6.
-- `pnpm test` (root): 101 files, 1066 tests, all passing; web: 51 files, 437. T3 adds 40 tests in 5 files:
+- `pnpm test` (root, after also merging #17/#18): 104 files, 1106 tests, all passing. T3-related web files unchanged by that merge. T3 adds 40 tests in 5 files:
   - `lib/rsvpForm.test.ts` (15): ±14-day date window across months and years, `isPastDeadline` (open all of the deadline's local day, closed at local midnight), guest clamp, required status, departure < arrival, window bounds, hotel not in the list, "No" clears fields, notes length, optimistic shape
   - `components/RsvpCard.test.tsx` (13):
     - visitors render nothing and call no API
@@ -93,7 +93,7 @@ Owner: Frontend · Reviewers: TL, Sec · Branch: wp/t3-fe-rsvp · PR: # (not ope
     - RSVP totals and filter
     - CSV: a request without the token in the URL, a Blob with exactly one BOM, `a[download]` named `cuencada-2027-rsvps.csv`, the anchor removed and the blob URL revoked afterwards
   - `slots.test.tsx` (2): the real `/cuencada/2027` page shows both slots to members; visitors get neither and no RSVP/attendee requests
-- `pnpm build` passes. `pnpm --filter @cuencada/web size`: **169.52 KB gzip** initial JS (budget 190). T3 adds nothing to the initial chunk. `AdminAttendancePage` chunk: 9.4 KB raw / 3.7 KB gzip (+0.95 KB CSS).
+- `pnpm build` passes. `pnpm --filter @cuencada/web size`: **169.90 KB gzip** initial JS (after merging T6-FE) (budget 190). T3 adds nothing to the initial chunk. `AdminAttendancePage` chunk: 9.4 KB raw / 3.7 KB gzip (+0.95 KB CSS).
 - **Screenshots** in `docs/ux/screenshots/t3/`, at 375 and 1280, taken with headless Chromium against `vite preview` with `/api/**` stubbed and device timezone Europe/Madrid:
   - `rsvp-abierto` (form with Sí, 2 guests, dates and hotel)
   - `rsvp-cerrado` (after the deadline)
