@@ -14,7 +14,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --root ../.. --project emails"
+    "test": "vitest run --config ../../vitest.config.ts --project emails"
   },
   "dependencies": {
     "@react-email/render": "^2.1.0",
