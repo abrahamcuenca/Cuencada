@@ -2,7 +2,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { describe, expect, it, vi } from "vitest";
 import { FakeStorage } from "../../../test/helpers/fakes.js";
 import { AppError } from "../../lib/errors.js";
-import { mergeAttendees, toAttendees } from "./attendees.js";
+import { hiddenOrderKey, mergeAttendees, toAttendees } from "./attendees.js";
 import type { AttendeeCandidate } from "./repository.js";
 
 function candidate(overrides: Partial<AttendeeCandidate>): AttendeeCandidate {
@@ -55,9 +55,48 @@ describe("mergeAttendees", () => {
       VIEWER
     );
     expect(merged).toEqual([
-      { personId: null, userId: null, displayName: "Familiar", avatarKey: null, source: "rsvp", isMe: false },
-      { personId: P2, userId: U2, displayName: "Zacarías", avatarKey: null, source: "attendance", isMe: false }
+      {
+        personId: null,
+        userId: null,
+        displayName: "Familiar",
+        avatarKey: null,
+        source: "rsvp",
+        isMe: false,
+        orderKey: hiddenOrderKey("rsvp", `p:${P1}`)
+      },
+      {
+        personId: P2,
+        userId: U2,
+        displayName: "Zacarías",
+        avatarKey: null,
+        source: "attendance",
+        isMe: false,
+        orderKey: `p:${P2}`
+      }
     ]);
+    // The hidden row's key carries neither id.
+    expect(merged[0]?.orderKey).not.toContain(P1);
+    expect(merged[0]?.orderKey).not.toContain(U1);
+  });
+
+  it("orders hidden rows by source then keyed HMAC, independent of insertion (RSVP time) order", () => {
+    const people = [P1, P2, "66666666-6666-4666-8666-666666666666", "77777777-7777-4777-8777-777777777777"];
+    const hiddenRsvps = people.map((personId) =>
+      candidate({ personId, accountName: personId, listedInDirectory: false })
+    );
+    const hiddenAttendance = candidate({ personId: "88888888-8888-4888-8888-888888888888", listedInDirectory: false });
+
+    const forward = mergeAttendees(hiddenRsvps, [hiddenAttendance], VIEWER);
+    const reversed = mergeAttendees([...hiddenRsvps].reverse(), [hiddenAttendance], VIEWER);
+
+    expect(forward.map((row) => row.orderKey)).toEqual(reversed.map((row) => row.orderKey));
+    // Source first: the attendance-only hidden row sorts before the hidden RSVPs.
+    expect(forward.map((row) => row.source)).toEqual(["attendance", "rsvp", "rsvp", "rsvp", "rsvp"]);
+    // Within a source, ascending HMAC order, which neither follows insertion order nor reveals ids.
+    const rsvpKeys = forward.slice(1).map((row) => row.orderKey);
+    expect(rsvpKeys).toEqual([...rsvpKeys].sort());
+    expect(rsvpKeys).toEqual(people.map((personId) => hiddenOrderKey("rsvp", `p:${personId}`)).sort());
+    for (const row of forward) expect(row).toMatchObject({ personId: null, userId: null, displayName: "Familiar" });
   });
 
   it("keeps the viewer's own row complete even when unlisted", () => {
@@ -72,7 +111,8 @@ describe("mergeAttendees", () => {
       displayName: "Abel",
       avatarKey: "a.webp",
       source: "rsvp",
-      isMe: true
+      isMe: true,
+      orderKey: `p:${P1}`
     });
   });
 });

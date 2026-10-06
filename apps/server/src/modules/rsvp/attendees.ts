@@ -7,6 +7,7 @@
  * `profiles.listed_in_directory = false` is anonymized for everyone but
  * themselves: name "Familiar", no avatar, no ids. They still count.
  */
+import { createHmac, randomBytes } from "node:crypto";
 import { type Attendee, AttendeeSource, RsvpStatus } from "@cuencada/types";
 import type { FastifyBaseLogger } from "fastify";
 import { isAppError } from "../../lib/errors.js";
@@ -30,6 +31,30 @@ export interface MergedAttendee {
   avatarKey: string | null;
   source: AttendeeSource;
   isMe: boolean;
+  /**
+   * Tie-break after `displayName` (server-side only, never sent). Visible
+   * rows: their id. Hidden rows: `source` + a keyed HMAC of the id, so their
+   * order depends neither on DB/insertion order (≈ RSVP time) nor on the id.
+   */
+  orderKey: string;
+}
+
+/**
+ * Per-process random HMAC key for ordering hidden rows. It never leaves the
+ * process, so the order cannot be inverted to an id, and it is unrelated to
+ * time. Order is stable within a process and reshuffles on restart.
+ */
+const HIDDEN_ORDER_KEY = randomBytes(32);
+
+/**
+ * Non-identifying sort key for a hidden row: `source`, then
+ * HMAC-SHA256(`HIDDEN_ORDER_KEY`, dedupe key).
+ *
+ * @param source - Where the row comes from (attendance sorts before rsvp).
+ * @param dedupeKey - `p:<personId>` or `u:<userId>`.
+ */
+export function hiddenOrderKey(source: AttendeeSource, dedupeKey: string): string {
+  return `${source}:${createHmac("sha256", HIDDEN_ORDER_KEY).update(dedupeKey).digest("hex")}`;
 }
 
 function keyOf(candidate: AttendeeCandidate): string | null {
@@ -47,7 +72,8 @@ function nameOf(candidate: AttendeeCandidate): string {
  * has an attendance record appears once, with `source: rsvp`. Unlisted
  * accounts other than the viewer are anonymized **before** sorting, so their
  * position in the list does not hint at their real name. Sorted by display
- * name (Spanish collation, accent-insensitive), then id.
+ * name (Spanish collation, accent-insensitive), then `orderKey` (id for
+ * visible rows; source + keyed HMAC for hidden ones, never insertion order).
  *
  * @param rsvps - `yes` RSVP candidates (active accounts).
  * @param attendance - Historical attendance candidates.
@@ -67,14 +93,23 @@ export function mergeAttendees(
     merged.set(
       key,
       hidden
-        ? { personId: null, userId: null, displayName: ANONYMOUS_NAME, avatarKey: null, source, isMe }
+        ? {
+            personId: null,
+            userId: null,
+            displayName: ANONYMOUS_NAME,
+            avatarKey: null,
+            source,
+            isMe,
+            orderKey: hiddenOrderKey(source, key)
+          }
         : {
             personId: candidate.personId,
             userId: candidate.userId,
             displayName: nameOf(candidate),
             avatarKey: candidate.avatarKey,
             source,
-            isMe
+            isMe,
+            orderKey: key
           }
     );
   };
@@ -85,8 +120,7 @@ export function mergeAttendees(
   const collator = new Intl.Collator("es", { sensitivity: "base" });
   return [...merged.values()].sort(
     (a, b) =>
-      collator.compare(a.displayName, b.displayName) ||
-      (a.personId ?? a.userId ?? "").localeCompare(b.personId ?? b.userId ?? "")
+      collator.compare(a.displayName, b.displayName) || (a.orderKey < b.orderKey ? -1 : a.orderKey > b.orderKey ? 1 : 0)
   );
 }
 
