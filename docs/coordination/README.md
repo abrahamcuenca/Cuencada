@@ -18,7 +18,7 @@ Source of truth for multi-agent work. The full plan lives in [`../plan.md`](../p
 
 ## Status
 
-PRs #1–#27 are merged. Deferred and cross-track items live in [`backlog.md`](backlog.md).
+PRs #1–#28 are merged. Deferred and cross-track items live in [`backlog.md`](backlog.md).
 
 | WP | Title | Owner | Reviewers | Branch | PR | Status |
 |---|---|---|---|---|---|---|
@@ -44,7 +44,7 @@ PRs #1–#27 are merged. Deferred and cross-track items live in [`backlog.md`](b
 | T6-FE | Family tree + people editor [SEC] | Frontend | TL, Sec | wp/t6-fe-family | #18 | merged |
 | T6-BE | Family tree API [SEC] | Backend | TL, Sec | wp/t6-be-family | #16 | merged |
 | T7-BE | Real-time chat API [SEC] | Backend | TL, Sec | wp/t7-be-chat | #25 | merged |
-| T7-FE | Real-time chat UI [SEC] | Frontend | TL, Sec | wp/t7-fe-chat | #28 | open |
+| T7-FE | Real-time chat UI [SEC] | Frontend | TL, Sec | wp/t7-fe-chat | #28 | merged |
 | T8-FE | Admin console [SEC] | Frontend | TL, Sec | wp/t8-fe-admin | #26 | merged |
 | T8-BE | Admin console API (+ alerts #27) [SEC] | Backend | TL, Sec | wp/t8-be-admin | #24, #27 | merged |
 | 2.1 | Migration 0002 | Backend (data) | Architect, TL | wp/2.1-migration-0002 | #17 | merged |

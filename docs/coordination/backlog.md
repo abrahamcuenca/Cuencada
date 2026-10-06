@@ -2,12 +2,12 @@
 
 Deferred and cross-track work, grouped by status. Imported from the
 orchestrator's working backlog by WP-0.8a (2026-10-06) and checked against
-`main` after PRs #1–#27. Add new items here instead of leaving TODOs in code.
+`main` after PRs #1–#28. Add new items here instead of leaving TODOs in code.
 When an item ships, move it to **Done** with the PR number.
 
 Owners: **0.8a** platform & repo hygiene · **0.8b** backend modules (auth,
 family, profile, admin, chat, media, cuencadas) · **0.8c** web features
-(`apps/web/src/features/**`) · **T7-FE** chat UI (PR #28) · **T9** PWA ·
+(`apps/web/src/features/**`) · **T9** PWA ·
 **WP-2.x** later phase (2.1 migrations, 2.4–2.5 cutover).
 
 ## Done
@@ -72,8 +72,11 @@ family, profile, admin, chat, media, cuencadas) · **0.8c** web features
 - Privacy sweep inside `features/**` (WP-0.8a swept everything else): fictional people only.
 - Adopt `warmRoutes()` (`apps/web/test/renderApp.tsx`) in other route-level tests whose first test flakes (admin.test.tsx, GalleryPage.test.tsx were seen failing once under load).
 
-### T7-FE (PR #28, open)
-- Chat room badge uses `<Badge shape="count" max={999}>`; viewport `interactive-widget`; preview update after delete.
+### 0.8c: chat (T7-FE follow-ups after PR #28)
+- `RoomList` badge: `<Badge shape="count" max={999}>` (WP-0.8a added `max`).
+- Chat fixtures/handlers answer `FORBIDDEN` for unverified members; the server now answers `EMAIL_UNVERIFIED` (`socket.ts` already branches on the 403 status).
+- `features/chat/testing/fixtures.ts` `ME` is "Prima Cuenca": rename to a fictional person and retake the `docs/ux/screenshots/t7/` screenshots if the name shows.
+- Preview update after delete.
 
 ### T9 (PWA)
 - The service worker must never cache `/api/**` responses.
