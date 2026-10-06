@@ -18,8 +18,22 @@ import type { AppConfig } from "./config.js";
 
 export const REDACTED = "[REDACTED]";
 
-/** Query parameters whose values are always redacted from logged URLs. */
-const SENSITIVE_QUERY_PARAMS = new Set(["ticket", "token", "t", "code", "key", "signature", "x-amz-signature"]);
+/**
+ * Query parameters whose values are always redacted from logged URLs.
+ * `q`/`search` carry free-text searches (people's names in the family tree
+ * and directory), which are PII.
+ */
+const SENSITIVE_QUERY_PARAMS = new Set([
+  "ticket",
+  "token",
+  "t",
+  "code",
+  "key",
+  "signature",
+  "x-amz-signature",
+  "q",
+  "search"
+]);
 /** Query parameter name prefixes that are always redacted (`ticket[]`, `token_x`, …). */
 const SENSITIVE_QUERY_PREFIXES = ["ticket", "token"];
 

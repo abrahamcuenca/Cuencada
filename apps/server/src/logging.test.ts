@@ -237,6 +237,11 @@ describe("scrubUrl", () => {
     expect(scrubUrl("/x?%E0%A4%A=abc&ok=1")).toBe(`/x?${REDACTED}&ok=1`);
   });
 
+  it("redacts free-text search terms (q, search), which may hold names", () => {
+    expect(scrubUrl("/api/family/people?q=Rosa")).toBe(`/api/family/people?q=${REDACTED}`);
+    expect(scrubUrl("/api/directory?Search=Rosa%20Cuenca&limit=20")).toBe(`/api/directory?Search=${REDACTED}&limit=20`);
+  });
+
   it("handles empty and valueless parameters", () => {
     expect(scrubUrl("/x?&ticket&a=")).toBe(`/x?&ticket=${REDACTED}&a=`);
   });
