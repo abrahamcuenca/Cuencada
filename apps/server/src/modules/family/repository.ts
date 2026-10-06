@@ -3,12 +3,12 @@
  *
  * Privacy rules (people are PII; see AGENTS.md):
  * - Admins and the person linked to the viewer's own account see every field.
- * - Living people: never a death year. Living people **linked to an account**
- *   also hide their birth year from other members. This is the intended
- *   privacy default (orchestrator decision; no visibility flag is planned).
- * - Living people without an account (children, relatives added by admins)
- *   show the birth year only. There are no birth dates, notes or contact
- *   fields in this module at all.
+ * - Living people: never a death year, and **no birth year for other
+ *   members**, whether or not they are linked to an account (Security L1,
+ *   PR #30: a year hidden only for linked people would reveal which `userId:
+ *   null` nodes are unlisted accounts; it also protects minors). Only the
+ *   linked member themself and admins see a living person's birth year.
+ *   There are no birth dates, notes or contact fields in this module at all.
  * - Deceased people show both years.
  * - **Unlisted accounts** (`profiles.listed_in_directory = false`): other
  *   members get `userId: null` and `avatarUrl: null` for the linked person,
@@ -193,7 +193,7 @@ export async function toPersonWithAvatar(deps: AvatarUrlDeps, row: PersonViewRow
  */
 export function toPerson(row: PersonViewRow, viewer: Viewer, avatars: PersonAvatarUrls): Person {
   const living = !row.deceased;
-  const hideBirthYear = living && row.userId !== null && !canSeeAllFields(row, viewer);
+  const hideBirthYear = living && !canSeeAllFields(row, viewer);
   return {
     id: row.id,
     userId: canSeeLink(row, viewer) ? row.userId : null,

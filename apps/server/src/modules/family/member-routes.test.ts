@@ -133,7 +133,7 @@ describe("GET /api/family/people/:id (privacy)", () => {
     expect((await getPerson(linked.id, await loginAs(app, admin))).birthYear).toBe(1980);
   });
 
-  it("shows only the birth year of living unlinked people and both years of deceased people", async () => {
+  it("hides the birth year of living unlinked people from members, shows it to admins, and shows both years of deceased people", async () => {
     const child = await insertPerson({ fullName: "Niña", birthYear: 2015 });
     const deceased = await insertPerson({ fullName: "Bisabuelo", birthYear: 1901, deathYear: 1980, deceased: true });
     const deceasedLinked = await insertPerson({
@@ -144,7 +144,9 @@ describe("GET /api/family/people/:id (privacy)", () => {
       deceased: true
     });
 
-    expect(await getPerson(child.id)).toMatchObject({ birthYear: 2015, deathYear: null, deceased: false, avatarUrl: null });
+    expect(await getPerson(child.id)).toMatchObject({ birthYear: null, deathYear: null, deceased: false, avatarUrl: null });
+    const admin = await createUser({ role: "admin", emailVerified: true });
+    expect((await getPerson(child.id, await loginAs(app, admin))).birthYear).toBe(2015);
     expect(await getPerson(deceased.id)).toMatchObject({ birthYear: 1901, deathYear: 1980, deceased: true });
     expect(await getPerson(deceasedLinked.id)).toMatchObject({ birthYear: 1930, deathYear: 2020 });
   });
@@ -401,6 +403,21 @@ describe("account links and avatars (profiles.listed_in_directory)", () => {
     const tree = await getTree("");
     expect(tree.parents[0]).toMatchObject({ id: personId, userId: user.id });
     expect(tree.parents[0]?.avatarUrl).toContain(`${UPLOAD_ID}-64.webp`);
+  });
+
+  it("serializes an unlisted linked node and an unlinked node with the same years identically (Security L1)", async () => {
+    const hidden = await createUser({ emailVerified: true, profile: { fullName: "Oculto", listedInDirectory: false } });
+    const unlisted = await insertPerson({ fullName: "Mismo Nombre", userId: hidden.id, birthYear: 1971, familyBranch: "Rama Sur" });
+    const unlinked = await insertPerson({ fullName: "Mismo Nombre", birthYear: 1971, familyBranch: "Rama Sur" });
+
+    const shape = (person: Person): Omit<Person, "id"> => {
+      const { id: _id, ...rest } = person;
+      return rest;
+    };
+    const a = await detail(unlisted.id, memberAuth);
+    const b = await detail(unlinked.id, memberAuth);
+    expect(shape(a)).toEqual(shape(b));
+    expect(a).toMatchObject({ userId: null, birthYear: null, avatarUrl: null });
   });
 
   it("returns userId and avatarUrl null for unlisted accounts in detail, search and tree, keeping name and genealogy", async () => {

@@ -31,7 +31,12 @@ export interface Person {
   fullName: string;
   nickname: string | null;
   familyBranch: string | null;
+  /**
+   * `null` for **living** people unless the viewer is that person (linked
+   * account) or an admin; deceased people always show it (when recorded).
+   */
   birthYear: number | null;
+  /** Only for deceased people. */
   deathYear: number | null;
   deceased: boolean;
   /**
