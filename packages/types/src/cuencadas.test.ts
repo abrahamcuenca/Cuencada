@@ -153,6 +153,28 @@ describe("createItineraryItemInputSchema", () => {
 });
 
 describe("updateItineraryItemInputSchema", () => {
+  // A leading/trailing BOM is whitespace for String#trim and is simply removed; inside a tag it is rejected.
+  it("rejects bidi controls and invisible characters in tags", () => {
+    const base = { date: "2028-07-01", title: "Cena" };
+    for (const tag of ["\u202Eatnec", "Co\u200Bmida", "Fami\uFEFFlia", "a\u2066b"]) {
+      expect(createItineraryItemInputSchema.safeParse({ ...base, tags: [tag] }).success, JSON.stringify(tag)).toBe(false);
+    }
+    expect(updateItineraryItemInputSchema.safeParse({ tags: ["\u202Ex"] }).success).toBe(false);
+  });
+
+  it("de-duplicates tags case-insensitively after trimming and NFC, keeping the first spelling", () => {
+    const base = { date: "2028-07-01", title: "Cena" };
+    const decomposed = "Cafe\u0301";
+    const parsed = createItineraryItemInputSchema.parse({
+      ...base,
+      tags: ["Comida", " comida ", "COMIDA", "Café", decomposed, "Playa"]
+    });
+    expect(parsed.tags).toEqual(["Comida", "Café", "Playa"]);
+    // Duplicates do not count toward the limit of 6.
+    const many = ["a", "A", "b", "B", "c", "C", "d", "e", "f"];
+    expect(createItineraryItemInputSchema.parse({ ...base, tags: many }).tags).toEqual(["a", "b", "c", "d", "e", "f"]);
+  });
+
   it("accepts a tags-only patch and leaves tags absent when not sent", () => {
     expect(updateItineraryItemInputSchema.parse({ tags: ["Familia"] })).toEqual({ tags: ["Familia"] });
     expect(updateItineraryItemInputSchema.parse({ title: "Cena" })).not.toHaveProperty("tags");

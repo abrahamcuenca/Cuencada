@@ -21,6 +21,7 @@ import {
   visibilitySchema,
   yearSchema
 } from "./common.js";
+import { hasUnsafeChars } from "./common.js";
 
 /* -------------------------------------------------------------------------- */
 /* Enums                                                                       */
@@ -91,17 +92,42 @@ export const ITINERARY_TAGS_MAX = 6;
 /** Maximum length of one itinerary tag, after trimming. */
 export const ITINERARY_TAG_MAX_LENGTH = 24;
 
-/** One itinerary tag on input: trimmed, 1–24 characters. */
+/**
+ * One itinerary tag on input: NFC-normalized, trimmed, 1–24 characters, and
+ * rejecting bidi controls and invisible characters (see `hasUnsafeChars`), so
+ * a tag can never be blank-looking, reversed or a lookalike of another.
+ */
 export const itineraryTagSchema = z
   .string()
+  .normalize("NFC")
   .trim()
   .min(1, { error: "La etiqueta no puede estar vacía." })
-  .max(ITINERARY_TAG_MAX_LENGTH, { error: `Cada etiqueta admite hasta ${ITINERARY_TAG_MAX_LENGTH} caracteres.` });
+  .max(ITINERARY_TAG_MAX_LENGTH, { error: `Cada etiqueta admite hasta ${ITINERARY_TAG_MAX_LENGTH} caracteres.` })
+  .refine((value) => !hasUnsafeChars(value), { error: "La etiqueta contiene caracteres no permitidos." });
 
-/** Itinerary tags on input: at most {@link ITINERARY_TAGS_MAX}. */
+/**
+ * Drops tags that repeat an earlier one case-insensitively (`Comida` and
+ * `comida`), keeping the first spelling and the original order.
+ */
+function dedupeTags(tags: string[]): string[] {
+  const seen = new Set<string>();
+  return tags.filter((tag) => {
+    const key = tag.toLocaleLowerCase("es");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * Itinerary tags on input: each validated by {@link itineraryTagSchema},
+ * de-duplicated case-insensitively, then at most {@link ITINERARY_TAGS_MAX}.
+ */
 export const itineraryTagsSchema = z
   .array(itineraryTagSchema)
-  .max(ITINERARY_TAGS_MAX, { error: `Máximo ${ITINERARY_TAGS_MAX} etiquetas.` });
+  .max(ITINERARY_TAGS_MAX * 4, { error: `Máximo ${ITINERARY_TAGS_MAX} etiquetas.` })
+  .transform(dedupeTags)
+  .pipe(z.array(z.string()).max(ITINERARY_TAGS_MAX, { error: `Máximo ${ITINERARY_TAGS_MAX} etiquetas.` }));
 
 export const itineraryItemSchema = z.object({
   id: idSchema,
