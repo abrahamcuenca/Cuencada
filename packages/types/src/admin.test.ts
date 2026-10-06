@@ -78,8 +78,11 @@ describe("person years", () => {
 });
 
 describe("familyTreeQuerySchema", () => {
-  it("coerces depth and caps it at 3", () => {
+  it("coerces depth and clamps it to 3 (T6 amendment)", () => {
     expect(familyTreeQuerySchema.parse({ depth: "2" })).toEqual({ depth: 2 });
-    expect(familyTreeQuerySchema.safeParse({ depth: "4" }).success).toBe(false);
+    expect(familyTreeQuerySchema.parse({ depth: "4" })).toEqual({ depth: 3 });
+    expect(familyTreeQuerySchema.parse({})).toEqual({ depth: 1 });
+    expect(familyTreeQuerySchema.safeParse({ depth: "0" }).success).toBe(false);
+    expect(familyTreeQuerySchema.safeParse({ depth: "1.5" }).success).toBe(false);
   });
 });
