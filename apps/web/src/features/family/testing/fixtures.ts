@@ -3,7 +3,7 @@
  * contract-shaped `FamilyTreeView` builder (same rules as the T6-BE plan),
  * and MSW handlers over it. Used by the tests and the screenshot stub.
  */
-import type { FamilyTreeView, Person, PersonSummary, Relationship } from "@cuencada/types";
+import type { AdminUserListItem, FamilyTreeView, Person, PersonSummary, Relationship } from "@cuencada/types";
 import { type HttpHandler, HttpResponse, http } from "msw";
 import { apiUrl, errorBody } from "../../../../test/auth";
 
@@ -53,6 +53,8 @@ export function makePerson(id: string, fullName: string, overrides: Partial<Pers
 export interface FamilyDb {
   people: Map<string, Person>;
   relationships: Relationship[];
+  /** Accounts behind `GET /admin/users?q=` (name or email contains `q`). */
+  accounts: AdminUserListItem[];
   log: Array<{ method: string; path: string; search: string; body: unknown }>;
 }
 
@@ -99,7 +101,28 @@ export function makeFamilyDb(): FamilyDb {
     edge("parent_of", IDS.ines, IDS.valeria),
     edge("parent_of", IDS.ines, IDS.hugo)
   ];
-  return { people: new Map(people.map((person) => [person.id, person])), relationships, log: [] };
+  const accounts: AdminUserListItem[] = [
+    account(ME_USER_ID, "José Herrera Navarro", "jose.herrera@example.com", IDS.jose),
+    account(fixtureId(901), "Ana Morales Vega", "ana.morales@example.com", IDS.ana)
+  ];
+  return { people: new Map(people.map((person) => [person.id, person])), relationships, accounts, log: [] };
+}
+
+/** A fictional admin-list account. */
+function account(id: string, displayName: string, email: string, personId: string | null): AdminUserListItem {
+  return {
+    id,
+    email,
+    displayName,
+    role: "member",
+    status: "active",
+    emailVerified: true,
+    mustChangePassword: false,
+    personId,
+    lastLoginAt: null,
+    activeSessionCount: 1,
+    createdAt: "2026-01-01T00:00:00.000Z"
+  };
 }
 
 /** The summary of a person (what rings and searches carry). */
@@ -226,6 +249,9 @@ export function familyHandlers(db: FamilyDb, { mePersonId = IDS.jose }: FamilyHa
     http.delete(apiUrl("/admin/people/:id"), async ({ request, params }) => {
       await record(db, request);
       const id = String(params.id);
+      if (db.people.get(id)?.userId) {
+        return HttpResponse.json(errorBody("CONFLICT", "Esta persona está vinculada a una cuenta. Desvincúlala antes de eliminarla."), { status: 409 });
+      }
       db.people.delete(id);
       db.relationships = db.relationships.filter((r) => r.fromPersonId !== id && r.toPersonId !== id);
       return new HttpResponse(null, { status: 204 });
@@ -246,7 +272,9 @@ export function familyHandlers(db: FamilyDb, { mePersonId = IDS.jose }: FamilyHa
     }),
     http.get(apiUrl("/admin/users"), async ({ request }) => {
       await record(db, request);
-      return HttpResponse.json({ items: [], nextCursor: null });
+      const q = new URL(request.url).searchParams.get("q")?.toLocaleLowerCase("es-MX") ?? "";
+      const items = db.accounts.filter((user) => `${user.displayName} ${user.email}`.toLocaleLowerCase("es-MX").includes(q));
+      return HttpResponse.json({ items, nextCursor: null });
     })
   ];
 }

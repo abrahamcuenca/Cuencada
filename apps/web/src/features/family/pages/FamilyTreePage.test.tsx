@@ -78,6 +78,9 @@ describe("FamilyTreePage", { timeout: 15_000 }, () => {
     await waitFor(() => expect(heading).toHaveFocus());
     const trail = screen.getByRole("navigation", { name: "Personas visitadas" });
     expect(within(trail).getByRole("button", { name: "José Herrera Navarro" })).toBeInTheDocument();
+    // [SEC] History state keeps ids only: no names persist in session history.
+    expect(router.state.location.state).toEqual({ trail: [IDS.jose] });
+    expect(JSON.stringify(window.history.state)).not.toContain("José");
     expect(within(group(/^Hijos/)).getAllByRole("button")).toHaveLength(5);
   });
 

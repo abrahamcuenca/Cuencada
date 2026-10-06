@@ -177,6 +177,7 @@ export function PersonForm({ person, submitLabel, onSubmit, onCancel }: PersonFo
       />
       <UserLinkField
         personId={person?.id ?? null}
+        personName={person?.fullName ?? null}
         value={values.account}
         error={errors.userId}
         onChange={(account) => setValues((current) => ({ ...current, account }))}

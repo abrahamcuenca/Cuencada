@@ -83,6 +83,42 @@ describe("AdminFamilyPage", { timeout: 15_000 }, () => {
 });
 
 describe("AdminPersonPage", { timeout: 15_000 }, () => {
+  it("shows the linked account by name and email, and disables delete with an explanation", async () => {
+    renderApp(`/admin/familia/${IDS.ana}`, authenticatedState(admin));
+
+    await screen.findByRole("heading", { level: 1, name: "Ana Morales Vega" });
+    expect(await screen.findByText("Ana Morales Vega (ana.morales@example.com)")).toBeInTheDocument();
+    const remove = screen.getByRole("button", { name: "Quitar a Ana Morales Vega" });
+    expect(remove).toBeDisabled();
+    expect(remove).toHaveAccessibleDescription(/vinculada a una cuenta.*desvincula la cuenta/i);
+  });
+
+  it("deletes a person without an account after confirming", async () => {
+    const user = userEvent.setup();
+    const { router } = renderApp(`/admin/familia/${IDS.raul}`, authenticatedState(admin));
+
+    await user.click(await screen.findByRole("button", { name: "Quitar a Raúl Herrera Morales" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Quitar" }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/admin/familia"));
+    expect(writes()).toContainEqual(expect.objectContaining({ method: "DELETE", path: `/admin/people/${IDS.raul}` }));
+    // Let the list load before the test ends (no request after the handlers reset).
+    expect(await screen.findByRole("link", { name: /José Herrera Navarro/ })).toBeInTheDocument();
+  });
+
+  it("shows the server's 409 message when the person got linked meanwhile", async () => {
+    const user = userEvent.setup();
+    renderApp(`/admin/familia/${IDS.raul}`, authenticatedState(admin));
+    await user.click(await screen.findByRole("button", { name: "Quitar a Raúl Herrera Morales" }));
+    // Another admin linked an account in the meantime.
+    const raul = db.people.get(IDS.raul);
+    if (raul) db.people.set(IDS.raul, { ...raul, userId: "00000000-0000-4000-8000-000000000999" });
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Quitar" }));
+
+    expect(await screen.findByText("Esta persona está vinculada a una cuenta. Desvincúlala antes de eliminarla.")).toBeInTheDocument();
+  });
+
   it("adds a child picked through the search", async () => {
     const user = userEvent.setup();
     renderApp(`/admin/familia/${IDS.jose}`, authenticatedState(admin));
