@@ -2,10 +2,12 @@
  * Cuencada queries. Content for several editions is always loaded with one
  * query per table (`where cuencada_id = any(...)`), never per edition.
  *
- * `hasMedia` reads `media_items` (owned by T4/media) read-only through an
- * EXISTS on its gallery keyset index; nothing here writes media rows.
+ * `hasMedia` comes from the media module's `countVisibleMediaByCuencada`
+ * (one batched query for all editions), so the gallery visibility rule
+ * (`ready` + `approved` + not deleted) has a single owner; nothing here
+ * writes media rows.
  */
-import { MediaUploadStatus, ModerationStatus, Visibility } from "@cuencada/types";
+import { Visibility } from "@cuencada/types";
 import { and, asc, desc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import {
   chatRooms,
@@ -18,22 +20,11 @@ import {
 import type { DbOrTx } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
 import { type AnnouncementRow, listAllAnnouncementsFor, listLiveAnnouncements } from "../announcements/repository.js";
+import { countVisibleMediaByCuencada } from "../media/service.js";
 import type { CuencadaRow, DailyMessageRow, ItineraryRow, LocationRow } from "./mappers.js";
 
 /** Spanish 404 message used by every Cuencada lookup. */
 export const CUENCADA_NOT_FOUND = "No encontramos esa Cuencada.";
-
-/** True when the edition has a visible gallery item (approved, ready, not deleted). */
-// Column names are spelled out with explicit table qualifiers: in a
-// single-table select Drizzle renders `${column}` unqualified, which inside
-// this subquery would bind `id` to media_items instead of the outer cuencadas.
-const hasMediaSql = sql<boolean>`exists (
-  select 1 from media_items m
-  where m.cuencada_id = "cuencadas"."id"
-    and m.deleted_at is null
-    and m.upload_status = ${MediaUploadStatus.Ready}
-    and m.moderation_status = ${ModerationStatus.Approved}
-)`;
 
 /** A published edition with its `hasMedia` flag. */
 export interface PublishedEdition {
@@ -42,18 +33,20 @@ export interface PublishedEdition {
 }
 
 /**
- * Every published edition, newest year first, with `hasMedia`. The list is
- * small (one edition per year), so status is computed in the caller.
+ * Every published edition, newest year first, with `hasMedia` (true when the
+ * media module counts at least one visible gallery item). Two queries in
+ * total. The list is small (one edition per year), so status is computed in
+ * the caller.
  *
  * @param db - Client or transaction.
  */
 export async function listPublishedEditions(db: DbOrTx): Promise<PublishedEdition[]> {
-  const rows = await db
-    .select({ row: cuencadas, hasMedia: hasMediaSql })
-    .from(cuencadas)
-    .where(eq(cuencadas.isPublished, true))
-    .orderBy(desc(cuencadas.year));
-  return rows.map(({ row, hasMedia }) => ({ row, hasMedia: Boolean(hasMedia) }));
+  const rows = await db.select().from(cuencadas).where(eq(cuencadas.isPublished, true)).orderBy(desc(cuencadas.year));
+  const visible = await countVisibleMediaByCuencada(
+    db,
+    rows.map((row) => row.id)
+  );
+  return rows.map((row) => ({ row, hasMedia: (visible.get(row.id) ?? 0) > 0 }));
 }
 
 /**
