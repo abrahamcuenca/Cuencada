@@ -10,7 +10,7 @@ Owner: Security Engineer · Reviewers: TL · Branch: wp/2.3-security-audit · PR
   - `docs/security/routes.md` is stale.
 - **Authorization matrix** (`authz-matrix.test.ts`):
   - Every route is called by 7 principals with valid fixtures: anonymous, verified, unverified, pending a password change, disabled with an old token, revoked session, admin.
-  - 9 "other member" IDOR probes.
+  - 27 state-checked probes (IDOR, hidden rooms, own-item rules, mass assignment).
   - CSRF variants on the cookie routes.
   - The WebSocket upgrade for anonymous, unverified and revoked callers.
 - **PII leak scans** (`pii-leak.test.ts`) on member and admin bodies, using the real S3 presigner.
@@ -36,9 +36,39 @@ Owner: Security Engineer · Reviewers: TL · Branch: wp/2.3-security-audit · PR
 
 ## Findings
 - **M1 (fixed):** no `Cache-Control` on API responses (ASVS 8.2.1).
-- **L1–L5:** in `backlog.md` → "WP-2.3 findings".
+- **M2, formerly L2 (fixed, owner decision):** the gallery, every media route and `/cuencadas/:year/members` now need a verified email (ADR 0001).
+- **L6 (fixed):** stored photo and avatar `Cache-Control` was a year with `immutable`; it is now `private, max-age=3600`.
+- **L1, L3, L4, L5** and the M2 web follow-up are in `backlog.md` → "WP-2.3 findings".
 
 ## Open questions (→ orchestrator)
-- **L2:** should unverified members read the gallery and member links? Either gate them with `requireVerifiedEmail`, or record the exception in ADR 0001.
+- None. L2 was decided by the owner (see the review log).
 
 ## Review log
+- **PR #35, round 1.** Tech Lead: APPROVED `1b728fd` with two nits. Second Security reviewer: CHANGES REQUESTED. Owner: decided L2.
+  - **L2 → M2 (A01), fixed:**
+    - `requireVerifiedEmail` on all media routes and on `/cuencadas/:year/members`; announcements and the RSVP summary stay open.
+    - Regression test `verified-gating.test.ts`.
+    - The matrix, `routes.md` and ADR 0001 are updated.
+    - Uploads and media mutations were **not** gated before; they are now.
+  - **B1:** the threat model no longer says unverified accounts can't read PII. It now describes the new gating and the residual risk: a stranger with a leaked open invite can verify their own mailbox. The planned stricter open invites (about 5 uses, 72 h, an admin alert on each acceptance) are listed as the mitigation.
+  - **B2:** M2 is recorded in the findings table, the README, the OWASP checklist and the backlog.
+  - **N1:** derivative and avatar object metadata is now `private, max-age=3600`, no longer than the presigned GET (L6, `cache-lifetimes.test.ts`).
+  - **N2:** probes can return `state`, which is re-read before and after the request and must not change. Mutation-checked.
+  - **N3:** new probes:
+    - another member's pending, processing, failed, pending-review or hidden media;
+    - hidden-room history, read state and delete;
+    - reporting your own item → 403;
+    - mass assignment on `PATCH /api/family/me` (and its alias) and on the RSVP PUT.
+  - **N4:** the PII scanner now:
+    - matches phones on digits;
+    - has JWT, raw S3 key and opaque-token patterns;
+    - searches the planted tokens verbatim;
+    - checks the unlisted member by name;
+    - plants a deleted chat message;
+    - scans the WebSocket frames.
+  - **N5:** the resize worker loads under `worker-src 'self'` with a 48 MP upload (`csp.md`).
+  - **L3:** a cutover line says to paste the `csp.md` string verbatim.
+  - **L5:** on the pre-launch list.
+  - **TL nits:**
+    - the unclassified-route message names `routeMatrix.ts`;
+    - `csp-check.mjs` parses the policy from `csp.md`, and its JSDoc explains why `upgrade-insecure-requests` is dropped locally.

@@ -67,11 +67,20 @@ first align the function with it. The second option is tracked as a Low in
 
 [`csp-check.mjs`](csp-check.mjs) does the following:
 
-- Serves `apps/web/dist` with exactly this policy, with `ws://` standing in
-  for `wss://cuencada.com` on the local origin.
+- **Parses the policy from the `add_header` line above**, so the harness and
+  this document can't drift. For the local plain-HTTP origin only, it swaps
+  `<bucket>` for the harness bucket and `wss://cuencada.com` for
+  `ws://127.0.0.1:<port>`, and drops `upgrade-insecure-requests`. That last
+  directive would rewrite every local request to `https://`; in production
+  HSTS makes it a no-op.
+- Rebuilds the SPA into a temp dir with the harness bucket as
+  `VITE_MEDIA_UPLOAD_ORIGIN`, so uploads are enabled, and serves it with that
+  policy.
 - Proxies `/api` and the chat WebSocket to the **real built API**, running on a
   scratch database (migrated and seeded with fictional fixtures).
 - Drives headless Chromium through the main routes.
+- Uploads a generated 48 MP JPEG on `/galeria/2026`, so the gallery downscales
+  it in the resize module worker (> 40 MP trigger) before the upload intent.
 - Collects every `securitypolicyviolation` event and every CSP console error.
 
 ```sh
@@ -83,7 +92,7 @@ The real API stands in for a stubbed one. It returns real response shapes, so
 every page renders its normal states, including the weather iframe and the chat
 socket.
 
-Result on `main` @ `28c55aa` + WP-2.3, 2026-10-06:
+Result on `main` @ `e75e718` (PR #34 merged) + WP-2.3, 2026-10-06:
 
 | Scope | Result |
 |---|---|
@@ -91,6 +100,7 @@ Result on `main` @ `28c55aa` + WP-2.3, 2026-10-06:
 | Logged in (admin, verified): `/`, `/cuencada/2026`, `/perfil`, `/perfil/sesiones`, `/directorio`, `/arbol`, `/galeria/2026`, `/chat`, `/mas`, `/admin`, `/admin/usuarios`, `/admin/invitaciones`, `/admin/bitacora`, `/admin/media`, `/admin/cuencadas`, `/admin/familia` | 0 unexpected violations |
 | Weather iframe rendered under `frame-src https://weatherwidget.io` | 2 frames, no violation |
 | Service worker (`worker-src 'self'`, `importScripts`) | activated, no violation |
+| Resize worker (PR #34, Security N5): 48 MP JPEG uploaded on `/galeria/2026` | `/assets/resize.worker-*.js` loaded as a same-origin module worker under `worker-src 'self'`, no violation. The upload intent reached the API as `image/jpeg`, 94,831 bytes (the original was 281,519 bytes), so the downscale ran in the worker. The browser's PUT to the fake bucket host fails at the network, as expected; the bucket host is in `connect-src`. |
 | Control: injected inline script, `style=""` attribute, off-bucket image, foreign iframe | all four blocked and reported (`script-src-elem`, `style-src-attr`, `img-src`, `frame-src`), which proves the instrumentation works |
 | Known and accepted | 1 blocked `eval` per page load: zod 4's capability probe `new Function("")` inside a `try/catch` (`allowsEval`). CSP blocks it and zod falls back to its non-JIT parser, so nothing breaks. It does emit a violation report on every load. **Fix (Low, web):** call `z.config({ jitless: true })` in `apps/web/src/main.tsx` before any schema runs. See the backlog. |
 

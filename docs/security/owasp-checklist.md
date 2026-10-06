@@ -20,7 +20,7 @@ The table covers both the 2021 and 2025 editions.
 
 | 2021 | 2025 | Status | Evidence / notes |
 |---|---|---|---|
-| A01 Broken Access Control | A01 Broken Access Control | **met** | Default-deny guard. `config.auth` is required in spirit, and a missing value means `user`. Role, status and must-change come from the DB (`apps/server/src/plugins/auth.ts`). Every route is classified, and a new route fails CI until it is (`inventory.test.ts`). The full matrix and 9 IDOR probes pass (`authz-matrix.test.ts`). CORS uses an exact allowlist (`headers.test.ts`). Cookie routes need CSRF. The WS upgrade needs a ticket and checks `Origin`. |
+| A01 Broken Access Control | A01 Broken Access Control | **met** (after M2) | **WP-2.3 M2, fixed:** unverified members could read the gallery and member links; these are now gated with `requireVerifiedEmail` (`verified-gating.test.ts`). Default-deny guard. `config.auth` is required in spirit, and a missing value means `user`. Role, status and must-change come from the DB (`apps/server/src/plugins/auth.ts`). Every route is classified, and a new route fails CI until it is (`inventory.test.ts`). The full matrix and 27 state-checked probes pass (`authz-matrix.test.ts`). CORS uses an exact allowlist (`headers.test.ts`). Cookie routes need CSRF. The WS upgrade needs a ticket and checks `Origin`. |
 | A02 Cryptographic Failures | A04 Cryptographic Failures | **met** | argon2id at m = 19 MiB, t = 2 (`lib/passwords.ts`). Opaque tokens use 32 random bytes and are stored only as SHA-256 hashes (`lib/tokens.ts`; `pii-leak.test.ts` confirms no hash is ever serialized). JWTs are HS256 with the algorithm pinned, `iss`/`aud` checked and a secret of ≥ 32 chars in prod (`config.ts`). TLS and HSTS are set (`headers.test.ts`; nginx in WP-2.4). |
 | A03 Injection | A05 Injection | **met** | Drizzle uses parameterized queries. `ILIKE` input is escaped (T5, T6). zod validates every body, param and query at the boundary (`fastify-type-provider-zod`). CSV export neutralizes formulas (`modules/rsvp/csv.ts`). The SPA renders text only, with no `dangerouslySetInnerHTML`. CSP has no inline script (`csp.md`). |
 | A04 Insecure Design | A06 Insecure Design | **met** | ADR 0001 covers the contracts, the PII guard via response schemas, tokens in fragments, and email-bound admin invites. The threat model is [threat-model.md](threat-model.md). Abuse limits: mail budgets, upload budgets, chat rate limits. |
@@ -46,14 +46,14 @@ The table covers both the 2021 and 2025 editions.
 | V3.4 | Cookie-based session management | **met** | `__Secure-` prefix, HttpOnly, Secure, SameSite=Strict, `Path=/api/auth` (`modules/auth/cookies.ts`, `sessionRoutes.test.ts`). |
 | V3.5 | Token-based session management | **met** | The access JWT lasts 15 min and lives in memory only. Refresh rotation is single-use and detects reuse. |
 | V3.7 | Defenses against session exploits | **met** | Re-authentication with the current password for password changes. |
-| V4.1–4.3 | Access control | **met** | Server-side default deny. Least privilege: the admin role is checked in the DB. IDOR is prevented by owner checks that answer 404 (matrix IDOR rows). The admin interface is protected (45 admin routes → 403 for members). |
+| V4.1–4.3 | Access control | **met** | Server-side default deny. Least privilege: the admin role is checked in the DB. IDOR is prevented by owner checks that answer 404 (27 matrix probes, which re-read the rows and assert nothing changed; mass assignment has no effect). Verified-email gating covers 21 routes, including media and member links (M2). The admin interface is protected (45 admin routes → 403 for members). |
 | V5.1–5.3 | Input validation, sanitization, output encoding | **met** | zod on every input, with bounded strings, NFC normalization and bidi/invisible-character rejection (ADR 0001 §1). Output: JSON, React text, CSV formula neutralization. |
 | V5.5 | Deserialization | **met** | Fastify's `secure-json-parse` (proto poisoning → error). No other deserializers. |
 | V7.1–7.3 | Logging content, processing, protection | **met** | No credentials, tokens or PII in logs: recursive redaction, a query-param allowlist, DB error params dropped (`logging.test.ts`). Audit metadata is redacted. |
 | V7.4 | Error handling | **met** | Generic messages, an `ApiError` envelope, no stack traces or SQL (`plugins/errors.test.ts`). |
 | V8.1 | General data protection | **met** | Response schemas strip unknown keys (`pii-leak.test.ts`). |
 | V8.2 | Client-side data protection | **met (after M1)** | **WP-2.3 M1, fixed:** `/api/` responses now send `Cache-Control: no-store` (`headers.test.ts`). The access token is never in storage. The SW caches only PII-free public reads and purges on logout (T9). |
-| V8.3 | Sensitive private data | **partial** | PII is member-only and honors visibility (`pii-leak.test.ts`). Media metadata is stripped. **Open:** decide whether unverified members may see the gallery and member links (WP-2.3 L2). Non-A/V video tracks are not yet neutralized (backlog T4). |
+| V8.3 | Sensitive private data | **partial** | PII is member-only and honors visibility (`pii-leak.test.ts`). Media metadata is stripped. The gallery, media routes and member links are verified-only (WP-2.3 M2, fixed; `verified-gating.test.ts`). Stored photos and avatars are cached privately for at most 1 h (L6, fixed). **Open:** non-A/V video tracks are not yet neutralized (backlog T4). A leaked open invite still lets a stranger verify their own mailbox (threat model A2; stricter open invites planned). |
 | V9.1–9.2 | Communications | **partial** | HSTS on the API. Production config requires `https://` origins. **Pending:** nginx TLS config and HSTS on HTML (WP-2.4). DB TLS depends on the deploy. |
 | V10.3 | Application integrity (deployed code) | **met** | No auto-update from untrusted sources. The SW update needs user consent ("Actualizar", `registerType: prompt`). |
 | V11 | Business logic | **met** | Limits on uploads (count and bytes), RSVPs (deadline and window), invites (uses and expiry), chat (rate), admin changes (3 per target per hour) and the last-admin guard. |
@@ -67,7 +67,9 @@ The table covers both the 2021 and 2025 editions.
 
 ## Sign-off
 
-The API and SPA code pass this review. One Medium was found and fixed (M1).
+The API and SPA code pass this review. Two Mediums were found and fixed: M1
+(`Cache-Control`) and M2 (verified-email gating of media and member links,
+owner decision).
 The remaining **partial** items depend on WP-2.4 (nginx headers, TLS, log
 redaction, `/health` restriction) or are tracked Lows and decisions. They are
 listed in [`backlog.md`](../coordination/backlog.md#wp-23-findings). Repeat the

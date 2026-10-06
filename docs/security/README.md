@@ -24,30 +24,47 @@ real Postgres:
   route omits `config.auth`, when HEAD twins drift from their GET, and when
   `routes.md` is stale. Regenerate `routes.md` with
   `UPDATE_SECURITY_DOCS=1 pnpm --filter @cuencada/server test -- inventory`.
-- **`authz-matrix.test.ts`** (105 tests):
+- **`authz-matrix.test.ts`**:
   - Every route is called by 7 principals with a minimal **valid** request:
     anonymous, verified member, unverified member, member pending a password
     change, disabled user with an old token, revoked session, and admin.
     Because the request is valid, a denial proves the guard decided, not
     validation.
-  - 9 "other member" IDOR probes.
+  - 27 extra probes as a verified member. A probe re-reads the rows it must
+    not touch, before and after the request, and fails on any change:
+    - IDOR on another member's session, avatar intent, media in every state
+      (hidden, pending review, pending upload, processing, failed) and chat
+      message;
+    - hidden-room chat history, read state and delete;
+    - reporting your own item;
+    - mass assignment on `PATCH /api/family/me` (and its alias) and on
+      `PUT …/rsvp/me`.
   - 6 CSRF header variants on the cookie routes.
   - WebSocket upgrades: anonymous, unverified, revoked, plus a control.
 - **`pii-leak.test.ts`**: scans the bodies of directory, family, attendees,
   chat, media, profile, edition and admin reads. It looks for hidden fields,
-  other people's emails or phones, argon2 or 64-hex hashes, IPs, object keys,
-  bucket names and presigned PUT URLs. It uses the real S3 presigner, and a
-  self-test proves the scanner catches each leak class.
+  other people's emails or phones (matched on digits), argon2 or 64-hex
+  hashes, JWTs, raw object keys, opaque-token-shaped values, the planted raw
+  tokens, IPs, bucket names, presigned PUT URLs, the unlisted member's name
+  in directory bodies, and the body of a deleted chat message. It also scans
+  the chat WebSocket frames. It uses the real S3 presigner, and a self-test
+  proves the scanner catches each leak class.
+- **`verified-gating.test.ts`**: unverified members get 403
+  `EMAIL_UNVERIFIED` and no data on every media route and on the member
+  edition details. Announcements and the RSVP summary stay open to them.
+- **`cache-lifetimes.test.ts`**: stored photos and avatars are cached
+  privately, for no longer than their presigned URL.
 - **`headers.test.ts`**: checks HSTS, nosniff, DENY, no-referrer, CORP and
   the full CSP on 200, 401 and 404 responses. It also checks CORS
   (allowlisted origins only) and `Cache-Control: no-store`.
 
 ## Matrix summary
 
-99 routes: 14 public, 37 user, 45 admin, 2 cookie, and the CORS preflight.
-That makes 693 principal checks plus 9 IDOR probes, and all of them match the
-expected status. The guard behaved exactly as designed: no route was more
-open than declared.
+99 routes: 14 public, 37 user (21 of them need a verified email), 45 admin,
+2 cookie, and the CORS preflight. That makes 693 principal checks plus 27
+probes, and all of them match the expected status. The guard behaved exactly
+as designed: no route was more open than declared. The one design gap, media
+and member links being open to unverified members, was fixed as M2.
 
 | Principal | Public | User | User + verified | Admin | Cookie |
 |---|---|---|---|---|---|
@@ -58,7 +75,7 @@ open than declared.
 | Disabled (old token) | 2xx (credential endpoints 400/401) | 401 | 401 | 401 | 401 refresh / 2xx logout |
 | Revoked session | 2xx | 401 | 401 | 401 | 401 |
 | Admin | 2xx | 2xx | 2xx | 2xx | 2xx |
-| Other member (IDOR) | n/a | 404 on sessions, media confirm/read-hidden/edit/delete, avatar confirm, chat delete, unlisted directory entry | | | |
+| Other member (probes) | n/a | 404 on sessions, avatar confirm, media in any non-public state (read, edit, delete, confirm, report), chat delete, hidden-room history/read/delete, unlisted directory entry; 403 for reporting your own item; mass assignment has no effect | | | |
 
 These results were judgment calls, all accepted:
 
@@ -74,9 +91,10 @@ These results were judgment calls, all accepted:
 |---|---|---|---|
 | M1 | Medium | API responses had no `Cache-Control`. Directory and family PII and token bodies could be kept in the browser's HTTP cache after logout on a shared computer (ASVS 8.2.1). | **Fixed** (`plugins/security.ts`, regression test in `headers.test.ts`) |
 | L1 | Low | zod 4's `new Function` probe triggers one blocked-`eval` CSP violation per page load. | Backlog (0.8c): `z.config({ jitless: true })` |
-| L2 | Low / decision | Unverified members can read the gallery (uploader names), member edition links, announcements and the RSVP summary. That is inconsistent with ADR 0001's "every other PII read". | Backlog (owner decision) |
-| L3 | Low | The API CSP from `contentSecurityPolicy(config)` (`base-uri 'self'`, `frame-src 'self' …`) is looser than the documented SPA policy. | Backlog (WP-2.4) |
+| M2 (was L2) | **Medium** (A01) | Unverified members could read the gallery (photos, uploader names) and the member edition details (WhatsApp/album links), and could upload and report. That is inconsistent with ADR 0001's "every other PII read". | **Fixed** by owner decision: `requireVerifiedEmail` on every media route and on `/cuencadas/:year/members`; announcements and the RSVP summary stay open (`verified-gating.test.ts`, ADR 0001). Residual: a leaked open invite lets a stranger verify their own mailbox (threat model A2; stricter open invites planned). |
+| L3 | Low | The API CSP from `contentSecurityPolicy(config)` (`base-uri 'self'`, `frame-src 'self' …`) is looser than the documented SPA policy. | WP-2.4 checklist: paste the `csp.md` string verbatim |
 | L4 | Low | The CI Postgres service image is pinned by tag, not digest. | Backlog |
-| L5 | Low | No breached-password check (ASVS 2.1.7). | Backlog |
+| L5 | Low | No breached-password check (ASVS 2.1.7). | Pre-launch list (backlog) |
+| L6 | Low | Stored photos and avatars carried `private, max-age=31536000, immutable`, so they stayed in a shared browser's disk cache for a year after logout. | **Fixed:** `private, max-age=3600`, no longer than the presigned GET (`cache-lifetimes.test.ts`). The residual hour is accepted (threat model A9). |
 
 No High was found.

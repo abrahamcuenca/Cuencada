@@ -1,6 +1,6 @@
 # Threat model
 
-WP-2.3 · Security Engineer · 2026-10-06 · baseline `main` @ `28c55aa`
+WP-2.3 · Security Engineer · 2026-10-06 · baseline `main` @ `28c55aa`, updated after the PR #35 review (merged with `main` @ `e75e718`)
 
 Cuencada is a private family portal:
 
@@ -97,7 +97,7 @@ Each row lists the main mitigation and where it's enforced or tested.
 | **I**: tokens in logs or `Referer` | Tokens travel in the body or `#t=` fragment. The logger redacts query params through an allowlist, and redacts keys recursively. | `logging.ts`, `logging.test.ts` |
 | **I**: cached PII or tokens on a shared computer | **WP-2.3 M1 (fixed): every `/api/` response is `Cache-Control: no-store`.** The SW never caches private API responses (T9) and purges on logout. | [`headers.test.ts`](../../apps/server/src/__tests__/security/headers.test.ts), `check:sw` |
 | **E**: temporary password reused for everything | `must_change_password` → 403 `PASSWORD_CHANGE_REQUIRED` everywhere except `/me` and change-password. | matrix column "pending" |
-| **E**: unverified account reading PII | `requireVerifiedEmail` on the directory, family, attendees and chat → 403 `EMAIL_UNVERIFIED`. | matrix column "unverified"; see accepted risk A4 |
+| **E**: unverified account reading PII | `requireVerifiedEmail` on the directory, family, attendees, chat, **the gallery and every media route, and the member edition details (WhatsApp/album links)** → 403 `EMAIL_UNVERIFIED`. The media and member-details gating was WP-2.3 L2 (Medium, fixed by owner decision). Still open to unverified members: announcements, the RSVP summary (counts only), their own RSVP, profile and avatar, and `/me`. | matrix column "unverified"; [`verified-gating.test.ts`](../../apps/server/src/__tests__/security/verified-gating.test.ts); ADR 0001; residual risk A4 |
 | **D**: email or argon2 flooding | Per-recipient mail budget (1 per 2 min per purpose, 3/h, 10/day). Global daily cap of 300 plus a reserved 100. Global limit of 300/min per IP. | `mailBudget.ts`, `mailSafety.test.ts` |
 
 ### 4.2 Invites and onboarding (`modules/invites`)
@@ -105,7 +105,7 @@ Each row lists the main mitigation and where it's enforced or tested.
 | Threat | Mitigation | Evidence |
 |---|---|---|
 | **S**: invitee claims someone else's identity | Bound invites compare the typed email with the bound one. Admin invites must be email-bound, single-use and sent by email. `emailVerified` is granted only for email-delivered bound invites. | ADR 0001 §3, `invites.test.ts` |
-| **E**: open invite leaks beyond the family | Max 20 uses and 14 days. An admin can revoke it. New accounts are unverified, so no PII reads until they verify. | accepted risk A2 |
+| **E**: open invite leaks beyond the family | Max 20 uses and 14 days. An admin can revoke it. New accounts start unverified: they read only public pages, announcements, the RSVP summary and their own data until they verify. **Verification is not a membership check:** a stranger holding a leaked link can verify their **own** mailbox, and from then on read every member-only area (directory, family tree, attendees, chat, gallery, member links). **Planned (separate WP):** stricter open invites, with a default of about 5 uses, a 72 h lifetime and an admin alert on each acceptance, so a leak is short-lived and noticed. | accepted risk A2 |
 | **T**: double use of a single-use invite | Row lock (`FOR UPDATE`) on accept. | `invites/publicRoutes.ts` |
 
 ### 4.3 Directory, profile and family (`modules/directory`, `profile`, `family`)
@@ -114,17 +114,17 @@ Each row lists the main mitigation and where it's enforced or tested.
 |---|---|---|
 | **I**: hidden contact fields leak | `toDirectoryEntry()` omits fields whose `show*` flag is off. The response schemas strip unknown keys and fail closed on `null`. Search matches only visible fields. | ADR 0001 §2; [`pii-leak.test.ts`](../../apps/server/src/__tests__/security/pii-leak.test.ts) (directory, family) |
 | **I**: unlisted members discovered | Directory 404 for unlisted members. The family tree nulls `userId`/`avatarUrl` for unlisted people. | matrix IDOR on `GET /api/directory/:id`; `pii-leak.test.ts` |
-| **T/E**: editing someone else's profile or tree node | Self-scoped routes (`/profile/me`, `/family/me`) have no id in the path. Tree edits are admin-only. The `parent_of` cycle check runs under an advisory lock. | matrix |
+| **T/E**: editing someone else's profile or tree node | Self-scoped routes (`/profile/me`, `/family/me`) have no id in the path, and zod strips unknown keys: a self-edit carrying `fullName`/`userId`/`deceased`/`id`, or an RSVP naming another `userId`, changes nothing it must not (matrix mass-assignment probes). Tree edits are admin-only. The `parent_of` cycle check runs under an advisory lock. | matrix |
 | **T**: avatar upload abuse | Presigned PUT bound to type and size. Magic bytes are checked. sharp decodes with a 24 MP cap and re-encodes to WebP. Confirm is owner-only. | matrix IDOR on avatar confirm; `avatar.test.ts` |
 
 ### 4.4 Media (`modules/media`)
 
 | Threat | Mitigation | Evidence |
 |---|---|---|
-| **I**: photos reachable without login | Private bucket. Short-lived presigned GETs are issued only to authenticated members (1 h). There are no public URLs. | `media/list.test.ts`, `pii-leak.test.ts` |
+| **I**: photos reachable without login | Private bucket. Short-lived presigned GETs (1 h) are issued only to **verified** members. There are no public URLs. Stored objects carry `Cache-Control: private, max-age=3600` (WP-2.3 N1; it was a year, `immutable`), so a photo stays in a shared browser's disk cache for at most about an hour after logout. | `media/list.test.ts`, `pii-leak.test.ts`, `verified-gating.test.ts`, `cache-lifetimes.test.ts` |
 | **I**: location metadata in uploads | EXIF/GPS stripped by re-encoding. MP4/QuickTime location atoms are neutralized. | `files.test.ts`; open item: non-A/V tracks (backlog) |
 | **T**: malicious file (polyglot, decompression bomb, wrong type) | MIME allowlist (no SVG or HEIC), per-kind size limits, magic-byte check, 50 MP guard, server-side derivatives. Stored on the bucket's own origin, which has no cookies. | `upload.test.ts`; backlog: `nosniff` metadata on stored QuickTime |
-| **E**: editing or deleting others' media; confirming others' uploads | Uploader-or-admin checks answer 404. Hidden and pending items are visible only to the uploader and admins. | matrix IDOR rows on `/api/media/:id*` |
+| **E**: editing or deleting others' media; confirming others' uploads | Uploader-or-admin checks answer 404. Hidden, pending-review, pending-upload, processing and failed items are visible only to the uploader and admins. A member can't report their own item (403). | matrix probes on `/api/media/:id*`, which re-read the row and assert it is unchanged |
 | **D**: storage exhaustion | 50 pending intents per user (5 for avatars), a daily byte budget, per-user rate limits, cleanup of stale intents. | `media/routes.ts`, `mediaCleanup.test.ts` |
 
 ### 4.5 Chat (`modules/chat`)
@@ -171,13 +171,14 @@ Each row lists the main mitigation and where it's enforced or tested.
 | # | Risk | Decision | Owner |
 |---|---|---|---|
 | A1 | The **legacy public site** (`index.html`, `cuencada2026.html`, root `images/`) stays public until cutover. It carries the old WhatsApp and OneDrive links, and git history keeps them. | Retire at cutover. Rotate the WhatsApp and OneDrive links. "Sweep forward, no history rewrite" (cutover checklist). | Repo owner |
-| A2 | **Open invites shared through WhatsApp:** anyone the link reaches can create an account. | Accepted. Limits of 20 uses and 14 days, admin revoke, accounts start unverified, admin audit. | Orchestrator (ADR 0001) |
+| A2 | **Open invites shared through WhatsApp:** anyone the link reaches can create an account, verify their own mailbox, and then read every member-only area. Email verification does not limit this. | Accepted for now, with these mitigations: limits of 20 uses and 14 days, admin revoke, accounts that start unverified (no PII until they verify), the admin audit log, and admins can disable a stranger's account. **Planned mitigation (separate WP):** default about 5 uses, 72 h lifetime, an admin alert on each acceptance. | Owner / orchestrator (ADR 0001) |
 | A3 | **Chat author visibility:** a member unlisted from the directory still shows their name and avatar in chat. | Accepted. Help text tells members (backlog 0.8c T5-FE). | Orchestrator (T7) |
-| A4 | **Unverified members** can read the gallery, the member edition details (WhatsApp/album links), announcements and the RSVP summary. The directory, family, attendees and chat need a verified email. | **Decision needed** (WP-2.3 L2). Email verification proves control of the mailbox, not family membership, so it adds little against a leaked open invite. Gallery uploader names reveal family membership the same way attendees do. | Owner / orchestrator |
+| A4 | **Unverified members** can still read announcements and the RSVP summary (counts only, no names). | **Decided** (owner, WP-2.3 L2, now fixed): the gallery, every media route and the member edition details are gated with `requireVerifiedEmail` (ADR 0001). Announcements and the summary stay open by decision. | Owner |
 | A5 | **Refresh race window:** a token stolen and replayed within 10 s of the victim's own refresh gets 409, not a revocation. | Accepted (ADR 0001, T1). | Orchestrator |
 | A6 | **HS256 shared secret** for access tokens (a single service). | Accepted. A secret of ≥ 32 chars from vault; rotating it logs everyone out. | Tech Lead |
 | A7 | **No CAPTCHA** on public auth endpoints. | Accepted. IP and email rate limits plus mail budgets. Revisit if abuse shows up. | Tech Lead |
 | A8 | sharp's prebuilt **libvips is LGPL-3.0-or-later**. | Accepted. Dynamically linked, unmodified and used server-side only, so no distribution obligation applies. | Tech Lead |
+| A9 | **Media in the browser cache:** after a logout, photos and avatars fetched through presigned URLs can stay in the browser's HTTP cache. | Bounded (WP-2.3 N1, fixed): stored objects carry `private, max-age=3600`, no longer than the presigned GET, instead of a year with `immutable`. The residual hour is accepted. Objects stored before the change keep their old metadata (there is no production bucket yet). | Tech Lead |
 
 ## 6. Open items
 
@@ -205,10 +206,14 @@ These come from [`backlog.md`](../coordination/backlog.md), plus the WP-2.3 find
 
 **Web:**
 
-- Centralize `EMAIL_UNVERIFIED` handling.
+- `/cuencada/:year` shows a generic "unavailable, retry" state for the member block when `/members` answers 403 `EMAIL_UNVERIFIED`. It should show the verify-email prompt instead (`useAccessDenial`), as the gallery already does (WP-2.3 L2 follow-up).
 - `z.config({ jitless: true })` (WP-2.3 L1).
 - Privacy sweep inside `features/**`.
-- Members-only home mosaic.
+
+**Before launch:**
+
+- Breached-password check (WP-2.3 L5).
+- Stricter open invites: about 5 uses, 72 h lifetime, an admin alert on each acceptance (separate WP; accepted risk A2).
 
 **Process:**
 
