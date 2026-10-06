@@ -1,0 +1,310 @@
+/* Directory (T5). Mobile-first: min-width queries only. */
+
+/* AppLayout uses PageShell layout="bleed", so the page owns its top spacing. */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding-block: var(--space-6) var(--space-12);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  line-height: var(--leading-tight);
+}
+
+.listPane,
+.detailPane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* Phones show either the list or the person. */
+.detailPane {
+  display: none;
+}
+
+.hasDetail .listPane {
+  display: none;
+}
+
+.hasDetail .detailPane {
+  display: flex;
+}
+
+/* -------------------------------------------------------------- search --- */
+
+.searchBar {
+  position: sticky;
+  top: calc(var(--top-nav-height) + var(--safe-top));
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-inline: calc(var(--gutter) * -1);
+  padding: var(--space-2) var(--gutter);
+  background: var(--color-bg);
+}
+
+.searchInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--control-height);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: max(16px, 1em);
+}
+
+.searchInput::placeholder {
+  color: var(--color-text-muted);
+}
+
+.searchHint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.searchHint:empty {
+  display: none;
+}
+
+.filterSummary {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.linkButton {
+  min-height: var(--tap-min);
+  padding: 0 var(--space-2);
+  border: 0;
+  background: none;
+  color: var(--color-primary);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ---------------------------------------------------------------- list --- */
+
+.list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  list-style: none;
+}
+
+.list > li + li {
+  border-top: 1px solid var(--color-primary-soft);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 64px;
+  padding: var(--space-2) var(--space-4);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+a.row:hover {
+  background: var(--color-primary-soft);
+}
+
+.rowSelected {
+  background: var(--color-primary-soft);
+  box-shadow: inset 4px 0 0 var(--color-primary);
+}
+
+.rowText {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rowName {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.rowMeta {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.chevron {
+  color: var(--color-text-muted);
+  font-size: var(--text-xl);
+}
+
+.more {
+  display: flex;
+  justify-content: center;
+  min-height: 1px;
+}
+
+/* -------------------------------------------------------------- detail --- */
+
+.back {
+  align-self: flex-start;
+}
+
+.detail,
+.detailSkeleton {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  text-align: center;
+  min-width: 0;
+}
+
+.detailName {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  overflow-wrap: anywhere;
+}
+
+/* Focus is moved here programmatically to announce the person; no ring needed. */
+.detailName:focus,
+.detailName:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.detailMeta {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.facts {
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+  margin: 0;
+  text-align: start;
+}
+
+.facts > div {
+  display: grid;
+  gap: 2px;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--color-primary-soft);
+}
+
+.facts dt {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.email {
+  overflow-wrap: anywhere;
+}
+
+.bio {
+  width: 100%;
+  margin: 0;
+  text-align: start;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.detailPlaceholder {
+  margin: 0;
+  padding: var(--space-8) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-sunken);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+/* ------------------------------------------------------------- filters --- */
+
+.filtersForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.filtersActions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+@media (min-width: 600px) {
+  .actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .actions > * {
+    flex: 1 1 10rem;
+  }
+}
+
+/* List on the left, the person on the right. */
+@media (min-width: 900px) {
+  .page {
+    display: grid;
+    grid-template-columns: minmax(20rem, 24rem) minmax(0, 1fr);
+    align-items: start;
+    gap: var(--space-8);
+  }
+
+  .listPane,
+  .hasDetail .listPane {
+    display: flex;
+  }
+
+  .detailPane {
+    display: flex;
+    position: sticky;
+    top: calc(var(--top-nav-height) + var(--space-4));
+  }
+
+  .back {
+    display: none;
+  }
+
+  .searchBar {
+    margin-inline: 0;
+    padding-inline: 0;
+  }
+}

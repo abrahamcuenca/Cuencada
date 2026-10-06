@@ -1,0 +1,181 @@
+/* Profile (T5). Mobile-first: min-width queries only. */
+
+/* AppLayout uses PageShell layout="bleed", so the page owns its top spacing. */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding-block: var(--space-6) var(--space-12);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  line-height: var(--leading-tight);
+}
+
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------ identity --- */
+
+.identity {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-5) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  text-align: center;
+  min-width: 0;
+}
+
+.identityName {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.identityMeta {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.avatarEditor {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+}
+
+/* A 4px ring around the 96px avatar; it fills clockwise while uploading. */
+.avatarRing {
+  --avatar-progress: 0%;
+  display: grid;
+  place-items: center;
+  padding: 4px;
+  border-radius: 50%;
+}
+
+.avatarRingBusy {
+  background: conic-gradient(var(--color-primary) var(--avatar-progress), var(--color-primary-soft) 0);
+  transition: background var(--duration-fast) linear;
+}
+
+.avatarStatus {
+  min-height: 1.25em;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.avatarStatus:empty {
+  min-height: 0;
+}
+
+.avatarError {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.avatarHint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+/* ---------------------------------------------------------------- form --- */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.sectionTitle {
+  margin: var(--space-2) 0 0;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  line-height: var(--leading-tight);
+}
+
+.sectionHint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.switches {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.formAlert:empty {
+  display: none;
+}
+
+.formError {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+/* "Guardar cambios" sits in the thumb zone; while dirty it sticks above the BottomNav. */
+.saveBar {
+  padding-block: var(--space-2);
+}
+
+.saveBarDirty {
+  position: sticky;
+  bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + var(--space-2));
+  z-index: 1;
+}
+
+.sessionsLink {
+  align-self: flex-start;
+}
+
+@media (min-width: 900px) {
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(16rem, 20rem) minmax(0, 1fr);
+    align-items: start;
+    gap: var(--space-8);
+  }
+
+  .identity {
+    position: sticky;
+    top: calc(var(--top-nav-height) + var(--space-4));
+  }
+
+  .saveBarDirty {
+    bottom: var(--space-4);
+  }
+}
