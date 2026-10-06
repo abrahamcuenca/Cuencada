@@ -1,0 +1,538 @@
+/*
+ * Admin console (T8). Phone first: one column of cards, 44px targets, no
+ * tables. `min-width` media queries only; at 900px the section nav becomes a
+ * sidebar next to the content.
+ */
+.layout {
+  display: grid;
+  gap: var(--space-6);
+  min-width: 0;
+  padding-block: var(--space-6) var(--space-section);
+}
+
+.content {
+  display: grid;
+  gap: var(--space-6);
+  align-content: start;
+  min-width: 0;
+}
+
+/* Mobile: the nav follows the dashboard cards; other admin pages hide it and show "‹ Administración". */
+.sidebar {
+  order: 2;
+  min-width: 0;
+}
+
+.sidebarDesktopOnly {
+  display: none;
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-min);
+  justify-self: start;
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
+}
+
+.navTitle {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-lg);
+}
+
+.navList {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.navLink {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--tap-min);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.navLink:hover {
+  border-color: var(--color-border-strong);
+}
+
+.navLink[aria-current="page"] {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  font-weight: var(--weight-semibold);
+}
+
+.navIcon {
+  flex: none;
+  font-size: var(--text-lg);
+}
+
+.navText {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+
+.navLabel {
+  font-weight: var(--weight-semibold);
+}
+
+.navHint {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.chevron {
+  flex: none;
+  color: var(--color-text-muted);
+  font-size: var(--text-xl);
+}
+
+@media (min-width: 900px) {
+  .layout {
+    grid-template-columns: 15rem minmax(0, 1fr);
+    align-items: start;
+    gap: var(--space-8);
+  }
+
+  .sidebar,
+  .sidebarDesktopOnly {
+    display: block;
+    order: 0;
+    position: sticky;
+    top: calc(var(--top-nav-height) + var(--space-4));
+  }
+
+  .back {
+    display: none;
+  }
+
+  .navLink {
+    border-color: transparent;
+    background: transparent;
+  }
+
+  .navHint {
+    display: none;
+  }
+
+  .stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* ---------------------------------------------------------------- headers */
+
+.pageHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.pageTitle {
+  margin: 0; /* overrides the legacy global h1 margin in styles.css */
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  line-height: var(--leading-tight);
+  letter-spacing: -0.02em;
+  overflow-wrap: anywhere;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: var(--text-xl);
+  line-height: var(--leading-snug);
+}
+
+.panel {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.muted {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+/* -------------------------------------------------------------- dashboard */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 8.5rem), 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stat {
+  display: grid;
+  gap: var(--space-1);
+  height: 100%;
+  min-height: 6rem;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.stat:hover {
+  border-color: var(--color-primary);
+}
+
+.statAlert {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.statValue {
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-bold);
+  line-height: 1;
+}
+
+.statLabel {
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  overflow-wrap: anywhere;
+}
+
+.edition {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.edition:hover {
+  border-color: var(--color-primary);
+}
+
+.rsvpCounts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-weight: var(--weight-semibold);
+}
+
+/* ------------------------------------------------------------------ lists */
+
+.rows {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.itemHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.itemTitle {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
+  overflow-wrap: anywhere;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.rowButton {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--tap-min);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--color-text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.rowButton:hover {
+  border-color: var(--color-primary);
+}
+
+.rowMain {
+  display: grid;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---------------------------------------------------------------- filters */
+
+.filters {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-sunken);
+}
+
+.filterGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+  gap: var(--space-3);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  justify-self: start;
+  max-width: 100%;
+  padding-inline-start: var(--space-3);
+  border-radius: var(--radius-pill);
+  background: var(--color-primary-soft);
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------- invites */
+
+.formCard {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.choice {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.choice legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+  font-weight: var(--weight-semibold);
+}
+
+.radio {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-height: var(--tap-min);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  cursor: pointer;
+}
+
+.radio:has(input:checked) {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.radio:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.radio input {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin: 0.15rem 0 0;
+  accent-color: var(--color-primary);
+}
+
+.radioText {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.linkBox {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 2px solid var(--color-accent);
+  border-radius: var(--radius-lg);
+  background: var(--color-accent-soft);
+}
+
+.warning {
+  margin: 0;
+  font-weight: var(--weight-bold);
+}
+
+.urlInput {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: max(16px, 1em);
+}
+
+/* ------------------------------------------------------------------ users */
+
+.facts {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+}
+
+.facts dt {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.sheetActions {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.selfNote {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
+}
+
+/* ------------------------------------------------------------------ audit */
+
+.entryMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.linkButton {
+  min-height: var(--tap-min);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-primary-strong);
+  font: inherit;
+  font-weight: var(--weight-bold);
+  text-align: start;
+  text-decoration: underline;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.metadata {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
+  font-size: var(--text-sm);
+}
+
+.metaRow {
+  display: contents;
+}
+
+.metadata dt {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.metadata dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------------ alert */
+
+.alertRegion:empty {
+  display: none;
+}
+
+.alert {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-snug);
+}
+
+.alertDanger {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.alertSuccess {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.alertInfo {
+  background: var(--color-warning-soft);
+  color: var(--color-text);
+}
