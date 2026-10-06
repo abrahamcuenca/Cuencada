@@ -35,7 +35,7 @@ describe("RsvpCard", () => {
     renderCard();
 
     const group = await screen.findByRole("group", { name: "¿Vas a la Cuencada 2027?" });
-    expect(screen.getByText("Confirma antes del 31 de mayo de 2099 a las 11:59 p.m.")).toBeInTheDocument();
+    expect(screen.getByText("Confirma a más tardar el 31 de mayo de 2099.")).toBeInTheDocument();
     await user.click(within(group).getByRole("radio", { name: /Sí/ }));
     await user.click(screen.getByRole("button", { name: "Agregar un acompañante" }));
     await user.click(screen.getByRole("button", { name: "Agregar un acompañante" }));
@@ -93,7 +93,7 @@ describe("RsvpCard", () => {
 
     expect(
       await screen.findByText(
-        "Las confirmaciones cerraron el 15 de agosto de 2026 a las 11:59 p.m. Escribe en el grupo de WhatsApp si cambiaron tus planes."
+        "Las confirmaciones cerraron el 15 de agosto de 2026. Escribe en el grupo de WhatsApp si cambiaron tus planes."
       )
     ).toBeInTheDocument();
     expect(screen.getByText("Tú + 2 acompañantes")).toBeInTheDocument();
@@ -151,8 +151,8 @@ describe("RsvpCard", () => {
     expect(screen.getByRole("radio", { name: /Sí/ })).toBeChecked();
   });
 
-  it("reloads the lock state when the server refuses after the deadline", async () => {
-    db.failPutWith = 403;
+  it("shows the server message and locks the card on 409 CONFLICT (RSVP closed)", async () => {
+    db.failPutWith = 409;
     const user = userEvent.setup();
     renderCard();
 
@@ -160,13 +160,14 @@ describe("RsvpCard", () => {
     db.my = { rsvp: null, deadline: "2026-08-16T05:59:00Z", editable: false };
     await user.click(screen.getByRole("button", { name: "Guardar respuesta" }));
 
-    expect(await screen.findByText("Las confirmaciones ya cerraron.")).toBeInTheDocument();
+    expect(await screen.findByText("La fecha límite para confirmar asistencia ya pasó.")).toBeInTheDocument();
     expect(await screen.findByText(/Las confirmaciones cerraron el 15 de agosto de 2026/)).toBeInTheDocument();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
     await waitFor(() => expect(db.log.filter((line) => line === "GET /cuencadas/2027/rsvp/me")).toHaveLength(2));
   });
 
-  it("shows the attended badge on a past edition the member went to", async () => {
-    db.attendees = [makeAttendee(2), makeAttendee(1, { userId: ME.id, displayName: ME.displayName })];
+  it("shows the attended badge on a past edition when the server marks a row isMe", async () => {
+    db.attendees = [makeAttendee(2), makeAttendee(1, { displayName: ME.displayName, source: "attendance", rsvpStatus: null, isMe: true })];
     renderCard(2026);
 
     expect(await screen.findByText("🎉 Fuiste a esta Cuencada")).toBeInTheDocument();
@@ -174,11 +175,12 @@ describe("RsvpCard", () => {
     expect(db.log).not.toContain("GET /cuencadas/2026/rsvp/me");
   });
 
-  it("matches attendance-only rows by the linked person", async () => {
-    db.attendees = [makeAttendee(1, { personId: ME.personId, source: "attendance", rsvpStatus: null })];
+  it("trusts isMe rather than matching ids on the client", async () => {
+    db.attendees = [makeAttendee(1, { userId: ME.id, personId: ME.personId, isMe: false })];
     renderCard(2026);
 
-    expect(await screen.findByText("🎉 Fuiste a esta Cuencada")).toBeInTheDocument();
+    await waitFor(() => expect(db.log).toContain("GET /cuencadas/2026/attendees"));
+    expect(screen.queryByText(/Fuiste a esta Cuencada/)).not.toBeInTheDocument();
   });
 
   it("shows no badge on a past edition the member missed", async () => {

@@ -3,7 +3,7 @@
  * (tests and the screenshot stub). Test-only: never imported by app code.
  */
 import type {
-  AdminAttendanceBulkRequest,
+  AdminAttendanceReplaceRequest,
   AdminRsvpRow,
   Attendee,
   AttendanceRecord,
@@ -29,6 +29,7 @@ export const CUENCADA_2027_ID = fixtureId(2027);
 export const HOTEL_A = fixtureId(271);
 export const HOTEL_B = fixtureId(272);
 export const VENUE = fixtureId(273);
+const UTF8_BOM = String.fromCharCode(0xfeff);
 
 /** The current test user (member), as in `test/auth.ts`. */
 export const ME = makeUser({ personId: fixtureId(9001) });
@@ -95,6 +96,7 @@ export function makeAttendee(n: number, overrides: Partial<Attendee> = {}): Atte
     avatarUrl: null,
     source: "rsvp",
     rsvpStatus: "yes",
+    isMe: false,
     ...overrides
   };
 }
@@ -120,7 +122,7 @@ export function makeAttendees(count: number): Attendee[] {
   return Array.from({ length: count }, (_, i) =>
     makeAttendee(i + 2, {
       displayName: FAMILY_NAMES[i % FAMILY_NAMES.length] ?? `Familiar ${i}`,
-      rsvpStatus: i % 5 === 4 ? "maybe" : "yes"
+      ...(i % 5 === 4 ? { source: "attendance" as const, rsvpStatus: null } : {})
     })
   );
 }
@@ -161,10 +163,10 @@ export interface FakeRsvpDb {
   adminRows: AdminRsvpRow[];
   csv: string;
   /** When set, `PUT rsvp/me` fails with this status (after `putDelayMs`). */
-  failPutWith: 403 | 500 | null;
+  failPutWith: 409 | 500 | null;
   putDelayMs: number;
   putBodies: unknown[];
-  bulkBodies: AdminAttendanceBulkRequest[];
+  attendanceBodies: AdminAttendanceReplaceRequest[];
   /** `METHOD /path?query` of every handled request. */
   log: string[];
 }
@@ -184,7 +186,7 @@ export function makeRsvpDb(): FakeRsvpDb {
     failPutWith: null,
     putDelayMs: 0,
     putBodies: [],
-    bulkBodies: [],
+    attendanceBodies: [],
     log: []
   };
 }
@@ -223,8 +225,8 @@ export function rsvpHandlers(db: FakeRsvpDb): HttpHandler[] {
       const body: unknown = await request.json();
       db.putBodies.push(body);
       if (db.putDelayMs > 0) await delay(db.putDelayMs);
-      if (db.failPutWith === 403) {
-        return HttpResponse.json(errorBody("FORBIDDEN", "Las confirmaciones ya cerraron."), { status: 403 });
+      if (db.failPutWith === 409) {
+        return HttpResponse.json(errorBody("CONFLICT", "La fecha límite para confirmar asistencia ya pasó."), { status: 409 });
       }
       if (db.failPutWith === 500) {
         return HttpResponse.json(errorBody("INTERNAL", "No pudimos guardar tu respuesta."), { status: 500 });
@@ -257,23 +259,25 @@ export function rsvpHandlers(db: FakeRsvpDb): HttpHandler[] {
       logRequest(db, request);
       return HttpResponse.json(db.attendance);
     }),
-    http.post(apiUrl("/admin/cuencadas/:id/attendance"), async ({ request }) => {
+    http.put(apiUrl("/admin/cuencadas/:id/attendance"), async ({ request }) => {
       logRequest(db, request);
-      // Test-only fake: the client builds this body from `AdminAttendanceBulkRequest`.
-      const body = (await request.json()) as { add: string[]; remove: string[] };
-      db.bulkBodies.push(body);
-      const kept = db.attendance.filter((record) => !body.remove.includes(record.personId));
-      const added = body.add.map((id) => ({
-        personId: id,
-        displayName: db.people.find((person) => person.id === id)?.fullName ?? id,
-        createdAt: "2026-10-06T12:00:00Z"
-      }));
-      db.attendance = [...kept, ...added];
+      // Test-only fake: the client builds this body from `AdminAttendanceReplaceRequest`.
+      const body = (await request.json()) as { personIds: string[] };
+      db.attendanceBodies.push(body);
+      db.attendance = body.personIds.map(
+        (id) =>
+          db.attendance.find((record) => record.personId === id) ?? {
+            personId: id,
+            displayName: db.people.find((person) => person.id === id)?.fullName ?? id,
+            createdAt: "2026-10-06T12:00:00Z"
+          }
+      );
       return HttpResponse.json(db.attendance);
     }),
     http.get(apiUrl("/admin/cuencadas/:id/rsvps.csv"), ({ request }) => {
       logRequest(db, request);
-      return new HttpResponse(db.csv, { headers: { "content-type": "text/csv; charset=utf-8" } });
+      // Like T3-BE: UTF-8 with a BOM.
+      return new HttpResponse(`${UTF8_BOM}${db.csv}`, { headers: { "content-type": "text/csv; charset=utf-8" } });
     }),
     http.get(apiUrl("/admin/cuencadas/:id/rsvps"), ({ request }) => {
       logRequest(db, request);

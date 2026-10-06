@@ -30,7 +30,9 @@ export function downloadBlob(blob: Blob, filename: string): void {
 }
 
 /**
- * Saves CSV text as a `.csv` file (UTF-8 with BOM).
+ * Saves CSV text as a `.csv` file (UTF-8 with exactly one BOM). T3-BE sends
+ * a BOM, but `Response.text()` (UTF-8 decode) strips it, so it is restored
+ * here; text that still starts with one is left alone.
  *
  * @param csv - The CSV text returned by the API.
  * @param filename - Suggested file name.

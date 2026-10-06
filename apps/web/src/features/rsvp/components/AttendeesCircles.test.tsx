@@ -27,23 +27,22 @@ describe("AttendeesCircles", () => {
   });
 
   it("shows five circles with +N and opens the full list in a dialog", async () => {
-    db.attendees = [...makeAttendees(11), makeAttendee(1, { userId: ME.id, displayName: "Prima Cuenca" })];
+    db.attendees = [...makeAttendees(11), makeAttendee(1, { userId: ME.id, displayName: "Prima Cuenca", isMe: true })];
     const user = userEvent.setup();
     renderWithStore(<AttendeesCircles year={2027} />, authenticatedState(ME));
 
-    const stack = await screen.findByRole("list", { name: "10 confirmados · 2 tal vez" });
+    const stack = await screen.findByRole("list", { name: "12 confirmados" });
     expect(within(stack).getAllByRole("img")).toHaveLength(6);
     // The current user comes first.
     expect(within(stack).getAllByRole("img")[0]).toHaveAccessibleName("Prima Cuenca");
     expect(within(stack).getByRole("img", { name: "y 7 más" })).toHaveTextContent("+7");
 
-    await user.click(screen.getByRole("button", { name: /10 confirmados · 2 tal vez/ }));
+    await user.click(screen.getByRole("button", { name: /12 confirmados/ }));
     const dialog = await screen.findByRole("dialog", { name: "¿Quién va? · Cuencada 2027" });
     const rows = within(dialog).getAllByRole("listitem");
     expect(rows).toHaveLength(12);
     expect(rows[0]).toHaveTextContent("Prima CuencaTú");
     expect(within(dialog).getByText("María de la Luz Cuenca")).toBeInTheDocument();
-    expect(within(dialog).getAllByText("Tal vez")).toHaveLength(2);
 
     await user.click(within(dialog).getByRole("button", { name: "Cerrar" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());

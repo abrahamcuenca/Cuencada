@@ -47,6 +47,18 @@ export function attendanceChanges(changes: AttendanceChanges): { add: string[]; 
   return { add: [...changes.add].sort(), remove: [...changes.remove].sort() };
 }
 
+/**
+ * @param recorded - Person ids in the saved attendance.
+ * @param changes - Unsaved edits.
+ * @returns The complete set to `PUT` (saved − removed + added), sorted and unique.
+ */
+export function nextAttendanceSet(recorded: Iterable<string>, changes: AttendanceChanges): string[] {
+  const next = new Set<string>();
+  for (const id of recorded) if (!changes.remove.has(id)) next.add(id);
+  for (const id of changes.add) next.add(id);
+  return [...next].sort();
+}
+
 /** Lower-case, accent-free text for searching Spanish names. */
 export function normalizeName(value: string): string {
   return value.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase("es-MX").trim();

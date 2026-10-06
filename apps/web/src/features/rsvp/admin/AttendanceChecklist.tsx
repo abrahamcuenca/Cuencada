@@ -8,7 +8,7 @@ import { Skeleton } from "../../../shared/ui/Skeleton";
 import { TextInput } from "../../../shared/ui/TextInput";
 import { useToast } from "../../../shared/ui/Toast";
 import { useGetAdminAttendanceQuery, useListAttendancePeopleQuery, useSaveAdminAttendanceMutation } from "../api";
-import { type AttendanceChanges, attendanceChanges, checklistRows, matchesSearch, toggleAttendance } from "./attendanceModel";
+import { type AttendanceChanges, attendanceChanges, checklistRows, matchesSearch, nextAttendanceSet, toggleAttendance } from "./attendanceModel";
 import styles from "./admin.module.css";
 
 /** People per request; the API caps pages at 100. */
@@ -32,7 +32,7 @@ export interface AttendanceChecklistProps {
 
 /**
  * Searchable list of family people with a checkbox each. Changes are kept
- * locally and saved in one bulk request (`add` / `remove`) from the sticky bar.
+ * locally and saved as one atomic replace-set `PUT { personIds }` from the sticky bar.
  */
 export function AttendanceChecklist({ cuencadaId }: AttendanceChecklistProps): ReactNode {
   const toast = useToast();
@@ -70,7 +70,7 @@ export function AttendanceChecklist({ cuencadaId }: AttendanceChecklistProps): R
   const isChecked = (personId: string): boolean => (recorded.has(personId) ? !changes.remove.has(personId) : changes.add.has(personId));
 
   const onSave = (): void => {
-    save({ cuencadaId, body: { add, remove } })
+    save({ cuencadaId, body: { personIds: nextAttendanceSet(recorded, changes) } })
       .unwrap()
       .then(() => {
         setChanges({ add: new Set(), remove: new Set() });

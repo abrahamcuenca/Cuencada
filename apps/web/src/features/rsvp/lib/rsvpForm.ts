@@ -5,6 +5,7 @@
 import {
   type MyRsvp,
   RSVP_MAX_GUESTS,
+  RSVP_DATE_WINDOW_DAYS,
   RSVP_NOTES_MAX_LENGTH,
   type RsvpStatus,
   type UpsertRsvpInput,
@@ -37,8 +38,6 @@ export interface DateWindow {
 /** Result of {@link validateRsvpDraft}. */
 export type RsvpValidation = { ok: true; body: UpsertRsvpInput } | { ok: false; errors: RsvpFieldErrors };
 
-/** Days before the start and after the end that arrival/departure may fall on. */
-export const DATE_WINDOW_PADDING_DAYS = 7;
 
 const RSVP_FIELDS: readonly RsvpField[] = ["status", "guestCount", "arrivalDate", "departureDate", "hotelLocationId", "notes"];
 
@@ -76,6 +75,20 @@ function zonedDate(instant: string, timeZone: string): string {
   return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
 }
 
+/**
+ * Same rule as the server (T3-BE `rsvpEditability`): the deadline lasts until
+ * the end of its calendar day in the edition's timezone, whatever hour is stored.
+ *
+ * @param deadline - RSVP deadline (ISO instant), or `null` for none.
+ * @param now - The current instant.
+ * @param timeZone - The edition's IANA timezone.
+ * @returns Whether today, in that timezone, is after the deadline's day.
+ */
+export function isPastDeadline(deadline: string | null, now: Date, timeZone: string): boolean {
+  if (deadline === null) return false;
+  return zonedDate(now.toISOString(), timeZone) > zonedDate(deadline, timeZone);
+}
+
 /** Adds whole days to a calendar date (no timezone involved). */
 function addDays(date: string, days: number): string {
   const [year, month, day] = date.split("-").map(Number);
@@ -85,7 +98,7 @@ function addDays(date: string, days: number): string {
 
 /**
  * The dates arrival/departure may take: the edition's days, as seen in its
- * timezone, padded by {@link DATE_WINDOW_PADDING_DAYS} on each side.
+ * timezone, padded by `RSVP_DATE_WINDOW_DAYS` (contract, same rule as the server) on each side.
  *
  * @param startsAt - Edition start (ISO instant).
  * @param endsAt - Edition end (ISO instant).
@@ -94,8 +107,8 @@ function addDays(date: string, days: number): string {
  */
 export function editionDateWindow(startsAt: string, endsAt: string, timeZone: string): DateWindow {
   return {
-    min: addDays(zonedDate(startsAt, timeZone), -DATE_WINDOW_PADDING_DAYS),
-    max: addDays(zonedDate(endsAt, timeZone), DATE_WINDOW_PADDING_DAYS)
+    min: addDays(zonedDate(startsAt, timeZone), -RSVP_DATE_WINDOW_DAYS),
+    max: addDays(zonedDate(endsAt, timeZone), RSVP_DATE_WINDOW_DAYS)
   };
 }
 

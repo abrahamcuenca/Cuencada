@@ -1,5 +1,5 @@
 import type {
-  AdminAttendanceBulkRequest,
+  AdminAttendanceReplaceRequest,
   AdminRsvpRow,
   Attendee,
   AttendanceRecord,
@@ -27,7 +27,8 @@ export interface PutMyRsvpArgs {
 /** Arguments of {@link rsvpApi} `saveAdminAttendance`. */
 export interface SaveAttendanceArgs {
   cuencadaId: string;
-  body: AdminAttendanceBulkRequest;
+  /** The complete set of attendees (replace-set, atomic on the server). */
+  body: AdminAttendanceReplaceRequest;
 }
 
 const yearPath = (year: number): string => `/cuencadas/${encodeURIComponent(String(year))}`;
@@ -93,7 +94,7 @@ export const rsvpApi = baseApi.injectEndpoints({
       providesTags: (_result, _error, id) => [{ type: "Attendance", id }]
     }),
     saveAdminAttendance: build.mutation<AttendanceRecord[], SaveAttendanceArgs>({
-      query: ({ cuencadaId, body }) => ({ url: `${adminPath(cuencadaId)}/attendance`, method: "POST", body }),
+      query: ({ cuencadaId, body }) => ({ url: `${adminPath(cuencadaId)}/attendance`, method: "PUT", body }),
       async onQueryStarted({ cuencadaId }, { dispatch, queryFulfilled }) {
         try {
           const { data } = await queryFulfilled;

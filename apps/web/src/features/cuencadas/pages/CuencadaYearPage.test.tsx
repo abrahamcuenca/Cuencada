@@ -17,7 +17,7 @@ const server = setupServer(
   // T3 attendee strip: the member attended 2026, so the RSVP slot shows "Fuiste a esta Cuencada".
   http.get(apiUrl("/cuencadas/2026/attendees"), () =>
     HttpResponse.json([
-      { personId: null, userId: makeUser().id, displayName: makeUser().displayName, avatarUrl: null, source: "rsvp", rsvpStatus: "yes" }
+      { personId: null, userId: makeUser().id, displayName: makeUser().displayName, avatarUrl: null, source: "rsvp", rsvpStatus: "yes", isMe: true }
     ])
   ),
   http.get(apiUrl("/cuencadas/1999"),() => HttpResponse.json(errorBody("NOT_FOUND", "No encontramos esa Cuencada."), { status: 404 }))

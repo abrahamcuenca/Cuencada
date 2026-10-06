@@ -1,5 +1,6 @@
 /**
- * Who the RSVP UI is for, and whether an attendee row is the current user.
+ * Who the RSVP UI is for, plus small attendee-row helpers. "Is this me?" is
+ * the server's `Attendee.isMe`.
  */
 import type { Attendee, CurrentUser } from "@cuencada/types";
 import { useAppSelector } from "../../../app/hooks";
@@ -14,19 +15,6 @@ export function useMember(): CurrentUser | null {
   const user = useAppSelector(selectCurrentUser);
   const mustChange = useAppSelector(selectPasswordChangeRequired);
   return status === "authenticated" && user !== null && !mustChange ? user : null;
-}
-
-/**
- * The contract's `Attendee` has no `isMe` flag yet (see WP-T3-FE Requests),
- * so match on the user id, or on the linked person for attendance-only rows.
- *
- * @param attendee - One attendee row.
- * @param user - The current user.
- * @returns Whether the row is the current user.
- */
-export function isMe(attendee: Attendee, user: Pick<CurrentUser, "id" | "personId">): boolean {
-  if (attendee.userId !== null && attendee.userId === user.id) return true;
-  return attendee.personId !== null && user.personId !== null && attendee.personId === user.personId;
 }
 
 /**

@@ -25,7 +25,7 @@ afterEach(() => {
 });
 
 describe("AdminAttendancePage", () => {
-  it("saves added and removed attendees in one bulk request", async () => {
+  it("saves the checklist as one replace-set PUT", async () => {
     const user = userEvent.setup();
     renderApp(PATH, admin());
 
@@ -42,7 +42,8 @@ describe("AdminAttendancePage", () => {
     await user.click(screen.getByRole("button", { name: "Guardar asistencia" }));
 
     expect(await screen.findByText("Asistencia guardada.")).toBeInTheDocument();
-    expect(db.bulkBodies).toEqual([{ add: [personId(3)], remove: [personId(2)] }]);
+    expect(db.log).toContain(`PUT /admin/cuencadas/${CUENCADA_2027_ID}/attendance`);
+    expect(db.attendanceBodies).toEqual([{ personIds: [personId(3)] }]);
     expect(await screen.findByRole("checkbox", { name: "Tomás Cuenca Ruiz" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Rosa Cuenca" })).not.toBeChecked();
     expect(screen.getByText("1 asistente")).toBeInTheDocument();
@@ -108,14 +109,17 @@ describe("AdminAttendancePage", () => {
     expect(await screen.findByText("Descargamos el CSV de confirmaciones.")).toBeInTheDocument();
     expect(db.log).toContain(`GET /admin/cuencadas/${CUENCADA_2027_ID}/rsvps.csv`);
     expect(clicked).toHaveLength(1);
-    expect(clicked[0]?.download).toBe("cuencada-2027-confirmaciones.csv");
+    expect(clicked[0]?.download).toBe("cuencada-2027-rsvps.csv");
     expect(clicked[0]?.getAttribute("href")).toBe("blob:cuencada/csv");
     const blob = createObjectURL.mock.calls[0]?.[0];
     expect(blob?.type).toBe("text/csv;charset=utf-8");
     const bytes = new Uint8Array((await blob?.arrayBuffer()) ?? new ArrayBuffer(0));
-    // UTF-8 BOM first, so Excel reads the accents.
+    // Exactly one UTF-8 BOM (the server already sends one), so Excel reads the accents.
     expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    expect([...bytes.slice(3, 6)]).not.toEqual([0xef, 0xbb, 0xbf]);
     expect(await blob?.text()).toBe(db.csv);
     expect(document.querySelector("a[download]")).toBeNull();
+    // The blob URL is revoked after the download starts.
+    await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith("blob:cuencada/csv"), { timeout: 3000 });
   });
 });

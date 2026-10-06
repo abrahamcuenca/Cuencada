@@ -1,5 +1,6 @@
+import { RSVP_DATE_WINDOW_DAYS } from "@cuencada/types";
 import { describe, expect, it } from "vitest";
-import { clampGuests, draftFromRsvp, editionDateWindow, optimisticRsvp, type RsvpDraft, validateRsvpDraft } from "./rsvpForm";
+import { clampGuests, draftFromRsvp, editionDateWindow, isPastDeadline, optimisticRsvp, type RsvpDraft, validateRsvpDraft } from "./rsvpForm";
 
 const WINDOW = { min: "2027-07-03", max: "2027-07-22" };
 const HOTELS = ["00000000-0000-4000-8000-000000000271"];
@@ -9,19 +10,39 @@ function draft(overrides: Partial<RsvpDraft> = {}): RsvpDraft {
 }
 
 describe("editionDateWindow", () => {
-  it("pads the edition days, seen in its timezone, by a week on each side", () => {
+  it("pads the edition days, seen in its timezone, by RSVP_DATE_WINDOW_DAYS (14) on each side", () => {
+    expect(RSVP_DATE_WINDOW_DAYS).toBe(14);
     // 06:00Z on Jul 10 is midnight in Mérida; 05:59Z on Jul 16 is still Jul 15 there.
     expect(editionDateWindow("2027-07-10T06:00:00Z", "2027-07-16T05:59:59Z", "America/Merida")).toEqual({
-      min: "2027-07-03",
-      max: "2027-07-22"
+      min: "2027-06-26",
+      max: "2027-07-29"
     });
   });
 
   it("crosses month and year boundaries", () => {
     expect(editionDateWindow("2027-01-02T06:00:00Z", "2027-12-29T06:00:00Z", "America/Merida")).toEqual({
-      min: "2026-12-26",
-      max: "2028-01-05"
+      min: "2026-12-19",
+      max: "2028-01-12"
     });
+  });
+});
+
+describe("isPastDeadline", () => {
+  // Stored at 09:00 on May 31 in Mérida (UTC-6): the RSVP stays open all that day there.
+  const DEADLINE = "2027-05-31T15:00:00Z";
+
+  it("is false without a deadline", () => {
+    expect(isPastDeadline(null, new Date("2099-01-01T00:00:00Z"), "America/Merida")).toBe(false);
+  });
+
+  it("stays open until the end of the deadline's day in the edition's timezone", () => {
+    expect(isPastDeadline(DEADLINE, new Date("2027-05-31T16:00:00Z"), "America/Merida")).toBe(false);
+    // 23:59:59 on May 31 in Mérida, already June 1 in UTC.
+    expect(isPastDeadline(DEADLINE, new Date("2027-06-01T05:59:59Z"), "America/Merida")).toBe(false);
+  });
+
+  it("closes at local midnight after the deadline's day", () => {
+    expect(isPastDeadline(DEADLINE, new Date("2027-06-01T06:00:00Z"), "America/Merida")).toBe(true);
   });
 });
 

@@ -1,4 +1,4 @@
-import type { Attendee, CurrentUser } from "@cuencada/types";
+import type { Attendee } from "@cuencada/types";
 import { type ReactNode, useState } from "react";
 import { isAbortError, isFetchBaseQueryError } from "../../../shared/api/errors";
 import { AvatarCircle } from "../../../shared/ui/AvatarCircle";
@@ -10,7 +10,7 @@ import { Dialog } from "../../../shared/ui/Dialog";
 import { Skeleton } from "../../../shared/ui/Skeleton";
 import { useGetCuencadaQuery } from "../../cuencadas/api";
 import { useListAttendeesQuery } from "../api";
-import { attendeeKey, isMe, safeAvatarUrl, useMember } from "../lib/members";
+import { attendeeKey, safeAvatarUrl, useMember } from "../lib/members";
 import styles from "../rsvp.module.css";
 
 /** Props for {@link AttendeesCircles}. */
@@ -33,7 +33,7 @@ export function AttendeesCircles({ year }: AttendeesCirclesProps): ReactNode {
 
   let body: ReactNode;
   if (attendees.data !== undefined) {
-    body = <AttendeeStrip year={year} title={title} isPast={isPast} attendees={attendees.data} me={member} />;
+    body = <AttendeeStrip year={year} title={title} isPast={isPast} attendees={attendees.data} />;
   } else if (attendees.error !== undefined) {
     if (isAbortError(attendees.error)) return null;
     const forbidden = isFetchBaseQueryError(attendees.error) && attendees.error.status === 403;
@@ -69,20 +69,19 @@ export function AttendeesCircles({ year }: AttendeesCirclesProps): ReactNode {
 }
 
 /** Sorts names in Spanish order, with the current user first. */
-function sortAttendees(list: readonly Attendee[], me: CurrentUser): Attendee[] {
+function sortAttendees(list: readonly Attendee[]): Attendee[] {
   return [...list].sort((a, b) => {
-    const meA = isMe(a, me) ? 0 : 1;
-    const meB = isMe(b, me) ? 0 : 1;
+    const meA = a.isMe ? 0 : 1;
+    const meB = b.isMe ? 0 : 1;
     return meA - meB || a.displayName.localeCompare(b.displayName, "es-MX");
   });
 }
 
+/** The strip is `yes` RSVPs plus historical attendance (T3-BE), so everyone counts as confirmed. */
 function countLabel(attendees: readonly Attendee[], isPast: boolean): string {
-  if (isPast) return `${attendees.length} ${attendees.length === 1 ? "asistente" : "asistentes"}`;
-  const maybe = attendees.filter((attendee) => attendee.rsvpStatus === "maybe").length;
-  const confirmed = attendees.length - maybe;
-  const base = `${confirmed} ${confirmed === 1 ? "confirmado" : "confirmados"}`;
-  return maybe > 0 ? `${base} · ${maybe} tal vez` : base;
+  const count = attendees.length;
+  if (isPast) return `${count} ${count === 1 ? "asistente" : "asistentes"}`;
+  return `${count} ${count === 1 ? "confirmado" : "confirmados"}`;
 }
 
 interface AttendeeStripProps {
@@ -90,10 +89,9 @@ interface AttendeeStripProps {
   title: string;
   isPast: boolean;
   attendees: readonly Attendee[];
-  me: CurrentUser;
 }
 
-function AttendeeStrip({ year, title, isPast, attendees, me }: AttendeeStripProps): ReactNode {
+function AttendeeStrip({ year, title, isPast, attendees }: AttendeeStripProps): ReactNode {
   const [open, setOpen] = useState(false);
   if (attendees.length === 0) {
     return (
@@ -102,7 +100,7 @@ function AttendeeStrip({ year, title, isPast, attendees, me }: AttendeeStripProp
       </p>
     );
   }
-  const sorted = sortAttendees(attendees, me);
+  const sorted = sortAttendees(attendees);
   const label = countLabel(attendees, isPast);
   return (
     <>
@@ -125,10 +123,9 @@ function AttendeeStrip({ year, title, isPast, attendees, me }: AttendeeStripProp
         <ul className={styles.attendeeList}>
           {sorted.map((attendee, index) => (
             <li key={attendeeKey(attendee, index)} className={styles.attendeeRow}>
-              <AvatarCircle name={attendee.displayName} src={safeAvatarUrl(attendee.avatarUrl)} size="md" decorative highlight={isMe(attendee, me)} />
+              <AvatarCircle name={attendee.displayName} src={safeAvatarUrl(attendee.avatarUrl)} size="md" decorative highlight={attendee.isMe} />
               <span className={styles.attendeeName}>{attendee.displayName}</span>
-              {isMe(attendee, me) ? <Badge tone="accent">Tú</Badge> : null}
-              {attendee.rsvpStatus === "maybe" ? <Badge tone="neutral">Tal vez</Badge> : null}
+              {attendee.isMe ? <Badge tone="accent">Tú</Badge> : null}
             </li>
           ))}
         </ul>

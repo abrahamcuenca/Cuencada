@@ -16,7 +16,7 @@ import styles from "./admin.module.css";
 
 /**
  * `/admin/cuencadas/:id/asistencia`: historical attendance (a searchable
- * people checklist saved as one bulk request) and the RSVP list with
+ * people checklist saved as one replace-set PUT) and the RSVP list with
  * filters and the CSV export.
  */
 export function AdminAttendancePage(): ReactNode {
@@ -53,7 +53,7 @@ function AttendanceScreen({ cuencada }: { cuencada: AdminCuencada }): ReactNode 
   const onExport = async (): Promise<void> => {
     try {
       const csv = await exportCsv(cuencada.id).unwrap();
-      downloadCsv(csv, `cuencada-${cuencada.year}-confirmaciones.csv`);
+      downloadCsv(csv, `cuencada-${cuencada.year}-rsvps.csv`);
       toast.show({ message: "Descargamos el CSV de confirmaciones.", tone: "success" });
     } catch (error) {
       if (!isAbortError(error)) toast.show({ message: getApiErrorMessage(error), tone: "danger" });

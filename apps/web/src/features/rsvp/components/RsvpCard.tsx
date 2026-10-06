@@ -9,11 +9,12 @@ import { Skeleton } from "../../../shared/ui/Skeleton";
 import { useToast } from "../../../shared/ui/Toast";
 import { useGetCuencadaMembersQuery, useGetCuencadaQuery } from "../../cuencadas/api";
 import { useGetMyRsvpQuery, useListAttendeesQuery, usePutMyRsvpMutation } from "../api";
-import { isMe, useMember } from "../lib/members";
+import { useMember } from "../lib/members";
 import {
   type DateWindow,
   draftFromRsvp,
   editionDateWindow,
+  isPastDeadline,
   optimisticRsvp,
   type RsvpDraft,
   type RsvpFieldErrors,
@@ -48,7 +49,7 @@ function AttendedBadge({ year }: { year: number }): ReactNode {
   const member = useMember();
   const attendees = useListAttendeesQuery(year, { skip: member === null });
   if (member === null || attendees.data === undefined) return null;
-  if (!attendees.data.some((attendee) => isMe(attendee, member))) return null;
+  if (!attendees.data.some((attendee) => attendee.isMe)) return null;
   return (
     <p className={styles.attendedBadge} data-slot="rsvp">
       <Badge tone="festive">🎉 Fuiste a esta Cuencada</Badge>
@@ -60,7 +61,7 @@ function RsvpPanel({ cuencada }: { cuencada: PublicCuencada }): ReactNode {
   const my = useGetMyRsvpQuery(cuencada.year);
   let body: ReactNode;
   if (my.data !== undefined) {
-    body = <RsvpBody cuencada={cuencada} data={my.data} onForbidden={() => void my.refetch()} />;
+    body = <RsvpBody cuencada={cuencada} data={my.data} onClosed={() => void my.refetch()} />;
   } else if (my.error !== undefined) {
     body = isAbortError(my.error) ? null : (
       <div className={styles.stack}>
@@ -85,9 +86,9 @@ function RsvpPanel({ cuencada }: { cuencada: PublicCuencada }): ReactNode {
   );
 }
 
-/** Formats the deadline instant in the edition's timezone ("15 de agosto de 2026, 11:59 p.m."). */
+/** Formats the deadline day in the edition's timezone ("15 de agosto de 2026"); it lasts until the end of that day. */
 function formatDeadline(deadline: string, timeZone: string): string {
-  return formatDate(deadline, timeZone, { day: "numeric", month: "long", year: "numeric", hour: "numeric", minute: "2-digit" });
+  return formatDate(deadline, timeZone, { day: "numeric", month: "long", year: "numeric" });
 }
 
 /** Ends a sentence with a period, unless it already ends with one ("… 11:59 p.m."). */
@@ -98,11 +99,11 @@ function sentence(text: string): string {
 interface RsvpBodyProps {
   cuencada: PublicCuencada;
   data: MyRsvpResponse;
-  /** Called when the server says the RSVP is closed, to reload `editable`. */
-  onForbidden: () => void;
+  /** Called on 409 `CONFLICT` (RSVP closed): reloads `editable` so the card locks. */
+  onClosed: () => void;
 }
 
-function RsvpBody({ cuencada, data, onForbidden }: RsvpBodyProps): ReactNode {
+function RsvpBody({ cuencada, data, onClosed }: RsvpBodyProps): ReactNode {
   const { year, timezone } = cuencada;
   const toast = useToast();
   const members = useGetCuencadaMembersQuery(year);
@@ -114,7 +115,7 @@ function RsvpBody({ cuencada, data, onForbidden }: RsvpBodyProps): ReactNode {
 
   const hotels: LocationItem[] = (members.data?.locations ?? []).filter((location) => location.kind === "hotel");
   const dateWindow: DateWindow = editionDateWindow(cuencada.startsAt, cuencada.endsAt, timezone);
-  const deadlinePassed = data.deadline !== null && Date.now() >= Date.parse(data.deadline);
+  const deadlinePassed = isPastDeadline(data.deadline, new Date(), timezone);
   const closed = !data.editable || deadlinePassed;
 
   if (closed) {
@@ -157,12 +158,12 @@ function RsvpBody({ cuencada, data, onForbidden }: RsvpBodyProps): ReactNode {
         if (isAbortError(error)) return;
         setEditing(true);
         toast.show({ message: getApiErrorMessage(error), tone: "danger" });
-        if (getApiErrorCode(error) === "FORBIDDEN") onForbidden();
+        if (getApiErrorCode(error) === "CONFLICT") onClosed();
       });
   };
 
   const deadlineHint = data.deadline ? (
-    <p className={styles.deadline}>{sentence(`Confirma antes del ${formatDeadline(data.deadline, timezone)}`)}</p>
+    <p className={styles.deadline}>{sentence(`Confirma a más tardar el ${formatDeadline(data.deadline, timezone)}`)}</p>
   ) : null;
 
   if (data.rsvp !== null && !editing) {
