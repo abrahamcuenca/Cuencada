@@ -1,62 +1,83 @@
-import { createBrowserRouter, Navigate, Outlet } from "react-router-dom";
-import { SiteHeader } from "../components/SiteHeader";
-import { AdminPage } from "../pages/AdminPage";
-import { ArbolPage } from "../pages/ArbolPage";
-import { CuencadaYearPage } from "../pages/CuencadaYearPage";
-import { DirectorioPage } from "../pages/DirectorioPage";
-import { GaleriaPage } from "../pages/GaleriaPage";
-import { HomePage } from "../pages/HomePage";
-import { PanelPage } from "../pages/PanelPage";
-import { PerfilPage } from "../pages/PerfilPage";
-import { useAuth } from "./auth";
+/**
+ * App router (Phase 0 owned; frozen). Composes every feature's
+ * {@link FeatureRoutes} under the matching guard. Phase-1 tracks add routes
+ * in `features/<f>/routes.tsx` only. See docs/coordination/WP-0.6.md.
+ */
+import { createBrowserRouter, type RouteObject } from "react-router-dom";
+import { adminRoutes } from "../features/admin/routes";
+import { RequireAdmin, RequireAuth, RequirePasswordChanged } from "../features/auth/guards";
+import { authRoutes } from "../features/auth/routes";
+import { chatRoutes } from "../features/chat/routes";
+import { cuencadasRoutes } from "../features/cuencadas/routes";
+import { directoryRoutes } from "../features/directory/routes";
+import { familyRoutes } from "../features/family/routes";
+import { galleryRoutes } from "../features/gallery/routes";
+import { profileRoutes } from "../features/profile/routes";
+import { pwaRoutes } from "../features/pwa/routes";
+import { rsvpRoutes } from "../features/rsvp/routes";
+import type { FeatureRoutes } from "../shared/lib/featureRoutes";
+import { AppLayout } from "./AppLayout";
+import { NotFoundPage, RouteErrorPage, RouteSpinner } from "./fallbacks";
 
-function Layout(): React.ReactNode {
-  return (
-    <>
-      <SiteHeader />
-      <main>
-        <Outlet />
-      </main>
-    </>
-  );
+/** Every feature's routes, in one place. Order does not matter: React Router ranks paths. */
+export const featureRoutes: readonly FeatureRoutes[] = [
+  authRoutes,
+  cuencadasRoutes,
+  rsvpRoutes,
+  galleryRoutes,
+  profileRoutes,
+  directoryRoutes,
+  familyRoutes,
+  chatRoutes,
+  adminRoutes,
+  pwaRoutes
+];
+
+function collect(level: keyof FeatureRoutes): RouteObject[] {
+  return featureRoutes.flatMap((feature) => feature[level] ?? []);
 }
 
-function RequireAuth(): React.ReactNode {
-  const { status, user } = useAuth();
-  if (status === "loading") return <div className="shell"><p>Cargando tu sesión...</p></div>;
-  if (!user) return <Navigate to="/" replace />;
-  return <Outlet />;
-}
+// Dev-only living style guide (WP-0.7). Statically dropped from production builds.
+const devRoutes: RouteObject[] = import.meta.env.DEV
+  ? [{ path: "/_ui", lazy: async () => ({ Component: (await import("../shared/ui/StyleGuide")).StyleGuide }) }]
+  : [];
 
-function RequireAdmin(): React.ReactNode {
-  const { status, user } = useAuth();
-  if (status === "loading") return <div className="shell"><p>Cargando tu sesión...</p></div>;
-  if (!user) return <Navigate to="/" replace />;
-  if (user.role !== "admin") return <Navigate to="/panel" replace />;
-  return <Outlet />;
-}
-
-export const router = createBrowserRouter([
+/**
+ * The full route tree:
+ * `AppLayout` > public | RequireAuth > (session | RequirePasswordChanged > (member | RequireAdmin > admin)).
+ *
+ * Exported for tests (`createMemoryRouter(appRoutes)`).
+ */
+export const appRoutes: RouteObject[] = [
   {
-    element: <Layout />,
+    Component: AppLayout,
+    ErrorBoundary: RouteErrorPage,
+    HydrateFallback: RouteSpinner,
     children: [
-      { path: "/", element: <HomePage /> },
-      { path: "/cuencada/:year", element: <CuencadaYearPage /> },
+      ...collect("public"),
+      ...devRoutes,
       {
-        element: <RequireAuth />,
+        Component: RequireAuth,
         children: [
-          { path: "/arbol", element: <ArbolPage /> },
-          { path: "/directorio", element: <DirectorioPage /> },
-          { path: "/galeria", element: <GaleriaPage /> },
-          { path: "/panel", element: <PanelPage /> },
-          { path: "/perfil", element: <PerfilPage /> }
+          ...collect("session"),
+          // App-owned mobile "Más" menu (session level: reachable during a forced password change).
+          { path: "/mas", lazy: async () => ({ Component: (await import("./MorePage")).MorePage }) },
+          {
+            Component: RequirePasswordChanged,
+            children: [...collect("member"), { Component: RequireAdmin, children: collect("admin") }]
+          }
         ]
       },
-      {
-        element: <RequireAdmin />,
-        children: [{ path: "/admin", element: <AdminPage /> }]
-      },
-      { path: "*", element: <Navigate to="/" replace /> }
+      { path: "*", Component: NotFoundPage }
     ]
   }
-]);
+];
+
+/**
+ * Creates the browser router. Called once by `App`.
+ *
+ * @returns A data router over {@link appRoutes}.
+ */
+export function createAppRouter(): ReturnType<typeof createBrowserRouter> {
+  return createBrowserRouter(appRoutes);
+}
