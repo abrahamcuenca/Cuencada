@@ -10,6 +10,7 @@ import {
 import { logout } from "../features/auth/session";
 import { type ChatUnreadBadge, useChatUnreadBadge } from "../features/chat/unread";
 import { useGetCuencadaHomeQuery } from "../features/cuencadas/api";
+import { PwaStatusMount } from "../features/pwa";
 import { wantsMinimalChrome } from "../shared/lib/featureRoutes";
 import { reportUnexpected } from "../shared/lib/reportUnexpected";
 // Direct imports (not the shared/ui barrel) keep unused primitives' CSS out of the initial chunk.
@@ -195,6 +196,7 @@ export function AppLayout(): ReactNode {
       }
     >
       <Outlet />
+      <PwaStatusMount />
     </PageShell>
   );
 }
