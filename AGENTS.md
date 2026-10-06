@@ -13,6 +13,7 @@
 - Use `pnpm build`, `pnpm typecheck`, `pnpm lint`, and `pnpm test` from the repo root.
 - Use `pnpm --filter @cuencada/web dev` for the frontend and `pnpm --filter @cuencada/server dev` for the API.
 - Use `mise run verify` before deploy work; it runs lint, typecheck, tests, and production audit.
+- Never use `drizzle-kit push`; apply schema only via migrations (`db:migrate`). `drizzle.config.ts` refuses `push`/`drop` unless `ALLOW_DRIZZLE_PUSH=1` and the database is on loopback. There is no `db:push` script; do not add one.
 
 ## Acleron
 
@@ -27,6 +28,15 @@
 - RSVP requires an account. Admins manually create past/future Cuencadas and historical attendance.
 - Invite tokens, magic-link tokens, and refresh/session tokens must be stored hashed, not plaintext.
 - Directory contact fields and family tree data are PII; default to member-only and honor profile visibility.
+- This repository is public. Fixtures, seeds, docs, wireframes, style guides and screenshots use fictional people only (e.g. "Ana Morales Vega", branch "Rama Norte", phones `+52 555 0…`, `@example.com` emails). Never use real family names or real family photos.
+- Never interpolate PII (emails, names, phones, tokens) into `Error` messages or log lines; errors get logged. Keep identifiers in structured fields that the logger redacts.
+
+## Agent Workflow
+
+- Run git with explicit paths (`git add <files>`, never `git add -A` or `git add .`). Never use bare `git stash`/`git stash pop`; the stash is shared between worktrees.
+- Agents share one scratchpad: prefix every temp file with the WP id (e.g. `w08a-commit-msg.txt`).
+- Before merging a PR, merge the latest `main` into the branch and run the full suite (`pnpm lint && pnpm typecheck && pnpm test && pnpm build`).
+- Deferred and cross-track work (including the CSP/nginx cutover checklist) lives in `docs/coordination/backlog.md`; add items there instead of leaving TODOs in code.
 
 ## Editing Notes
 
