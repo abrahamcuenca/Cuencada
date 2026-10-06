@@ -1,0 +1,41 @@
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.main {
+  flex: 1;
+  padding-block: var(--space-6) var(--space-12);
+}
+
+/* Full-bleed pages start with a hero flush under the header. */
+.main.bleed {
+  padding-top: 0;
+}
+
+.main:focus {
+  outline: none;
+}
+
+.banner {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-banner);
+}
+
+/* Reserve room for the fixed tab bar + home indicator. */
+.withBottomNav {
+  padding-bottom: calc(var(--bottom-nav-height) + var(--safe-bottom));
+}
+
+@media (min-width: 900px) {
+  .withBottomNav {
+    padding-bottom: 0;
+  }
+
+  .main {
+    padding-block: var(--space-10) var(--space-16);
+  }
+}

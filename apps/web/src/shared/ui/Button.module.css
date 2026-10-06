@@ -1,0 +1,136 @@
+.button {
+  --btn-bg: var(--color-accent);
+  --btn-fg: var(--color-text-on-accent);
+  --btn-border: transparent;
+  --btn-bg-hover: var(--color-accent-hover);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--control-height);
+  min-width: var(--tap-min);
+  padding: var(--space-2) var(--space-5);
+  border: 2px solid var(--btn-border);
+  border-radius: var(--radius-pill);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  font-family: var(--font-body);
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  white-space: normal;
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.button:focus-visible {
+  border-radius: var(--radius-pill);
+}
+
+.button:active {
+  transform: scale(0.97);
+}
+
+@media (hover: hover) {
+  .button:hover:not(:disabled) {
+    background: var(--btn-bg-hover);
+    transform: translateY(-2px);
+  }
+}
+
+.button:disabled,
+.button[aria-disabled="true"] {
+  opacity: 0.55;
+  transform: none;
+  cursor: not-allowed;
+}
+
+.loading {
+  cursor: progress;
+}
+
+.label {
+  min-width: 0;
+  text-wrap: balance;
+}
+
+.icon {
+  display: inline-flex;
+  font-size: 1.15em;
+  line-height: 1;
+}
+
+.fullWidth {
+  display: flex;
+  width: 100%;
+}
+
+/* ---------- Sizes (all ≥ 44px tall) ---------- */
+.sm {
+  min-height: var(--control-height-sm);
+  padding: var(--space-1) var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.md {
+  min-height: var(--control-height);
+}
+
+.lg {
+  min-height: var(--control-height-lg);
+  padding: var(--space-2) var(--space-6);
+  font-size: var(--text-lg);
+}
+
+/* ---------- Variants ---------- */
+.primary {
+  box-shadow: 0 6px 16px rgb(231 184 75 / 0.35);
+}
+
+.secondary {
+  --btn-bg: var(--color-surface);
+  --btn-fg: var(--color-primary);
+  --btn-border: var(--color-primary);
+  --btn-bg-hover: var(--color-primary-soft);
+}
+
+.ghost {
+  --btn-bg: transparent;
+  --btn-fg: var(--color-primary);
+  --btn-border: transparent;
+  --btn-bg-hover: var(--color-primary-soft);
+}
+
+.whatsapp {
+  --btn-bg: var(--color-whatsapp);
+  --btn-fg: var(--color-text-on-whatsapp);
+  --btn-bg-hover: var(--color-whatsapp-hover);
+}
+
+.danger {
+  --btn-bg: var(--color-danger);
+  --btn-fg: #ffffff;
+  --btn-bg-hover: #8f1e18;
+}
+
+/* On the green hero (legacy .btn.light / .btn.ghost) */
+.onDark.secondary {
+  --btn-bg: #ffffff;
+  --btn-fg: var(--color-primary);
+  --btn-border: #ffffff;
+  --btn-bg-hover: var(--brand-gold-100);
+}
+
+.onDark.ghost {
+  --btn-fg: #ffffff;
+  --btn-border: rgb(255 255 255 / 0.6);
+  --btn-bg-hover: rgb(255 255 255 / 0.14);
+}
