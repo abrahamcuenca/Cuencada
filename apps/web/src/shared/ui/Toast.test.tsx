@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MIN_ACTION_TOAST_MS, type ToastOptions, ToastProvider, useToast } from "./Toast";
+import { MAX_VISIBLE_TOASTS, MIN_ACTION_TOAST_MS, type ToastApi, type ToastOptions, ToastProvider, evictForNewToast, useToast } from "./Toast";
 
 function Shows({ options }: { options: ToastOptions }): React.ReactNode {
   const toast = useToast();
@@ -18,6 +18,44 @@ function renderToast(options: ToastOptions): void {
     </ToastProvider>
   );
 }
+
+/** Renders a provider and hands back its API for imperative calls. */
+function renderApi(): ToastApi {
+  let api: ToastApi | null = null;
+  function Capture(): React.ReactNode {
+    api = useToast();
+    return null;
+  }
+  render(
+    <ToastProvider>
+      <Capture />
+    </ToastProvider>
+  );
+  if (api === null) throw new Error("toast API missing");
+  return api;
+}
+
+const undo = { label: "Deshacer", onClick: () => {} };
+
+describe("evictForNewToast", () => {
+  it("keeps everything while there is room for the new toast", () => {
+    const list = [{ id: "a" }, { id: "b" }];
+    expect(evictForNewToast(list)).toEqual({ kept: list, evicted: [] });
+    expect(evictForNewToast([])).toEqual({ kept: [], evicted: [] });
+  });
+
+  it("evicts the oldest toast without an action, never an action toast", () => {
+    const list = [{ id: "a", action: undo }, { id: "b" }, { id: "c" }];
+    const { kept, evicted } = evictForNewToast(list);
+    expect(evicted.map((t) => t.id)).toEqual(["b"]);
+    expect(kept.map((t) => t.id)).toEqual(["a", "c"]);
+  });
+
+  it("lets the stack grow when only action toasts remain", () => {
+    const list = Array.from({ length: MAX_VISIBLE_TOASTS }, (_, i) => ({ id: String(i), action: undo }));
+    expect(evictForNewToast(list)).toEqual({ kept: list, evicted: [] });
+  });
+});
 
 describe("ToastProvider", () => {
   beforeEach(() => {
@@ -90,5 +128,47 @@ describe("ToastProvider", () => {
   it("announces errors in the assertive region", () => {
     renderToast({ message: "No pudimos subir la foto.", tone: "danger" });
     expect(screen.getByRole("alert")).toHaveTextContent("No pudimos subir la foto.");
+  });
+
+  it("never drops an action toast when the stack is full", () => {
+    const api = renderApi();
+    act(() => {
+      api.show({ message: "Foto eliminada.", action: undo });
+      api.show({ message: "Uno." });
+      api.show({ message: "Dos." });
+      api.show({ message: "Tres." });
+    });
+    expect(screen.getByText("Foto eliminada.")).toBeInTheDocument();
+    expect(screen.queryByText("Uno.")).not.toBeInTheDocument();
+    expect(screen.getByText("Dos.")).toBeInTheDocument();
+    expect(screen.getByText("Tres.")).toBeInTheDocument();
+  });
+
+  it("keeps every action toast even beyond the visible limit", () => {
+    const api = renderApi();
+    act(() => {
+      for (let i = 1; i <= MAX_VISIBLE_TOASTS + 1; i += 1) api.show({ message: `Acción ${i}.`, action: undo });
+    });
+    expect(screen.getAllByRole("button", { name: "Deshacer" })).toHaveLength(MAX_VISIBLE_TOASTS + 1);
+  });
+
+  it("clears the timer of an evicted toast", () => {
+    const api = renderApi();
+    act(() => {
+      api.show({ message: "Uno." });
+      api.show({ message: "Dos." });
+      api.show({ message: "Tres." });
+    });
+    expect(vi.getTimerCount()).toBe(3);
+    act(() => {
+      api.show({ message: "Cuatro." });
+    });
+    expect(screen.queryByText("Uno.")).not.toBeInTheDocument();
+    expect(vi.getTimerCount()).toBe(3);
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(vi.getTimerCount()).toBe(0);
+    expect(screen.queryByText("Cuatro.")).not.toBeInTheDocument();
   });
 });
