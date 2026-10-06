@@ -9,7 +9,7 @@ import { baseApi } from "./baseApi";
 import { AUTH_CHANNEL_NAME, startAuthSync } from "../../features/auth/authSync";
 import { cancelOnlineLogoutRetry, logout } from "../../features/auth/session";
 import { isAbortError } from "./errors";
-import { cancelOnlineRefreshRetry, REFRESH_LOCK_NAME, REFRESH_RACE_GRACE_WAIT_MS } from "./reauth";
+import { cancelOnlineRefreshRetry, REFRESH_LOCK_NAME, REFRESH_RACE_GRACE_WAIT_MS, refreshAccessToken } from "./reauth";
 
 interface PingResponse {
   ok: boolean;
@@ -179,11 +179,37 @@ describe("baseQueryWithReauth", () => {
 
       const pending = store.dispatch(testApi.endpoints.ping.initiate(1));
       await vi.waitFor(() => expect(fake.refreshCalls).toBe(2));
+      // Let the second 409 land, so the 11 s pause is running.
+      await vi.advanceTimersByTimeAsync(200);
+      const started = Date.now();
       store.dispatch(loggedOut());
-      await vi.advanceTimersByTimeAsync(REFRESH_RACE_GRACE_WAIT_MS + 100);
+      // The logout ends the pause at once (the clock only moves with real time here, and the
+      // test would time out long before the 11 s pause ended on its own).
       await pending;
 
+      expect(Date.now() - started).toBeLessThan(2_000);
       expect(fake.refreshCalls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never lets a new session join a refresh that started before a logout", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout"] });
+    try {
+      fake.refreshPlan = [{ status: 409, code: "REFRESH_RACE" }, { status: 409, code: "REFRESH_RACE" }, { status: 200 }];
+      const stale = refreshAccessToken(store);
+      await vi.waitFor(() => expect(fake.refreshCalls).toBe(2));
+      store.dispatch(loggedOut());
+
+      // A new login in the same tab refreshes on its own instead of reusing the stale promise.
+      fake.refreshPlan = [{ status: 200 }];
+      fake.refreshCalls = 0;
+      const fresh = refreshAccessToken(store);
+      expect(fresh).not.toBe(stale);
+      expect(await fresh).toBe(true);
+      expect(await stale).toBe(false);
+      expect(store.getState().auth.status).toBe("authenticated");
     } finally {
       vi.useRealTimers();
     }
