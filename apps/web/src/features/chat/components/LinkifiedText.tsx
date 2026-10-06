@@ -15,7 +15,7 @@ export function LinkifiedText({ text }: LinkifiedTextProps): ReactNode {
   return segments.map((segment, index) =>
     segment.kind === "link" ? (
       // biome-ignore lint/suspicious/noArrayIndexKey: segments are positional and never reordered.
-      <a key={index} href={segment.href} target="_blank" rel="noopener noreferrer">
+      <a key={index} href={segment.href} title={segment.title} target="_blank" rel="noopener noreferrer">
         {segment.text}
       </a>
     ) : (

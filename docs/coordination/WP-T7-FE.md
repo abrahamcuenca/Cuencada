@@ -133,6 +133,7 @@ Built against the WP-0.2 chat contract with MSW and a fake WebSocket. Mid-task, 
   - `javascript:`, `data:`, `vbscript:` and `www.` stay text
   - trailing punctuation is trimmed, keeping a parenthesis that balances one inside the URL
   - no `innerHTML`, no `eval`
+  - **anti-spoofing (Security L1, PR #28):** the visible link text is rebuilt from the parsed URL, never the typed text: scheme, the ASCII host (punycode for lookalikes, e.g. `https://xn--pple-43d.com/login`) and the percent-encoded path, cut at 60 characters with "…". The `title` carries the full ASCII URL. A URL containing zero-width, bidi-control or BOM characters (U+200B–200F, U+202A–202E, U+2066–2069, U+FEFF) is never linkified. Ideographic full stops (。．｡) are normalized to "." before parsing, so `evil.com。com` shows as `evil.com.com`
 - **Connection status** (`<output>` under the app bar):
 
   | State | Message |
@@ -213,7 +214,7 @@ Fixtures, tests and screenshots use invented people only ("Lucía Ramírez Solí
    - strip the query string from the reverse-proxy access logs for `/api/chat/ws` (already in ADR 0001)
    - pass the `Upgrade`/`Connection` headers
    - keep `proxy_read_timeout` above 60 s: the client pings every 25 s and treats 60 s of silence as dead
-6. **T9 (PWA):** the service worker must never intercept or cache `/api/chat/*` (REST or WS). Chat data lives only in the in-memory RTK cache, which `loggedOut` already resets.
+6. **T9 (PWA), forwarded by the orchestrator:** the service worker must **never** intercept or cache `/api/chat/*` (REST or WS). Chat data lives only in the in-memory RTK cache, which `loggedOut` already resets.
 7. **WP-0.6 / `index.html`:** consider `interactive-widget=resizes-content` in the viewport meta. Android Chrome then resizes the layout viewport for the keyboard; the `visualViewport` handling stays as the iOS path.
 8. **WP-0.7:**
    - `Badge shape="count"` caps numbers at "99+". The room list passes the string "999+" at the server cap.

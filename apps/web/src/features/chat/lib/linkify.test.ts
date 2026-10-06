@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { linkify, safeHref } from "./linkify";
+import { LINK_TEXT_MAX, linkify, safeHref } from "./linkify";
 
 const links = (text: string): string[] => linkify(text).flatMap((segment) => (segment.kind === "link" ? [segment.href] : []));
 
@@ -8,9 +8,9 @@ describe("linkify", () => {
     const segments = linkify("Fotos: https://example.com/album?id=3 y http://example.org.");
     expect(segments).toEqual([
       { kind: "text", text: "Fotos: " },
-      { kind: "link", text: "https://example.com/album?id=3", href: "https://example.com/album?id=3" },
+      { kind: "link", text: "https://example.com/album?id=3", href: "https://example.com/album?id=3", title: "https://example.com/album?id=3" },
       { kind: "text", text: " y " },
-      { kind: "link", text: "http://example.org", href: "http://example.org/" },
+      { kind: "link", text: "http://example.org", href: "http://example.org/", title: "http://example.org/" },
       { kind: "text", text: "." }
     ]);
   });
@@ -50,5 +50,44 @@ describe("linkify", () => {
       new URL("https://es.wikipedia.org/wiki/Mérida_(Yucatán)").href
     ]);
     expect(links("¿Viste https://example.com/a?")).toEqual(["https://example.com/a"]);
+  });
+
+  it("shows a lookalike (Cyrillic) host as punycode, in the text, href and title", () => {
+    // "аpple.com" with a Cyrillic "а" (U+0430).
+    const [link] = linkify("https://\u0430pple.com/login").filter((segment) => segment.kind === "link");
+    expect(link).toEqual({
+      kind: "link",
+      text: "https://xn--pple-43d.com/login",
+      href: "https://xn--pple-43d.com/login",
+      title: "https://xn--pple-43d.com/login"
+    });
+  });
+
+  it("never linkifies a URL with bidi controls or invisible characters", () => {
+    for (const text of [
+      "https://example.com/\u202Egpj.exe",
+      "https://exa\u200Bmple.com/",
+      "https://example.com/\u2066x\u2069",
+      "https://\uFEFFexample.com"
+    ]) {
+      expect(links(text)).toEqual([]);
+    }
+  });
+
+  it("normalizes ideographic full stops so the shown host is the real one", () => {
+    for (const dot of ["\u3002", "\uFF0E", "\uFF61"]) {
+      const [link] = linkify(`https://evil.com${dot}com/x`).filter((segment) => segment.kind === "link");
+      expect(link).toMatchObject({ text: "https://evil.com.com/x", href: "https://evil.com.com/x" });
+    }
+  });
+
+  it("builds the visible text from the parsed URL and truncates long ones", () => {
+    const long = `https://example.com/${"a".repeat(100)}`;
+    const [link] = linkify(long).filter((segment) => segment.kind === "link");
+    expect(link?.text).toHaveLength(LINK_TEXT_MAX);
+    expect(link?.text.endsWith("…")).toBe(true);
+    expect(link).toMatchObject({ href: long, title: long });
+    // Hosts are lower-cased and paths percent-encoded: what you see is where it goes.
+    expect(linkify("https://EXAMPLE.com/Mérida")[0]).toMatchObject({ text: "https://example.com/M%C3%A9rida" });
   });
 });
