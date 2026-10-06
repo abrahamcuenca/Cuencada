@@ -89,3 +89,4 @@ No breaking change for request senders. Response consumers gain fields (`timezon
 - None blocking.
 
 ## Review log
+- 2026-10-06: The orchestrator merged `origin/main` (T2-FE, PR #11) into this branch. With the orchestrator's approval, the web fixtures (`apps/web/src/features/cuencadas/testing/fixtures.ts`) gained `expiresAt: null` on `makeAnnouncement` and `timezone`/`hasMedia: false` on `makeSummary` for the contract amendments. Web behaviour is unchanged. `pnpm lint && pnpm typecheck && pnpm test && pnpm build`: green (59 files, 579 tests).
