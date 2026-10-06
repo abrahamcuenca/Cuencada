@@ -2,7 +2,7 @@
 
 Deferred and cross-track work, grouped by status. Imported from the
 orchestrator's working backlog by WP-0.8a (2026-10-06) and checked against
-`main` after PRs #1–#29. Add new items here instead of leaving TODOs in code.
+`main` after PRs #1–#30. Add new items here instead of leaving TODOs in code.
 When an item ships, move it to **Done** with the PR number.
 
 Owners: **0.8a** platform & repo hygiene · **0.8b** backend modules (auth,
@@ -31,6 +31,7 @@ family, profile, admin, chat, media, cuencadas) · **0.8c** web features
 | T8-BE: admin disable burns pending email tokens and closes chat sockets; admin alerts independent of the global cap | T8-BE #24, #27 |
 | Service worker never caches private `/api/**`: only the PII-free public edition endpoints (NetworkFirst), purged on logout; CI `check:sw` | T9 #29 |
 | API CSP `connect-src` includes the `wss://` origin | WP-0.4 #8 / T7-BE #25 |
+| WP-0.8b: unlisted people get `userId`/`avatarUrl` null in the family tree; avatar 24 MP cap, decode once, semaphore, `profile.*` audit actions; ≤ 3 role/status changes per target per hour, force-reset exemption only on a real flip, `?emailVerified=` filter, exclusive audit `to`; chat `senderUserId` + `room_preview` frame, 60 s revoked-session memory, deterministic tests; `hasMedia` owned by media; tags-bound comment; per-edition HMAC for hidden attendees; login/reset timing equalized | WP-0.8b #30 |
 | WP-0.8a: logging query-param **allowlist** (q, search, city, familyBranch, cursor, ticket… redacted) | WP-0.8a |
 | WP-0.8a: distinct 403 `EMAIL_UNVERIFIED` (server); web accepts both codes in 0.8c | WP-0.8a (+0.8c) |
 | WP-0.8a: `drizzle.config.ts` refuses `push`/`drop` unless `ALLOW_DRIZZLE_PUSH=1` + loopback; AGENTS.md "never drizzle-kit push"; no `db:push` script | WP-0.8a |
@@ -43,22 +44,15 @@ family, profile, admin, chat, media, cuencadas) · **0.8c** web features
 
 ## Open
 
-### 0.8b (backend modules)
+### Backend (open after WP-0.8b #30)
 - T4: a `pending_upload` row with a null `upload_expires_at` is never considered stale (cleanup filters `isNotNull`); decide and test. `X-Content-Type-Options: nosniff` on stored QuickTime objects (S3 metadata).
 - T4: neutralize non-A/V tracks (GoPro gpmd, Google camm, mebx, subtitle GPS): zero samples, convert `trak` to `free`; tests. Interim: upload help text about action cams/drones.
 - T6: concurrent test for the `parent_of` cycle check (two inverse edges at once).
-- T6-BE (Security L2 #19): for unlisted users, family tree/detail/search return `userId: null` and `avatarUrl: null` to others (name kept, genealogy intact).
-- T5-BE: avatar decode once + small semaphore; add `profile.*` to `AuditAction`.
 - T5: store phones as E.164 server-side (10-digit numbers are assumed +52 today).
-- T8-BE: limit role/status changes on the same target to 3/hour (caps the exempt-alert flood); optionally coalesce alerts per target per 10 min. Force-reset exempt only when `must_change_password` flips false→true. Nits: summary SQL via ORM table refs; comment on the unreachable 409; comment on target filtering.
-- T8-BE: unverified-email filter on the users list (T8-FE request); audit "hasta" exclusive upper bound server-side.
-- T7-BE: poll instead of sleep in the slow-reader test; test the post-registration DB recheck; keep user sessions in a 60 s memory; ping re-checks session + user status. T7-FE requests: `senderUserId` on `ChatRoomLastMessage`.
-- T3-BE (optional): mix the edition id into the HMAC ordering.
-- T2-BE: comment on the x4 raw array bound.
-- Reconcile `hasMedia`: T2-BE `EXISTS` vs T4 `countVisibleMediaByCuencada` (same rule: ready + approved + not deleted).
+- T8-BE (optional): coalesce admin alerts per target per 10 min. Nits: summary SQL via ORM table refs; comment on the unreachable 409; comment on target filtering.
+- T7-BE: ping re-checks session + user status.
 - `lib/storage`: `getStream`/`putStream` (video jobs buffer up to 300 MB, ~600 MB peak). Until then consider a 150 MB video cap.
 - Media: `incoming/` prefix + server-side copy on confirm, so a bucket lifecycle rule can expire orphans (with WP-2.1/2.4).
-- T1 L2 (optional): move budget + token creation into the mail job (timing).
 - Optional: `audit_logs.action` format CHECK (with a migration, WP-2.x).
 
 ### 0.8c (web features)

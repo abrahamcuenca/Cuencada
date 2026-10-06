@@ -18,7 +18,7 @@ Source of truth for multi-agent work. The full plan lives in [`../plan.md`](../p
 
 ## Status
 
-PRs #1–#29 are merged. Deferred and cross-track items live in [`backlog.md`](backlog.md).
+PRs #1–#30 are merged. Deferred and cross-track items live in [`backlog.md`](backlog.md).
 
 | WP | Title | Owner | Reviewers | Branch | PR | Status |
 |---|---|---|---|---|---|---|
@@ -49,7 +49,7 @@ PRs #1–#29 are merged. Deferred and cross-track items live in [`backlog.md`](b
 | T8-BE | Admin console API (+ alerts #27) [SEC] | Backend | TL, Sec | wp/t8-be-admin | #24, #27 | merged |
 | 2.1 | Migration 0002 | Backend (data) | Architect, TL | wp/2.1-migration-0002 | #17 | merged |
 | 0.8a | Platform & repo hygiene [SEC] | Senior SWE | TL, Sec | wp/0.8a-platform-hygiene | | in progress |
-| 0.8b | Backend module follow-ups | Backend | TL, Sec | — | | in progress |
+| 0.8b | Backend module follow-ups [SEC] | Backend | TL, Sec | wp/0.8b-backend-followups | #30 | merged |
 | 0.8c | Web feature follow-ups | Frontend | TL | — | | in progress |
 | T9 | PWA (generateSW, public-only API cache, logout purge) | Frontend | TL, Sec | wp/t9-pwa | #29 | merged |
 | 2.4–2.5 | Cutover (see backlog checklist) | Tech Lead | Sec | — | | todo |
