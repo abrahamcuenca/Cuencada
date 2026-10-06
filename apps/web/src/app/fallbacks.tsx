@@ -1,11 +1,12 @@
 import type { ReactNode } from "react";
 import { isRouteErrorResponse, Link, useRouteError } from "react-router-dom";
+import { Spinner } from "../shared/ui/Spinner";
 
 /** Shown while a lazy route's code downloads on first load. */
 export function RouteSpinner(): ReactNode {
   return (
-    <div role="status" aria-live="polite" className="shell">
-      <p>Cargando…</p>
+    <div className="shell">
+      <Spinner size="lg" label="Cargando…" />
     </div>
   );
 }
@@ -39,20 +40,6 @@ export function RouteErrorPage(): ReactNode {
       <Link className="btn primary" to="/">
         Volver al inicio
       </Link>
-    </section>
-  );
-}
-
-/**
- * Dev-only `/_ui` placeholder.
- * TODO(WP-0.7): mount `shared/ui/StyleGuide.tsx` here once that branch lands.
- */
-export function DevStyleGuidePlaceholder(): ReactNode {
-  return (
-    <section className="shell">
-      <p className="kicker">Solo desarrollo</p>
-      <h1>Guía de estilos</h1>
-      <p>Aquí se montará la guía de componentes de WP-0.7.</p>
     </section>
   );
 }

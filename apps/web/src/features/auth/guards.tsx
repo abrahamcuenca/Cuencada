@@ -9,6 +9,7 @@
 import type { ReactNode } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAppSelector } from "../../app/hooks";
+import { Spinner } from "../../shared/ui/Spinner";
 import { selectAuthStatus, selectCurrentUser, selectPasswordChangeRequired } from "./authSlice";
 import type { LoginRedirectState } from "./redirect";
 
@@ -20,8 +21,8 @@ export const CHANGE_PASSWORD_PATH = "/cambiar-contrasena";
 /** Shown while the boot refresh decides whether there is a session. */
 export function SessionPending(): ReactNode {
   return (
-    <div role="status" aria-live="polite" className="shell">
-      <p>Cargando tu sesión…</p>
+    <div className="shell">
+      <Spinner size="lg" label="Cargando tu sesión…" />
     </div>
   );
 }

@@ -1,25 +1,44 @@
 import type { ReactNode } from "react";
-import { Link, NavLink, Outlet } from "react-router-dom";
+import { Link, Outlet, useLocation } from "react-router-dom";
 import { selectCurrentUser, selectIsAdmin } from "../features/auth/authSlice";
 import { logout } from "../features/auth/session";
+// Direct imports (not the shared/ui barrel) keep unused primitives' CSS out of the initial chunk.
+import { BottomNav } from "../shared/ui/BottomNav";
+import { Button } from "../shared/ui/Button";
+import { type NavItem, renderRouterLink } from "../shared/ui/nav";
+import { PageShell } from "../shared/ui/PageShell";
+import { TopNav } from "../shared/ui/TopNav";
 import { useAppDispatch, useAppSelector } from "./hooks";
 import styles from "./layout.module.css";
 
 // TODO(T2): point "Programa" at the current Cuencada from `GET /api/cuencadas/home`.
 const PROGRAMA_PATH = "/cuencada/2026";
 
-/** Mobile bottom tab bar (Inicio, Programa, Fotos, Chat, Más). Hidden at ≥900px. */
-export function DefaultBottomNav(): ReactNode {
+/** Mobile tab bar destinations (Inicio, Programa, Fotos, Chat, Más). */
+export const BOTTOM_NAV_ITEMS: readonly NavItem[] = [
+  { key: "inicio", label: "Inicio", href: "/", icon: "🏠", end: true },
+  { key: "programa", label: "Programa", href: PROGRAMA_PATH, icon: "📅" },
+  { key: "fotos", label: "Fotos", href: "/galeria", icon: "📸" },
+  { key: "chat", label: "Chat", href: "/chat", icon: "💬" },
+  { key: "mas", label: "Más", href: "/perfil", icon: "☰" }
+];
+
+const TOP_NAV_ITEMS: readonly NavItem[] = [
+  { key: "programa", label: "Programa", href: PROGRAMA_PATH },
+  { key: "galeria", label: "Galería", href: "/galeria" },
+  { key: "directorio", label: "Directorio", href: "/directorio" },
+  { key: "arbol", label: "Árbol", href: "/arbol" },
+  { key: "chat", label: "Chat", href: "/chat" }
+];
+
+const ADMIN_NAV_ITEM: NavItem = { key: "admin", label: "Admin", href: "/admin" };
+
+function Brand(): ReactNode {
   return (
-    <nav className={styles.bottomNav} aria-label="Navegación inferior">
-      <NavLink to="/" end>
-        Inicio
-      </NavLink>
-      <NavLink to={PROGRAMA_PATH}>Programa</NavLink>
-      <NavLink to="/galeria">Fotos</NavLink>
-      <NavLink to="/chat">Chat</NavLink>
-      <NavLink to="/perfil">Más</NavLink>
-    </nav>
+    <Link to="/" className={styles.brand}>
+      <img src="/images/logo-96.webp" alt="" width={44} height={44} />
+      <span>Cuencada</span>
+    </Link>
   );
 }
 
@@ -29,61 +48,59 @@ function SessionAction(): ReactNode {
 
   if (user === null) {
     return (
-      <Link className={styles.action} to="/entrar">
+      <Button to="/entrar" size="sm">
         Entrar
-      </Link>
+      </Button>
     );
   }
   return (
-    <button
-      type="button"
-      className={styles.action}
+    <Button
+      variant="secondary"
+      size="sm"
       onClick={() => {
         void dispatch(logout());
       }}
     >
       Salir
-    </button>
+    </Button>
   );
 }
 
-/** Props of {@link AppLayout}. */
-export interface AppLayoutProps {
-  /** Replaces the default bottom tab bar (e.g. with the WP-0.7 `BottomNav`). */
-  bottomNav?: ReactNode;
-}
-
 /**
- * App shell: sticky header (brand, top nav at ≥900px, Entrar/Salir), the
- * routed page in `<main>`, and a bottom tab bar slot for mobile.
+ * App shell built on the WP-0.7 primitives: `TopNav` (brand, links at
+ * ≥900px, Entrar/Salir), the routed page inside `PageShell`'s `<main>`, and
+ * the mobile `BottomNav`.
  *
- * The Admin link appears only for users whose in-memory role is admin. That
- * is a UX hint, not access control; the server enforces the role.
+ * The Admin link appears only when the in-memory role is admin. That is a UX
+ * hint, not access control; the server enforces the role.
  */
-export function AppLayout({ bottomNav }: AppLayoutProps): ReactNode {
+export function AppLayout(): ReactNode {
+  const { pathname } = useLocation();
   const isAdmin = useAppSelector(selectIsAdmin);
+  const topItems = isAdmin ? [...TOP_NAV_ITEMS, ADMIN_NAV_ITEM] : TOP_NAV_ITEMS;
 
   return (
-    <div className={styles.layout}>
-      <header className={styles.header}>
-        <Link className={styles.brand} to="/">
-          <img src="/images/Logo_Cuencada2026.jpg" alt="" width={40} height={40} />
-          <span>Cuencada</span>
-        </Link>
-        <nav className={styles.topNav} aria-label="Navegación principal">
-          <NavLink to={PROGRAMA_PATH}>Programa</NavLink>
-          <NavLink to="/galeria">Galería</NavLink>
-          <NavLink to="/directorio">Directorio</NavLink>
-          <NavLink to="/arbol">Árbol</NavLink>
-          <NavLink to="/chat">Chat</NavLink>
-          {isAdmin ? <NavLink to="/admin">Admin</NavLink> : null}
-        </nav>
-        <SessionAction />
-      </header>
-      <main className={styles.main}>
-        <Outlet />
-      </main>
-      {bottomNav ?? <DefaultBottomNav />}
-    </div>
+    <PageShell
+      layout="bleed"
+      header={
+        <TopNav
+          items={topItems}
+          currentPath={pathname}
+          renderLink={renderRouterLink}
+          brand={<Brand />}
+          actions={<SessionAction />}
+        />
+      }
+      bottomNav={
+        <BottomNav
+          items={BOTTOM_NAV_ITEMS}
+          currentPath={pathname}
+          renderLink={renderRouterLink}
+          label="Navegación inferior"
+        />
+      }
+    >
+      <Outlet />
+    </PageShell>
   );
 }

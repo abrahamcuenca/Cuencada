@@ -17,7 +17,7 @@ import { pwaRoutes } from "../features/pwa/routes";
 import { rsvpRoutes } from "../features/rsvp/routes";
 import type { FeatureRoutes } from "../shared/lib/featureRoutes";
 import { AppLayout } from "./AppLayout";
-import { DevStyleGuidePlaceholder, NotFoundPage, RouteErrorPage, RouteSpinner } from "./fallbacks";
+import { NotFoundPage, RouteErrorPage, RouteSpinner } from "./fallbacks";
 
 /** Every feature's routes, in one place. Order does not matter: React Router ranks paths. */
 export const featureRoutes: readonly FeatureRoutes[] = [
@@ -37,7 +37,10 @@ function collect(level: keyof FeatureRoutes): RouteObject[] {
   return featureRoutes.flatMap((feature) => feature[level] ?? []);
 }
 
-const devRoutes: RouteObject[] = import.meta.env.DEV ? [{ path: "/_ui", Component: DevStyleGuidePlaceholder }] : [];
+// Dev-only living style guide (WP-0.7). Statically dropped from production builds.
+const devRoutes: RouteObject[] = import.meta.env.DEV
+  ? [{ path: "/_ui", lazy: async () => ({ Component: (await import("../shared/ui/StyleGuide")).StyleGuide }) }]
+  : [];
 
 /**
  * The full route tree:
