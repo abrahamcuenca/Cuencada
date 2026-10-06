@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { render } from "@react-email/render";
 import { describe, expect, it } from "vitest";
-import { FOOTER_BRAND, FOOTER_IGNORE } from "./content.js";
+import { CTA_FALLBACK_LABEL, FOOTER_BRAND, FOOTER_IGNORE } from "./content.js";
 import { EmailRenderError, EmailRenderErrorCode } from "./errors.js";
 import { EmailKind, type EmailTemplate, renderEmail } from "./render.js";
 import { InviteEmail } from "./templates/InviteEmail.js";
@@ -13,6 +13,10 @@ const XSS = "<script>alert(1)</script>";
 
 function countOccurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 interface Case {
@@ -52,6 +56,7 @@ const cases: Case[] = [
       props: {
         inviterName: name,
         inviteeName: name,
+        eventTitle: name,
         acceptUrl: inviteUrl,
         expiresAt: EXPIRES,
       },
@@ -132,12 +137,21 @@ describe("renderEmail", () => {
       expect(email.text).toContain(FOOTER_IGNORE);
     });
 
-    it("includes the CTA URL exactly once in the HTML and once in the text", async () => {
+    it("includes the CTA URL exactly twice in the HTML (button + fallback) and once in the text", async () => {
       const email = await renderEmail(c.template);
       const url = c.ctaUrl ?? "";
-      expect(countOccurrences(email.html, url)).toBe(1);
+      expect(countOccurrences(email.html, url)).toBe(2);
+      expect(countOccurrences(email.html, `href="${url}"`)).toBe(1);
       expect(countOccurrences(email.text, url)).toBe(1);
-      expect(email.html).toContain(`href="${url}"`);
+    });
+
+    it("shows a copy-paste fallback link that wraps on mobile", async () => {
+      const email = await renderEmail(c.template);
+      const url = c.ctaUrl ?? "";
+      expect(email.html).toContain(CTA_FALLBACK_LABEL);
+      expect(email.html).toMatch(
+        new RegExp(`word-break:break-all[^>]*>${escapeRegExp(url)}<`),
+      );
     });
 
     it("throws EmailRenderError when the link is not https", async () => {
@@ -164,7 +178,7 @@ describe("renderEmail", () => {
       const email = await renderEmail(c.withUrl(dev), {
         allowInsecureLinks: true,
       });
-      expect(countOccurrences(email.html, dev)).toBe(1);
+      expect(countOccurrences(email.html, dev)).toBe(2);
       await expect(
         renderEmail(c.withUrl("http://evil.example/x"), {
           allowInsecureLinks: true,
@@ -280,7 +294,46 @@ describe("InviteEmail", () => {
       />,
     );
     expect(html).toContain("Aceptar invitación");
-    expect(countOccurrences(html, inviteUrl)).toBe(1);
+    expect(countOccurrences(html, inviteUrl)).toBe(2);
+  });
+
+  it("shows eventTitle in the body when present and omits the sentence otherwise", async () => {
+    const withEvent = await renderEmail({
+      kind: EmailKind.Invite,
+      props: {
+        inviterName: "Tía Lupita",
+        eventTitle: "Cuencada 2027 · Mérida",
+        acceptUrl: inviteUrl,
+        expiresAt: EXPIRES,
+      },
+    });
+    expect(withEvent.html).toContain("Cuencada 2027 · Mérida");
+    expect(withEvent.text).toContain(
+      "Ya estamos preparando la próxima reunión: Cuencada 2027 · Mérida.",
+    );
+    const without = await renderEmail({
+      kind: EmailKind.Invite,
+      props: {
+        inviterName: "Tía Lupita",
+        acceptUrl: inviteUrl,
+        expiresAt: EXPIRES,
+      },
+    });
+    expect(without.text).not.toContain("próxima reunión");
+  });
+
+  it("escapes HTML-like input in eventTitle", async () => {
+    const email = await renderEmail({
+      kind: EmailKind.Invite,
+      props: {
+        inviterName: "Tía Lupita",
+        eventTitle: XSS,
+        acceptUrl: inviteUrl,
+        expiresAt: EXPIRES,
+      },
+    });
+    expect(email.html).not.toContain("<script");
+    expect(email.html).toContain("&lt;script&gt;");
   });
 });
 

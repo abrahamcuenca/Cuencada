@@ -12,7 +12,12 @@ import {
   Text,
 } from "@react-email/components";
 import type { CSSProperties, ReactElement } from "react";
-import { type EmailContent, FOOTER_BRAND, FOOTER_IGNORE } from "../content.js";
+import {
+  CTA_FALLBACK_LABEL,
+  type EmailContent,
+  FOOTER_BRAND,
+  FOOTER_IGNORE,
+} from "../content.js";
 
 /** Brand colours from `apps/web/src/shared/styles/tokens.css` (emails cannot use CSS variables). */
 const color = {
@@ -112,6 +117,20 @@ const styles = {
     lineHeight: "22px",
     margin: "0 0 8px",
   },
+  fallbackLabel: {
+    color: color.muted,
+    fontSize: "13px",
+    lineHeight: "20px",
+    margin: "0 0 4px",
+  },
+  fallbackUrl: {
+    color: color.green,
+    fontSize: "13px",
+    lineHeight: "20px",
+    margin: "0 0 16px",
+    wordBreak: "break-all",
+    overflowWrap: "anywhere",
+  },
   warning: {
     backgroundColor: color.dangerSoft,
     borderLeft: `4px solid ${color.danger}`,
@@ -196,6 +215,12 @@ export function EmailLayout({
                   {content.cta.label}
                 </Button>
               </Section>
+            )}
+            {content.cta === null ? null : (
+              <>
+                <Text style={styles.fallbackLabel}>{CTA_FALLBACK_LABEL}</Text>
+                <Text style={styles.fallbackUrl}>{content.cta.url}</Text>
+              </>
             )}
             {content.notes.map((note) => (
               <Text key={note} style={styles.note}>

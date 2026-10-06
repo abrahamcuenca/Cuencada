@@ -17,6 +17,8 @@ export interface InviteEmailProps {
   inviterName: string;
   /** Name the admin typed for the invitee, if any. */
   inviteeName?: string | null;
+  /** Upcoming event shown in the body, e.g. "Cuencada 2027 · Mérida". Cleaned and escaped like names. */
+  eventTitle?: string | null;
   /** `https://cuencada.com/invitacion#t=<token>` (token in the fragment). */
   acceptUrl: string;
   /** When the invite expires (`Date` or ISO string). */
@@ -39,16 +41,25 @@ export function buildInviteContent(
   );
   const inviter = cleanName(props.inviterName) ?? "Alguien de la familia";
   const invitee = cleanName(props.inviteeName);
+  const eventTitle = cleanName(props.eventTitle);
   const expires = formatDateTime(props.expiresAt, "expiresAt", options);
+  const paragraphs = [
+    `${inviter} te invitó a unirte al portal familiar de la Cuencada, donde compartimos fotos, confirmamos asistencia y nos mantenemos en contacto toda la familia.`,
+  ];
+  if (eventTitle !== null) {
+    paragraphs.push(
+      endSentence(`Ya estamos preparando la próxima reunión: ${eventTitle}`),
+    );
+  }
+  paragraphs.push(
+    "Crea tu cuenta con el botón de abajo; solo toma un par de minutos.",
+  );
   return {
     subject: `${inviter} te invitó al portal de la Cuencada`,
     preview: `${inviter} te invitó al portal familiar de la Cuencada.`,
     heading: "¡Te esperamos en la Cuencada!",
     greeting: invitee === null ? "¡Hola!" : `¡Hola, ${invitee}!`,
-    paragraphs: [
-      `${inviter} te invitó a unirte al portal familiar de la Cuencada, donde compartimos fotos, confirmamos asistencia y nos mantenemos en contacto toda la familia.`,
-      "Crea tu cuenta con el botón de abajo; solo toma un par de minutos.",
-    ],
+    paragraphs,
     cta: { label: "Aceptar invitación", url },
     notes: [
       endSentence(`Esta invitación vence el ${expires}`),

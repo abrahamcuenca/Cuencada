@@ -1,5 +1,8 @@
 /** Footer wordmark printed in every email. */
 export const FOOTER_BRAND = "CUENCADA · Portal familiar";
+/** Shown under the button, followed by the raw URL, for older mail clients. */
+export const CTA_FALLBACK_LABEL =
+  "¿El botón no funciona? Copia y pega este enlace en tu navegador:";
 /** Footer reassurance line printed in every email. */
 export const FOOTER_IGNORE = "Si no esperabas este correo, puedes ignorarlo.";
 
