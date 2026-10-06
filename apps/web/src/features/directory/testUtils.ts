@@ -49,7 +49,7 @@ export interface FakeDirectoryDb {
   /** Every list request as its query string, e.g. `q=Ros&limit=30`. */
   log: string[];
   /** Status the list answers with (200 by default). */
-  listError: "FORBIDDEN" | "INTERNAL" | null;
+  listError: "FORBIDDEN" | "EMAIL_UNVERIFIED" | "INTERNAL" | null;
 }
 
 /** A fresh fake database. */

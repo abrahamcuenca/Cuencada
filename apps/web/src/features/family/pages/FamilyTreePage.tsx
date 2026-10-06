@@ -233,7 +233,8 @@ interface TreeErrorProps {
 
 function TreeError({ error, hasPersonId, onRetry }: TreeErrorProps): ReactNode {
   const code = getApiErrorCode(error);
-  if (code === "FORBIDDEN") {
+  // EMAIL_UNVERIFIED (WP-0.8a); FORBIDDEN kept until 0.8c centralizes this.
+  if (code === "EMAIL_UNVERIFIED" || code === "FORBIDDEN") {
     return (
       <EmptyState
         tone="lock"

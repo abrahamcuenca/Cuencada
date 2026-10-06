@@ -56,7 +56,7 @@ family, profile, admin, chat, media, cuencadas) · **0.8c** web features
 - Optional: `audit_logs.action` format CHECK (with a migration, WP-2.x).
 
 ### 0.8c (web features)
-- Accept 403 `EMAIL_UNVERIFIED` as well as `FORBIDDEN` for "verify your email" (WP-0.8a changed the server code).
+- Centralize the "verify your email" handling on 403 `EMAIL_UNVERIFIED`. WP-0.8a already made the directory (`AccessStates.tsx`) and family tree (`FamilyTreePage.tsx`) accept it alongside `FORBIDDEN`; chat and RSVP branch on the 403 status. Then drop the `FORBIDDEN` fallbacks and update fixtures.
 - T1-FE: switch "cerrar en todos" to `logout-all`; on a second `REFRESH_RACE` wait past the grace (~10 s) and retry once; "vuelve a pedirlo" copy for lost emails.
 - T2-FE: `useScrollToHash` try/catch on a malformed fragment; Home daily message refreshes past midnight (`useNow` tick); admin Mensajes Select label truncation at 375 px; forecast URL format hint (`www.` rejected); record the section-order decision; R2 tips/extras content model; R1 itinerary tags; R4 song lyrics URL; R8 admin-picked highlights (needs T4).
 - T3-FE: hotel re-save while members load; deadline lock re-evaluates at midnight; R2 attendance link from the T2 edit page + T8 shell.
