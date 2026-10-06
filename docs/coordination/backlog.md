@@ -82,6 +82,8 @@ family, profile, admin, chat, media, cuencadas) · **0.8c** web features
 - **Minimum client version mechanism** (force-reload/upgrade prompt for stale PWA clients after a breaking API change, e.g. the `EMAIL_UNVERIFIED` split).
 - Observability: alert on `mail.cap_reached` and `mail.queue_full` (Loki/Grafana).
 - Process: lint/review rule for "no PII interpolated into Error messages" (Security L7, PR #8). AGENTS.md states the rule; an automated check is still open.
+- T8-BE (from WP-0.8c): `GET /admin/users/:id`, so T6-FE's admin person form can show the linked account exactly (today it searches `GET /admin/users?q=<person name>`, which misses accounts whose display name differs).
+- T5-BE (from WP-0.8c): store phones as E.164 (or a country code) so the directory can offer WhatsApp for numbers typed without `+`; the web never guesses `+52`.
 
 ## Cutover checklist (WP-2.4–2.5)
 

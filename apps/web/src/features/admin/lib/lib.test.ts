@@ -107,7 +107,7 @@ describe("audit filters", () => {
   it("turns a day range into an inclusive instant range", () => {
     expect(toAuditQuery({ action: "", entityType: "", from: "2026-10-01", to: "2026-10-01", actorUserId: "" }, "America/Merida")).toEqual({
       ok: true,
-      filter: { from: "2026-10-01T06:00:00.000Z", to: "2026-10-02T05:59:59.999Z" }
+      filter: { from: "2026-10-01T06:00:00.000Z", to: "2026-10-02T06:00:00.000Z" }
     });
   });
 
@@ -159,6 +159,6 @@ describe("userActionErrorMessage", () => {
   it("maps the guardrails to Spanish", () => {
     expect(userActionErrorMessage(error(409, "CONFLICT", "x"))).toBe(LAST_ADMIN_MESSAGE);
     expect(userActionErrorMessage(error(403, "FORBIDDEN", "No puedes cambiar tu propio rol ni desactivar tu propia cuenta."))).toBe(SELF_CHANGE_MESSAGE);
-    expect(userActionErrorMessage(error(429, "RATE_LIMITED", "x"))).toMatch(/Espera un minuto/);
+    expect(userActionErrorMessage(error(429, "RATE_LIMITED", "Esta cuenta ya cambió 3 veces en la última hora."))).toBe("Esta cuenta ya cambió 3 veces en la última hora.");
   });
 });

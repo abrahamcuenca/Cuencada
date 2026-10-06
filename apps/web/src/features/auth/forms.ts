@@ -87,6 +87,12 @@ export function confirmError(password: string, confirm: string): string | undefi
   return password === confirm ? undefined : PASSWORDS_DIFFER_MESSAGE;
 }
 
+/**
+ * Shown on every "we sent you an email" screen (202 answers: magic link,
+ * password reset, verification). Mail can be slow or land in spam, and the
+ * server never says whether it was sent, so the way out is to ask again.
+ */
+export const EMAIL_MAY_BE_SLOW_HINT = "Si no llega en unos minutos, revisa la carpeta de spam o vuelve a pedirlo.";
 /** 429 copy (wireframes §3.1). */
 export const RATE_LIMITED_MESSAGE = "Demasiados intentos. Espera unos minutos y vuelve a intentarlo.";
 /** 401 at login. Identical for unknown emails: no account enumeration. */

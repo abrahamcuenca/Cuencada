@@ -1,6 +1,18 @@
 import { RSVP_DATE_WINDOW_DAYS } from "@cuencada/types";
 import { describe, expect, it } from "vitest";
-import { clampGuests, draftFromRsvp, editionDateWindow, isPastDeadline, optimisticRsvp, type RsvpDraft, validateRsvpDraft } from "./rsvpForm";
+import type { LocationItem } from "@cuencada/types";
+import {
+  clampGuests,
+  draftFromRsvp,
+  editionDateWindow,
+  hotelChoices,
+  isDeadlineDayOver,
+  isPastDeadline,
+  optimisticRsvp,
+  type RsvpDraft,
+  SAVED_HOTEL_LABEL,
+  validateRsvpDraft
+} from "./rsvpForm";
 
 const WINDOW = { min: "2027-07-03", max: "2027-07-22" };
 const HOTELS = ["00000000-0000-4000-8000-000000000271"];
@@ -116,5 +128,30 @@ describe("optimisticRsvp", () => {
   it("adds the edition id and the save time", () => {
     const body = { status: "maybe", guestCount: 0, arrivalDate: null, departureDate: null, hotelLocationId: null, notes: null } as const;
     expect(optimisticRsvp(body, "id-1", new Date("2026-10-06T12:00:00Z"))).toEqual({ ...body, cuencadaId: "id-1", updatedAt: "2026-10-06T12:00:00.000Z" });
+  });
+});
+
+describe("isDeadlineDayOver", () => {
+  it("is open all of the deadline's local day and closed from the next one", () => {
+    // 18:00Z on May 31 is noon May 31 in Mérida.
+    expect(isDeadlineDayOver("2027-05-31T18:00:00Z", "2027-05-31", "America/Merida")).toBe(false);
+    expect(isDeadlineDayOver("2027-05-31T18:00:00Z", "2027-06-01", "America/Merida")).toBe(true);
+    expect(isDeadlineDayOver(null, "2099-01-01", "America/Merida")).toBe(false);
+  });
+});
+
+describe("hotelChoices", () => {
+  const hotel = (id: string, name: string, kind: LocationItem["kind"] = "hotel"): LocationItem =>
+    ({ id, name, kind }) as LocationItem; // Only id/name/kind are read here.
+  const A = "00000000-0000-4000-8000-000000000271";
+  const B = "00000000-0000-4000-8000-000000000272";
+
+  it("offers only hotel locations once the list has loaded, even if the saved one is gone", () => {
+    expect(hotelChoices([hotel(A, "Hotel A"), hotel(B, "Salón", "venue")], B, true)).toEqual([{ id: A, name: "Hotel A" }]);
+  });
+
+  it("keeps the saved hotel as an option while the list is loading or failed", () => {
+    expect(hotelChoices([], A, false)).toEqual([{ id: A, name: SAVED_HOTEL_LABEL }]);
+    expect(hotelChoices([], null, false)).toEqual([]);
   });
 });

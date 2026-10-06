@@ -13,6 +13,7 @@ import { FormAlert } from "../components/FormAlert";
 import { PasswordField } from "../components/PasswordField";
 import {
   describeAuthError,
+  EMAIL_MAY_BE_SLOW_HINT,
   type FieldErrors,
   INVALID_CREDENTIALS_MESSAGE,
   useFocusFirstInvalid,
@@ -33,6 +34,7 @@ function MagicLinkSent({ email, onReset }: { email: string; onReset: () => void 
       </span>
       <h2 className={styles.title}>Revisa tu correo</h2>
       <p>Si {email} tiene una cuenta, te enviamos un enlace para entrar. Caduca en unos minutos.</p>
+      <p className={styles.note}>{EMAIL_MAY_BE_SLOW_HINT}</p>
       <Button variant="secondary" fullWidth onClick={onReset}>
         Usar otro correo
       </Button>

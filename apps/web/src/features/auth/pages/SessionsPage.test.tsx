@@ -118,13 +118,18 @@ describe("SessionsPage", () => {
     expect(revoked).toEqual([WINDOWS_ID, ANDROID_ID]);
   });
 
-  it("logs out on every device: revokes the others, then logs this one out", async () => {
+  it("logs out on every device with one POST /auth/logout-all, then clears this session locally", async () => {
     const { revoked } = serveSessions(SESSIONS);
     const logout = vi.fn();
+    const logoutAll = vi.fn();
     server.use(
       http.post(apiUrl("/auth/logout"), () => {
         logout();
         return new HttpResponse(null, { status: 204 });
+      }),
+      contractRoute("post", "/auth/logout-all", null, () => {
+        logoutAll();
+        return noContent();
       })
     );
     const { store, router } = renderApp("/perfil/sesiones", authenticatedState());
@@ -134,9 +139,27 @@ describe("SessionsPage", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Cerrar sesión en todos" }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/entrar"));
-    expect(revoked).toEqual([WINDOWS_ID, ANDROID_ID]);
-    expect(logout).toHaveBeenCalledTimes(1);
+    expect(logoutAll).toHaveBeenCalledTimes(1);
+    // The server ended every session itself: no revoke-others, no separate logout.
+    expect(revoked).toEqual([]);
+    expect(logout).not.toHaveBeenCalled();
     expect(store.getState().auth.status).toBe("anonymous");
+    expect(store.getState().auth.logoutPending).toBe(false);
+    expect(window.localStorage.getItem("cuencada-pending-logout")).toBeNull();
+  });
+
+  it("stays logged in and shows the error when logout-all fails", async () => {
+    serveSessions(SESSIONS);
+    server.use(contractRoute("post", "/auth/logout-all", null, () => apiError("INTERNAL", "Error interno.")));
+    const { store, router } = renderApp("/perfil/sesiones", authenticatedState());
+
+    await userEvent.click(await screen.findByRole("button", { name: "Cerrar sesión en todos los dispositivos" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cerrar sesión en todos" }));
+
+    expect(await screen.findByText("Error interno.")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/perfil/sesiones");
+    expect(store.getState().auth.status).toBe("authenticated");
   });
 
   it("shows a retry state when the list cannot load", async () => {

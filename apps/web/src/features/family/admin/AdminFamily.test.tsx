@@ -24,6 +24,25 @@ function writes(): FamilyDb["log"] {
 }
 
 describe("AdminFamilyPage", { timeout: 15_000 }, () => {
+  it("shows the verify state, not a retry, to an admin whose email isn't verified", async () => {
+    server.use(
+      http.get(apiUrl("/family/people"), () => HttpResponse.json(errorBody("FORBIDDEN", "Verifica tu correo."), { status: 403 }))
+    );
+    const unverifiedAdmin = makeUser({ role: "admin", emailVerified: false });
+    renderApp("/admin/familia", authenticatedState(unverifiedAdmin));
+
+    expect(await screen.findByRole("heading", { name: "Verifica tu correo para administrar el árbol" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
+  });
+
+  it("shows the verify state on a person's page for an unverified admin", async () => {
+    server.use(http.get(apiUrl("/family/people/:id"), () => HttpResponse.json(errorBody("FORBIDDEN", "Verifica tu correo."), { status: 403 })));
+    renderApp(`/admin/familia/${IDS.jose}`, authenticatedState(makeUser({ role: "admin", emailVerified: false })));
+
+    expect(await screen.findByRole("heading", { name: "Verifica tu correo para administrar el árbol" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
+  });
+
   it("lists people with a search box", async () => {
     const user = userEvent.setup();
     renderApp("/admin/familia", authenticatedState(admin));
@@ -64,6 +83,42 @@ describe("AdminFamilyPage", { timeout: 15_000 }, () => {
 });
 
 describe("AdminPersonPage", { timeout: 15_000 }, () => {
+  it("shows the linked account by name and email, and disables delete with an explanation", async () => {
+    renderApp(`/admin/familia/${IDS.ana}`, authenticatedState(admin));
+
+    await screen.findByRole("heading", { level: 1, name: "Ana Morales Vega" });
+    expect(await screen.findByText("Ana Morales Vega (ana.morales@example.com)")).toBeInTheDocument();
+    const remove = screen.getByRole("button", { name: "Quitar a Ana Morales Vega" });
+    expect(remove).toBeDisabled();
+    expect(remove).toHaveAccessibleDescription(/vinculada a una cuenta.*desvincula la cuenta/i);
+  });
+
+  it("deletes a person without an account after confirming", async () => {
+    const user = userEvent.setup();
+    const { router } = renderApp(`/admin/familia/${IDS.raul}`, authenticatedState(admin));
+
+    await user.click(await screen.findByRole("button", { name: "Quitar a Raúl Herrera Morales" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Quitar" }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/admin/familia"));
+    expect(writes()).toContainEqual(expect.objectContaining({ method: "DELETE", path: `/admin/people/${IDS.raul}` }));
+    // Let the list load before the test ends (no request after the handlers reset).
+    expect(await screen.findByRole("link", { name: /José Herrera Navarro/ })).toBeInTheDocument();
+  });
+
+  it("shows the server's 409 message when the person got linked meanwhile", async () => {
+    const user = userEvent.setup();
+    renderApp(`/admin/familia/${IDS.raul}`, authenticatedState(admin));
+    await user.click(await screen.findByRole("button", { name: "Quitar a Raúl Herrera Morales" }));
+    // Another admin linked an account in the meantime.
+    const raul = db.people.get(IDS.raul);
+    if (raul) db.people.set(IDS.raul, { ...raul, userId: "00000000-0000-4000-8000-000000000999" });
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Quitar" }));
+
+    expect(await screen.findByText("Esta persona está vinculada a una cuenta. Desvincúlala antes de eliminarla.")).toBeInTheDocument();
+  });
+
   it("adds a child picked through the search", async () => {
     const user = userEvent.setup();
     renderApp(`/admin/familia/${IDS.jose}`, authenticatedState(admin));

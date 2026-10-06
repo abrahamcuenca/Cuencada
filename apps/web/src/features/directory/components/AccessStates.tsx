@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 import { useAppSelector } from "../../../app/hooks";
-import { getApiErrorCode } from "../../../shared/api/errors";
 import { Button } from "../../../shared/ui/Button";
 import { EmptyState } from "../../../shared/ui/EmptyState";
+import { useAccessDenial } from "../../auth/accessDenied";
 import { selectCurrentUser } from "../../auth/authSlice";
 import { ResendVerificationButton } from "../../auth/components/VerifyEmailBanner";
 import styles from "../directory.module.css";
@@ -17,11 +17,9 @@ export const VERIFY_TO_VIEW_TITLE = "Verifica tu correo para ver el directorio";
  */
 export function DirectoryError({ error, onRetry }: { error: unknown; onRetry: () => void }): ReactNode {
   const user = useAppSelector(selectCurrentUser);
-  const code = getApiErrorCode(error);
+  const denial = useAccessDenial(error);
 
-  // EMAIL_UNVERIFIED (WP-0.8a); FORBIDDEN + unverified kept until 0.8c centralizes this.
-  const unverified = code === "EMAIL_UNVERIFIED" || (code === "FORBIDDEN" && user?.emailVerified === false);
-  if (unverified && user !== null) {
+  if (denial === "unverified") {
     return (
       <EmptyState
         tone="lock"
@@ -31,7 +29,7 @@ export function DirectoryError({ error, onRetry }: { error: unknown; onRetry: ()
           <>
             El directorio tiene datos de contacto de la familia. Abre el enlace que te enviamos a{" "}
             <span translate="no" className={styles.email}>
-              {user.email}
+              {user?.email ?? "tu correo"}
             </span>{" "}
             para confirmar que eres tú.
           </>
@@ -40,7 +38,7 @@ export function DirectoryError({ error, onRetry }: { error: unknown; onRetry: ()
       />
     );
   }
-  if (code === "FORBIDDEN") {
+  if (denial === "forbidden") {
     return <EmptyState tone="lock" icon="🔒" title="No tienes acceso al directorio" description="Si crees que es un error, pídele ayuda a un administrador." />;
   }
   return (

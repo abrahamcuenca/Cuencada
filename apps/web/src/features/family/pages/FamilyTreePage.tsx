@@ -7,13 +7,15 @@ import { Button } from "../../../shared/ui/Button";
 import { EmptyState } from "../../../shared/ui/EmptyState";
 import { Skeleton } from "../../../shared/ui/Skeleton";
 import { cx } from "../../../shared/ui/cx";
+import { useAccessDenial } from "../../auth/accessDenied";
 import { selectCurrentUser, selectIsAdmin } from "../../auth/authSlice";
+import { AccessDeniedState } from "../../auth/components/AccessDeniedState";
 import { useGetFamilyTreeQuery } from "../api";
 import { PersonSearch } from "../components/PersonSearch";
 import { Breadcrumbs, FocusCard, type OpenPerson, RelativeBand, SiblingStrip } from "../components/TreeParts";
 import styles from "../family.module.css";
-import { usePrefersReducedMotion } from "../lib/hooks";
-import { type TrailEntry, type TreeLocationState, extendedGenerations, nextTrail, readTrail } from "../lib/tree";
+import { useCachedPersonNames, usePrefersReducedMotion } from "../lib/hooks";
+import { type TrailEntry, type TreeLocationState, extendedGenerations, nextTrail, readTrail, resolveTrail } from "../lib/tree";
 
 // Only members editing their own node download the form.
 const SelfEditDialog = lazy(async () => ({
@@ -31,7 +33,9 @@ export function FamilyTreePage(): ReactNode {
   const { personId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
-  const trail = useMemo(() => readTrail(location.state), [location.state]);
+  const trailIds = useMemo(() => readTrail(location.state), [location.state]);
+  const names = useCachedPersonNames();
+  const trail = useMemo(() => resolveTrail(trailIds, names), [trailIds, names]);
   const [expanded, setExpanded] = useState(false);
   const validId = personId === undefined || idSchema.safeParse(personId).success;
 
@@ -40,11 +44,11 @@ export function FamilyTreePage(): ReactNode {
   });
 
   const open: OpenPerson = (person) => {
-    const view = tree.data;
-    const current: TrailEntry | null = view ? { id: view.focus.id, name: view.focus.fullName } : null;
-    if (person.id === current?.id) return;
+    const currentId = tree.data?.focus.id ?? null;
+    if (person.id === currentId) return;
+    // [SEC] ids only in history state; names are resolved from memory when rendering.
     const state: TreeLocationState = {
-      trail: nextTrail(trail, current, person.id)
+      trail: nextTrail(trailIds, currentId, person.id)
     };
     navigate(`/arbol/${encodeURIComponent(person.id)}`, { state });
   };
@@ -233,14 +237,14 @@ interface TreeErrorProps {
 
 function TreeError({ error, hasPersonId, onRetry }: TreeErrorProps): ReactNode {
   const code = getApiErrorCode(error);
-  // EMAIL_UNVERIFIED (WP-0.8a); FORBIDDEN kept until 0.8c centralizes this.
-  if (code === "EMAIL_UNVERIFIED" || code === "FORBIDDEN") {
+  const denial = useAccessDenial(error);
+  if (denial !== null) {
     return (
-      <EmptyState
-        tone="lock"
-        icon="✉️"
-        title="Verifica tu correo para ver el árbol familiar"
-        description="El árbol tiene datos privados de la familia. Abre el enlace que te enviamos por correo; si no lo encuentras, pide otro desde el aviso de arriba."
+      <AccessDeniedState
+        denial={denial}
+        verifyTitle="Verifica tu correo para ver el árbol familiar"
+        forbiddenTitle="No tienes acceso al árbol familiar"
+        verifyDescription="El árbol tiene datos privados de la familia. Abre el enlace que te enviamos por correo; si no lo encuentras, pide otro."
       />
     );
   }

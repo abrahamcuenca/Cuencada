@@ -7,7 +7,9 @@ import { EmptyState } from "../../../shared/ui/EmptyState";
 import { Select } from "../../../shared/ui/Select";
 import { Skeleton } from "../../../shared/ui/Skeleton";
 import { cx } from "../../../shared/ui/cx";
+import { type AccessDenial, useAccessDenial } from "../../auth/accessDenied";
 import { selectIsAdmin } from "../../auth/authSlice";
+import { AccessDeniedState } from "../../auth/components/AccessDeniedState";
 import { MEDIA_PAGE_SIZE, useGalleryYearsQuery, useListMediaInfiniteQuery, useMediaHeadQuery } from "../api";
 import { GalleryLightbox } from "../components/GalleryLightbox";
 import { isViewable, MediaGrid, MediaGridSkeleton } from "../components/MediaGrid";
@@ -15,7 +17,9 @@ import { UploadPanel } from "../components/UploadPanel";
 import { Uploader, type UploaderHandle } from "../components/Uploader";
 import styles from "../gallery.module.css";
 import { parseYearParam } from "../lib/mediaText";
-import { UPLOAD_RULES_TEXT } from "../lib/validateFile";
+import { LARGE_PHOTO_NOTE } from "../lib/resizeImage";
+import { uploadsConfigured } from "../lib/uploadOrigin";
+import { UPLOAD_LOCATION_NOTE, UPLOAD_RULES_TEXT } from "../lib/validateFile";
 import { useExpiredUrlRefetch } from "../lib/useExpiredUrlRefetch";
 import { PROCESSING_POLL_MS } from "../upload/uploadManager";
 import { useUploadManager } from "../upload/useUploadManager";
@@ -50,6 +54,18 @@ function LoadError({ onRetry }: { onRetry: () => void }): React.ReactNode {
           Reintentar
         </Button>
       }
+    />
+  );
+}
+
+/** The member-only album refused with 403: unverified email, or no access at all. */
+function AccessDenied({ denial }: { denial: AccessDenial }): React.ReactNode {
+  return (
+    <AccessDeniedState
+      denial={denial}
+      verifyTitle="Verifica tu correo para ver el álbum"
+      forbiddenTitle="No tienes acceso al álbum"
+      verifyDescription="El álbum es solo para la familia. Abre el enlace que te enviamos por correo; si no lo encuentras, pide otro."
     />
   );
 }
@@ -110,6 +126,7 @@ function GalleryYear({ year }: { year: number }): React.ReactNode {
   const items = useMemo(() => data?.pages.flatMap((page) => page.items) ?? [], [data]);
   const viewable = useMemo(() => items.filter(isViewable), [items]);
   const onMediaError = useExpiredUrlRefetch(refetch);
+  const denial = useAccessDenial(error);
 
   // The upload manager polls for its own uploads; the page polls only for processing items it
   // doesn't track (e.g. from an earlier visit). Only the first page is fetched and patched in.
@@ -129,7 +146,7 @@ function GalleryYear({ year }: { year: number }): React.ReactNode {
       </div>
     );
   } else if (isError && !data) {
-    content = isAbortError(error) ? null : <LoadError onRetry={() => void refetch()} />;
+    content = isAbortError(error) ? null : denial !== null ? <AccessDenied denial={denial} /> : <LoadError onRetry={() => void refetch()} />;
   } else if (items.length === 0) {
     content = (
       <EmptyState
@@ -137,9 +154,11 @@ function GalleryYear({ year }: { year: number }): React.ReactNode {
         title="Aún no hay fotos de este año. ¡Sé el primero en subir!"
         description="Comparte un momento de esta Cuencada con toda la familia."
         action={
-          <Button icon="📤" onClick={() => uploader.current?.openPicker()}>
-            Subir fotos y videos
-          </Button>
+          uploadsConfigured() ? (
+            <Button icon="📤" onClick={() => uploader.current?.openPicker()}>
+              Subir fotos y videos
+            </Button>
+          ) : undefined
         }
       />
     );
@@ -172,7 +191,9 @@ function GalleryYear({ year }: { year: number }): React.ReactNode {
         </div>
       </header>
       <Uploader ref={uploader} year={year} />
-      <p className={styles.hint}>{UPLOAD_RULES_TEXT}</p>
+      <p className={styles.hint}>
+        {UPLOAD_RULES_TEXT} {LARGE_PHOTO_NOTE} {UPLOAD_LOCATION_NOTE}
+      </p>
       {content}
       <UploadPanel year={year} />
       <GalleryLightbox items={viewable} openId={openId} onOpenIdChange={setOpenId} onMediaError={onMediaError} />

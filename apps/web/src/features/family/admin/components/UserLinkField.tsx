@@ -16,9 +16,26 @@ export interface LinkedAccount {
 export interface UserLinkFieldProps {
   /** The person being edited (`null` while creating). */
   personId: string | null;
+  /** Their full name, used to look up the already linked account's name and email. */
+  personName?: string | null;
   value: LinkedAccount | null;
   error?: string | undefined;
   onChange: (value: LinkedAccount | null) => void;
+}
+
+/**
+ * "Nombre (correo)" of the account already linked to the person, found with
+ * the admin users search by the person's name (`GET /admin/users` has no
+ * by-id lookup; see the backlog).
+ * `null` while loading or when the account's name differs from the person's.
+ */
+function useLinkedAccountLabel(value: LinkedAccount | null, personName: string | null): string | null {
+  const q = personName?.trim().slice(0, 100) ?? "";
+  const lookup = value !== null && value.label === null && q.length >= 2;
+  const users = useSearchUsersForPersonLinkQuery({ q, limit: 25 }, { skip: !lookup });
+  if (!lookup || value === null) return null;
+  const match = users.currentData?.items.find((user) => user.id === value.userId);
+  return match ? `${match.displayName} (${match.email})` : null;
 }
 
 /**
@@ -26,7 +43,7 @@ export interface UserLinkFieldProps {
  * that account already has a person). Accounts already linked to someone
  * else are shown but cannot be picked.
  */
-export function UserLinkField({ personId, value, error, onChange }: UserLinkFieldProps): ReactNode {
+export function UserLinkField({ personId, personName = null, value, error, onChange }: UserLinkFieldProps): ReactNode {
   const [picking, setPicking] = useState(false);
   const [text, setText] = useState("");
   const q = useDebouncedValue(text.trim());
@@ -35,6 +52,7 @@ export function UserLinkField({ personId, value, error, onChange }: UserLinkFiel
   const enabled = picking && q.length >= 2;
   const users = useSearchUsersForPersonLinkQuery({ q, limit: 8 }, { skip: !enabled });
   const items = enabled ? (users.currentData?.items ?? []) : [];
+  const linkedLabel = useLinkedAccountLabel(value, personName);
 
   return (
     <fieldset className={styles.linkBox} aria-describedby={error ? errorId : undefined}>
@@ -43,7 +61,7 @@ export function UserLinkField({ personId, value, error, onChange }: UserLinkFiel
         <p className={styles.muted}>Sin cuenta vinculada. Vincúlala para que la persona pueda editar sus datos.</p>
       ) : (
         <p>
-          Vinculada a <strong>{value.label ?? "una cuenta del portal"}</strong>.
+          Vinculada a <strong>{value.label ?? linkedLabel ?? "una cuenta del portal"}</strong>.
         </p>
       )}
       <div className={styles.actions}>

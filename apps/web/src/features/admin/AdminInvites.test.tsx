@@ -120,7 +120,7 @@ describe("InvitesPage", { timeout: 15_000 }, () => {
     const user = userEvent.setup();
     const writeText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    renderApp("/admin/invitaciones", authenticatedState(ADMIN_USER));
+    const { store } = renderApp("/admin/invitaciones", authenticatedState(ADMIN_USER));
     const form = await openForm(user);
 
     await user.click(within(form).getByRole("radio", { name: /Enlace para compartir/ }));
@@ -134,7 +134,9 @@ describe("InvitesPage", { timeout: 15_000 }, () => {
 
     await user.click(within(box).getByRole("button", { name: /Copiar enlace/ }));
     expect(writeText).toHaveBeenCalledWith(ONE_TIME_URL);
-    expect(await within(box).findByText(/Enlace copiado/)).toBeInTheDocument();
+    expect(await within(box).findByText(/Enlace copiado/)).toHaveTextContent("El enlace queda en tu portapapeles");
+    // [SEC] The create mutation is untracked: the one-time URL never reaches the Redux store.
+    expect(JSON.stringify(store.getState())).not.toContain(ONE_TIME_URL);
 
     const share = within(box).getByRole("link", { name: /Compartir por WhatsApp/ });
     expect(share).toHaveAttribute("href", whatsappShareHref(ONE_TIME_URL));

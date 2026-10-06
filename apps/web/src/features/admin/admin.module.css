@@ -519,6 +519,32 @@
   overflow-wrap: anywhere;
 }
 
+/* Entity ids: 8 characters on phones (full id in the title), the whole id from 600px. */
+.idFull {
+  /* Visually hidden on phones but still read by screen readers. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (min-width: 600px) {
+  .idShort {
+    display: none;
+  }
+
+  .idFull {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+    white-space: normal;
+  }
+}
+
 /* ------------------------------------------------------------------ alert */
 
 .alertRegion:empty {

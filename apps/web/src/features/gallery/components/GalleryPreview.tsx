@@ -2,11 +2,18 @@ import { Link } from "react-router-dom";
 import { useAppSelector } from "../../../app/hooks";
 import { Button } from "../../../shared/ui/Button";
 import { Skeleton } from "../../../shared/ui/Skeleton";
+import { type AccessDenial, classifyAccessDenial } from "../../auth/accessDenied";
 import { selectCurrentUser, selectPasswordChangeRequired } from "../../auth/authSlice";
 import { PREVIEW_SIZE, useMediaHeadQuery } from "../api";
 import styles from "../gallery.module.css";
 import { mediaAlt } from "../lib/mediaText";
 import { useExpiredUrlRefetch } from "../lib/useExpiredUrlRefetch";
+
+function denialText(denial: AccessDenial | null): string {
+  if (denial === "unverified") return "Verifica tu correo para ver las fotos.";
+  if (denial === "forbidden") return "No tienes acceso al álbum.";
+  return "No pudimos cargar las fotos.";
+}
 
 /** Props for {@link GalleryPreview}. */
 export interface GalleryPreviewProps {
@@ -27,8 +34,9 @@ export function GalleryPreview({ year, headingLevel = 2 }: GalleryPreviewProps):
   const user = useAppSelector(selectCurrentUser);
   const passwordChangeRequired = useAppSelector(selectPasswordChangeRequired);
   const blocked = user === null || passwordChangeRequired;
-  const { data, isLoading, isError, refetch } = useMediaHeadQuery({ year, limit: PREVIEW_SIZE }, { skip: blocked });
+  const { data, isLoading, isError, error, refetch } = useMediaHeadQuery({ year, limit: PREVIEW_SIZE }, { skip: blocked });
   const onMediaError = useExpiredUrlRefetch(refetch);
+  const denial = classifyAccessDenial(error, user);
   if (blocked) return null;
 
   const Heading = headingLevel === 3 ? "h3" : "h2";
@@ -48,7 +56,7 @@ export function GalleryPreview({ year, headingLevel = 2 }: GalleryPreviewProps):
           ))}
         </ul>
       ) : isError ? (
-        <p className={styles.hint}>No pudimos cargar las fotos.</p>
+        <p className={styles.hint}>{denialText(denial)}</p>
       ) : items.length === 0 ? (
         <p className={styles.hint}>Aún no hay fotos de este año. ¡Sé el primero en subir!</p>
       ) : (

@@ -1,13 +1,15 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { authenticatedState, makeUser } from "../../../../test/auth";
+import { apiUrl, authenticatedState, errorBody, makeUser } from "../../../../test/auth";
 import { renderApp as renderAppBase } from "../../../../test/renderApp";
 import type { AppStore } from "../../../app/store";
 import { env } from "../../../shared/lib/env";
 import { loggedOut } from "../../auth/authSlice";
 import { BUCKET_ORIGIN, type FakeGalleryDb, FakeXhr, galleryHandlers, makeDb, makeEdition, makeGate, makeMedia, SIGNED_PUT_URL, uuid } from "../testUtils";
+import { pngOfSize, stubImagePipeline } from "../testing/imageFixtures";
 import { getUploadManager } from "../upload/uploadManager";
 
 const MB = 1024 * 1024;
@@ -86,6 +88,7 @@ describe("GalleryPage grid", () => {
 
     expect(await screen.findByRole("heading", { name: "Aún no hay fotos de este año. ¡Sé el primero en subir!" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: /Subir fotos y videos/ }).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText(/Las cámaras de acción y drones pueden guardar ubicación en el video\./)).toBeInTheDocument();
   });
 
   it("redirects /galeria to the newest edition that has media", async () => {
@@ -96,12 +99,13 @@ describe("GalleryPage grid", () => {
     expect(await screen.findByRole("heading", { name: "Álbum vivo 2025" })).toBeInTheDocument();
   });
 
-  it("skips a failing probe instead of failing the page", async () => {
+  it("picks the default year from CuencadaSummary.hasMedia without probing each year", async () => {
     db.media = [makeMedia(1, { year: 2025 })];
-    db.failingProbes = [2026];
     const { router } = renderApp("/galeria", authenticatedState());
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/galeria/2025"));
+    expect(db.log.filter((line) => line.includes("limit=1"))).toEqual([]);
+    expect(db.log.filter((line) => line === "GET /cuencadas")).toHaveLength(1);
   });
 
   it("falls back to the newest started edition when no year has media", async () => {
@@ -194,6 +198,23 @@ describe("GalleryPage grid", () => {
   });
 });
 
+describe("GalleryPage access", () => {
+  it("asks an unverified member to verify the email on 403 instead of offering a retry", async () => {
+    server.use(http.get(apiUrl("/cuencadas/:year/media"), () => HttpResponse.json(errorBody("FORBIDDEN", "No."), { status: 403 })));
+    renderApp("/galeria/2026", authenticatedState(makeUser({ emailVerified: false })));
+
+    expect(await screen.findByRole("heading", { name: "Verifica tu correo para ver el álbum" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
+  });
+
+  it("says access is closed for any other 403", async () => {
+    server.use(http.get(apiUrl("/cuencadas/:year/media"), () => HttpResponse.json(errorBody("FORBIDDEN", "No."), { status: 403 })));
+    renderApp("/galeria/2026", authenticatedState());
+
+    expect(await screen.findByRole("heading", { name: "No tienes acceso al álbum" })).toBeInTheDocument();
+  });
+});
+
 describe("GalleryPage processing", () => {
   it("polls only the first page every 5s while an item is processing and stops when none are", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -255,6 +276,59 @@ describe("GalleryPage uploads", () => {
     await user.click(within(sheet).getByRole("button", { name: "Entendido" }));
     expect(db.log.some((line) => line.includes("/media/uploads"))).toBe(false);
     expect(FakeXhr.instances).toHaveLength(0);
+  });
+
+  it("uploads a 48 MP iPhone photo as is when the canvas can't be created (iOS area cap)", async () => {
+    stubImagePipeline({ width: 8064, height: 6048 }, { canvasFails: true });
+    const user = userEvent.setup();
+    const file = pngOfSize(8064, 6048, "IMG_48MP.png");
+    renderApp("/galeria/2026", authenticatedState());
+
+    await pickAndUpload(user, [file]);
+
+    const xhr = await waitForXhr(1);
+    expect(db.bodies["POST uploads IMG_48MP.png"]).toMatchObject({ mimeType: "image/png", byteSize: file.size });
+    expect(xhr.body).toBe(file);
+  });
+
+  it("downscales a photo above 40 MP to a ≤ 16 MP JPEG before the intent", async () => {
+    const fake = stubImagePipeline({ width: 16320, height: 12240 }, 4321);
+    const user = userEvent.setup();
+    renderApp("/galeria/2026", authenticatedState());
+    expect(await screen.findByText(/Reducimos fotos muy grandes para subirlas más rápido\./)).toBeInTheDocument();
+
+    await pickAndUpload(user, [pngOfSize(16320, 12240, "IMG_200MP.png")]);
+
+    const xhr = await waitForXhr(1);
+    expect(db.bodies["POST uploads IMG_200MP.jpg"]).toEqual({ fileName: "IMG_200MP.jpg", mimeType: "image/jpeg", byteSize: 4321, caption: null });
+    expect(xhr.body).toBeInstanceOf(File);
+    expect((xhr.body as File).type).toBe("image/jpeg"); // The PUT body is the File the manager prepared.
+    expect(fake.closed).toBe(1);
+  });
+
+  it("leaves a photo within 40 MP untouched", async () => {
+    stubImagePipeline({ width: 6000, height: 4000 });
+    const user = userEvent.setup();
+    const file = pngOfSize(6000, 4000, "IMG_24MP.png");
+    renderApp("/galeria/2026", authenticatedState());
+
+    await pickAndUpload(user, [file]);
+
+    const xhr = await waitForXhr(1);
+    expect(db.bodies["POST uploads IMG_24MP.png"]).toMatchObject({ mimeType: "image/png", byteSize: file.size });
+    expect(xhr.body).toBe(file);
+    expect(createImageBitmap).not.toHaveBeenCalled();
+  });
+
+  it("fails the row with a Spanish message when a huge photo can't be decoded, without an intent", async () => {
+    stubImagePipeline("fail");
+    const user = userEvent.setup();
+    renderApp("/galeria/2026", authenticatedState());
+
+    await pickAndUpload(user, [pngOfSize(16000, 12000, "rota.png")]);
+
+    expect(await screen.findByText(/No pudimos leer esta foto/)).toBeInTheDocument();
+    expect(db.log.some((line) => line.includes("/media/uploads"))).toBe(false);
   });
 
   it("creates an intent, PUTs only the signed headers with progress, then confirms", async () => {
@@ -446,13 +520,24 @@ describe("GalleryPage uploads", () => {
     expect(document.body.textContent).not.toContain("attacker.example");
   });
 
-  it("refuses uploads when no bucket origin is configured", async () => {
+  it("disables uploading, with Spanish copy and a dev hint, when no bucket origin is configured", async () => {
+    env.mediaUploadOrigin = null;
+    renderApp("/galeria/2026", authenticatedState());
+
+    const button = await screen.findByRole("button", { name: /Subir fotos y videos/ });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAccessibleDescription(/Por ahora no se pueden subir fotos ni videos\. Avísale a un administrador\./);
+    expect(screen.getByText(/falta VITE_MEDIA_UPLOAD_ORIGIN/)).toBeInTheDocument();
+  });
+
+  it("never asks for an upload intent when no bucket origin is configured (no orphan rows)", async () => {
     env.mediaUploadOrigin = null;
     const user = userEvent.setup();
     renderApp("/galeria/2026", authenticatedState());
     await pickAndUpload(user, [fileOf("IMG_1.jpg", "image/jpeg")]);
 
     expect(await screen.findByText(/⚠️ No se pudo subir/)).toBeInTheDocument();
+    expect(db.log.some((line) => line.startsWith("POST /cuencadas/2026/media/uploads"))).toBe(false);
     expect(FakeXhr.instances).toHaveLength(0);
   });
 

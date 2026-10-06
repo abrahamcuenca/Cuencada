@@ -8,28 +8,26 @@ import type { FamilyTreeView, Person, PersonSummary } from "@cuencada/types";
 /** Longest breadcrumb trail kept in history state. */
 export const TRAIL_MAX = 5;
 
-/** One visited person in the breadcrumb trail. */
+/** One visited person in the breadcrumb trail, as rendered (names resolved from memory). */
 export interface TrailEntry {
   id: string;
   name: string;
 }
 
-/** Shape of `location.state` on `/arbol/:personId?`. */
+/**
+ * Shape of `location.state` on `/arbol/:personId?`: person **ids only** [SEC].
+ * History state outlives the session (it is kept by the browser, survives a
+ * logout on a shared device and a reload), so no names are written there;
+ * they are resolved from the in-memory RTK Query cache when rendering.
+ */
 export interface TreeLocationState {
-  trail: TrailEntry[];
+  trail: string[];
 }
 
-function isTrailEntry(value: unknown): value is TrailEntry {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "id" in value &&
-    "name" in value &&
-    typeof value.id === "string" &&
-    typeof value.name === "string" &&
-    value.id.length <= 64 &&
-    value.name.length <= 200
-  );
+function trailId(value: unknown): string | null {
+  // Legacy entries were `{ id, name }`: keep the id, drop the name.
+  const id = typeof value === "object" && value !== null && "id" in value ? value.id : value;
+  return typeof id === "string" && id.length > 0 && id.length <= 64 ? id : null;
 }
 
 /**
@@ -37,28 +35,71 @@ function isTrailEntry(value: unknown): value is TrailEntry {
  * anything, e.g. after a deploy or from another feature).
  *
  * @param state - `location.state`.
- * @returns The validated trail, or `[]`.
+ * @returns The validated person ids, oldest first, or `[]`.
  */
-export function readTrail(state: unknown): TrailEntry[] {
+export function readTrail(state: unknown): string[] {
   if (typeof state !== "object" || state === null || !("trail" in state) || !Array.isArray(state.trail)) return [];
-  return state.trail.filter(isTrailEntry).slice(-TRAIL_MAX);
+  return state.trail
+    .map(trailId)
+    .filter((id): id is string => id !== null)
+    .slice(-TRAIL_MAX);
 }
 
 /**
- * The trail to carry when moving from `current` to `targetId`. Returning to
+ * The trail to carry when moving from `currentId` to `targetId`. Returning to
  * someone already in the trail cuts it back to before them, so the trail
  * never loops.
  *
- * @param trail - The trail of the current history entry.
- * @param current - The person being left (the current focus), if known.
+ * @param trail - The trail (ids) of the current history entry.
+ * @param currentId - The person being left (the current focus), if known.
  * @param targetId - The person being opened.
  * @returns The trail for the new history entry.
  */
-export function nextTrail(trail: readonly TrailEntry[], current: TrailEntry | null, targetId: string): TrailEntry[] {
-  const withCurrent = current === null ? [...trail] : [...trail.filter((entry) => entry.id !== current.id), current];
-  const existing = withCurrent.findIndex((entry) => entry.id === targetId);
+export function nextTrail(trail: readonly string[], currentId: string | null, targetId: string): string[] {
+  const withCurrent = currentId === null ? [...trail] : [...trail.filter((id) => id !== currentId), currentId];
+  const existing = withCurrent.indexOf(targetId);
   const cut = existing === -1 ? withCurrent : withCurrent.slice(0, existing);
   return cut.slice(-TRAIL_MAX);
+}
+
+/**
+ * Names for the trail ids. Ids whose name isn't in memory any more (after a
+ * reload, or once the cache let go of them) are skipped rather than shown blank.
+ *
+ * @param ids - Trail ids from history state.
+ * @param names - Person id → full name, from memory.
+ * @returns The entries to render.
+ */
+export function resolveTrail(ids: readonly string[], names: ReadonlyMap<string, string>): TrailEntry[] {
+  return ids.flatMap((id) => {
+    const name = names.get(id);
+    return name === undefined ? [] : [{ id, name }];
+  });
+}
+
+/**
+ * Collects person names from tree views and people pages (the RTK Query
+ * cache), into `into`.
+ *
+ * @param data - Any cached `FamilyTreeView`, `Page<PersonSummary>` or `Person`.
+ * @param into - The map to fill.
+ */
+export function collectPersonNames(data: unknown, into: Map<string, string>): void {
+  if (typeof data !== "object" || data === null) return;
+  const add = (person: unknown): void => {
+    if (typeof person !== "object" || person === null || !("id" in person) || !("fullName" in person)) return;
+    if (typeof person.id === "string" && typeof person.fullName === "string") into.set(person.id, person.fullName);
+  };
+  add(data);
+  for (const key of ["focus", "parents", "partners", "children", "siblings", "items"] as const) {
+    if (!(key in data)) continue;
+    const value: unknown = (data as Record<string, unknown>)[key]; // `key in data` checked just above.
+    if (Array.isArray(value)) value.forEach(add);
+    else add(value);
+  }
+  if ("extended" in data && typeof data.extended === "object" && data.extended !== null && "people" in data.extended && Array.isArray(data.extended.people)) {
+    data.extended.people.forEach(add);
+  }
 }
 
 /**

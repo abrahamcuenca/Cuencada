@@ -6,7 +6,8 @@ import { Field } from "../../../shared/ui/Field";
 import { Select } from "../../../shared/ui/Select";
 import { TextInput } from "../../../shared/ui/TextInput";
 import styles from "../admin.module.css";
-import { useCreateAdminInviteMutation } from "../api";
+import { useAppDispatch } from "../../../app/hooks";
+import { adminApi } from "../api";
 import {
   BOUND_INVITE_MAX_DAYS,
   changeInviteDelivery,
@@ -45,7 +46,8 @@ const ROLE_OPTIONS = [
 export function InviteForm({ onCreated, onCancel }: InviteFormProps): ReactNode {
   const [values, setValues] = useState<InviteFormValues>(INVITE_FORM_DEFAULTS);
   const [errors, setErrors] = useState<InviteFormErrors>({});
-  const [create, { isLoading, reset }] = useCreateAdminInviteMutation();
+  const dispatch = useAppDispatch();
+  const [isLoading, setIsLoading] = useState(false);
   const groupId = useId();
 
   const update = (patch: Partial<InviteFormValues>): void => {
@@ -63,14 +65,16 @@ export function InviteForm({ onCreated, onCancel }: InviteFormProps): ReactNode 
       return;
     }
     setErrors({});
+    setIsLoading(true);
     try {
-      const created = await create(result.request).unwrap();
-      // Drop the mutation result (it may hold the one-time URL) from the store right away.
-      reset();
+      // [SEC] Untracked: the answer (it may hold the one-time URL) never enters the Redux store.
+      const created = await dispatch(adminApi.endpoints.createAdminInvite.initiate(result.request, { track: false })).unwrap();
       onCreated(created);
     } catch (error) {
       if (isAbortError(error)) return;
       setErrors({ form: getApiErrorMessage(error) });
+    } finally {
+      setIsLoading(false);
     }
   };
 

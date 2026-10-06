@@ -81,6 +81,26 @@ export function restoreSession(): AppThunk<Promise<boolean>> {
 }
 
 /**
+ * Local half of "Cerrar sesión en todos los dispositivos", after
+ * `POST /auth/logout-all` answered 2xx: the server already revoked every
+ * session (this one included) and cleared the refresh cookie, so no
+ * `POST /auth/logout` and no pending-logout marker are needed. Clears the
+ * in-memory session and the API cache (`loggedOut` bumps the epoch, so an
+ * in-flight refresh can't revive it) and tells the other tabs.
+ *
+ * @returns A thunk.
+ */
+export function finishLogoutEverywhere(): AppThunk<void> {
+  return (dispatch) => {
+    cancelOnlineLogoutRetry();
+    clearPendingLogout();
+    dispatch(loggedOut());
+    dispatch(logoutConfirmed());
+    broadcastLogout();
+  };
+}
+
+/**
  * Logs out everywhere this browser knows about:
  * 1. clears the in-memory session and the RTK Query cache (`loggedOut`, which
  *    also bumps the epoch so an in-flight refresh cannot revive the session);

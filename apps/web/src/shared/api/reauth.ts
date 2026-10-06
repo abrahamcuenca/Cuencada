@@ -42,6 +42,14 @@ export const LOGOUT_PATH = "/auth/logout";
 export const CSRF_HEADERS: Readonly<Record<string, string>> = { [CSRF_HEADER]: "1" };
 /** Pause before retrying a refresh that lost a `REFRESH_RACE`, letting the winner finish. */
 export const REFRESH_RACE_RETRY_DELAY_MS = 150;
+/**
+ * Pause before the last retry after a SECOND consecutive `REFRESH_RACE`: just
+ * past the server's 10 s reuse-grace window (`REFRESH_REUSE_GRACE_MS`), so a
+ * slow winner (e.g. another tab on a bad connection) has surely stored its new
+ * cookie. If the cookie jar still holds the old token by then, the server treats
+ * it as reuse and revokes the session, which is the correct outcome.
+ */
+export const REFRESH_RACE_GRACE_WAIT_MS = 11_000;
 
 type ApiBaseQuery = BaseQueryFn<string | FetchArgs, unknown, FetchBaseQueryError, object, FetchBaseQueryMeta>;
 type QueryResult = Awaited<ReturnType<ApiBaseQuery>>;
@@ -115,8 +123,24 @@ function isRefreshRace(result: QueryResult): boolean {
   return result.error?.status === 409 && getApiErrorCode(result.error) === ErrorCode.REFRESH_RACE;
 }
 
+/** The pending REFRESH_RACE pause, so a logout can end it at once (see {@link cancelOnlineRefreshRetry}). */
+let raceWait: { timer: ReturnType<typeof setTimeout>; resolve: () => void } | null = null;
+
 function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => {
+    const finish = (): void => {
+      raceWait = null;
+      resolve();
+    };
+    raceWait = { timer: setTimeout(finish, ms), resolve: finish };
+  });
+}
+
+/** Ends a pending REFRESH_RACE pause now; the refresh then sees the new epoch and gives up. */
+function cancelRaceWait(): void {
+  if (raceWait === null) return;
+  clearTimeout(raceWait.timer);
+  raceWait.resolve();
 }
 
 async function runRefresh(api: BaseQueryApi): Promise<boolean> {
@@ -137,9 +161,11 @@ async function refreshOnce(api: BaseQueryApi): Promise<boolean> {
 
   let result = await requestRefresh(api);
   if (loggedOutMeanwhile()) return false;
-  if (isRefreshRace(result)) {
-    // Another tab rotated the cookie inside the grace window; retry exactly once.
-    await delay(REFRESH_RACE_RETRY_DELAY_MS);
+  // Another tab rotated the cookie inside the grace window: retry after a short pause and,
+  // if that races too, once more after the grace window has passed. Then give up.
+  for (const pause of [REFRESH_RACE_RETRY_DELAY_MS, REFRESH_RACE_GRACE_WAIT_MS]) {
+    if (!isRefreshRace(result)) break;
+    await delay(pause);
     if (loggedOutMeanwhile()) return false;
     result = await requestRefresh(api);
     if (loggedOutMeanwhile()) return false;
@@ -216,14 +242,20 @@ function scheduleOnlineRefreshRetry(api: Pick<BaseQueryApi, "dispatch" | "getSta
   window.addEventListener("online", retry, { once: true });
 }
 
-/** Cancels a pending "retry the refresh when back online" (after success, logout, and between tests). */
+/**
+ * Cancels a pending "retry the refresh when back online" (after success,
+ * logout, and between tests). The store's `loggedOut` listener calls it, so it
+ * also ends a pending REFRESH_RACE pause (up to 11 s) right away.
+ */
 export function cancelOnlineRefreshRetry(): void {
+  cancelRaceWait();
   if (onlineRetry === null) return;
   window.removeEventListener("online", onlineRetry);
   onlineRetry = null;
 }
 
-let refreshInFlight: Promise<boolean> | null = null;
+/** The shared refresh, tagged with the session epoch it started in. */
+let refreshInFlight: { epoch: number; promise: Promise<boolean> } | null = null;
 
 /**
  * Exchanges the HttpOnly refresh cookie for a new access token.
@@ -240,12 +272,18 @@ let refreshInFlight: Promise<boolean> | null = null;
  * @returns `true` when a new token is in the store.
  */
 export function refreshAccessToken(api: Pick<BaseQueryApi, "dispatch" | "getState">): Promise<boolean> {
-  if (refreshInFlight === null) {
-    refreshInFlight = runRefresh(detachedApi(api, "refreshAccessToken")).finally(() => {
-      refreshInFlight = null;
-    });
-  }
-  return refreshInFlight;
+  const epoch = selectSessionEpoch(authState(api));
+  // [SEC] A refresh from an earlier session (logout or account switch since) is never joined:
+  // it can only end with `false`, and a new login must not wait on it.
+  if (refreshInFlight !== null && refreshInFlight.epoch === epoch) return refreshInFlight.promise;
+  const entry = {
+    epoch,
+    promise: runRefresh(detachedApi(api, "refreshAccessToken")).finally(() => {
+      if (refreshInFlight === entry) refreshInFlight = null;
+    })
+  };
+  refreshInFlight = entry;
+  return entry.promise;
 }
 
 /**

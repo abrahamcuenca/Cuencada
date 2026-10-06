@@ -22,7 +22,7 @@ afterEach(() => {
   window.history.replaceState(null, "", "/");
 });
 
-const USER_A = makeUser({ id: "11111111-1111-4111-8111-111111111111", displayName: "Rosa Cuenca", email: "rosa@example.com" });
+const USER_A = makeUser({ id: "11111111-1111-4111-8111-111111111111", displayName: "Rosa Ejemplo", email: "rosa@example.com" });
 const USER_B = makeUser({ id: "22222222-2222-4222-8222-222222222222", displayName: "Primo B", email: "b@example.com" });
 
 function serveConsume(respond: () => Response | Promise<Response> = () => tokenResponse(USER_B, "token-B")): ReturnType<typeof vi.fn> {
@@ -128,7 +128,7 @@ describe("MagicLinkPage", () => {
       const consumed = serveConsume();
       const { store } = openLink(authenticatedState(USER_A, "token-A"));
 
-      expect(await screen.findByText(/Ya tienes la sesión abierta como/)).toHaveTextContent("Rosa Cuenca");
+      expect(await screen.findByText(/Ya tienes la sesión abierta como/)).toHaveTextContent("Rosa Ejemplo");
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(consumed).not.toHaveBeenCalled();
       expect(store.getState().auth.user?.id).toBe(USER_A.id);
@@ -160,7 +160,7 @@ describe("MagicLinkPage", () => {
       const consumed = serveConsume();
       const { store, router } = openLink(authenticatedState(USER_A, "token-A"));
 
-      await userEvent.click(await screen.findByRole("button", { name: "Seguir como Rosa Cuenca" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Seguir como Rosa Ejemplo" }));
 
       await waitFor(() => expect(router.state.location.pathname).toBe("/"));
       expect(consumed).not.toHaveBeenCalled();

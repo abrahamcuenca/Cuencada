@@ -8,24 +8,34 @@
   font-weight: var(--weight-semibold);
 }
 
-.mosaic {
+/* Members-only photos: visitors see the brand art and a login teaser. */
+.photosTeaser {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.teaserArt {
+  flex: none;
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: var(--radius-md);
+}
+
+.teaserText {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  flex: 1 1 14rem;
   gap: var(--space-2);
-  padding: 0;
-  list-style: none;
+  justify-items: start;
 }
 
-.mosaic img {
-  width: 100%;
-  aspect-ratio: 4 / 3;
-  object-fit: cover;
-  border-radius: var(--radius-sm);
-  background: var(--gradient-photo-placeholder);
+.teaserText p {
+  margin: 0;
 }
 
-.mosaicAction {
-  margin-top: var(--space-4);
+.teaserTitle {
+  font-weight: var(--weight-semibold);
 }
 
 .next {
@@ -104,11 +114,6 @@
 }
 
 @media (min-width: 900px) {
-  .mosaic {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: var(--space-3);
-  }
-
   .highlights {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }

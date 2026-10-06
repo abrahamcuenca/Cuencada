@@ -33,7 +33,7 @@ Based on `origin/main` (2bcb7a0) with `origin/wp/t8-be-admin` merged in for the 
 - **`emailQueued`:** `true` → success "…le enviamos un correo para elegir una contraseña nueva."; `false` → an info notice that the account must still change its password but no email went out (disabled account or mail budget) and "Avísale por otro medio."
 - **Enable has a light confirmation** ("Sus sesiones anteriores siguen cerradas…") so a mis-tap can't re-open a disabled account. Promote also confirms.
 - **Invite form delivery:** two modes, "Por correo" (bound, sent, single use) and "Enlace para compartir" (open). The contract's third case, a bound copy-link member invite (`email` + `sendEmail: false`), isn't offered: it loses the "delivered by email ⇒ verified" guarantee and adds a confusing choice. The form validates with the contract schema, so client and server rules can't drift.
-- **"Sin verificar correo" card** links to the active users list: `GET /admin/users` has no verified filter; rows carry a "Sin verificar" badge.
+- **"Sin verificar correo" card** opens `/admin/usuarios?estado=active&correo=sin-verificar` (`emailVerified=false`, WP-0.8b).
 - **Dates:** `PORTAL_TIME_ZONE` (`America/Merida`, from T1) for every admin timestamp and for the audit day range (`desde` = local midnight, `hasta` = end of that local day). `zonedMidnight` handles any offset/DST (tested with Europe/Madrid).
 - **Cache tags:** `Invite LIST`, `AdminUser LIST` (shared with T6's account picker, so it refreshes too), `AdminUser SUMMARY` for the dashboard, `AuditLog LIST`. Each write invalidates what it changes, plus the audit log. No new tag types.
 - **Asistencia** has no index page of its own (it's per edition): the nav row opens Cuencadas, and the dashboard's RSVP card deep-links to the next edition's asistencia (T3-FE, merged in #23).
@@ -53,3 +53,12 @@ Based on `origin/main` (2bcb7a0) with `origin/wp/t8-be-admin` merged in for the 
 - **T8-BE (optional):** an `emailVerified=false` filter on `GET /admin/users` would let the "Sin verificar correo" card open an exact list.
 - **T4-FE (optional):** reading `?cola=reported` on `/admin/media` would let the "Fotos reportadas" card open that tab directly.
 - **Coordination board:** please mark T8-FE as in review (README not edited to avoid conflicts).
+
+## Review log
+- 2026-10-06, **WP-0.8c**:
+  - [SEC] `createAdminInvite` is dispatched with `{ track: false }`: the one-time URL never enters the Redux store (asserted on the whole state).
+  - Copy success adds "El enlace queda en tu portapapeles: pégalo solo en el chat de la familia y, al terminar, copia otra cosa para borrarlo."
+  - Bitácora: `adminAlertExempt` / `adminAlertLimitNotice` / `adminAlertSkipped` (literal `true` only) show as badges; entity ids show 8 characters on phones (full id in `title`, visible from 600 px and read by screen readers). "Hasta" is sent as the start of the next local day (exclusive `to`, WP-0.8b).
+  - Usuarios: "Correo" filter (`?correo=sin-verificar|verificado` → `emailVerified`), with a client-side check; a 429 on `PATCH` shows the server's message (per-account limit).
+  - Dashboard photo cards link to `/admin/media?cola=pending|reported`.
+  - Screenshot `t8/bitacora-avisos-{375,1280}`.
