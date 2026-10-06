@@ -1,11 +1,16 @@
 /**
- * RSVP module (T3 owns this folder). Registered under `/api` by
- * `app.ts`; add routes here: `/cuencadas/:year/rsvp*`, `/cuencadas/:year/attendees` and admin RSVP/attendance routes.
- * See `docs/coordination/WP-0.4.md` for the route checklist.
+ * RSVP module (T3): members' own RSVP, the summary and attendee strip, and
+ * the admin RSVP table/CSV and historical attendance. Mounted under `/api`
+ * by `app.ts`. See `docs/coordination/WP-T3-BE.md`.
  */
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
+import rsvpAdminRoutes from "./admin-routes.js";
+import rsvpMemberRoutes from "./member-routes.js";
 
-/** RSVP routes under `/api` (stub until T3). */
-const rsvpModule: FastifyPluginAsyncZod = async () => {};
+/** RSVP routes under `/api`. */
+const rsvpModule: FastifyPluginAsyncZod = async (app) => {
+  await app.register(rsvpMemberRoutes);
+  await app.register(rsvpAdminRoutes);
+};
 
 export default rsvpModule;

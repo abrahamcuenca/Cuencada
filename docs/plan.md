@@ -187,11 +187,14 @@ Codex/opencode left a pnpm/turbo monorepo (`apps/web`, `apps/server`, `packages/
 1. `POST …/media/uploads`. The server checks the type allowlist and size, inserts a `pending_upload` row, and returns a presigned PUT that is bound to the content type and length.
 2. The browser PUTs the file directly to the bucket.
 3. `POST /media/:id/confirm` runs a HEAD request plus a magic-byte check.
-4. An in-process **sharp** job:
-   - auto-rotates
-   - **strips EXIF/GPS**
-   - makes a 400px WebP thumbnail and a 1600px display copy
-5. A cleanup job removes abandoned uploads.
+4. An in-process job re-reads the original and re-checks its size and magic bytes, then:
+   - images (**sharp**): auto-rotates, **strips EXIF/GPS**, makes a 1600px WebP display copy and a 400px WebP thumbnail
+   - videos (pure JS, no ffmpeg): **neutralizes location/identifying metadata in place** (`udta` incl. `©xyz`, `meta` incl. the QuickTime ISO6709 location key, `uuid`/XMP become same-size zeroed `free` boxes, so chunk offsets stay valid) and writes the result to its own display key
+   - only the sanitized copies are ever served; the original is deleted afterwards (and on any failure)
+   - after a restart, items that never started are re-queued; items interrupted mid-work are marked failed, never re-run (no crash loop)
+   - not yet stripped (follow-up L5): GPS telemetry tracks from action cameras and drones (GoPro `gpmd`, `camm`, `mebx`, subtitle GPS); the uploader shows a warning meanwhile
+5. A cleanup job removes abandoned uploads and re-sweeps leftover objects of deleted/failed items.
+6. Per-user limits: intents/min, open intents, and a rolling 24 h byte budget (4 GiB for members; admins exempt).
 
 **Moderation:** items are auto-approved, members can report them, and admins hide or delete them. A flag can switch this to approval first.
 

@@ -43,6 +43,10 @@ Phase 1 builds frontend and backend tracks in parallel. They need one contract t
   - *Note (WP-0.5.1, orchestrator decision):* `#t=` is the canonical fragment name, and it is what `@cuencada/emails` generates. Earlier drafts said `#token=`.
 - Fragments are never sent to the server or in `Referer`, so tokens stay out of access logs and proxies. Email link scanners don't consume them, because a GET does nothing.
 - The refresh token exists only in the `__Secure-cuencada_rt` cookie (HttpOnly, Secure, SameSite=Strict, Path=/api/auth). It is never in a JSON body. Refresh and logout also require the `X-Cuencada-CSRF` header and an exact `Origin` match. The access token is returned in the body and kept only in memory.
+- **Refresh rotation threat note (T1, PR #14):**
+  - Refresh tokens are single-use. A used token presented again **within 10 s** answers 409 `REFRESH_RACE` and revokes nothing, because two tabs refreshing at once is normal. Each race is audited as `auth.refresh_race`.
+  - **Accepted risk:** a thief who replays a stolen token in the 10 s before the victim's own refresh gets 409 too, and so does the victim. The victim's client must therefore retry once **after** the window instead of logging out (T1-FE). Its token is then detected as reuse, and the whole session, including the thief's rotated chain, is revoked (`refresh_reuse`).
+  - Used tokens of live sessions are never purged, so reuse detection works however old the replayed token is.
 - **The one exception** is the WebSocket ticket. Browsers cannot set headers on a WS upgrade, so the 30-second, single-use ticket from `POST /api/chat/ticket` goes in `?ticket=`. The ticket is bound to the issuing session, so revoking the session invalidates unused tickets. The server must redact `ticket` from request logs, burn the ticket on first use, and check `Origin` on upgrade. App-level redaction doesn't cover the VPS reverse proxy, so WP-2.4 must also strip the query string from proxy access logs for `/api/chat/ws`.
 - **Invites.** Holding an invite token must not be enough to claim someone else's identity:
   - `POST /api/invites/inspect` returns only `emailMasked` (`maskEmail`: `t***@e***.com`), never the full bound address. The invitee has to type it, and `accept` compares it after `emailSchema` normalization.
@@ -81,7 +85,7 @@ Changes made in response to the Security and Tech Lead reviews. Most are already
 - **Deliberately not changed:**
   - `AuditLogEntry.entityType` stays a free string, so legacy rows still serialize.
   - Display names reject ZWJ, so emoji sequences are not allowed in names; chat bodies keep ZWJ.
-- **Open:** whether unverified members (copy-link invites) may access the directory and family tree. This is a T1/T5 decision.
+- **Decided (T1, 2026-10-06):** unverified members (copy-link and open invites) get **403 `FORBIDDEN`** on the directory, the family tree and every other PII read. Those routes declare `config.requireVerifiedEmail: true` (the WP-0.4 guard reads `users.email_verified_at` from the database). T5 (directory, profile reads of other members) and T6 (family tree) enforce it. A member verifies through `POST /api/auth/email/verify-request` → `/verificar#t=…` → `POST /api/auth/email/verify`; a magic-link login or a password reset sent to the current address also verifies it. Own-profile routes and `/me` stay open to unverified members so they can see the prompt.
 
 ## Consequences
 
