@@ -64,10 +64,10 @@ jobs:
       - name: Install Chromium for Playwright
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: Install the pinned e2e fonts
-        # tests/e2e/fonts/fonts.conf restricts Chromium to these (same paths locally), so the
-        # overflow/target gates measure the same glyph widths everywhere.
-        run: sudo apt-get install -y --no-install-recommends fonts-dejavu-core fonts-noto-color-emoji
+      - name: Install the e2e emoji font
+        # tests/e2e/fonts/fonts.conf uses the bundled DejaVu Sans (tests/e2e/fonts) plus this
+        # package's Noto Color Emoji, so the gates measure the same glyph widths everywhere.
+        run: sudo apt-get install -y --no-install-recommends fonts-noto-color-emoji
 
       - name: Build the API and the e2e SPA
         run: pnpm e2e:build

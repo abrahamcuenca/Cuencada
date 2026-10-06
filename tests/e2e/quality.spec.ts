@@ -116,9 +116,12 @@ async function checkRoutes(page: Page, testInfo: TestInfo, routes: RouteCheck[])
     span.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap;font:600 16px var(--font-body, sans-serif)";
     document.body.append(span);
     const widths: Record<string, number> = {};
-    for (const text of ["Directorio familiar", "Filtros", "⚙️🔎💬📅", "Pueblo Ejemplo · Norte"]) {
-      span.textContent = text;
-      widths[text] = Number(span.getBoundingClientRect().width.toFixed(3));
+    for (const weight of ["400", "600"]) {
+      span.style.fontWeight = weight;
+      for (const text of ["Directorio familiar", "Filtros", "⚙️🔎💬📅", "Pueblo Ejemplo · Norte"]) {
+        span.textContent = text;
+        widths[`${weight} ${text}`] = Number(span.getBoundingClientRect().width.toFixed(3));
+      }
     }
     span.remove();
     return widths;

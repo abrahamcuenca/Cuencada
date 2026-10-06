@@ -113,7 +113,13 @@ Both live in `tests/e2e/harness/`, **outside `apps/server/src`**. They aren't co
 
 ## Mobile quality gates (`quality.spec.ts`, `support/gates.ts`)
 21 routes (public, member and admin) are checked at **320 and 375 px**, 42 checks in all:
-- **Fonts are pinned.** Every browser the suite launches gets `FONTCONFIG_FILE=tests/e2e/fonts/fonts.conf`, which exposes only DejaVu Sans plus Noto Color Emoji. Both come from Debian/Ubuntu packages at the same paths locally and in CI, and the e2e job installs them.
+- **Fonts are pinned.** Every browser the suite launches gets `FONTCONFIG_FILE=tests/e2e/fonts/fonts.conf`, which exposes only two font sources:
+  - **DejaVu Sans Book and Bold, bundled in `tests/e2e/fonts/`** (license in `DejaVu-LICENSE.txt`, about 1.4 MB);
+  - Noto Color Emoji from `fonts-noto-color-emoji`, which the e2e job installs. Only that one file is accepted from its directory.
+
+  Every family name in the CSS stacks is resolved to DejaVu Sans first (a strong prepend), so no other installed font can be picked by name.
+
+  Bundling closed a second CI-only difference. In the CI screencast for run 37533805008, **regular-weight text rendered in a serif fallback** while bold text matched local, so the runner's system `dejavu` directory couldn't be trusted. The font fingerprint in `quality-gates.json` now covers weights 400 and 600.
   - Before this, Chromium resolved the CSS stack (`system-ui, …, "Noto Sans", Arial, sans-serif`) to whatever each machine had. Glyph widths differed, so CI failed the 320 px overflow check on the year pages while local runs passed.
   - DejaVu is wide, so it's a pessimistic font for overflow, and it's Ubuntu's default fallback.
 - **Each route waits for a content heading before measuring** (year pages, Fotos, Directorio, Árbol). An error state can't pass the gate.
@@ -136,6 +142,13 @@ Both live in `tests/e2e/harness/`, **outside `apps/server/src`**. They aren't co
   - **CI's DOM and CSS are fine:** the DOM snapshot from the CI trace (CI DOM and CSS, rendered locally at 320 px) lays out at exactly 320 (search bar 0–320, "Filtros" 209–304).
   - **Fonts match:** CI's DejaVu and Noto Color Emoji are the same package versions as local.
   - **Conclusion:** I couldn't reproduce or find the culprit, so I haven't guessed a product fix. The next CI run reports the transient culprits and the font fingerprint.
+  - **Follow-up, CI run 37533805008 (86dedb2):**
+    - CI showed the overflow from 96 ms, with no in-flow culprit; the only fixed culprit was the nav, at five tabs of 64.4 px.
+    - The CI DOM snapshot, rendered locally, is 320 wide; a `<dialog>` is present but closed (`display: none`).
+    - Locally, a 3 s API delay (skeleton visible) still gives 320.
+    - The CI screencast frames are the decisive evidence: body-weight text ("Una familia. Una historia.", "Pueblo Ejemplo · Norte", the search placeholder) rendered **serif** in CI, sans locally.
+    - Conclusion: the CI font environment still differed for weight 400. Hence the bundled DejaVu Sans and the strong family prepend.
+    - No product element has been shown to be at fault, so there is no product change for `/directorio`.
   - **Follow-up, CI run 37521295809:**
     - CI reported no in-flow culprits, either now or transiently. The overflow started at 125 ms and stayed (`innerWidth` 322).
     - CI's font fingerprint is **identical** to local, which rules fonts out.
