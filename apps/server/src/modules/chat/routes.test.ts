@@ -116,6 +116,7 @@ describe("GET /api/chat/rooms", () => {
     });
     expect(globalRoom?.lastMessage).toMatchObject({
       preview: "mío",
+      senderUserId: me.user.id,
       senderDisplayName: "Ana"
     });
     expect(globalRoom?.lastMessageAt).toBe(at(3).toISOString());
