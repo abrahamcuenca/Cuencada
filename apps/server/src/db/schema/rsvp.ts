@@ -4,7 +4,7 @@
  */
 import { RSVP_MAX_GUESTS, RSVP_NOTES_MAX_LENGTH, RsvpStatus } from "@cuencada/types";
 import { sql } from "drizzle-orm";
-import { check, date, index, integer, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { check, date, foreignKey, index, integer, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { users } from "./auth.js";
 import { cuencadaLocations, cuencadas } from "./cuencadas.js";
 import { checkIn, createdAt, updatedAt } from "./helpers.js";
@@ -25,7 +25,10 @@ export const cuencadaRsvps = pgTable(
     guestCount: integer("guest_count").notNull().default(0),
     arrivalDate: date("arrival_date"),
     departureDate: date("departure_date"),
-    /** Must be a location of the same Cuencada; enforced by the service. */
+    /**
+     * Must be a location of the same Cuencada: enforced by the composite FK
+     * below (0002). The `kind = hotel` rule stays in the service.
+     */
     hotelLocationId: uuid("hotel_location_id").references(() => cuencadaLocations.id, { onDelete: "set null" }),
     notes: text("notes"),
     createdAt: createdAt(),
@@ -35,6 +38,15 @@ export const cuencadaRsvps = pgTable(
     uniqueIndex("cuencada_rsvps_cuencada_user_idx").on(table.cuencadaId, table.userId),
     index("cuencada_rsvps_user_id_idx").on(table.userId),
     index("cuencada_rsvps_hotel_location_id_idx").on(table.hotelLocationId),
+    // Same-Cuencada integrity. The migration (0002) creates it with
+    // `ON DELETE SET NULL ("hotel_location_id")` (PG15+), which Drizzle cannot
+    // express; "set null" here keeps the snapshot in step. Never create this
+    // FK with `drizzle-kit push`: a plain SET NULL would also null cuencada_id.
+    foreignKey({
+      name: "cuencada_rsvps_hotel_same_cuencada_fk",
+      columns: [table.cuencadaId, table.hotelLocationId],
+      foreignColumns: [cuencadaLocations.cuencadaId, cuencadaLocations.id]
+    }).onDelete("set null"),
     checkIn("cuencada_rsvps_status_check", "status", RsvpStatus),
     check("cuencada_rsvps_guest_count_check", sql.raw(`"guest_count" between 0 and ${RSVP_MAX_GUESTS}`)),
     check(

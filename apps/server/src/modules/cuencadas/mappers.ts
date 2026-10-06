@@ -41,6 +41,7 @@ export function toItineraryItem(row: ItineraryRow): ItineraryItem {
     locationName: row.locationName,
     locationId: row.locationId,
     priceNote: row.priceNote,
+    tags: row.tags,
     visibility: row.visibility,
     sortOrder: row.sortOrder
   };
