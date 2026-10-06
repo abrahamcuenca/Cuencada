@@ -80,7 +80,12 @@ export const AuditAction = {
   AnnouncementCreated: "announcement.created",
   AnnouncementUpdated: "announcement.updated",
   AnnouncementDeleted: "announcement.deleted",
+  /** `entityType: cuencada`; metadata holds counts only (`added`, `removed`, `total`, `mode`). */
   AttendanceUpdated: "attendance.updated",
+  /** `entityType: rsvp`; a member created or changed their own RSVP (metadata: `status`, `guestCount`, `created`). */
+  RsvpSaved: "rsvp.saved",
+  /** `entityType: cuencada`; an admin downloaded the RSVP CSV (metadata: `rows`). */
+  RsvpExported: "rsvp.exported",
   MediaModerated: "media.moderated",
   MediaUploaded: "media.uploaded",
   MediaUploadRejected: "media.upload_rejected",
