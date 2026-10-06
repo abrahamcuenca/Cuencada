@@ -2,8 +2,15 @@
  * One chat WebSocket [SEC]: the upgrade checks (Origin, single-use ticket,
  * live session), then sequential handling of validated client frames.
  *
- * - Handshake failures close with **1008** (policy violation) and a generic
- *   reason; the client fetches a new ticket (a 401 there means log in again).
+ * - Handshake: the ticket is burned on **any** upgrade attempt, then the
+ *   Origin and the session are checked. Failures close with **1008** (policy
+ *   violation) and a generic reason; the client fetches a new ticket (a 401
+ *   there means log in again). At capacity, upgrades close with 1013.
+ * - After registration the session is checked once more, so a revocation that
+ *   raced the first check cannot leave a socket open.
+ * - Backpressure: a socket whose send buffer passes
+ *   {@link BUFFER_TERMINATE_BYTES} is terminated; above
+ *   {@link BUFFER_SKIP_LOW_PRIORITY_BYTES} it gets no `typing`/`presence`.
  * - Frames are processed one at a time, in order. Frames that arrive while the
  *   session is still being loaded wait in the same queue.
  * - Invalid frames get an `error` frame; after {@link MAX_BAD_FRAMES} the
@@ -22,7 +29,7 @@ import {
 import type { WebSocket } from "@fastify/websocket";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { allowedOrigins } from "../../config.js";
-import { type ChatConnection, type ChatHub, CloseReason } from "./hub.js";
+import { type ChatConnection, type ChatHub, CloseReason, WS_TRY_AGAIN_LATER } from "./hub.js";
 import { toChatMessages } from "./mappers.js";
 import { type ChatPrincipal, findVisibleRoom, insertMessageIdempotent, loadPrincipal, markRead } from "./repository.js";
 
@@ -32,6 +39,38 @@ export const WS_POLICY_VIOLATION = 1008;
 export const MAX_BAD_FRAMES = 5;
 /** Frames that may wait in the queue before the socket is closed. */
 export const MAX_PENDING_FRAMES = 32;
+/** A socket with more than this many unsent bytes is a slow reader and is terminated. */
+export const BUFFER_TERMINATE_BYTES = 1024 * 1024;
+/** Above this many unsent bytes, `typing` and `presence` frames are skipped. */
+export const BUFFER_SKIP_LOW_PRIORITY_BYTES = 256 * 1024;
+
+/** What {@link deliverFrame} did. */
+export type DeliveryOutcome = "sent" | "skipped" | "terminated" | "closed";
+
+/** The parts of a `ws` socket that {@link deliverFrame} uses. */
+export type DeliverySocket = Pick<WebSocket, "readyState" | "OPEN" | "bufferedAmount" | "send" | "terminate">;
+
+/**
+ * Send one frame with backpressure: terminate a socket that stopped reading
+ * (its unsent buffer is past {@link BUFFER_TERMINATE_BYTES}), and drop
+ * low-priority frames (`typing`, `presence`) once it is past
+ * {@link BUFFER_SKIP_LOW_PRIORITY_BYTES}. A close frame could not reach a reader
+ * that is not reading, so the socket is terminated rather than closed; the
+ * hub forgets it on the resulting `close` event.
+ */
+export function deliverFrame(socket: DeliverySocket, frame: WsServerMessage): DeliveryOutcome {
+  if (socket.readyState !== socket.OPEN) return "closed";
+  const buffered = socket.bufferedAmount;
+  if (buffered > BUFFER_TERMINATE_BYTES) {
+    socket.terminate();
+    return "terminated";
+  }
+  if (buffered > BUFFER_SKIP_LOW_PRIORITY_BYTES && (frame.type === "typing" || frame.type === "presence")) {
+    return "skipped";
+  }
+  socket.send(JSON.stringify(frame));
+  return "sent";
+}
 
 /** Generic 1008 reason: never says which check failed. */
 const REJECT_REASON = "No autorizado.";
@@ -71,13 +110,15 @@ function errorFrame(code: ErrorCode, message: string, clientMessageId: string | 
 }
 
 /** Wrap a `ws` socket as a hub connection. */
-function wrap(socket: WebSocket, id: number, principal: ChatPrincipal): ChatConnection {
+function wrap(socket: WebSocket, id: number, principal: ChatPrincipal, log: FastifyRequest["log"]): ChatConnection {
   return {
     id,
     principal,
     alive: true,
     send(frame) {
-      if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(frame));
+      if (deliverFrame(socket, frame) === "terminated") {
+        log.warn({ connectionId: id }, "chat socket terminated: slow reader");
+      }
     },
     close(code, reason) {
       if (socket.readyState === socket.OPEN || socket.readyState === socket.CONNECTING) socket.close(code, reason);
@@ -100,16 +141,22 @@ function wrap(socket: WebSocket, id: number, principal: ChatPrincipal): ChatConn
  * @param request - The upgrade request (its URL, with the ticket, is scrubbed in logs).
  */
 export function openChatSocket(app: FastifyInstance, hub: ChatHub, socket: WebSocket, request: FastifyRequest): void {
+  // Burn the ticket first, whatever happens next: a ticket gets exactly one attempt.
+  const query = chatWsQuerySchema.safeParse(request.query);
+  const grant = query.success ? hub.tickets.consume(query.data.ticket, app.clock.now()) : null;
   if (!isAllowedOrigin(app, firstHeader(request.headers.origin))) {
     request.log.info("chat socket rejected: origin");
     socket.close(WS_POLICY_VIOLATION, REJECT_REASON);
     return;
   }
-  const query = chatWsQuerySchema.safeParse(request.query);
-  const grant = query.success ? hub.tickets.consume(query.data.ticket, app.clock.now()) : null;
   if (grant === null) {
     request.log.info("chat socket rejected: ticket");
     socket.close(WS_POLICY_VIOLATION, REJECT_REASON);
+    return;
+  }
+  if (hub.isFull()) {
+    request.log.warn({ sockets: hub.size }, "chat socket refused: at capacity");
+    socket.close(WS_TRY_AGAIN_LATER, CloseReason.ServerBusy);
     return;
   }
 
@@ -129,9 +176,23 @@ export function openChatSocket(app: FastifyInstance, hub: ChatHub, socket: WebSo
       socket.close(WS_POLICY_VIOLATION, REJECT_REASON);
       return null;
     }
-    connection = wrap(socket, hub.allocateId(), principal);
-    hub.add(connection);
-    return connection;
+    if (hub.isFull()) {
+      socket.close(WS_TRY_AGAIN_LATER, CloseReason.ServerBusy);
+      return null;
+    }
+    const registered = wrap(socket, hub.allocateId(), principal, request.log);
+    if (!hub.add(registered)) return null;
+    connection = registered;
+    // A revocation or disable may have committed between the first check and
+    // registration without seeing this socket: check once more now that the
+    // hub would see it.
+    return loadPrincipal(app.db, { sessionId: grant.sessionId, userId: grant.userId, now: app.clock.now() }).then(
+      (again) => {
+        if (again !== null) return registered;
+        hub.closeSession(grant.sessionId);
+        return null;
+      }
+    );
   });
   let queue: Promise<unknown> = ready;
 

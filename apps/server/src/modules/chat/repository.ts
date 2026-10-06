@@ -317,6 +317,11 @@ export interface ChatPrincipal {
   userId: string;
   sessionId: string;
   displayName: string;
+  /**
+   * `profiles.listed_in_directory` ("Aparecer en el directorio"). Unlisted
+   * members are left out of presence; refreshed by the periodic re-check.
+   */
+  listedInDirectory: boolean;
 }
 
 /** SQL: the session is live and its user may use chat (same rules as the REST guard + verified email). */
@@ -330,6 +335,9 @@ function usableSessionSql(now: Date): SQL {
     and not ${users.mustChangePassword})`;
 }
 
+/** SQL: the user is listed in the directory (no profile row → unlisted, fail closed). */
+const listedSql = sql<boolean>`coalesce(${profiles.listedInDirectory}, false)`;
+
 /**
  * Load the principal for a ticket: the session must be live, belong to
  * `userId`, and its user must be active, verified and not pending a password
@@ -342,30 +350,38 @@ export async function loadPrincipal(
   input: { sessionId: string; userId: string; now: Date }
 ): Promise<ChatPrincipal | null> {
   const [row] = await db
-    .select({ userId: sessions.userId, displayName: users.displayName })
+    .select({ userId: sessions.userId, displayName: users.displayName, listedInDirectory: listedSql })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
+    .leftJoin(profiles, eq(profiles.userId, sessions.userId))
     .where(and(eq(sessions.id, input.sessionId), eq(sessions.userId, input.userId), usableSessionSql(input.now)))
     .limit(1);
   if (row === undefined) return null;
   return {
     userId: row.userId,
     sessionId: input.sessionId,
-    displayName: row.displayName
+    displayName: row.displayName,
+    listedInDirectory: row.listedInDirectory
   };
 }
 
 /**
- * Of `sessionIds`, the ones that are still usable for chat.
+ * Of `sessionIds`, the ones that are still usable for chat, with each user's
+ * current directory listing.
  *
- * @returns The ids to keep; every other connected session must be closed.
+ * @returns `sessionId → listedInDirectory` for sessions to keep; every other connected session must be closed.
  */
-export async function usableSessionIds(db: DbOrTx, sessionIds: readonly string[], now: Date): Promise<Set<string>> {
-  if (sessionIds.length === 0) return new Set();
+export async function usableSessions(
+  db: DbOrTx,
+  sessionIds: readonly string[],
+  now: Date
+): Promise<Map<string, boolean>> {
+  if (sessionIds.length === 0) return new Map();
   const rows = await db
-    .select({ id: sessions.id })
+    .select({ id: sessions.id, listedInDirectory: listedSql })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
+    .leftJoin(profiles, eq(profiles.userId, sessions.userId))
     .where(and(inArray(sessions.id, [...sessionIds]), usableSessionSql(now)));
-  return new Set(rows.map((row) => row.id));
+  return new Map(rows.map((row) => [row.id, row.listedInDirectory]));
 }

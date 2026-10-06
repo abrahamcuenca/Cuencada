@@ -162,7 +162,8 @@ const chatRoutes: FastifyPluginAsyncZod<ChatRoutesOptions> = async (app, { hub }
 
   /**
    * `DELETE /api/chat/messages/:id`: the sender, or an admin, soft-deletes a
-   * message. An admin deleting someone else's message is audited (no body).
+   * message in a visible room (404 otherwise, including another member's
+   * message). An admin deleting someone else's message is audited (no body).
    * Deleting an already deleted message is a no-op 204.
    */
   app.delete(
@@ -177,10 +178,15 @@ const chatRoutes: FastifyPluginAsyncZod<ChatRoutesOptions> = async (app, { hub }
     async (request, reply) => {
       const user = authUser(request);
       const message = await findMessage(app.db, request.params.id);
-      if (message === null) throw new AppError("NOT_FOUND", MESSAGE_NOT_FOUND);
-      const own = message.senderUserId === user.id;
-      if (!own && user.role !== "admin") {
-        throw new AppError("FORBIDDEN", "Solo puedes borrar tus propios mensajes.");
+      const own = message !== null && message.senderUserId === user.id;
+      // 404 for unknown messages, messages in hidden rooms, and other members'
+      // messages (non-admins): the answer never confirms that a message exists.
+      if (
+        message === null ||
+        (!own && user.role !== "admin") ||
+        (await findVisibleRoom(app.db, message.roomId)) === null
+      ) {
+        throw new AppError("NOT_FOUND", MESSAGE_NOT_FOUND);
       }
       if (message.deletedAt !== null) return reply.code(204).send(null);
 

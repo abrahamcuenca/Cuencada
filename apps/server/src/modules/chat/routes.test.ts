@@ -354,7 +354,7 @@ describe("DELETE /api/chat/messages/:id", () => {
     expect(again.statusCode).toBe(204);
   });
 
-  it("forbids deleting another member's message", async () => {
+  it("answers 404 (not 403) for another member's message", async () => {
     const server = await start();
     const me = await createChatMember();
     const other = await createChatMember();
@@ -368,7 +368,22 @@ describe("DELETE /api/chat/messages/:id", () => {
       url: `/api/chat/messages/${message.id}`,
       ...me.auth
     });
-    expect(response.statusCode).toBe(403);
+    expect(response.statusCode).toBe(404);
+    const [row] = await getTestDb().select().from(chatMessages).where(eq(chatMessages.id, message.id));
+    expect(row?.deletedAt).toBeNull();
+  });
+
+  it("answers 404 for messages in rooms of unpublished editions, even to the sender and admins", async () => {
+    const server = await start();
+    const me = await createChatMember();
+    const admin = await createChatMember({ role: "admin" });
+    const draft = await createCuencada({ year: 2032, isPublished: false });
+    const hidden = await insertEditionRoom(draft.id, 2032);
+    const message = await insertMessage({ roomId: hidden.id, senderUserId: me.user.id });
+    for (const auth of [me.auth, admin.auth]) {
+      const response = await server.inject({ method: "DELETE", url: `/api/chat/messages/${message.id}`, ...auth });
+      expect(response.statusCode).toBe(404);
+    }
     const [row] = await getTestDb().select().from(chatMessages).where(eq(chatMessages.id, message.id));
     expect(row?.deletedAt).toBeNull();
   });

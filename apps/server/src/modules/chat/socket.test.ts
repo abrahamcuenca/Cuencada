@@ -20,6 +20,7 @@ import {
   sleep
 } from "../../../test/helpers/chat.js";
 import { getTestDb } from "../../../test/helpers/db.js";
+import { bearerFor, createSession } from "../../../test/helpers/factories.js";
 import { createCuencada } from "../../../test/helpers/media.js";
 import { chatHubOf, closeSocketsForSession, closeSocketsForUser } from "./index.js";
 import { MAX_BAD_FRAMES, WS_POLICY_VIOLATION } from "./socket.js";
@@ -65,17 +66,18 @@ function sendFrame(roomId: string, body: string, clientMessageId: string = rando
 }
 
 describe("chat WebSocket handshake", () => {
-  it("closes with 1008 for a disallowed or missing Origin, without burning the ticket", async () => {
+  it("closes with 1008 for a disallowed or missing Origin and burns the ticket", async () => {
     const server = await start();
     const me = await createChatMember();
-    const { ticket } = await issueTicket(server, me);
     for (const origin of ["https://evil.example", null]) {
+      const { ticket } = await issueTicket(server, me);
       const client = await open(server, { ticket, origin });
       expect((await client.closed).code).toBe(WS_POLICY_VIOLATION);
+      // The attempt burned it: the real origin cannot use it afterwards.
+      const retry = await open(server, { ticket });
+      expect((await retry.closed).code).toBe(WS_POLICY_VIOLATION);
     }
-    // The Origin check runs first, so the ticket is still usable from the real origin.
-    const ok = await open(server, { ticket });
-    await ok.waitFor(frameOf("presence"));
+    expect(hub(server).tickets.size).toBe(0);
   });
 
   it("burns a ticket on first use", async () => {
@@ -401,8 +403,11 @@ describe("chat socket lifecycle", () => {
     expect(closeSocketsForSession(server, me.sessionId)).toBe(1);
     expect((await first.closed).code).toBe(WsCloseCode.SessionRevoked);
 
-    const second = await join(server, me);
-    const { ticket } = await issueTicket(server, me);
+    // The closed session cannot register again (handshake-race guard), so use a new one.
+    const session = await createSession(me.user.id);
+    const again: ChatMember = { user: me.user, sessionId: session.id, auth: await bearerFor(me.user, session) };
+    const second = await join(server, again);
+    const { ticket } = await issueTicket(server, again);
     expect(closeSocketsForUser(server, me.user.id)).toBe(1);
     expect((await second.closed).code).toBe(WsCloseCode.SessionRevoked);
     const late = await open(server, { ticket });
