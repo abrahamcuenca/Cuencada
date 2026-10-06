@@ -64,13 +64,21 @@ Both live in `tests/e2e/harness/`, **outside `apps/server/src`**. They aren't co
 | Network | none (specs read the files) | loopback only. Presigned URLs carry an HMAC (per-process random secret) over method, key, expiry, content type and length. A PUT must match the signed `Content-Type` and the exact size. Expired or tampered URLs get 403. CORS is open only to the e2e origin. |
 
 - **Database guard** (`harness/dbGuard.ts`, Security L2). The harness runs `DROP DATABASE`, `CREATE DATABASE` and migrations, and an SSH tunnel to production Postgres may also listen on loopback. Every check runs **before** any DROP or CREATE:
-  1. The URL must be on a loopback host, the name must match `/^[a-z0-9_]+_e2e$/`, and the port must be the test container's **55432**. A different port is allowed only when `E2E_ALLOW_DB_PORT` names that exact port.
-  2. A **live check** on the cluster's `postgres` database: `current_setting('cuencada.test_cluster', true)` must equal `'cuencada-test'`.
+  1. The URL must be a plain `postgresql://` URL with **no query string and no fragment**. The driver turns query params into connection settings, so `?options=-c …` or `?cuencada.test_cluster=…` could forge the marker for one connection, and `?database=…` could swap the database. The host must be loopback, the name must match `/^[a-z0-9_]+_e2e$/`, and the port must be the test container's **55432** (another port only when `E2E_ALLOW_DB_PORT` names exactly that port).
+     - Every connection (drop/create, migrate, seed, API) uses **canonical URLs rebuilt from the parsed host, port, user, password and database**. The raw env value is never passed through.
+  2. A **live catalog check**: `pg_db_role_setting` must hold `cuencada.test_cluster=cuencada-test` as a database-level, all-roles setting on the `postgres` database. It is never read from `current_setting`, which a connection can set for itself.
+  3. After connecting for migrate, seed and the API, `current_database()` must equal the checked `_e2e` name.
   - The marker is a database-level setting (`ALTER DATABASE postgres SET cuencada.test_cluster = 'cuencada-test'`).
     - `scripts/test-db.sh up` sets it idempotently, including on a container that is already running. It doesn't recreate anything, so it stays backward compatible.
     - CI's e2e job sets it on its service container.
     - An older container gets the marker on its next `scripts/test-db.sh up`. Until then the harness refuses and says to run it. There is deliberately no weaker fallback such as a port or version heuristic.
-  - Unit tests: `harness/dbGuard.test.ts` (Vitest project `e2e-harness`, part of `pnpm test`) covers a wrong port refused, the override, a missing marker refused and a wrong marker refused.
+  - Tests: `harness/dbGuard.test.ts` (Vitest project `e2e-harness`, part of `pnpm test`):
+    - query strings refused (`options`, `database`, the marker param, the full reported bypass, an empty `?`); fragments refused
+    - credentials re-encoded into the canonical URL
+    - wrong port refused, the exact override accepted, non-loopback host and non-`_e2e` name refused, no password echoed
+    - a missing catalog marker refused; a `current_database()` mismatch refused
+    - an **integration test against the test container**: a GUC forged through the driver's `options` shows up in `current_setting`, but the catalog check still refuses
+  - Also checked live: the harness refuses the reported bypass URL before connecting.
 - **Seed environment allowlist** (`harness/seedEnv.ts`, Security L1). The product seed gets an explicit set of e2e-only constants: `NODE_ENV=test`, the guarded `DATABASE_URL`, an e2e admin email and temporary password, and fake `*.example.test` `SEED_*_URL` links. It never gets `process.env`, so vault seed values in an operator's shell can't reach the e2e database, screenshots or traces. `harness/seedEnv.test.ts` covers this.
 - TLS: `openssl` makes self-signed certificates per run, outside the repo. Only the test Chromium runs with `--ignore-certificate-errors` and `ignoreHTTPSErrors`.
 - `X-Forwarded-For` spoofing works here only because the client is on loopback. Production depends on nginx overwriting `X-Forwarded-For` (already on the cutover checklist). The e2e setup demonstrates why that item matters.

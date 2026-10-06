@@ -7,7 +7,7 @@
  * Guarded (`dbGuard.ts`): loopback host, `*_e2e` name, the test container's
  * port and the test-cluster marker, all checked before any DROP/CREATE.
  */
-import { assertE2eDatabaseUrl, assertTestClusterMarker } from "./dbGuard.js";
+import { assertCurrentDatabase, assertTestClusterMarker, type E2eDatabaseTarget, type GuardQuery } from "./dbGuard.js";
 import { E2E_SEED_ADMIN_TEMP_PASSWORD, e2eSeedEnv } from "./seedEnv.js";
 import { createDatabase, type Database } from "../../../apps/server/dist/db/client.js";
 import { runMigrations } from "../../../apps/server/dist/db/migrate.js";
@@ -29,13 +29,12 @@ import {
  * check of the test-cluster marker on the cluster's `postgres` database,
  * both before any DROP/CREATE (see `dbGuard.ts`).
  */
-async function recreateDatabase(databaseUrl: string): Promise<void> {
-  const name = assertE2eDatabaseUrl(databaseUrl);
-  const adminUrl = new URL(databaseUrl);
-  adminUrl.pathname = "/postgres";
-  const admin = createDatabase({ DATABASE_URL: adminUrl.href }, { max: 1 });
+async function recreateDatabase(target: E2eDatabaseTarget): Promise<void> {
+  const name = target.database;
+  // Canonical URL from parsed fields (no query string: nothing can forge settings per connection).
+  const admin = createDatabase({ DATABASE_URL: target.adminUrl }, { max: 1 });
   try {
-    await assertTestClusterMarker((sql) => admin.$client.unsafe(sql));
+    await assertTestClusterMarker(guardQuery(admin));
     // `name` matched /^[a-z0-9_]+_e2e$/ above, so quoting it is safe.
     await admin.$client.unsafe(`drop database if exists "${name}" with (force)`);
     await admin.$client.unsafe(`create database "${name}"`);
@@ -134,28 +133,43 @@ async function seedChatHistory(sql: Sql, senderId: string): Promise<void> {
   }
 }
 
+/** Adapter from a server DB client to the guard's query signature. */
+export function guardQuery(db: Database): GuardQuery {
+  return (sql, params = []) => db.$client.unsafe(sql, [...params]);
+}
+
 /**
  * Reset the e2e database and load the fixtures.
  *
- * @param databaseUrl - Loopback `*_e2e` database URL.
+ * @param target - Checked target from `resolveE2eDatabase` (canonical URLs only).
  */
-export async function prepareE2eDatabase(databaseUrl: string): Promise<void> {
-  await recreateDatabase(databaseUrl);
-  await runMigrations(databaseUrl);
+export async function prepareE2eDatabase(target: E2eDatabaseTarget): Promise<void> {
+  await recreateDatabase(target);
 
-  const db = createDatabase({ DATABASE_URL: databaseUrl }, { max: 1 });
+  // The migrator opens its own connection with the same canonical URL; check where it lands first.
+  const probe = createDatabase({ DATABASE_URL: target.url }, { max: 1 });
   try {
+    await assertCurrentDatabase(guardQuery(probe), target.database);
+  } finally {
+    await probe.close();
+  }
+  await runMigrations(target.url);
+
+  const db = createDatabase({ DATABASE_URL: target.url }, { max: 1 });
+  try {
+    await assertCurrentDatabase(guardQuery(db), target.database);
     // An explicit allowlist, never process.env: an operator shell may hold vault seed values (Security L1).
-    const seedEnv = e2eSeedEnv(databaseUrl);
+    const seedEnv = e2eSeedEnv(target.url);
     if (seedEnv.SEED_ADMIN_TEMP_PASSWORD !== E2E_SEED_ADMIN_TEMP_PASSWORD) throw new Error("e2e seed: unexpected seed env");
     await runSeed(db, resolveSeedOptions(seedEnv));
   } finally {
     await db.close();
   }
 
-  const fixtures = createDatabase({ DATABASE_URL: databaseUrl }, { max: 1 });
+  const fixtures = createDatabase({ DATABASE_URL: target.url }, { max: 1 });
   const sql = fixtures.$client;
   try {
+    await assertCurrentDatabase(guardQuery(fixtures), target.database);
     const hashes = { member: await hashPassword(MEMBER_PASSWORD), temp: await hashPassword(TEMP_ADMIN_PASSWORD) };
     const editionId = await seedFutureEdition(sql);
     for (const project of PROJECT_KEYS) {

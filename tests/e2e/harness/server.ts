@@ -18,7 +18,8 @@ import { buildApp } from "../../../apps/server/dist/app.js";
 import { loadConfig } from "../../../apps/server/dist/config.js";
 import { LocalObjectStore } from "./localObjectStore.js";
 import { FileSinkMailer } from "./mailSink.js";
-import { prepareE2eDatabase } from "./seed.js";
+import { assertCurrentDatabase, resolveE2eDatabase } from "./dbGuard.js";
+import { guardQuery, prepareE2eDatabase } from "./seed.js";
 import { createSelfSignedCert } from "./tls.js";
 import {
   API_PORT,
@@ -45,7 +46,9 @@ function assertTestOnly(): void {
 async function main(): Promise<void> {
   assertTestOnly();
   rmSync(E2E_RUN_DIR, { recursive: true, force: true });
-  await prepareE2eDatabase(E2E_DATABASE_URL);
+  // Every connection below uses the guard's canonical URLs, never the raw env value.
+  const target = resolveE2eDatabase(E2E_DATABASE_URL);
+  await prepareE2eDatabase(target);
 
   const config = loadConfig({
     NODE_ENV: "test",
@@ -58,7 +61,7 @@ async function main(): Promise<void> {
     // The preview proxy is on loopback; specs give each browser context its
     // own X-Forwarded-For so per-IP rate limits do not couple the journeys.
     TRUST_PROXY: "loopback",
-    DATABASE_URL: E2E_DATABASE_URL,
+    DATABASE_URL: target.url,
     JWT_SECRET: E2E_JWT_SECRET,
     // The preview is HTTPS, so the production cookie shape (`__Secure-`, Secure) applies.
     COOKIE_SECURE: "true",
@@ -71,6 +74,7 @@ async function main(): Promise<void> {
   const storage = new LocalObjectStore({ origin: STORAGE_ORIGIN, dir: STORAGE_DIR, allowedOrigin: WEB_ORIGIN });
   const storageServer = await storage.listen(STORAGE_PORT, createSelfSignedCert(TLS_DIR));
   const app = await buildApp(config, { mailer: new FileSinkMailer(MAIL_DIR, config.NODE_ENV), storage });
+  await assertCurrentDatabase(guardQuery(app.db), target.database);
 
   const shutdown = async (): Promise<void> => {
     storageServer.close();
