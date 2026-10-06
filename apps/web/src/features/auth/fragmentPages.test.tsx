@@ -1,15 +1,15 @@
 import { screen } from "@testing-library/react";
 import { http } from "msw";
-import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { apiUrl, statusState } from "../../../test/auth";
 import { renderApp } from "../../../test/renderApp";
 import { clearFragmentToken } from "../../shared/lib/fragmentToken";
 import { FRAGMENT_TOKEN as TOKEN } from "./testing/contractHandlers";
+import { createTestServer } from "../../../test/msw";
 
 // Token-consuming POSTs stay pending: these tests only check the URL scrubbing.
 const pending = (): Promise<Response> => new Promise<Response>(() => {});
-const server = setupServer(
+const server = createTestServer(
   http.post(apiUrl("/auth/magic-link/consume"), pending),
   http.post(apiUrl("/invites/inspect"), pending),
   http.post(apiUrl("/auth/email/verify"), pending)
@@ -25,7 +25,7 @@ afterEach(() => {
 
 describe("fragment-token pages", () => {
   it.each([
-    ["/entrar/enlace", "Entrando…"],
+    ["/entrar/enlace", "Entrar a la Cuencada"],
     ["/invitacion", "Te invitaron a la Cuencada"],
     ["/restablecer", "Nueva contraseña"],
     ["/verificar", "Verificar correo"]

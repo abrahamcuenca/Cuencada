@@ -1,14 +1,14 @@
 import { loginInputSchema, magicLinkRequestInputSchema } from "@cuencada/types";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { authenticatedState, makeUser, statusState } from "../../../../test/auth";
 import { renderApp } from "../../../../test/renderApp";
 import { INVALID_CREDENTIALS_MESSAGE, RATE_LIMITED_MESSAGE } from "../forms";
 import { apiError, contractRoute, okAccepted, tokenResponse } from "../testing/contractHandlers";
+import { createTestServer } from "../../../../test/msw";
 
-const server = setupServer();
+const server = createTestServer();
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
 afterEach(() => server.resetHandlers());
@@ -191,15 +191,44 @@ describe("LoginPage", () => {
     expect(await screen.findByRole("link", { name: "¿Olvidaste tu contraseña?" })).toHaveAttribute("href", "/recuperar");
   });
 
-  it("toggles the password visibility", async () => {
+  it("toggles the password visibility with a Mostrar/Ocultar label", async () => {
     renderLogin();
     const input = await screen.findByLabelText("Contraseña");
     expect(input).toHaveAttribute("type", "password");
     expect(input).toHaveAttribute("autocomplete", "current-password");
 
     await userEvent.click(screen.getByRole("button", { name: "Mostrar contraseña" }));
-
     expect(input).toHaveAttribute("type", "text");
+
+    await userEvent.click(screen.getByRole("button", { name: "Ocultar contraseña" }));
+    expect(input).toHaveAttribute("type", "password");
+  });
+
+  it("hides a revealed password again when the form is submitted", async () => {
+    server.use(contractRoute("post", "/auth/login", loginInputSchema, () => apiError("INVALID_CREDENTIALS")));
+    renderLogin();
+    await userEvent.type(await screen.findByLabelText("Correo electrónico"), "prima@example.com");
+    await userEvent.type(screen.getByLabelText("Contraseña"), PASSWORD);
+    await userEvent.click(screen.getByRole("button", { name: "Mostrar contraseña" }));
+    expect(screen.getByLabelText("Contraseña")).toHaveAttribute("type", "text");
+
+    await userEvent.click(screen.getByRole("button", { name: "Entrar" }));
+
+    expect(await screen.findByText(INVALID_CREDENTIALS_MESSAGE)).toBeInTheDocument();
+    expect(screen.getByLabelText("Contraseña")).toHaveAttribute("type", "password");
+  });
+
+  it("marks the email as the username for password managers", async () => {
+    renderLogin();
+
+    expect(await screen.findByLabelText("Correo electrónico")).toHaveAttribute("autocomplete", "username");
+  });
+
+  it("does not show the TopNav Entrar button on the login page itself", async () => {
+    renderLogin();
+
+    await screen.findByRole("heading", { name: "Entrar" });
+    expect(screen.queryByRole("link", { name: "Entrar" })).not.toBeInTheDocument();
   });
 
   it("sends an already logged-in user to the home page", async () => {

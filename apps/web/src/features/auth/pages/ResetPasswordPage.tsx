@@ -8,6 +8,8 @@ import { useToast } from "../../../shared/ui/Toast";
 import { authApi } from "../api";
 import styles from "../auth.module.css";
 import { loggedOut, selectAuthStatus } from "../authSlice";
+import { broadcastLogout } from "../authSync";
+import { SessionConflict, SessionGateWaiting, useSessionGate } from "../components/SessionConflict";
 import { AuthLayout } from "../components/AuthLayout";
 import { FormAlert } from "../components/FormAlert";
 import { PasswordField } from "../components/PasswordField";
@@ -58,6 +60,7 @@ export function ResetPasswordPage(): ReactNode {
   const [deadLink, setDeadLink] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const status = useAppSelector(selectAuthStatus);
+  const gate = useSessionGate();
 
   if (done) {
     return (
@@ -68,6 +71,11 @@ export function ResetPasswordPage(): ReactNode {
   }
   if (deadLink !== null) return <ResetLinkInvalid message={deadLink} />;
   if (token === null) return <ResetLinkInvalid message={LINK_MISSING_MESSAGE} />;
+  // [SEC] Never reset another account's password from inside a live session without an explicit choice.
+  if (gate === "waiting") return <SessionGateWaiting title="Nueva contraseña" />;
+  if (gate === "conflict") {
+    return <SessionConflict title="Nueva contraseña" action="cambiar la contraseña con este enlace" onLoggedOut={() => {}} onKeep={discard} />;
+  }
 
   const onSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -86,8 +94,11 @@ export function ResetPasswordPage(): ReactNode {
         await dispatch(authApi.endpoints.confirmPasswordReset.initiate(body, { track: false })).unwrap();
         setDone(true);
         discard();
-        // The server revoked every session, including this tab's.
-        if (status === "authenticated") dispatch(loggedOut());
+        // The server revoked every session, including this tab's (and the other tabs').
+        if (status === "authenticated") {
+          dispatch(loggedOut());
+          broadcastLogout();
+        }
         toast.show({ message: "Contraseña actualizada. Ya puedes entrar.", tone: "success" });
         void navigate("/entrar", { replace: true });
       } catch (error) {
@@ -106,7 +117,7 @@ export function ResetPasswordPage(): ReactNode {
     <AuthLayout title="Nueva contraseña" icon="🔑" lead="Crea una contraseña nueva para tu cuenta. Cerraremos tus sesiones abiertas por seguridad.">
       <form ref={formRef} className={styles.form} noValidate onSubmit={onSubmit}>
         <PasswordField label="Nueva contraseña" name="newPassword" autoComplete="new-password" showStrength value={newPassword} onChange={setNewPassword} error={errors.newPassword} />
-        <PasswordField label="Confirma tu contraseña" name="confirm" autoComplete="new-password" value={confirm} onChange={setConfirm} error={errors.confirm} />
+        <PasswordField label="Confirma tu contraseña" toggleNoun="confirmación" name="confirm" autoComplete="new-password" value={confirm} onChange={setConfirm} error={errors.confirm} />
         <FormAlert message={formError} />
         <div className={styles.actions}>
           <Button type="submit" fullWidth size="lg" loading={pending}>

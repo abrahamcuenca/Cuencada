@@ -137,7 +137,7 @@ export function LoginPage(): ReactNode {
               name="email"
               type="email"
               inputMode="email"
-              autoComplete="email"
+              autoComplete="username"
               autoCapitalize="none"
               spellCheck={false}
               placeholder="nombre@correo.com"

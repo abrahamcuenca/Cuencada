@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useAppSelector } from "../../../app/hooks";
 import { Button } from "../../../shared/ui/Button";
 import { useToast } from "../../../shared/ui/Toast";
@@ -10,6 +10,44 @@ import { describeAuthError } from "../forms";
 /** Toast after a verification email was requested. */
 export const VERIFICATION_SENT_MESSAGE = "Te enviamos un enlace nuevo. Revisa tu correo (y la carpeta de spam).";
 
+/** Client cooldown after a successful resend (Security L2). The server rate limit is the real control. */
+export const RESEND_COOLDOWN_MS = 60_000;
+
+// Shared by every resend button (banner and /verificar), so remounting does not reset it.
+let cooldownUntil = 0;
+
+/** Clears the resend cooldown (tests). */
+export function resetResendCooldown(): void {
+  cooldownUntil = 0;
+}
+
+/**
+ * @param ms - Remaining milliseconds.
+ * @returns e.g. "0:59".
+ */
+function formatCountdown(ms: number): string {
+  const seconds = Math.ceil(ms / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+/** Re-renders every second while a cooldown runs; returns the remaining ms (0 when none). */
+function useCooldownRemaining(): [number, () => void] {
+  const [now, setNow] = useState(() => Date.now());
+  const remaining = Math.max(0, cooldownUntil - now);
+
+  useEffect(() => {
+    if (remaining <= 0) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [remaining]);
+
+  const start = (): void => {
+    cooldownUntil = Date.now() + RESEND_COOLDOWN_MS;
+    setNow(Date.now());
+  };
+  return [remaining, start];
+}
+
 /** Props for {@link ResendVerificationButton}. */
 export interface ResendVerificationButtonProps {
   fullWidth?: boolean;
@@ -17,17 +55,20 @@ export interface ResendVerificationButtonProps {
 
 /**
  * Asks the server for a new verification email (`POST /auth/email/verify-request`).
- * Disabled while pending; reports the result in a toast.
+ * Disabled while pending and for {@link RESEND_COOLDOWN_MS} after a success,
+ * with a visible countdown ("Reenviar en 0:59").
  */
 export function ResendVerificationButton({ fullWidth = false }: ResendVerificationButtonProps): ReactNode {
   const toast = useToast();
   const [request, { isLoading }] = useRequestEmailVerificationMutation();
+  const [remaining, startCooldown] = useCooldownRemaining();
 
   const onClick = (): void => {
-    if (isLoading) return;
+    if (isLoading || remaining > 0) return;
     request()
       .unwrap()
       .then(() => {
+        startCooldown();
         toast.show({ message: VERIFICATION_SENT_MESSAGE, tone: "success" });
       })
       .catch((error: unknown) => {
@@ -37,8 +78,8 @@ export function ResendVerificationButton({ fullWidth = false }: ResendVerificati
   };
 
   return (
-    <Button variant="secondary" size="sm" fullWidth={fullWidth} loading={isLoading} onClick={onClick}>
-      Reenviar enlace
+    <Button variant="secondary" size="sm" fullWidth={fullWidth} loading={isLoading} disabled={remaining > 0} onClick={onClick}>
+      {remaining > 0 ? `Reenviar en ${formatCountdown(remaining)}` : "Reenviar enlace"}
     </Button>
   );
 }

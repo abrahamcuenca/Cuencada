@@ -1,21 +1,24 @@
 import { passwordResetConfirmInputSchema, passwordResetRequestInputSchema } from "@cuencada/types";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { authenticatedState, statusState } from "../../../../test/auth";
+import { HttpResponse, http } from "msw";
+import { apiUrl, authenticatedState, makeUser, statusState } from "../../../../test/auth";
 import { renderApp } from "../../../../test/renderApp";
 import { clearFragmentToken, readAndScrubFragmentToken } from "../../../shared/lib/fragmentToken";
 import { LINK_INVALID_MESSAGE, LINK_MISSING_MESSAGE, PASSWORDS_DIFFER_MESSAGE, RATE_LIMITED_MESSAGE } from "../forms";
 import { apiError, contractRoute, FRAGMENT_TOKEN, noContent, okAccepted } from "../testing/contractHandlers";
+import { cancelOnlineLogoutRetry } from "../session";
 import { RESET_REQUESTED_MESSAGE } from "./ForgotPasswordPage";
+import { createTestServer } from "../../../../test/msw";
 
-const server = setupServer();
+const server = createTestServer();
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
 afterEach(() => {
   server.resetHandlers();
   clearFragmentToken();
+  cancelOnlineLogoutRetry();
   window.history.replaceState(null, "", "/");
 });
 
@@ -90,14 +93,36 @@ describe("ResetPasswordPage", () => {
     expect(readAndScrubFragmentToken()).toBeNull();
   });
 
-  it("clears this tab's session after a reset, because the server revoked it", async () => {
-    server.use(contractRoute("post", "/auth/password-reset/confirm", passwordResetConfirmInputSchema, () => noContent()));
-    const { store, router } = openReset(authenticatedState());
+  it("asks a logged-in user to log out before using the reset link, then resets", async () => {
+    const confirmed = vi.fn();
+    server.use(
+      http.post(apiUrl("/auth/logout"), () => new HttpResponse(null, { status: 204 })),
+      contractRoute("post", "/auth/password-reset/confirm", passwordResetConfirmInputSchema, () => {
+        confirmed();
+        return noContent();
+      })
+    );
+    const { store, router } = openReset(authenticatedState(makeUser({ displayName: "Rosa Cuenca" })));
 
+    expect(await screen.findByText(/Ya tienes la sesión abierta como/)).toHaveTextContent("Rosa Cuenca");
+    expect(screen.queryByLabelText("Nueva contraseña")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Cerrar sesión y continuar" }));
+    await waitFor(() => expect(store.getState().auth.status).toBe("anonymous"));
     await submitReset();
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/entrar"));
-    expect(store.getState().auth.status).toBe("anonymous");
+    expect(confirmed).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the session and discards the reset link on Seguir como", async () => {
+    const { store, router } = openReset(authenticatedState(makeUser({ displayName: "Rosa Cuenca" })));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Seguir como Rosa Cuenca" }));
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect(store.getState().auth.status).toBe("authenticated");
+    window.history.replaceState(null, "", "/restablecer");
+    expect(readAndScrubFragmentToken()).toBeNull();
   });
 
   it("requires matching passwords of at least 12 characters", async () => {

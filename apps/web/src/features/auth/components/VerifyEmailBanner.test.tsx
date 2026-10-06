@@ -1,6 +1,5 @@
-import { screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { setupServer } from "msw/node";
 import { render } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { authenticatedState, makeUser, statusState } from "../../../../test/auth";
@@ -8,12 +7,17 @@ import { AppProviders } from "../../../app/providers";
 import { makeStore, type RootState } from "../../../app/store";
 import { RATE_LIMITED_MESSAGE } from "../forms";
 import { apiError, contractRoute, okAccepted } from "../testing/contractHandlers";
-import { VERIFICATION_SENT_MESSAGE, VerifyEmailBanner } from "./VerifyEmailBanner";
+import { RESEND_COOLDOWN_MS, resetResendCooldown, VERIFICATION_SENT_MESSAGE, VerifyEmailBanner } from "./VerifyEmailBanner";
+import { createTestServer } from "../../../../test/msw";
 
-const server = setupServer();
+const server = createTestServer();
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
-afterEach(() => server.resetHandlers());
+afterEach(() => {
+  server.resetHandlers();
+  resetResendCooldown();
+  vi.useRealTimers();
+});
 
 function renderBanner(preloaded: Pick<RootState, "auth">): void {
   render(
@@ -61,5 +65,33 @@ describe("VerifyEmailBanner", () => {
     await userEvent.click(screen.getByRole("button", { name: "Reenviar enlace" }));
 
     expect(await screen.findByText(RATE_LIMITED_MESSAGE)).toBeInTheDocument();
+  });
+
+  it("waits 60 seconds with a visible countdown before allowing another resend", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const requested = vi.fn();
+    server.use(
+      contractRoute("post", "/auth/email/verify-request", null, () => {
+        requested();
+        return okAccepted();
+      })
+    );
+    renderBanner(authenticatedState(makeUser({ emailVerified: false })));
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    await user.click(screen.getByRole("button", { name: "Reenviar enlace" }));
+    const cooling = await screen.findByRole("button", { name: /Reenviar en [01]:\d\d/ });
+    expect(cooling).toBeDisabled();
+
+    act(() => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(screen.getByRole("button", { name: /Reenviar en 0:[23]\d/ })).toBeDisabled();
+
+    act(() => {
+      vi.advanceTimersByTime(RESEND_COOLDOWN_MS);
+    });
+    expect(screen.getByRole("button", { name: "Reenviar enlace" })).toBeEnabled();
+    expect(requested).toHaveBeenCalledTimes(1);
   });
 });

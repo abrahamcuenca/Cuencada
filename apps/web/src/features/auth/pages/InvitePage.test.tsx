@@ -1,30 +1,33 @@
 import { inviteAcceptInputSchema, inviteInspectInputSchema } from "@cuencada/types";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { makeUser, statusState } from "../../../../test/auth";
+import { HttpResponse, http } from "msw";
+import { apiUrl, authenticatedState, makeUser, statusState } from "../../../../test/auth";
 import { renderApp } from "../../../../test/renderApp";
 import { clearFragmentToken, readAndScrubFragmentToken } from "../../../shared/lib/fragmentToken";
+import { cancelOnlineLogoutRetry } from "../session";
 import { INVITE_INVALID_MESSAGE, LINK_MISSING_MESSAGE, PASSWORDS_DIFFER_MESSAGE, RATE_LIMITED_MESSAGE } from "../forms";
 import { apiError, contractRoute, FRAGMENT_TOKEN, makeInvite, tokenResponse } from "../testing/contractHandlers";
 import { INVITE_ACCEPT_REJECTED_MESSAGE, INVITE_EMAIL_MISMATCH_MESSAGE, INVITE_EMAIL_TAKEN_MESSAGE } from "./InvitePage";
+import { createTestServer } from "../../../../test/msw";
 
-const server = setupServer();
+const server = createTestServer();
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
 afterEach(() => {
   server.resetHandlers();
   clearFragmentToken();
+  cancelOnlineLogoutRetry();
   window.history.replaceState(null, "", "/");
 });
 
 const PASSWORD = "mi frase secreta larga";
 
-function openInvite(invite = makeInvite()): ReturnType<typeof renderApp> {
+function openInvite(invite = makeInvite(), preloaded = statusState("anonymous")): ReturnType<typeof renderApp> {
   server.use(contractRoute("post", "/invites/inspect", inviteInspectInputSchema, () => Response.json(invite)));
   window.history.replaceState(null, "", `/invitacion#t=${FRAGMENT_TOKEN}`);
-  return renderApp("/invitacion", statusState("anonymous"));
+  return renderApp("/invitacion", preloaded);
 }
 
 async function fillForm({ email = "tia.lupe@example.com", password = PASSWORD, confirm = PASSWORD } = {}): Promise<void> {
@@ -40,7 +43,7 @@ describe("InvitePage", () => {
     openInvite();
 
     expect(await screen.findByText(/Jorge Cuenca te invitó/)).toBeInTheDocument();
-    expect(screen.getByText("t***@e***.com")).toBeInTheDocument();
+    expect(screen.getAllByText(/t\*\*\*@e\*\*\*\.com/)).toHaveLength(1);
     expect(screen.getByLabelText("Nombre completo")).toHaveValue("Lupe Cuenca");
     expect(screen.getByLabelText("Correo electrónico")).toHaveValue("");
     expect(screen.queryByText(/tia\.lupe@example\.com/)).not.toBeInTheDocument();
@@ -165,5 +168,31 @@ describe("InvitePage", () => {
     renderApp("/invitacion", statusState("anonymous"));
 
     expect(await screen.findByText(LINK_MISSING_MESSAGE)).toBeInTheDocument();
+  });
+
+  it("does not offer the accept form while another user is logged in", async () => {
+    const accepted = vi.fn();
+    server.use(
+      contractRoute("post", "/invites/accept", inviteAcceptInputSchema, () => {
+        accepted();
+        return tokenResponse();
+      })
+    );
+    const { store } = openInvite(makeInvite(), authenticatedState(makeUser({ displayName: "Rosa Cuenca" }), "token-A"));
+
+    expect(await screen.findByText(/Ya tienes la sesión abierta como/)).toHaveTextContent("Rosa Cuenca");
+    expect(screen.queryByRole("button", { name: "Crear mi cuenta" })).not.toBeInTheDocument();
+    expect(accepted).not.toHaveBeenCalled();
+    expect(store.getState().auth.accessToken).toBe("token-A");
+  });
+
+  it("shows the accept form after the user logs out from the interstitial", async () => {
+    server.use(http.post(apiUrl("/auth/logout"), () => new HttpResponse(null, { status: 204 })));
+    const { store } = openInvite(makeInvite(), authenticatedState(makeUser({ displayName: "Rosa Cuenca" })));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Cerrar sesión y continuar" }));
+
+    expect(await screen.findByRole("button", { name: "Crear mi cuenta" })).toBeInTheDocument();
+    expect(store.getState().auth.status).toBe("anonymous");
   });
 });

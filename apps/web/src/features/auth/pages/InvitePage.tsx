@@ -25,6 +25,7 @@ import {
   usePendingAction,
   validateForm
 } from "../forms";
+import { SessionConflict, SessionGateWaiting, useSessionGate } from "../components/SessionConflict";
 import { PORTAL_TIME_ZONE } from "../sessionDisplay";
 import { useConsumableFragmentToken } from "../useFragmentToken";
 
@@ -140,7 +141,7 @@ function AcceptInviteForm({ invite, token, onAccepted, onInvalid }: AcceptInvite
       </Field>
       <Field
         label="Correo electrónico"
-        hint={invite.emailMasked === null ? "Será tu usuario para entrar." : `Escribe completo el correo de la invitación (${invite.emailMasked}).`}
+        hint={invite.emailMasked === null ? "Será tu usuario para entrar." : "Escríbelo completo, tal como aparece en el correo de la invitación."}
         error={errors.email}
         required
       >
@@ -158,8 +159,8 @@ function AcceptInviteForm({ invite, token, onAccepted, onInvalid }: AcceptInvite
           />
         )}
       </Field>
-      <PasswordField label="Crea una contraseña" name="password" autoComplete="new-password" showStrength value={password} onChange={setPassword} error={errors.password} />
-      <PasswordField label="Confirma tu contraseña" name="confirm" autoComplete="new-password" value={confirm} onChange={setConfirm} error={errors.confirm} />
+      <PasswordField label="Crea una contraseña" toggleNoun="contraseña nueva" name="password" autoComplete="new-password" showStrength value={password} onChange={setPassword} error={errors.password} />
+      <PasswordField label="Confirma tu contraseña" toggleNoun="confirmación" name="confirm" autoComplete="new-password" value={confirm} onChange={setConfirm} error={errors.confirm} />
       <FormAlert message={formError} />
       {formError === INVITE_EMAIL_TAKEN_MESSAGE ? (
         <Link className={styles.link} to="/entrar">
@@ -184,6 +185,7 @@ function AcceptInviteForm({ invite, token, onAccepted, onInvalid }: AcceptInvite
  */
 export function InvitePage(): ReactNode {
   const dispatch = useAppDispatch();
+  const gate = useSessionGate();
   const { token, discard } = useConsumableFragmentToken();
   const started = useRef(false);
   const [state, setState] = useState<InspectState>(() =>
@@ -237,6 +239,22 @@ export function InvitePage(): ReactNode {
           Ir a Entrar
         </Button>
       </AuthLayout>
+    );
+  }
+
+  // [SEC] Accepting logs in as the new account: never while someone else is logged in (Security M1).
+  if (gate === "waiting") return <SessionGateWaiting title="Te invitaron a la Cuencada" />;
+  if (gate === "conflict") {
+    return (
+      <SessionConflict
+        title="Te invitaron a la Cuencada"
+        action="crear tu cuenta con esta invitación"
+        onLoggedOut={() => {}}
+        onKeep={() => {
+          tokenRef.current = null;
+          discard();
+        }}
+      />
     );
   }
 

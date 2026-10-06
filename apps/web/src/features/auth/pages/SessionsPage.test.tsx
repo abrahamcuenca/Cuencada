@@ -2,15 +2,15 @@ import type { SessionListItem } from "@cuencada/types";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { apiUrl, authenticatedState } from "../../../../test/auth";
 import { renderApp } from "../../../../test/renderApp";
 import { RATE_LIMITED_MESSAGE } from "../forms";
 import { cancelOnlineLogoutRetry } from "../session";
 import { apiError, contractRoute, makeSession, noContent } from "../testing/contractHandlers";
+import { createTestServer } from "../../../../test/msw";
 
-const server = setupServer();
+const server = createTestServer();
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
 afterEach(() => {

@@ -64,6 +64,10 @@ export const initialAuthState: AuthState = {
 };
 
 function applyCredentials(state: AuthState, action: PayloadAction<Credentials>): void {
+  // [SEC] A different account replaced the session without a logout (Security M1):
+  // bump the epoch like `loggedOut` does, so an in-flight refresh for the previous
+  // user is discarded. The store listener also resets the API cache.
+  if (state.user !== null && state.user.id !== action.payload.user.id) state.sessionEpoch += 1;
   state.accessToken = action.payload.accessToken;
   state.user = action.payload.user;
   state.status = "authenticated";
@@ -141,6 +145,15 @@ export const {
 
 /** Reducer for the `auth` key of the store. */
 export const authReducer = authSlice.reducer;
+
+/**
+ * @param previous - Auth state before the action.
+ * @param next - Auth state after it.
+ * @returns Whether the logged-in account changed from one user to another (A → B, no logout in between).
+ */
+export function didSwitchUser(previous: AuthState, next: AuthState): boolean {
+  return previous.user !== null && next.user !== null && previous.user.id !== next.user.id;
+}
 
 /** Minimal state shape the auth selectors need (avoids importing the store type). */
 export interface WithAuthState {

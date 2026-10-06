@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppDispatch } from "../../../app/hooks";
 import { Button } from "../../../shared/ui/Button";
@@ -8,39 +8,47 @@ import styles from "../auth.module.css";
 import { credentialsReceived } from "../authSlice";
 import { AuthLayout } from "../components/AuthLayout";
 import { FormAlert } from "../components/FormAlert";
+import { SessionConflict, SessionGateWaiting, useSessionGate } from "../components/SessionConflict";
 import { describeAuthError, LINK_INVALID_MESSAGE, LINK_MISSING_MESSAGE } from "../forms";
 import { CHANGE_PASSWORD_PATH } from "../guards";
 import { DEFAULT_AFTER_LOGIN_PATH } from "../redirect";
 import { useConsumableFragmentToken } from "../useFragmentToken";
 
-type ConsumeState = { kind: "consuming" } | { kind: "success" } | { kind: "failed"; message: string };
+type LinkState = { kind: "ready" } | { kind: "consuming" } | { kind: "success" } | { kind: "failed"; message: string };
+
+/** Heading of the confirm step. */
+export const MAGIC_LINK_TITLE = "Entrar a la Cuencada";
 
 /**
  * `/entrar/enlace#t=…`: exchanges the magic-link token for a session.
  *
- * The token is POSTed once (a ref guards against StrictMode's double effect,
- * which would burn the single-use token and report a false failure), then
- * dropped from memory whatever the outcome.
+ * [SEC] Never on load (Security M1):
+ * - anonymous visitors tap "Entrar" first, so a link scanner that runs
+ *   JavaScript cannot burn the single-use token and the login is deliberate;
+ * - a logged-in user sees the "ya tienes la sesión abierta" interstitial and
+ *   must log out explicitly before the token is used, so a forwarded link can
+ *   never silently switch accounts.
+ * The token is dropped from memory after the POST, whatever the outcome.
  */
 export function MagicLinkPage(): ReactNode {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
+  const gate = useSessionGate();
   const { token, discard } = useConsumableFragmentToken();
   const started = useRef(false);
-  const [state, setState] = useState<ConsumeState>(() =>
-    token === null ? { kind: "failed", message: LINK_MISSING_MESSAGE } : { kind: "consuming" }
-  );
+  const [state, setState] = useState<LinkState>(() => (token === null ? { kind: "failed", message: LINK_MISSING_MESSAGE } : { kind: "ready" }));
 
-  useEffect(() => {
+  const consume = (): void => {
     if (token === null || started.current) return;
     started.current = true;
+    setState({ kind: "consuming" });
 
-    const consume = async (): Promise<void> => {
+    const run = async (): Promise<void> => {
       try {
         const response = await dispatch(authApi.endpoints.consumeMagicLink.initiate({ token }, { track: false })).unwrap();
         discard();
-        dispatch(credentialsReceived({ accessToken: response.accessToken, user: response.user }));
         setState({ kind: "success" });
+        dispatch(credentialsReceived({ accessToken: response.accessToken, user: response.user }));
         void navigate(response.user.mustChangePassword ? CHANGE_PASSWORD_PATH : DEFAULT_AFTER_LOGIN_PATH, { replace: true });
       } catch (error) {
         discard();
@@ -48,8 +56,8 @@ export function MagicLinkPage(): ReactNode {
         if (message !== null) setState({ kind: "failed", message });
       }
     };
-    void consume();
-  }, [token, discard, dispatch, navigate]);
+    void run();
+  };
 
   if (state.kind === "failed") {
     return (
@@ -64,9 +72,27 @@ export function MagicLinkPage(): ReactNode {
     );
   }
 
+  if (state.kind === "consuming" || state.kind === "success") {
+    return (
+      <AuthLayout title={state.kind === "success" ? "¡Listo!" : "Entrando…"}>
+        <Spinner size="lg" label={state.kind === "success" ? "Sesión iniciada. Te llevamos al inicio…" : "Validando tu enlace…"} />
+      </AuthLayout>
+    );
+  }
+
+  if (gate === "waiting") return <SessionGateWaiting title={MAGIC_LINK_TITLE} />;
+  if (gate === "conflict") {
+    return <SessionConflict title={MAGIC_LINK_TITLE} action="entrar con este enlace" onLoggedOut={consume} onKeep={discard} />;
+  }
+
   return (
-    <AuthLayout title={state.kind === "success" ? "¡Listo!" : "Entrando…"}>
-      <Spinner size="lg" label={state.kind === "success" ? "Sesión iniciada. Te llevamos al inicio…" : "Validando tu enlace…"} />
+    <AuthLayout title={MAGIC_LINK_TITLE} icon="🔑" lead="Toca el botón para entrar con el enlace que pediste. Solo funciona una vez.">
+      <div className={styles.actions}>
+        <Button fullWidth size="lg" onClick={consume}>
+          Entrar
+        </Button>
+      </div>
+      <p className={styles.note}>¿No pediste este enlace? Cierra esta página; nadie entrará a tu cuenta sin él.</p>
     </AuthLayout>
   );
 }

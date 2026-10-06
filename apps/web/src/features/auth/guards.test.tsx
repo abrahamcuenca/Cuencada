@@ -1,8 +1,14 @@
 import { act, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { authenticatedState, makeUser, statusState } from "../../../test/auth";
 import { renderApp } from "../../../test/renderApp";
 import { passwordChangeRequired, tokenRefreshed } from "./authSlice";
+import { createTestServer } from "../../../test/msw";
+
+const server = createTestServer();
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
 
 describe("RequireAuth", () => {
   it.each(["idle", "restoring"] as const)("shows the session spinner instead of redirecting while %s", async (status) => {

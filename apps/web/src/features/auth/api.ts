@@ -107,6 +107,18 @@ export const authApi = baseApi.injectEndpoints({
         { type: "Session", id }
       ]
     }),
+    /**
+     * `POST /auth/logout-all` → 204: revokes every session of the user, this one
+     * included, and clears the refresh cookie (T1-BE, contract amendment on
+     * `wp/t1-be-auth`).
+     * TODO(T1-BE merge): switch "Cerrar sesión en todos los dispositivos" to this
+     * endpoint (then finish with a local `loggedOut` + broadcast); until then
+     * SessionsPage keeps revoke-others + `logout()`.
+     */
+    logoutAll: build.mutation<void, void>({
+      query: () => ({ url: "/auth/logout-all", method: "POST" }),
+      invalidatesTags: [{ type: "Session", id: "LIST" }]
+    }),
     /** `POST /auth/sessions/revoke-others` → 204. Every session except this one ends. */
     revokeOtherSessions: build.mutation<void, void>({
       query: () => ({ url: "/auth/sessions/revoke-others", method: "POST" }),

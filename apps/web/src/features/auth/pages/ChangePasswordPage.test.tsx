@@ -2,7 +2,6 @@ import { changePasswordInputSchema } from "@cuencada/types";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { apiUrl, authenticatedState, makeUser } from "../../../../test/auth";
 import { renderApp } from "../../../../test/renderApp";
@@ -10,8 +9,9 @@ import { PASSWORDS_DIFFER_MESSAGE, RATE_LIMITED_MESSAGE } from "../forms";
 import { cancelOnlineLogoutRetry } from "../session";
 import { apiError, contractRoute, tokenResponse } from "../testing/contractHandlers";
 import { WRONG_CURRENT_PASSWORD_MESSAGE } from "./ChangePasswordPage";
+import { createTestServer } from "../../../../test/msw";
 
-const server = setupServer();
+const server = createTestServer();
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
 afterEach(() => {
@@ -30,6 +30,16 @@ async function submitChange(currentLabel: string, current = TEMP, next = NEW, co
 }
 
 describe("ChangePasswordPage", () => {
+  it("names each show/hide toggle after its own field", async () => {
+    renderApp("/cambiar-contrasena", authenticatedState(makeUser({ mustChangePassword: true })));
+
+    expect(await screen.findByRole("button", { name: "Mostrar contraseña temporal" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mostrar nueva contraseña" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Mostrar confirmación" }));
+    expect(screen.getByRole("button", { name: "Ocultar confirmación" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Confirma la nueva")).toHaveAttribute("type", "text");
+  });
+
   it("completes the forced change: new token, gate cleared, back to the app", async () => {
     const changed = vi.fn();
     server.use(

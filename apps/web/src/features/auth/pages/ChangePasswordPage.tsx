@@ -123,9 +123,10 @@ export function ChangePasswordPage(): ReactNode {
           value={currentPassword}
           onChange={setCurrentPassword}
           error={errors.currentPassword}
+          toggleNoun={forced ? "contraseña temporal" : "contraseña actual"}
         />
         <PasswordField label="Nueva contraseña" name="newPassword" autoComplete="new-password" showStrength value={newPassword} onChange={setNewPassword} error={errors.newPassword} />
-        <PasswordField label="Confirma la nueva" name="confirm" autoComplete="new-password" value={confirm} onChange={setConfirm} error={errors.confirm} />
+        <PasswordField label="Confirma la nueva" toggleNoun="confirmación" name="confirm" autoComplete="new-password" value={confirm} onChange={setConfirm} error={errors.confirm} />
         <FormAlert message={formError} />
         <div className={styles.actions}>
           <Button type="submit" fullWidth size="lg" loading={pending}>
