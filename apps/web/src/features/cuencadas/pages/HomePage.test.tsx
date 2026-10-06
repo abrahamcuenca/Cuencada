@@ -54,7 +54,8 @@ describe("HomePage", () => {
     expect(timer).toHaveAccessibleName(/Faltan 3 días, 3 horas y 0 minutos/);
     expect(screen.getByRole("link", { name: /Ver programa/ })).toHaveAttribute("href", "/cuencada/2026#programa");
     expect(screen.getByText(/Mérida · Yucatán · 13—18 de septiembre de 2026/)).toBeInTheDocument();
-    expect(document.querySelector('[data-slot="rsvp"]')).not.toBeNull();
+    // T3: the RSVP card renders nothing (and calls no API) for visitors.
+    expect(document.querySelector('[data-slot="rsvp"]')).toBeNull();
     expect(screen.getByRole("complementary", { name: "Mensaje del día" })).toHaveTextContent("¡Faltan pocos días!");
   });
 

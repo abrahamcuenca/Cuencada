@@ -10,6 +10,8 @@
 import type { ReactNode } from "react";
 import { Button } from "../../../shared/ui/Button";
 import { Card } from "../../../shared/ui/Card";
+import { AttendeesCircles } from "../../rsvp/components/AttendeesCircles";
+import { RsvpCard } from "../../rsvp/components/RsvpCard";
 import styles from "./content.module.css";
 
 /** Props shared by every slot. */
@@ -18,22 +20,14 @@ export interface CuencadaSlotProps {
   year: number;
 }
 
-/** RSVP card (T3). Placeholder until T3 lands. */
+/** RSVP card (T3): renders nothing for visitors. */
 export function RsvpSlot({ year }: CuencadaSlotProps): ReactNode {
-  return (
-    <Card tone="sunken" padding="sm" className={styles.slot} data-slot="rsvp" icon="✅" title="Confirmar asistencia">
-      <p>Muy pronto podrás confirmar tu asistencia a la Cuencada {year} desde aquí.</p>
-    </Card>
-  );
+  return <RsvpCard year={year} />;
 }
 
-/** Attendee circles (T3). Placeholder until T3 lands. */
+/** Attendee circles (T3): renders nothing for visitors. */
 export function AttendeesSlot({ year }: CuencadaSlotProps): ReactNode {
-  return (
-    <Card tone="sunken" padding="sm" className={styles.slot} data-slot="attendees" icon="👨‍👩‍👧‍👦" title="¿Quién va?">
-      <p>Aquí verás a la familia que asistirá a la Cuencada {year}.</p>
-    </Card>
-  );
+  return <AttendeesCircles year={year} />;
 }
 
 /** Gallery preview (T4). Placeholder until T4 lands. */
