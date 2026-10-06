@@ -1,11 +1,12 @@
 import { inviteAcceptInputSchema, inviteInspectInputSchema } from "@cuencada/types";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { HttpResponse, http } from "msw";
 import { apiUrl, authenticatedState, makeUser, statusState } from "../../../../test/auth";
 import { renderApp } from "../../../../test/renderApp";
 import { clearFragmentToken, readAndScrubFragmentToken } from "../../../shared/lib/fragmentToken";
+import { loggedOut } from "../authSlice";
 import { cancelOnlineLogoutRetry } from "../session";
 import { INVITE_INVALID_MESSAGE, LINK_MISSING_MESSAGE, PASSWORDS_DIFFER_MESSAGE, RATE_LIMITED_MESSAGE } from "../forms";
 import { apiError, contractRoute, FRAGMENT_TOKEN, makeInvite, tokenResponse } from "../testing/contractHandlers";
@@ -184,6 +185,37 @@ describe("InvitePage", () => {
     expect(screen.queryByRole("button", { name: "Crear mi cuenta" })).not.toBeInTheDocument();
     expect(accepted).not.toHaveBeenCalled();
     expect(store.getState().auth.accessToken).toBe("token-A");
+  });
+
+  it("waits for the boot session check before inspecting, so its anonymous outcome cannot abort the inspect", async () => {
+    // Found by the WP-2.2 e2e run: refresh 401 → loggedOut → resetApiState aborted an
+    // inspect already in flight and the page stayed on "Revisando tu invitación…".
+    let release: () => void = () => {};
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const inspected = vi.fn();
+    server.use(
+      contractRoute("post", "/invites/inspect", inviteInspectInputSchema, async () => {
+        inspected();
+        await released;
+        return Response.json(makeInvite());
+      })
+    );
+    window.history.replaceState(null, "", `/invitacion#t=${FRAGMENT_TOKEN}`);
+    const { store } = renderApp("/invitacion", statusState("restoring"));
+
+    expect(await screen.findByText("Revisando tu invitación…")).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(inspected).not.toHaveBeenCalled();
+
+    act(() => {
+      store.dispatch(loggedOut());
+    });
+    release();
+
+    expect(await screen.findByRole("button", { name: "Crear mi cuenta" })).toBeInTheDocument();
+    expect(inspected).toHaveBeenCalledTimes(1);
   });
 
   it("shows the accept form after the user logs out from the interstitial", async () => {
