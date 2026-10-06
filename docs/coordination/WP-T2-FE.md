@@ -110,7 +110,7 @@ Owner: Frontend · Reviewers: TL, Sec · Branch: wp/t2-fe-cuencadas · PR: # (no
 5. **R5, WP-0.6/app (`AppLayout.tsx`, not mine):** the `TODO(T2)` "Programa" tab still points at `/cuencada/2026`. It should use `featured?.year ?? latestPast?.year` from `useGetCuencadaHomeQuery`, which is now available from `features/cuencadas/api`.
 6. **R6, WP-0.7 (`shared/ui/Countdown.tsx`):** `Countdown` computes with its own `getCountdown`, which duplicates `computeCountdown` in `shared/lib/dates.ts`. Please make it use `computeCountdown` and drop `getCountdown`. T2 already uses `computeCountdown` for ticking.
 7. **R7, admin GET filter:** `GET /admin/announcements` can't filter for portal-wide announcements only (`cuencadaId=null`). The web filters client-side. Consider `?scope=portal`.
-8. **R8, T4:** the Home memories mosaic uses the 4 static public photos in `public/images/fotos`. Replace it with admin-picked public highlights when T4 has them.
+8. **R8, T4:** ~~static Home mosaic~~ Done in WP-0.8c: family photos are members-only (owner decision). Visitors get the brand art and a login teaser; verified members see `GalleryPreview` of the latest past edition. Admin-picked highlights can still come later.
 9. **R9, WP-2.4 CSP:** add `frame-src 'self' https://weatherwidget.io`. Nothing else third-party is loaded by T2 pages.
 10. **R10, WP-0.1:** under heavy machine load, lazy-route tests can exceed Testing Library's 1 s `findBy` default. My three route-level test files raise `asyncUtilTimeout` to 5 s locally. A shared setting in `test/setup.ts` may be worth it.
 
@@ -157,3 +157,11 @@ Owner: Frontend · Reviewers: TL, Sec · Branch: wp/t2-fe-cuencadas · PR: # (no
   - **Note for other tracks:** every page now issues `GET /cuencadas/home` from the layout. Test files with `onUnhandledRequest: "error"` and no handler for it log "[MSW] Error … GET /api/cuencadas/home" (25 occurrences, all tests passing). Add `http.get(apiUrl("/cuencadas/home"), () => HttpResponse.json(makeMemoriesHome()))` to silence it.
   - Initial JS is 166.88 KB gzip (was 166.52), because `cuencadas/api.ts` is now in the layout chunk.
 - 2026-10-06: Clima redesigned twice at the orchestrator's request: script injection → sandboxed same-origin page → direct weatherwidget.io frame with the postMessage config. The Security L6 clamp is 150–250 px.
+- 2026-10-06, **WP-0.8c**:
+  - `idFromHash()` (in `lib/format.ts`) catches the `URIError` of a malformed fragment.
+  - Daily message: `useZonedToday` / `useOnNewDay` set one timer to the next local midnight in the edition's timezone (re-checked on `visibilitychange`) and refetch Home and the year page, so the new day's message appears.
+  - Countdown: `countdownInstants()` lets the server status drive "¡YA LLEGÓ!" (`active`) and the past message; `upcoming` still follows the clock.
+  - Itinerary `tags` show as chips on the Programa (plain text); the admin activity form has a tags field (contract rules: 6 max, 24 chars, case-insensitive duplicates skipped, Enter adds).
+  - Admin: "Asistencia y confirmaciones" link on the edit page; short Mensajes import-mode labels ("Agregar o actualizar" / "Reemplazar todo") with the detail in the hint; forecast hint with an example `https://forecast7.com/es/…` URL and a client-side error for `www.` or other hosts.
+  - Home "Últimos momentos" no longer uses the static family photos: visitors see the logo and "Inicia sesión para ver las fotos de la familia" (→ `/entrar`), unverified members a verify teaser, verified members `GalleryPreview`.
+  - Screenshots: new `t2/programa-etiquetas-{375,1280}`; `home-memories-*` re-taken with no family photos. 0 px overflow at 320/375/1280.

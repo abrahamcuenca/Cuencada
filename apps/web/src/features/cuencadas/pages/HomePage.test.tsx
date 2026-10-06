@@ -113,7 +113,7 @@ describe("HomePage", () => {
     expect(within(memories).getByText("Inicia sesión para ver las fotos de la familia")).toBeInTheDocument();
     expect(within(memories).getByRole("link", { name: "Entrar" })).toHaveAttribute("href", "/entrar");
     const sources = Array.from(document.querySelectorAll("img")).map((img) => img.getAttribute("src") ?? "");
-    expect(sources.some((src) => src.includes("/images/fotos") || src.includes("bucket"))).toBe(false);
+    expect(sources.some((src) => /\/fotos\//.test(src) || src.includes("bucket"))).toBe(false);
   });
 
   it("asks members with an unverified email to verify before showing photos", async () => {

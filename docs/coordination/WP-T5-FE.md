@@ -62,3 +62,13 @@ Built on `origin/main` against the profile contract (`packages/types/src/profile
 - `pnpm test`: 100 files, 1088 tests, all passing (web: 50 files, 453). New: `ProfilePage.test.tsx` (18), `profileForm.test.ts` (7), `DirectoryPage.test.tsx` (15), `contactLinks.test.ts` (16). One full run had 5 server DB tests time out at ~35 s under machine load (other agents share the box); they passed on the re-run.
 - `pnpm build` OK. Size: **169.59 kB gzip** initial JS (budget 190). Lazy chunks: ProfilePage 5.65 kB, DirectoryPage 4.62 kB gzip.
 - **Screenshots** in `docs/ux/screenshots/t5/` at 375 and 1280: `perfil` (with avatar, "Quitar foto" and the directory switch), `directorio` (list) and `directorio-detalle`. Fixtures and screenshots use fictional people only (surname "Ejemplo", branches "Rama Norte/Sur/Costa", `example.com` emails, drawn avatars). 0 px horizontal overflow and 0 elements outside the viewport at 320, 375 and 1280.
+
+## Review log
+- 2026-10-06, **WP-0.8c**:
+  - "Aparecer en el directorio" help adds "Tus mensajes en el chat seguirán mostrando tu nombre y foto."
+  - "Cargar más" that gets a 400 (stale cursor, e.g. after hiding myself) drops the extra pages and reloads page 1.
+  - **Phones:** no country code is ever assumed. `+`/`00`/11–15 digits are international (WhatsApp + `tel:+…`); shorter numbers are local (`tel:` as typed, no `wa.me`, note "Este número no tiene código de país…"). Buttons show the number ("WhatsApp +52 …", "Llamar al …"). Request: store E.164 server-side.
+  - City filter: prefix suggestions (accent/case-insensitive) from the rows already loaded.
+  - Avatar: unmount also aborts the confirm request; no bucket origin → refused before any intent; photos above 2048 px on the long edge are re-encoded as a 2048 px JPEG (q 0.9) first, so 48–200 MP phone photos pass the server's 24 MP cap; the size limit is checked after that.
+  - 403 states use the shared `classifyAccessDenial` (also `EMAIL_UNVERIFIED`).
+  - Screenshot `t5/directorio-telefonos-{375,1280}` (local number, no WhatsApp).

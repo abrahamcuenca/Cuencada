@@ -187,7 +187,7 @@ Outside the feature, for Security L2 (round 1, authorized by the orchestrator fo
   - `AdminMediaPage` 3.0 KB gzip
 - `pnpm --filter @cuencada/web size`: initial JS **167.56 KB gzip** (budget 190 KB). No gallery code is in the initial chunk; only the lazy route entries are.
 - **Screenshots** are in `docs/ux/screenshots/t4/`: `grid`, `lightbox`, `upload-sheet`, `upload-progress` and `admin-queue`, each at 375 and 1280.
-  - They were taken with headless Chromium against the Vite dev server, with `/api/**` stubbed, placeholder images from `public/images/fotos/`, and a fake XHR (72%, failed, 18%, waiting).
+  - They were taken with headless Chromium against the Vite dev server, with `/api/**` stubbed and a fake XHR (72%, failed, 18%, waiting). Re-taken in WP-0.8c with generated gradient placeholders (no people) and real XHRs routed by Playwright (one failed, the rest in flight).
   - Horizontal overflow measured **0 px** for all five screens at 320, 375 and 1280.
 
 ## Open questions (→ orchestrator)
@@ -219,3 +219,11 @@ Outside the feature, for Security L2 (round 1, authorized by the orchestrator fo
   - **TL 8:** `GalleryPreview` uses `selectPasswordChangeRequired`.
   - **Nits:** `pollingInterval` is computed directly (no `useEffect`/`setPoll`), and the panel title id uses `useId()`. The Lightbox "⋯" sheet is left for later.
   - Screenshots were not retaken. The visible changes are only the missing ✕ while "Verificando…" and the hidden live region.
+- 2026-10-06, **WP-0.8c**:
+  - `/galeria` (no year) picks the default from `CuencadaSummary.hasMedia` in one `GET /cuencadas` (`galleryYearsFrom`); the per-year probes are gone.
+  - `VITE_MEDIA_UPLOAD_ORIGIN` is checked **before** an intent: unset → the upload button is disabled with "Por ahora no se pueden subir fotos ni videos. Avísale a un administrador." (plus a dev-only hint naming the variable), the empty-state action is hidden, and the upload manager refuses without calling the API (no orphan `pending_upload` rows).
+  - Upload help adds "Las cámaras de acción y drones pueden guardar ubicación en el video." and "Reducimos fotos muy grandes para subirlas más rápido."
+  - **Large photos:** `readImageSize()` reads JPEG/PNG/WebP dimensions from the header; photos above 40 MP are decoded (`createImageBitmap`, EXIF orientation), drawn to ≤ 24 MP on an OffscreenCanvas in a one-shot module worker (main-thread fallback), re-encoded as JPEG q 0.92 (EXIF stripped) and the intent carries the new type/size/`.jpg` name. One image at a time; bitmaps closed. Smaller photos and videos are untouched; a decode failure fails the row in Spanish without an intent. Exported from `features/gallery` for T5 avatars.
+  - `/admin/media?cola=pending|reported|hidden` selects the tab (unknown → pending) and stays in sync; the T8 dashboard photo cards deep-link to it.
+  - The gallery list and preview show the shared verify / no-access states on 403.
+  - Screenshots `grid`, `lightbox`, `upload-sheet`, `upload-progress`, `admin-queue` re-taken with generated placeholders.
