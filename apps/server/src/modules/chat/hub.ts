@@ -90,6 +90,18 @@ export interface ChatHubDeps {
   log: FastifyBaseLogger;
 }
 
+/**
+ * Test seams. Production never sets them; tests use them to force races
+ * deterministically.
+ */
+export interface ChatHubHooks {
+  /**
+   * Awaited in `openChatSocket` right after a socket is registered and before
+   * the post-registration DB re-check (e.g. to revoke the session there).
+   */
+  afterRegister?: (connection: ChatConnection) => Promise<void>;
+}
+
 function addTo(map: Map<string, Set<ChatConnection>>, key: string, connection: ChatConnection): Set<ChatConnection> {
   const set = map.get(key) ?? new Set<ChatConnection>();
   set.add(connection);
@@ -123,6 +135,8 @@ export class ChatHub {
   private recheckRunning: Promise<number> | null = null;
   /** Session ids closed recently → forget-after time (ms). */
   private readonly revokedSessions = new Map<string, number>();
+  /** Test seams ({@link ChatHubHooks}); empty in production. */
+  readonly hooks: ChatHubHooks = {};
 
   constructor(private readonly deps: ChatHubDeps) {}
 
@@ -153,7 +167,7 @@ export class ChatHub {
    */
   add(connection: ChatConnection): boolean {
     const { sessionId, userId } = connection.principal;
-    if ((this.revokedSessions.get(sessionId) ?? 0) > this.deps.clock.now().getTime()) {
+    if (this.isRecentlyRevoked(sessionId)) {
       connection.close(WsCloseCode.SessionRevoked, CloseReason.SessionEnded);
       return false;
     }
@@ -205,12 +219,16 @@ export class ChatHub {
     reason: string = CloseReason.SessionEnded
   ): number {
     this.tickets.revokeSession(sessionId);
-    this.revokedSessions.set(sessionId, this.deps.clock.now().getTime() + REVOKED_MEMORY_MS);
+    this.rememberRevoked(sessionId);
     return this.closeAllOf([...(this.bySession.get(sessionId) ?? [])], code, reason);
   }
 
   /**
-   * Close every socket of a user and burn their unused tickets.
+   * Close every socket of a user and burn their unused tickets. Every session
+   * id the hub knows for the user (live sockets and unused tickets) is also
+   * remembered for {@link REVOKED_MEMORY_MS}, like {@link closeSession}, so a
+   * handshake of one of those sessions that is past its DB check cannot
+   * register afterwards.
    *
    * @returns How many sockets were closed.
    */
@@ -219,8 +237,20 @@ export class ChatHub {
     code: number = WsCloseCode.SessionRevoked,
     reason: string = CloseReason.SessionEnded
   ): number {
-    this.tickets.revokeUser(userId);
-    return this.closeAllOf([...(this.byUser.get(userId) ?? [])], code, reason);
+    const sessionIds = this.tickets.revokeUser(userId);
+    const connections = [...(this.byUser.get(userId) ?? [])];
+    for (const connection of connections) sessionIds.add(connection.principal.sessionId);
+    for (const sessionId of sessionIds) this.rememberRevoked(sessionId);
+    return this.closeAllOf(connections, code, reason);
+  }
+
+  /** True while `sessionId` is in the recently-revoked memory (tests and diagnostics). */
+  isRecentlyRevoked(sessionId: string): boolean {
+    return (this.revokedSessions.get(sessionId) ?? 0) > this.deps.clock.now().getTime();
+  }
+
+  private rememberRevoked(sessionId: string): void {
+    this.revokedSessions.set(sessionId, this.deps.clock.now().getTime() + REVOKED_MEMORY_MS);
   }
 
   /**

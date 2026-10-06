@@ -11,7 +11,7 @@ import {
   type Page,
   pageSchema
 } from "@cuencada/types";
-import { and, desc, eq, gte, lte, type SQL, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lt, type SQL, sql } from "drizzle-orm";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { auditLogs, users } from "../../db/schema/index.js";
 import { decodeCursor, encodeCursor } from "../media/cursor.js";
@@ -44,7 +44,8 @@ const adminAuditRoutes: FastifyPluginAsyncZod = async (app) => {
       if (query.entityType !== undefined) conditions.push(eq(auditLogs.entityType, query.entityType));
       if (query.entityId !== undefined) conditions.push(eq(auditLogs.entityId, query.entityId));
       if (query.from !== undefined) conditions.push(gte(auditLogs.createdAt, new Date(query.from)));
-      if (query.to !== undefined) conditions.push(lte(auditLogs.createdAt, new Date(query.to)));
+      // `to` is exclusive (half-open range; see auditLogQuerySchema).
+      if (query.to !== undefined) conditions.push(lt(auditLogs.createdAt, new Date(query.to)));
       if (query.cursor !== undefined) {
         const cursor = decodeCursor(query.cursor);
         conditions.push(

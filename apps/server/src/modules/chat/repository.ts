@@ -111,6 +111,7 @@ export interface LastMessageRecord {
   id: string;
   body: string;
   createdAt: Date;
+  senderUserId: string | null;
   senderDisplayName: string | null;
 }
 
@@ -126,6 +127,7 @@ export async function lastMessagesFor(db: DbOrTx, roomIds: readonly string[]): P
       id: chatMessages.id,
       body: chatMessages.body,
       createdAt: chatMessages.createdAt,
+      senderUserId: chatMessages.senderUserId,
       senderDisplayName: users.displayName
     })
     .from(chatMessages)

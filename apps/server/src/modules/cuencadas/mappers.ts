@@ -73,7 +73,7 @@ export function toDailyMessage(row: Pick<DailyMessageRow, "id" | "date" | "messa
  * Card for lists.
  *
  * @param row - Cuencada row.
- * @param hasMedia - Result of the `media_items` EXISTS.
+ * @param hasMedia - At least one visible gallery item (media module's `countVisibleMediaByCuencada`).
  * @param now - Current instant for the status.
  */
 export function toCuencadaSummary(row: CuencadaRow, hasMedia: boolean, now: Date): CuencadaSummary {

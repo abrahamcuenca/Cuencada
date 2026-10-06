@@ -63,6 +63,8 @@ export type WsCloseCode = (typeof WsCloseCode)[keyof typeof WsCloseCode];
 /** The newest live (not deleted) message of a room, truncated for the room list. */
 export interface ChatRoomLastMessage {
   id: string;
+  /** `null` if the sender's account was removed. Lets the UI say "Tú:" for the caller's own message. */
+  senderUserId: string | null;
   /** `null` if the sender's account was removed. */
   senderDisplayName: string | null;
   /** At most `CHAT_PREVIEW_MAX_LENGTH` characters; a trailing `…` marks truncation. */
@@ -72,6 +74,7 @@ export interface ChatRoomLastMessage {
 
 export const chatRoomLastMessageSchema = z.object({
   id: idSchema,
+  senderUserId: idSchema.nullable(),
   senderDisplayName: z.string().max(80).nullable(),
   preview: z.string().max(CHAT_PREVIEW_MAX_LENGTH),
   createdAt: dateTimeSchema
@@ -266,6 +269,18 @@ export const wsServerMessageDeletedSchema = z.object({
   roomId: idSchema,
   messageId: idSchema
 });
+/**
+ * The room's preview changed without a new message: sent to every socket after
+ * the message shown as `lastMessage` was deleted. Replace the room's
+ * `lastMessage`/`lastMessageAt` with these (`null` when no live message is
+ * left). Unread counts are not included; refetch rooms if they matter.
+ */
+export const wsServerRoomPreviewSchema = z.object({
+  type: z.literal("room_preview"),
+  roomId: idSchema,
+  lastMessageAt: dateTimeSchema.nullable(),
+  lastMessage: chatRoomLastMessageSchema.nullable()
+});
 export const wsServerTypingSchema = z.object({
   type: z.literal("typing"),
   roomId: idSchema,
@@ -291,6 +306,7 @@ export const wsServerPongSchema = z.object({
 export const wsServerMessageSchema = z.discriminatedUnion("type", [
   wsServerMessageEventSchema,
   wsServerMessageDeletedSchema,
+  wsServerRoomPreviewSchema,
   wsServerTypingSchema,
   wsServerPresenceSchema,
   wsServerErrorSchema,

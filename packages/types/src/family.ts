@@ -21,15 +21,29 @@ export const FAMILY_TREE_MAX_DEPTH = 3;
 /** A person in the tree. */
 export interface Person {
   id: string;
-  /** Linked account, or `null` for people without one (children, ancestors…). */
+  /**
+   * Linked account, or `null` for people without one (children, ancestors…).
+   * Also `null` for other members when the linked account is not listed in
+   * the directory (`listedInDirectory = false`); only that member and admins
+   * see the link then.
+   */
   userId: string | null;
   fullName: string;
   nickname: string | null;
   familyBranch: string | null;
+  /**
+   * `null` for **living** people unless the viewer is that person (linked
+   * account) or an admin; deceased people always show it (when recorded).
+   */
   birthYear: number | null;
+  /** Only for deceased people. */
   deathYear: number | null;
   deceased: boolean;
-  /** Presigned avatar URL (from the linked profile) or `null`. */
+  /**
+   * Presigned avatar URL (from the linked profile; 256 px on `Person`, 64 px
+   * on `PersonSummary`) or `null`. `null` under the same unlisted rule as
+   * `userId`, and for other members when the account is disabled.
+   */
   avatarUrl: string | null;
 }
 

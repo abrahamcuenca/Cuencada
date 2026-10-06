@@ -22,6 +22,7 @@ import {
 import { getTestDb } from "../../../test/helpers/db.js";
 import { bearerFor, createSession } from "../../../test/helpers/factories.js";
 import { createCuencada } from "../../../test/helpers/media.js";
+import { REVOKED_MEMORY_MS } from "./hub.js";
 import { chatHubOf, closeSocketsForSession, closeSocketsForUser } from "./index.js";
 import { MAX_BAD_FRAMES, WS_POLICY_VIOLATION } from "./socket.js";
 
@@ -357,6 +358,47 @@ describe("chat WebSocket frames", () => {
       });
     }
   });
+
+  it("broadcasts an updated room_preview only when the deleted message was the room's preview", async () => {
+    const server = await start();
+    const ana = await createChatMember({ displayName: "Ana" });
+    const beto = await createChatMember({ displayName: "Beto" });
+    const room = await insertGlobalRoom();
+    const older = await insertMessage({ roomId: room.id, senderUserId: beto.user.id, body: "primero", createdAt: new Date(Date.now() - 60_000) });
+    const middle = await insertMessage({ roomId: room.id, senderUserId: ana.user.id, body: "segundo", createdAt: new Date(Date.now() - 30_000) });
+    const newest = await insertMessage({ roomId: room.id, senderUserId: ana.user.id, body: "tercero", createdAt: new Date() });
+    const a = await join(server, ana);
+    const b = await join(server, beto);
+    const remove = async (messageId: string): Promise<void> => {
+      const response = await server.inject({ method: "DELETE", url: `/api/chat/messages/${messageId}`, ...ana.auth });
+      expect(response.statusCode).toBe(204);
+    };
+
+    // Not the preview: message_deleted only.
+    await remove(middle.id);
+    await b.waitFor(frameOf("message_deleted", (frame) => frame.messageId === middle.id));
+    // The preview: the room falls back to the previous live message, with its sender id.
+    await remove(newest.id);
+    for (const client of [a, b]) {
+      expect(await client.waitFor(frameOf("room_preview"))).toEqual({
+        type: "room_preview",
+        roomId: room.id,
+        lastMessageAt: older.createdAt.toISOString(),
+        lastMessage: {
+          id: older.id,
+          senderUserId: beto.user.id,
+          senderDisplayName: "Beto",
+          preview: "primero",
+          createdAt: older.createdAt.toISOString()
+        }
+      });
+    }
+    expect(b.ofType("room_preview")).toHaveLength(1);
+    // The last live message: the preview becomes empty.
+    const response = await server.inject({ method: "DELETE", url: `/api/chat/messages/${older.id}`, ...beto.auth });
+    expect(response.statusCode).toBe(204);
+    await a.waitFor(frameOf("room_preview", (frame) => frame.lastMessage === null && frame.lastMessageAt === null));
+  });
 });
 
 describe("chat socket lifecycle", () => {
@@ -412,6 +454,53 @@ describe("chat socket lifecycle", () => {
     expect((await second.closed).code).toBe(WsCloseCode.SessionRevoked);
     const late = await open(server, { ticket });
     expect((await late.closed).code).toBe(WS_POLICY_VIOLATION);
+  });
+
+  it("remembers every session of a user closed as a whole (sockets and unused tickets) for 60 s", async () => {
+    const clock = new TestClock();
+    const server = await start({ clock });
+    const me = await createChatMember();
+    await join(server, me);
+    const ticketOnly = await createSession(me.user.id);
+    const withTicket: ChatMember = { user: me.user, sessionId: ticketOnly.id, auth: await bearerFor(me.user, ticketOnly) };
+    await issueTicket(server, withTicket);
+    const untouched = await createSession(me.user.id);
+
+    expect(closeSocketsForUser(server, me.user.id)).toBe(1);
+
+    expect(hub(server).isRecentlyRevoked(me.sessionId)).toBe(true);
+    expect(hub(server).isRecentlyRevoked(ticketOnly.id)).toBe(true);
+    expect(hub(server).isRecentlyRevoked(untouched.id)).toBe(false);
+    clock.advance(REVOKED_MEMORY_MS + 1);
+    expect(hub(server).isRecentlyRevoked(me.sessionId)).toBe(false);
+  });
+
+  it("closes a socket whose session was revoked between registration and the post-registration DB re-check", async () => {
+    const server = await start();
+    const me = await createChatMember();
+    const other = await createChatMember();
+    const watcher = await join(server, other);
+    // Force the race: the revocation commits after the first check and after
+    // the hub registered the socket, without anyone calling closeSession.
+    hub(server).hooks.afterRegister = async (connection) => {
+      if (connection.principal.sessionId !== me.sessionId) return;
+      await getTestDb()
+        .update(sessions)
+        .set({ revokedAt: new Date(), revokedReason: "logout" })
+        .where(eq(sessions.id, me.sessionId));
+    };
+    const { ticket } = await issueTicket(server, me);
+
+    const client = await open(server, { ticket });
+
+    expect((await client.closed).code).toBe(WsCloseCode.SessionRevoked);
+    expect(hub(server).isRecentlyRevoked(me.sessionId)).toBe(true);
+    await watcher.waitFor(frameOf("presence", (frame) => frame.onlineUserIds.join() === other.user.id));
+    expect(
+      hub(server)
+        .connections()
+        .map((connection) => connection.principal.userId)
+    ).toEqual([other.user.id]);
   });
 
   it("terminates sockets that miss a heartbeat pong", async () => {
