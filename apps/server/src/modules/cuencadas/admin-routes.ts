@@ -20,7 +20,7 @@ import {
   type UpdateCuencadaInput,
   updateCuencadaInputSchema
 } from "@cuencada/types";
-import { count, desc, eq } from "drizzle-orm";
+import { count, desc, eq, sql } from "drizzle-orm";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { cuencadas, dailyMessages } from "../../db/schema/index.js";
@@ -101,7 +101,8 @@ const cuencadaAdminRoutes: FastifyPluginAsyncZod = async (app) => {
               slug: String(input.year),
               startsAt: new Date(input.startsAt),
               endsAt: new Date(input.endsAt),
-              rsvpDeadline: toDateOrNull(input.rsvpDeadline)
+              rsvpDeadline: toDateOrNull(input.rsvpDeadline),
+              firstPublishedAt: input.isPublished ? app.clock.now() : null
             })
             .returning();
           if (created === undefined) throw new Error("create cuencada: insert returned no row");
@@ -192,9 +193,14 @@ const cuencadaAdminRoutes: FastifyPluginAsyncZod = async (app) => {
             throw new AppError("VALIDATION", message, { details: [{ path: "endsAt", message }] });
           }
 
+          // first_published_at is set on the first publish only; unpublish/republish keeps the original instant.
+          const firstPublished =
+            input.isPublished === true
+              ? { firstPublishedAt: sql`coalesce(${cuencadas.firstPublishedAt}, ${app.clock.now().toISOString()}::timestamptz)` }
+              : {};
           const [updated] = await tx
             .update(cuencadas)
-            .set(updateValues(input))
+            .set({ ...updateValues(input), ...firstPublished })
             .where(eq(cuencadas.id, current.id))
             .returning();
           if (updated === undefined) throw new AppError("NOT_FOUND");
@@ -259,7 +265,7 @@ const cuencadaAdminRoutes: FastifyPluginAsyncZod = async (app) => {
         if (current.isPublished) {
           throw new AppError("CONFLICT", "Solo se pueden eliminar borradores. Despublica la Cuencada primero.");
         }
-        const blocker = await draftDeleteBlocker(tx, current.id);
+        const blocker = await draftDeleteBlocker(tx, current);
         if (blocker !== null) throw new AppError("CONFLICT", blocker);
         await tx.delete(cuencadas).where(eq(cuencadas.id, current.id));
         await recordAudit(tx, {
