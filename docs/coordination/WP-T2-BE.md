@@ -104,3 +104,9 @@ No breaking change for request senders. Response consumers gain fields (`timezon
   - **Import `updated`** excludes unchanged messages, which are not rewritten either. Tested.
   - **Docs:** T7 handoff (edition rooms must stay undeletable), `first_published_at` request for 0002, the `hasMedia` move to `countVisibleMediaByCuencada`, and the status vs countdown note for T2-FE.
   - `pnpm lint && pnpm typecheck && pnpm test && pnpm build`: green (64 files, 642 tests; typecheck run with `--force`).
+- 2026-10-06: **Follow-up after migration 0002 (#17)**, branch `wp/t2-be-followup`:
+  - Every publish path (create with `isPublished: true`, and PATCH `isPublished: true`) sets `first_published_at = coalesce(first_published_at, <app.clock now>)`. Unpublish and republish keep the original. Tested.
+  - The delete guard requires `first_published_at is null` **and** no edition chat room (and no media). A `TODO(T2-BE)` notes that the chat-room check can be dropped once 0002's backfill and this deploy have run in production. Request 3 is done.
+  - `ItineraryItem.tags`: create/PATCH persist them, and public/member/admin responses include them. Tested end to end.
+  - `itineraryTagSchema` (contract, authorized) now NFC-normalizes, rejects bidi/invisible characters (`hasUnsafeChars`), and `itineraryTagsSchema` de-duplicates case-insensitively (`es` locale, first spelling kept) before the 6-tag limit. Contract tests added.
+  - The published-year lock (409) is unchanged.

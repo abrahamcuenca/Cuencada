@@ -31,6 +31,12 @@ export {
   renderEmail,
 } from "./render.js";
 export {
+  AdminAccountChange,
+  AdminAccountChangedEmail,
+  type AdminAccountChangedEmailProps,
+  buildAdminAccountChangedContent,
+} from "./templates/AdminAccountChangedEmail.js";
+export {
   buildInviteContent,
   InviteEmail,
   type InviteEmailProps,
