@@ -14,6 +14,7 @@ import { AuthLayout } from "../components/AuthLayout";
 import { FormAlert } from "../components/FormAlert";
 import { PasswordField } from "../components/PasswordField";
 import {
+  breachedPasswordError,
   confirmError,
   describeAuthError,
   type FieldErrors,
@@ -102,6 +103,13 @@ export function ResetPasswordPage(): ReactNode {
         toast.show({ message: "Contraseña actualizada. Ya puedes entrar.", tone: "success" });
         void navigate("/entrar", { replace: true });
       } catch (error) {
+        // The server keeps the link valid after a breached password: stay on the form.
+        const breached = breachedPasswordError(error, "newPassword");
+        if (breached !== undefined) {
+          setErrors({ newPassword: breached });
+          focusInvalid();
+          return;
+        }
         const message = describeAuthError(error, { TOKEN_INVALID: LINK_INVALID_MESSAGE });
         if (message === LINK_INVALID_MESSAGE) {
           discard();

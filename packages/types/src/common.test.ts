@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ValidationIssueCode,
   apiErrorSchema,
   assetUrlSchema,
   cursorQuerySchema,
@@ -105,5 +106,19 @@ describe("apiErrorSchema", () => {
   it("rejects more than 100 details", () => {
     const details = Array.from({ length: 101 }, (_, index) => ({ path: `lines.${index}`, message: "x" }));
     expect(apiErrorSchema.safeParse({ error: { code: "VALIDATION", message: "x", details } }).success).toBe(false);
+  });
+
+  it("keeps a known detail code", () => {
+    const detail = { path: "password", message: "x", code: ValidationIssueCode.PASSWORD_BREACHED };
+    const parsed = apiErrorSchema.parse({ error: { code: "VALIDATION", message: "x", details: [detail] } });
+    expect(parsed.error.details).toEqual([detail]);
+  });
+
+  it("parses an unknown detail code (forward compatibility) but bounds its length", () => {
+    const future = { path: "password", message: "Mensaje nuevo.", code: "PASSWORD_TOO_SIMILAR_TO_EMAIL" };
+    const parsed = apiErrorSchema.parse({ error: { code: "VALIDATION", message: "x", details: [future] } });
+    expect(parsed.error.details).toEqual([future]);
+    const huge = { error: { code: "VALIDATION", message: "x", details: [{ ...future, code: "X".repeat(65) }] } };
+    expect(apiErrorSchema.safeParse(huge).success).toBe(false);
   });
 });

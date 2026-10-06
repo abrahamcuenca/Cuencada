@@ -135,7 +135,8 @@ Still open:
   it is aligned first.
 - **L4 (platform):** the CI `services.postgres.image` is `postgres:16-alpine`,
   pinned by tag. Actions are SHA-pinned; pin this image by digest too.
-- **L5 (backend, pre-launch):** there is no breached-password check (ASVS
+- **L5 (backend, pre-launch): fixed in WP-2.3c** (HIBP k-anonymity, option 2
+  below, fail-open). Was: no breached-password check (ASVS
   2.1.7) on password set, change or reset.
   - Option 1: an offline list of the top 100k passwords, shipped with the
     server.
@@ -162,7 +163,7 @@ WP-2.4 prepared every item below; **the owner applies them** following
 - [x] Memory: video cap 150 MB (may return to 300 MB after the resize, no migration); systemd `MemoryHigh=700M`/`MemoryMax=900M` + hardening drop-in (`infra/systemd/`); OOM/restart alert queries. [ ] Owner resizes server_1 to 2 GB, then installs the drop-in.
 - [ ] Resend: DNS records (runbook § Resend DNS), domain verified, sending-only key. `admin@cuencada.com` must receive mail (the seeded admin starts unverified).
 - [x] Legacy URLs redirected by nginx. [ ] `git rm` the root `index.html`, `cuencada2026.html`, `images/`, `mensajes.json`, root `canciones/` in a PR after cutover (owner: history stays).
-- [ ] **Pre-launch:** breached-password check on password set, change and reset (WP-2.3 L5, ASVS 2.1.7): being built in a separate WP; launch waits for it.
+- [x] **Pre-launch:** breached-password check on password set, change and reset (WP-2.3 L5, ASVS 2.1.7). Done in WP-2.3c (HIBP k-anonymity, fail-open). [ ] Owner confirms `server_1` egress to `api.pwnedpasswords.com` (runbook § 1) and enables the "breach check unavailable" alert (runbook § 10).
 - [x] **Pre-launch:** stricter open invites (#36).
 - [ ] Minimum client version mechanism, then "bump min client version" in the release checklist for security fixes (runbook § 11).
 - [ ] Git history still contains the pre-sweep real/real-looking family names and the legacy links; owner decided "sweep forward, no history rewrite". Revisit only if the owner asks.

@@ -54,6 +54,7 @@ PRs #1–#30 are merged. Deferred and cross-track items live in [`backlog.md`](b
 | T9 | PWA (generateSW, public-only API cache, logout purge) | Frontend | TL, Sec | wp/t9-pwa | #29 | merged |
 | 2.2 | E2E + mobile quality gates [SEC] | Frontend + UI/UX | TL, Sec | wp/2.2-e2e | #37 | in review |
 | 2.3 | Security audit [SEC] | Security | TL | wp/2.3-security-audit | | in review |
+| 2.3c | Breached-password check (ASVS 2.1.7) [SEC] | Backend | TL, Sec | wp/2.3c-breached-passwords | | in review |
 | 2.4–2.5 | Cutover (see backlog checklist) | Tech Lead | Sec | — | | todo |
 
 ## WP file template

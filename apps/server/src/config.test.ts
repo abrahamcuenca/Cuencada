@@ -129,6 +129,20 @@ describe("loadConfig", () => {
     expect(problemsOf({ ...DEV_ENV, MEDIA_REQUIRE_APPROVAL: "yes" })[0]).toMatch(/^MEDIA_REQUIRE_APPROVAL:/);
   });
 
+  it("defaults PASSWORD_BREACH_CHECK to on outside test and off under test", () => {
+    expect(loadConfig(PROD_ENV)).toMatchObject({ PASSWORD_BREACH_CHECK: "on", PASSWORD_BREACH_MIN_COUNT: 1 });
+    expect(loadConfig(DEV_ENV).PASSWORD_BREACH_CHECK).toBe("on");
+    expect(loadConfig({ ...DEV_ENV, NODE_ENV: "test" }).PASSWORD_BREACH_CHECK).toBe("off");
+    expect(loadConfig({ ...PROD_ENV, PASSWORD_BREACH_CHECK: " OFF " }).PASSWORD_BREACH_CHECK).toBe("off");
+    expect(loadConfig({ ...PROD_ENV, PASSWORD_BREACH_CHECK: "" }).PASSWORD_BREACH_CHECK).toBe("on");
+  });
+
+  it("rejects an invalid PASSWORD_BREACH_CHECK or threshold", () => {
+    expect(problemsOf({ ...PROD_ENV, PASSWORD_BREACH_CHECK: "maybe" })[0]).toMatch(/^PASSWORD_BREACH_CHECK:/);
+    expect(problemsOf({ ...PROD_ENV, PASSWORD_BREACH_MIN_COUNT: "0" })[0]).toMatch(/^PASSWORD_BREACH_MIN_COUNT:/);
+    expect(loadConfig({ ...PROD_ENV, PASSWORD_BREACH_MIN_COUNT: "5" }).PASSWORD_BREACH_MIN_COUNT).toBe(5);
+  });
+
   it("rejects refresh idle days above the absolute lifetime", () => {
     expect(problemsOf({ ...DEV_ENV, REFRESH_IDLE_DAYS: "100", REFRESH_ABSOLUTE_DAYS: "90" })).toEqual([
       "REFRESH_IDLE_DAYS: must not exceed REFRESH_ABSOLUTE_DAYS"

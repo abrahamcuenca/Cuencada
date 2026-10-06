@@ -1,6 +1,7 @@
-import { loginInputSchema } from "@cuencada/types";
+import { loginInputSchema, PASSWORD_BREACHED_MESSAGE } from "@cuencada/types";
 import { describe, expect, it } from "vitest";
 import {
+  breachedPasswordError,
   CONFIRM_REQUIRED_MESSAGE,
   confirmError,
   describeAuthError,
@@ -43,6 +44,25 @@ describe("confirmError", () => {
   it("reports mismatched passwords and accepts matching ones", () => {
     expect(confirmError("abc", "abd")).toBe(PASSWORDS_DIFFER_MESSAGE);
     expect(confirmError("abc", "abc")).toBeUndefined();
+  });
+});
+
+describe("breachedPasswordError", () => {
+  const validation = (details: unknown[]): unknown => ({
+    status: 400,
+    data: { error: { code: "VALIDATION", message: "Revisa los datos enviados.", details } }
+  });
+
+  it("returns the Spanish message for a PASSWORD_BREACHED detail on the field", () => {
+    const error = validation([{ path: "newPassword", message: "x", code: "PASSWORD_BREACHED" }]);
+    expect(breachedPasswordError(error, "newPassword")).toBe(PASSWORD_BREACHED_MESSAGE);
+    expect(breachedPasswordError(error, "password")).toBeUndefined();
+  });
+
+  it("ignores an unknown detail code but still parses the error (older client, newer server)", () => {
+    const error = validation([{ path: "newPassword", message: "Otra razón.", code: "SOME_FUTURE_CODE" }]);
+    expect(breachedPasswordError(error, "newPassword")).toBeUndefined();
+    expect(describeAuthError(error)).toBe("Revisa los datos enviados.");
   });
 });
 

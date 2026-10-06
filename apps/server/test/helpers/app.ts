@@ -1,5 +1,6 @@
 import { type App, type AppDeps, buildApp } from "../../src/app.js";
 import { type AppConfig, loadConfig } from "../../src/config.js";
+import type { RangeFetcher } from "../../src/lib/breachedPasswords.js";
 import type { Clock } from "../../src/lib/clock.js";
 import type { LogStream } from "../../src/logging.js";
 import type { Mailer } from "../../src/lib/mailer/types.js";
@@ -17,6 +18,11 @@ export interface TestAppOverrides {
   clock?: Clock;
   /** Capture the app's pino output (tests log nothing otherwise). */
   logStream?: LogStream;
+  /**
+   * Fake HIBP range fetcher (the only network boundary of the breach check).
+   * Pair it with `config: { PASSWORD_BREACH_CHECK: "on" }`; tests default to `off`.
+   */
+  breachFetcher?: RangeFetcher;
   /**
    * Register extra routes before `ready()` (test-only fixtures such as a
    * route that throws). They inherit the real guard and error handler.
@@ -59,6 +65,7 @@ export async function createTestApp(overrides: TestAppOverrides = {}): Promise<A
   };
   if (overrides.clock !== undefined) deps.clock = overrides.clock;
   if (overrides.logStream !== undefined) deps.logStream = overrides.logStream;
+  if (overrides.breachFetcher !== undefined) deps.breachFetcher = overrides.breachFetcher;
   const app = await buildApp(createTestConfig(overrides.config), deps);
   try {
     if (overrides.routes !== undefined) await overrides.routes(app);

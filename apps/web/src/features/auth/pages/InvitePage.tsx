@@ -15,6 +15,7 @@ import { AuthLayout } from "../components/AuthLayout";
 import { FormAlert } from "../components/FormAlert";
 import { PasswordField } from "../components/PasswordField";
 import {
+  breachedPasswordError,
   confirmError,
   describeAuthError,
   type FieldErrors,
@@ -109,6 +110,13 @@ function AcceptInviteForm({ invite, token, onAccepted, onInvalid }: AcceptInvite
         onAccepted();
         void navigate("/", { replace: true });
       } catch (error) {
+        // The invite is not consumed by a breached password: stay on the form.
+        const breached = breachedPasswordError(error, "password");
+        if (breached !== undefined) {
+          setErrors({ password: breached });
+          focusInvalid();
+          return;
+        }
         const message = describeAuthError(error, {
           INVITE_INVALID: invite.emailMasked === null ? INVITE_INVALID_MESSAGE : INVITE_ACCEPT_REJECTED_MESSAGE,
           CONFLICT: INVITE_EMAIL_TAKEN_MESSAGE

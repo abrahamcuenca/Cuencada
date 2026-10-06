@@ -94,7 +94,7 @@ These results were judgment calls, all accepted:
 | M2 (was L2) | **Medium** (A01) | Unverified members could read the gallery (photos, uploader names) and the member edition details (WhatsApp/album links), and could upload and report. That is inconsistent with ADR 0001's "every other PII read". | **Fixed** by owner decision: `requireVerifiedEmail` on every media route and on `/cuencadas/:year/members`; announcements and the RSVP summary stay open (`verified-gating.test.ts`, ADR 0001). Residual: a leaked open invite lets a stranger verify their own mailbox (threat model A2; stricter open invites planned). |
 | L3 | Low | The API CSP from `contentSecurityPolicy(config)` (`base-uri 'self'`, `frame-src 'self' …`) is looser than the documented SPA policy. | WP-2.4 checklist: paste the `csp.md` string verbatim |
 | L4 | Low | The CI Postgres service image is pinned by tag, not digest. | Backlog |
-| L5 | Low | No breached-password check (ASVS 2.1.7). | Pre-launch list (backlog) |
+| L5 | Low | No breached-password check (ASVS 2.1.7). | **Fixed** (WP-2.3c): HIBP k-anonymity check on invite accept, change and reset (`lib/breachedPasswords.ts`); fails open with a warn log. New egress: `api.pwnedpasswords.com` (threat model TB7). |
 | L6 | Low | Stored photos and avatars carried `private, max-age=31536000, immutable`, so they stayed in a shared browser's disk cache for a year after logout. | **Fixed:** `private, max-age=3600`, no longer than the presigned GET (`cache-lifetimes.test.ts`). The residual hour is accepted (threat model A9). |
 
 No High was found.

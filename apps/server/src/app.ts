@@ -13,6 +13,7 @@ import { z } from "zod";
 import type { AppConfig, TrustProxySetting } from "./config.js";
 import { createDatabase, type Database } from "./db/client.js";
 import { type LogStream, loggerOptions } from "./logging.js";
+import { type BreachedPasswordChecker, createBreachedPasswordChecker, type RangeFetcher } from "./lib/breachedPasswords.js";
 import { type Clock, systemClock } from "./lib/clock.js";
 import { AppError } from "./lib/errors.js";
 import { createJobQueue, type JobQueue } from "./lib/jobs.js";
@@ -44,6 +45,8 @@ declare module "fastify" {
     storage: StorageService;
     clock: Clock;
     jobs: JobQueue;
+    /** Breached-password check (HIBP k-anonymity); `skipped` when `PASSWORD_BREACH_CHECK=off`. */
+    breachedPasswords: BreachedPasswordChecker;
   }
 }
 
@@ -65,6 +68,8 @@ export interface AppDeps {
   clock?: Clock;
   /** Capture logs (tests). Without it, tests log nothing. */
   logStream?: LogStream;
+  /** HIBP range fetcher (tests inject a fake; production uses the global `fetch`). */
+  breachFetcher?: RangeFetcher;
 }
 
 const SERVICE_NAME = "cuencada-api";
@@ -174,6 +179,15 @@ async function configureApp(app: App, config: AppConfig, deps: AppDeps, owned: O
     await releaseOwned(owned);
   });
   app.decorate("mailer", deps.mailer ?? createMailer(config, app.log));
+  app.decorate(
+    "breachedPasswords",
+    createBreachedPasswordChecker({
+      enabled: config.PASSWORD_BREACH_CHECK === "on",
+      minCount: config.PASSWORD_BREACH_MIN_COUNT,
+      logger: app.log,
+      ...(deps.breachFetcher === undefined ? {} : { fetcher: deps.breachFetcher })
+    })
+  );
 
   await registerSecurity(app);
   await app.register(rateLimit, {

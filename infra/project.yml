@@ -124,6 +124,9 @@ server:
     MAIL_FROM: "Cuencada <no-reply@cuencada.com>"
     SUPPORT_EMAIL: admin@cuencada.com
     MEDIA_REQUIRE_APPROVAL: "false"
+    # Breached-password check (WP-2.3c): needs outbound HTTPS to api.pwnedpasswords.com; fails open.
+    PASSWORD_BREACH_CHECK: "on"
+    PASSWORD_BREACH_MIN_COUNT: "1"
     S3_ENDPOINT: https://us-southeast-1.linodeobjects.com
     S3_REGION: us-southeast-1
     # Not a secret (it is in the CSP and every presigned URL). Same value as

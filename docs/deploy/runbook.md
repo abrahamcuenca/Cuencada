@@ -53,7 +53,7 @@ unset VAR
 |---|---|---|
 | Home mosaic replaced, so there are no public family photos (CUTOVER GATE) | Done in #34 | — |
 | Stricter open invites: 5/10 uses, 72 h, admin alert per acceptance (threat model A2) | Done in #36 | — |
-| **Breached-password check** on set, change and reset (WP-2.3 L5, ASVS 2.1.7) | **In progress in a separate WP.** Launch waits for it | that WP |
+| **Breached-password check** on set, change and reset (WP-2.3 L5, ASVS 2.1.7) | Done in WP-2.3c (#39). Needs egress to `api.pwnedpasswords.com` (§ 1 step 10) | — |
 | Threat model updated for #35/#36 and WP-2.4 | Done in WP-2.4 | — |
 | WP-2.3 open findings: L1 (zod `jitless`, web), L4 (CI image digest) | Low. Not blocking, backlog | — |
 | **Acleron platform:** `nginx.site_template` and `server.credentials`, on branch `cuencada-nginx-credentials` in the local `acleron-platform` checkout (head `46d71eb`) | Written and tested (66/66); Security and TL approved. **O reviews it, merges or checks it out, and pushes it** | O |
@@ -132,6 +132,22 @@ unset VAR
    ssh -N -L ${TUNNEL_PORT}:127.0.0.1:5432 <db server> &   # see § 3 for the alternative through server_1
    pg_isready -h 127.0.0.1 -p ${TUNNEL_PORT}
    ```
+10. **O:** egress from `server_1` to the breached-password API (WP-2.3c),
+    read-only. The API sends only a 5-character SHA-1 prefix to
+    `https://api.pwnedpasswords.com/range/<prefix>`:
+    ```sh
+    ssh server_1 'curl -sS -o /dev/null -w "%{http_code}\n" --max-time 5 \
+      -H "Add-Padding: true" -H "User-Agent: cuencada" https://api.pwnedpasswords.com/range/21BD1'
+    ```
+    - Expect `200`. The firewall must allow outbound HTTPS (443) to that host
+      (Cloudflare-fronted, so allow by hostname or allow 443 egress). nginx
+      needs no change: the call is server-side and not proxied.
+    - If it is blocked, nothing breaks: the check **fails open** and logs
+      `password.breach_check_unavailable` (alert in § 10). But the check is
+      then effectively off, so fix egress before launch.
+    - The one-off seed (§ 6) runs the same check from the operator's machine
+      and needs the same egress (or `PASSWORD_BREACH_CHECK=off` for that run,
+      with a freshly generated password).
 
 ## 2. Rotate the legacy links (before seeding)
 
@@ -527,6 +543,7 @@ So the legacy files live only in **the repo and its history**.
 | Process restarts / crash loop | `count_over_time({unit="cuencada-server.service"} \|= "Main process exited" [10m])`, or `{syslog_identifier="systemd"} \|= "cuencada-server.service: Scheduled restart job"` | ≥ 1 warn, ≥ 3 page |
 | OOM kill | `{syslog_identifier="kernel"} \|= "oom-kill" \|= "cuencada-server"` | > 0 |
 | Fatal / failed start | `{unit="cuencada-server.service"} \| json \| level >= 50` | > 0 |
+| Breached-password check unavailable (WP-2.3c: egress blocked or HIBP down, so the check is effectively off) | `count_over_time({unit="cuencada-server.service"} \| json \| event="password.breach_check_unavailable" [5m])` | > 0 for 15 min (three consecutive 5-min windows; the `unavailableTotal` counter keeps rising). One isolated warn is not actionable |
 | Chat at capacity | `{unit="cuencada-server.service"} \|= "chat socket refused: at capacity"` | > 0 |
 | 5xx rate (nginx) | `sum(count_over_time({filename="/var/log/nginx/cuencada-access.log"} \|~ "\" 5\\d\\d " [5m]))` | > 10 |
 

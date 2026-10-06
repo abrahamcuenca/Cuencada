@@ -1,4 +1,4 @@
-import { passwordResetConfirmInputSchema, passwordResetRequestInputSchema } from "@cuencada/types";
+import { PASSWORD_BREACHED_MESSAGE, passwordResetConfirmInputSchema, passwordResetRequestInputSchema } from "@cuencada/types";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -7,7 +7,7 @@ import { apiUrl, authenticatedState, makeUser, statusState } from "../../../../t
 import { renderApp } from "../../../../test/renderApp";
 import { clearFragmentToken, readAndScrubFragmentToken } from "../../../shared/lib/fragmentToken";
 import { EMAIL_MAY_BE_SLOW_HINT, LINK_INVALID_MESSAGE, LINK_MISSING_MESSAGE, PASSWORDS_DIFFER_MESSAGE, RATE_LIMITED_MESSAGE } from "../forms";
-import { apiError, contractRoute, FRAGMENT_TOKEN, noContent, okAccepted } from "../testing/contractHandlers";
+import { apiError, breachedPasswordResponse, contractRoute, FRAGMENT_TOKEN, noContent, okAccepted } from "../testing/contractHandlers";
 import { cancelOnlineLogoutRetry } from "../session";
 import { RESET_REQUESTED_MESSAGE } from "./ForgotPasswordPage";
 import { createTestServer } from "../../../../test/msw";
@@ -147,6 +147,28 @@ describe("ResetPasswordPage", () => {
 
     expect(await screen.findByText(LINK_INVALID_MESSAGE)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Pedir otro enlace" })).toHaveAttribute("href", "/recuperar");
+  });
+
+  it("shows the breached-password message on the field and keeps the link for a retry", async () => {
+    let attempts = 0;
+    server.use(
+      contractRoute("post", "/auth/password-reset/confirm", passwordResetConfirmInputSchema, () => {
+        attempts += 1;
+        return attempts === 1 ? breachedPasswordResponse("newPassword") : noContent();
+      })
+    );
+    const { router } = openReset();
+
+    await submitReset();
+
+    expect(await screen.findByText(PASSWORD_BREACHED_MESSAGE)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Nueva contraseña")).toHaveFocus());
+    expect(screen.getByLabelText("Nueva contraseña")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.queryByText(LINK_INVALID_MESSAGE)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Guardar contraseña" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/entrar"));
+    expect(attempts).toBe(2);
   });
 
   it("shows the rate-limit message on 429 and keeps the form", async () => {

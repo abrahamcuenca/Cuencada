@@ -1,4 +1,4 @@
-import { changePasswordInputSchema } from "@cuencada/types";
+import { changePasswordInputSchema, PASSWORD_BREACHED_MESSAGE } from "@cuencada/types";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
@@ -7,7 +7,7 @@ import { apiUrl, authenticatedState, makeUser } from "../../../../test/auth";
 import { renderApp } from "../../../../test/renderApp";
 import { PASSWORDS_DIFFER_MESSAGE, RATE_LIMITED_MESSAGE } from "../forms";
 import { cancelOnlineLogoutRetry } from "../session";
-import { apiError, contractRoute, tokenResponse } from "../testing/contractHandlers";
+import { apiError, breachedPasswordResponse, contractRoute, tokenResponse } from "../testing/contractHandlers";
 import { WRONG_CURRENT_PASSWORD_MESSAGE } from "./ChangePasswordPage";
 import { createTestServer } from "../../../../test/msw";
 
@@ -128,6 +128,20 @@ describe("ChangePasswordPage", () => {
 
     expect(await screen.findByText("La contraseña es demasiado común.")).toBeInTheDocument();
     expect(screen.queryByText(WRONG_CURRENT_PASSWORD_MESSAGE)).not.toBeInTheDocument();
+  });
+
+  it("shows the breached-password message on the new-password field and keeps the session", async () => {
+    server.use(contractRoute("post", "/auth/change-password", changePasswordInputSchema, () => breachedPasswordResponse("newPassword")));
+    const { store } = renderApp("/cambiar-contrasena", authenticatedState(makeUser({ mustChangePassword: true })));
+
+    await submitChange("Contraseña temporal");
+    await userEvent.click(screen.getByRole("button", { name: "Guardar y continuar" }));
+
+    expect(await screen.findByText(PASSWORD_BREACHED_MESSAGE)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Nueva contraseña")).toHaveFocus());
+    expect(screen.getByLabelText("Nueva contraseña")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Contraseña temporal")).not.toHaveAttribute("aria-invalid", "true");
+    expect(store.getState().auth.status).toBe("authenticated");
   });
 
   it("treats 401 INVALID_CREDENTIALS as a wrong current password without logging out", async () => {
