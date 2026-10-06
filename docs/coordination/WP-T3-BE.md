@@ -57,7 +57,7 @@ Member routes answer 404 for drafts and unknown years (same as the edition pages
 Not changed: the summary stays at `/rsvp/summary` (contract path; the brief said `/rsvps`), and it has no name lists, matching `RsvpSummary`.
 
 ## Decisions
-- **`listed_in_directory`**: the column does not exist (profiles only have `show_email`/`show_phone`/`show_city`, and the schema is frozen), so nobody can be hidden yet. Every attendee is shown with name and avatar to verified members. Once the flag exists (Request 1), the plan is: an unlisted account appears as **"Familiar"** with `avatarUrl: null` and `userId`/`personId: null` (it still counts, but cannot be identified or linked), except on the caller's own row.
+- **`listed_in_directory`** (applied in `wp/t3-be-unlisted`, after migration 0002 added the column): on `/attendees`, a person whose linked account has `listed_in_directory = false` is returned to everyone else as **"Familiar"** with `avatarUrl`, `personId` and `userId` all `null`. They still count (one row per person, after dedupe), and the RSVP status/source stay. Anonymization happens after dedupe and **before sorting**, so a row's position does not hint at the real name, and no avatar is signed for it. The caller's own row (`isMe`) is always complete. People without an account (historical attendance only) have no profile and are unaffected. The admin RSVP table and CSV stay complete.
 - Active editions accept RSVP changes (the contract's `editable` is false only for `past` or after the deadline).
 - Drafts → 404 on member routes (no RSVP before publishing), consistent with `/cuencadas/:year/members`.
 - Disabled accounts are excluded from the summary and the attendee strip, since a disabled account is a removed member. Historical attendance of their linked person still shows (it is a fact about the past edition).
@@ -65,7 +65,7 @@ Not changed: the summary stays at `/rsvp/summary` (contract path; the brief said
 - `AttendanceRecord.displayName` is `people.full_name` (the admin's canonical name).
 
 ## Requests (→ orchestrator)
-1. **Migration 0002 (WP-2.1): `profiles.listed_in_directory boolean not null default true`** (plus the T5 profile field). T3 then applies the "Familiar" rule above; T5's directory honours the same flag.
+1. Done: migration 0002 added `profiles.listed_in_directory`; T3 applies it (see Decisions). T5's directory and its "Aparecer en el directorio" toggle use the same flag.
 2. **Migration 0002: same-Cuencada FK for `cuencada_rsvps.hotel_location_id`**: composite `(cuencada_id, hotel_location_id)` → `cuencada_locations (cuencada_id, id)` with `ON DELETE SET NULL (hotel_location_id)`, as T2 requested for itinerary locations. The `kind = hotel` rule stays in the service (a later kind change by an admin leaves stale choices, which the summary keeps counting under that location; acceptable).
 3. **T2 (cuencadas):** when an admin changes a location's `kind` away from `hotel` or deletes it, RSVPs keep or lose the reference (the FK sets null on delete). If T2-FE wants a warning, a count of RSVPs per location could be added to `AdminCuencadaDetail` later.
 4. **T3-FE:** handle 409 on `PUT …/rsvp/me` (show the Spanish message and refetch `rsvp/me`), and 403 on `/attendees` for unverified members (prompt to verify the email). Use `RSVP_DATE_WINDOW_DAYS` for the pickers. The CSV link needs the bearer token, so download it with `fetch` + `Blob`, not a plain `<a href>`.
@@ -73,6 +73,12 @@ Not changed: the summary stays at `/rsvp/summary` (contract path; the brief said
 ## Verification (2026-10-06)
 - `pnpm lint && pnpm turbo run typecheck --force && pnpm test && pnpm build`: all green (82 files, 807 tests).
 - New tests (45): `rules.test.ts` 9, `csv.test.ts` 9, `attendees.test.ts` 4, `member-routes.test.ts` 15, `admin-routes.test.ts` 8. Route tests run against real Postgres with `inject()` and an injected clock.
+
+## Follow-up: unlisted members (wp/t3-be-unlisted)
+- `repository.ts` selects `profiles.listed_in_directory` with the attendee candidates; `mergeAttendees(rsvps, attendance, viewerId)` anonymizes; `toAttendees` no longer needs the viewer id.
+- Contract: `Attendee` JSDoc documents the anonymized shape (no schema change).
+- New tests (+5): unit tests for anonymization, the viewer's own row and no avatar signing; a route test (anonymized for others with no ids/names/avatar key in the body, complete for the user themselves, count kept, historical-only unlisted account also hidden); an admin test (table and CSV complete for an unlisted member).
+- `pnpm lint && pnpm turbo run typecheck --force && pnpm test && pnpm build`: all green (96 files, 1037 tests).
 
 ## Open questions (→ orchestrator)
 - None blocking.
