@@ -3,18 +3,20 @@
  * and announcements. Edition status (`draft`/`upcoming`/`active`/`past`) is
  * computed from `is_published` and the dates, never stored.
  */
-import { DAILY_MESSAGE_MAX_LENGTH, LocationKind, Visibility } from "@cuencada/types";
+import { DAILY_MESSAGE_MAX_LENGTH, ITINERARY_TAGS_MAX, LocationKind, Visibility } from "@cuencada/types";
 import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
   date,
   doublePrecision,
+  foreignKey,
   index,
   integer,
   pgTable,
   text,
   time,
+  unique,
   uniqueIndex,
   uuid
 } from "drizzle-orm/pg-core";
@@ -46,6 +48,11 @@ export const cuencadas = pgTable(
     externalAlbumUrl: text("external_album_url"),
     rsvpDeadline: timestamptz("rsvp_deadline"),
     isPublished: boolean("is_published").notNull().default(false),
+    /**
+     * Set on the first publish and never cleared (0002). Rows published before
+     * 0002 were backfilled with `created_at`. Null means "never published".
+     */
+    firstPublishedAt: timestamptz("first_published_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt()
   },
@@ -80,6 +87,8 @@ export const cuencadaLocations = pgTable(
   },
   (table) => [
     index("cuencada_locations_cuencada_sort_idx").on(table.cuencadaId, table.sortOrder),
+    // Target of the same-Cuencada composite FKs from itinerary items and RSVPs.
+    unique("cuencada_locations_cuencada_id_id_unique").on(table.cuencadaId, table.id),
     checkIn("cuencada_locations_kind_check", "kind", LocationKind),
     checkIn("cuencada_locations_visibility_check", "visibility", Visibility),
     check("cuencada_locations_lat_check", sql`"lat" is null or "lat" between -90 and 90`),
@@ -91,7 +100,8 @@ export const cuencadaLocations = pgTable(
 /**
  * One programa entry. `date` is a calendar day in the Cuencada's timezone and
  * the times are wall-clock (`time`, returned by postgres-js as `HH:MM:SS`).
- * `location_id` must belong to the same Cuencada; the service enforces that.
+ * `location_id` must belong to the same Cuencada: the composite FK (0002)
+ * enforces it, and deleting the location nulls only `location_id`.
  */
 export const cuencadaItineraryItems = pgTable(
   "cuencada_itinerary_items",
@@ -109,12 +119,27 @@ export const cuencadaItineraryItems = pgTable(
     locationId: uuid("location_id").references(() => cuencadaLocations.id, { onDelete: "set null" }),
     /** Display-only text such as "$1,000 p/p"; never used for arithmetic. */
     priceNote: text("price_note"),
+    /** Short labels; per-tag trimming and length (1–24) are validated by the contract. */
+    tags: text("tags").array().notNull().default(sql`'{}'::text[]`),
     visibility: text("visibility").$type<Visibility>().notNull().default("public"),
     sortOrder: integer("sort_order").notNull().default(0),
     createdAt: createdAt(),
     updatedAt: updatedAt()
   },
   (table) => [
+    // Same-Cuencada integrity. The migration (0002) creates it with
+    // `ON DELETE SET NULL ("location_id")` (PG15+), which Drizzle cannot
+    // express; "set null" here keeps the snapshot in step. Never create this
+    // FK with `drizzle-kit push`: a plain SET NULL would also null cuencada_id.
+    foreignKey({
+      name: "cuencada_itinerary_items_location_same_cuencada_fk",
+      columns: [table.cuencadaId, table.locationId],
+      foreignColumns: [cuencadaLocations.cuencadaId, cuencadaLocations.id]
+    }).onDelete("set null"),
+    check(
+      "cuencada_itinerary_items_tags_check",
+      sql.raw(`cardinality("tags") <= ${ITINERARY_TAGS_MAX} and array_position("tags", null) is null`)
+    ),
     index("cuencada_itinerary_items_cuencada_date_sort_idx").on(table.cuencadaId, table.date, table.sortOrder),
     index("cuencada_itinerary_items_location_id_idx").on(table.locationId),
     checkIn("cuencada_itinerary_items_visibility_check", "visibility", Visibility),

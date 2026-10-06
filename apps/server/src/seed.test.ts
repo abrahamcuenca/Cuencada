@@ -109,6 +109,7 @@ describe("runSeed", () => {
       externalAlbumUrl: "https://1drv.ms/f/c/b0c7d5955d4a8581/IgAC5vDMrmIvTJwWwOjkJJM7AT3DxtBo9OFj8FSXJI_GQY0?e=ASBPLY",
       isPublished: true
     });
+    expect(edition?.firstPublishedAt).toBeInstanceOf(Date);
 
     const locations = await db.select().from(cuencadaLocations).orderBy(cuencadaLocations.sortOrder);
     expect(locations.map((location) => [location.name, location.url, location.mapsUrl])).toEqual([

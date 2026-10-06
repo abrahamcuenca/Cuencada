@@ -44,6 +44,7 @@ export function makeItinerary(overrides: Partial<ItineraryItem> = {}): Itinerary
     locationName: "Cenote Santa Bárbara",
     locationId: fixtureId(203),
     priceNote: "$1,000 p/p",
+    tags: [],
     visibility: "public",
     sortOrder: 0,
     ...overrides
