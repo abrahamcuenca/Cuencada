@@ -1,0 +1,191 @@
+/*
+ * Cuencada design tokens (WP-0.7)
+ * ------------------------------------------------------------------
+ * Evolves the legacy index.html palette (#0b5e55 green, #e7b84b gold,
+ * #fffaf0 cream, #17332f ink) into semantic, contrast-checked tokens.
+ * Contrast ratios (WCAG 2.x) are noted next to text/background pairs.
+ *
+ * Breakpoints (CSS custom properties cannot be used inside @media, so
+ * these are documentation; always write `min-width` queries, never
+ * `max-width` — mobile is the default, wider screens are enhancements):
+ *   --bp-sm  600px   tablets / large phones landscape (dialogs centre, 2-col grids)
+ *   --bp-md  900px   laptop: TopNav replaces BottomNav, 3-col grids
+ *   --bp-lg  1200px  wide desktop: max content width reached
+ *
+ * Usage: import once in main.tsx, before base.css:
+ *   import "./shared/styles/tokens.css";
+ *   import "./shared/styles/base.css";
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ---------- Brand palette (raw) ---------- */
+  --brand-green-900: #0a3f39;
+  --brand-green-800: #0b5e55; /* legacy --green */
+  --brand-green-700: #087f6d; /* legacy --green2 */
+  --brand-green-100: #eef7f3; /* legacy .tag background */
+  --brand-green-50: #f4faf7;
+  --brand-gold-500: #e7b84b; /* legacy --gold */
+  --brand-gold-300: #ffe39a; /* legacy kicker gold */
+  --brand-gold-100: #fff6dc;
+  --brand-cream: #fffaf0; /* legacy --cream */
+  --brand-ink: #17332f; /* legacy --ink */
+  --brand-muted: #60736f; /* legacy --muted */
+  --brand-footer: #153c36; /* legacy footer */
+  --brand-bugambilia: #a61b4a; /* Mérida bougainvillea: festive secondary accent */
+  --brand-whatsapp: #25d366;
+
+  /* ---------- Semantic colour ---------- */
+  --color-bg: var(--brand-cream);
+  --color-surface: #ffffff;
+  --color-surface-sunken: var(--brand-green-50);
+  --color-surface-inverse: var(--brand-footer);
+  --color-border: #e2ebe6; /* decorative only (cards) */
+  --color-border-strong: #7b8f8a; /* form controls: 3.42:1 on white (≥3:1 non-text) */
+
+  --color-text: var(--brand-ink); /* 13.0:1 on cream */
+  --color-text-muted: var(--brand-muted); /* 4.83:1 on cream, 5.02:1 on white */
+  --color-text-inverse: #ffffff; /* 7.65:1 on primary */
+  --color-text-on-accent: var(--brand-ink); /* 7.32:1 on gold */
+
+  --color-primary: var(--brand-green-800);
+  --color-primary-hover: var(--brand-green-900);
+  --color-primary-strong: var(--brand-green-700); /* white text 4.92:1 */
+  --color-primary-soft: var(--brand-green-100); /* primary text 7.0:1 */
+
+  --color-accent: var(--brand-gold-500); /* never as text on light bg (1.78:1) */
+  --color-accent-hover: #d9a531;
+  --color-accent-soft: var(--brand-gold-100);
+  --color-accent-on-dark: var(--brand-gold-300); /* 6.08:1 on primary */
+  --color-accent-text: #8c6a12; /* gold-family text on light: 4.65:1 on gold-100 */
+
+  --color-festive: var(--brand-bugambilia); /* white text 7.3:1 */
+
+  --color-danger: #b3261e; /* 6.54:1 on white */
+  --color-danger-soft: #fdecea;
+  --color-success: #1b6e3a; /* 6.29:1 on white */
+  --color-success-soft: #e6f4ea;
+  --color-warning-soft: #fff1c9;
+
+  --color-whatsapp: var(--brand-whatsapp);
+  --color-whatsapp-hover: #1fbd5a;
+  --color-text-on-whatsapp: #0b2e1a; /* 7.46:1 — white on #25D366 is only 1.98:1 */
+
+  --color-scrim: rgb(10 30 27 / 0.6);
+  --color-lightbox-bg: #071a17;
+
+  /* Focus: a dark ring plus a gold halo, visible on cream, white AND green. */
+  --color-focus: var(--brand-green-900);
+  --color-focus-halo: var(--brand-gold-300);
+  --focus-ring: 0 0 0 3px var(--color-focus-halo);
+  --focus-outline: 3px solid var(--color-focus);
+  --focus-offset: 3px;
+
+  /* Hero gradient (legacy hero, kept verbatim in spirit) */
+  --gradient-hero: radial-gradient(circle at 85% 12%, rgb(231 184 75 / 0.38), transparent 34%),
+    linear-gradient(135deg, rgb(7 76 69 / 0.98), rgb(8 127 109 / 0.92));
+  --gradient-photo-placeholder: linear-gradient(135deg, #dfece7, #f6df9b);
+
+  /* ---------- Typography ---------- */
+  /* System fonts only: 0 KB of font downloads (LCP budget). The display stack
+   * prefers rounded system faces (SF Pro Rounded on Apple) for a warmer feel. */
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", Arial, sans-serif;
+  --font-display: ui-rounded, "SF Pro Rounded", "Nunito", system-ui, -apple-system, "Segoe UI", Roboto,
+    Arial, sans-serif;
+
+  /* Fluid type scale: min at 360px, max at 1200px viewport. Body never < 16px. */
+  --text-xs: 0.75rem; /* 12px — tab-bar labels, badges only */
+  --text-sm: 0.875rem; /* 14px — meta, captions */
+  --text-md: 1rem; /* 16px — body, inputs (prevents iOS zoom) */
+  --text-lg: clamp(1.0625rem, 1rem + 0.3vw, 1.25rem); /* 17→20 lead */
+  --text-xl: clamp(1.25rem, 1.1rem + 0.7vw, 1.625rem); /* 20→26 h3 */
+  --text-2xl: clamp(1.625rem, 1.3rem + 1.4vw, 2.375rem); /* 26→38 h2 / section-title */
+  --text-3xl: clamp(2.125rem, 1.6rem + 2.4vw, 3.5rem); /* 34→56 page title */
+  --text-display: clamp(3.25rem, 1.9rem + 7vw, 7.375rem); /* 52→118 legacy h1 */
+
+  --leading-tight: 1.05;
+  --leading-snug: 1.25;
+  --leading-body: 1.55;
+  --tracking-display: -0.05em;
+  --tracking-kicker: 0.16em;
+
+  --weight-regular: 400;
+  --weight-semibold: 600;
+  --weight-bold: 800;
+  --weight-black: 900;
+
+  /* ---------- Spacing (4px base) ---------- */
+  --space-0: 0;
+  --space-1: 0.25rem; /* 4 */
+  --space-2: 0.5rem; /* 8 */
+  --space-3: 0.75rem; /* 12 */
+  --space-4: 1rem; /* 16 — mobile gutter */
+  --space-5: 1.25rem; /* 20 */
+  --space-6: 1.5rem; /* 24 — card padding */
+  --space-8: 2rem; /* 32 */
+  --space-10: 2.5rem; /* 40 */
+  --space-12: 3rem; /* 48 */
+  --space-16: 4rem; /* 64 */
+  --space-section: clamp(2.5rem, 1.5rem + 4vw, 4.75rem); /* 40→76 legacy section padding */
+  --gutter: clamp(1rem, 0.6rem + 1.6vw, 1.5rem);
+  --content-max: 70rem; /* 1120px, legacy 1100px */
+  --reading-max: 42rem;
+
+  /* ---------- Sizing ---------- */
+  --tap-min: 44px; /* WCAG 2.5.5 / Apple HIG minimum target */
+  --control-height: 48px;
+  --control-height-sm: 44px; /* "small" never goes below the tap minimum */
+  --control-height-lg: 56px;
+  --bottom-nav-height: 64px;
+  --top-nav-height: 72px;
+
+  /* ---------- Radii ---------- */
+  --radius-xs: 6px;
+  --radius-sm: 12px; /* inputs, photo thumbs */
+  --radius-md: 18px; /* countdown tiles, inner blocks */
+  --radius-lg: 24px; /* cards (legacy) */
+  --radius-xl: 30px; /* feature panels (legacy upload panel) */
+  --radius-sheet: 28px; /* bottom-sheet top corners */
+  --radius-pill: 999px; /* buttons, tags */
+  --radius-round: 50%;
+
+  /* ---------- Shadows (tinted with ink, never neutral grey) ---------- */
+  --shadow-sm: 0 2px 8px rgb(19 55 49 / 0.08);
+  --shadow-md: 0 12px 35px rgb(19 55 49 / 0.12); /* legacy --shadow */
+  --shadow-lg: 0 24px 60px rgb(19 55 49 / 0.22);
+  --shadow-nav: 0 -6px 24px rgb(19 55 49 / 0.1);
+
+  /* ---------- Z-index ---------- */
+  --z-base: 0;
+  --z-raised: 10;
+  --z-sticky: 100; /* TopNav, sticky headers */
+  --z-nav: 200; /* BottomNav */
+  --z-banner: 300; /* offline / update banners */
+  --z-overlay: 400; /* dialogs, lightbox (native top layer anyway) */
+  --z-toast: 500;
+
+  /* ---------- Motion ---------- */
+  --duration-instant: 80ms;
+  --duration-fast: 150ms;
+  --duration-base: 240ms;
+  --duration-slow: 400ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+
+  /* ---------- Safe areas ---------- */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-instant: 0ms;
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-slow: 0ms;
+  }
+}

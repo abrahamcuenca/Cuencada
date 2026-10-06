@@ -1,0 +1,41 @@
+.skeleton {
+  display: block;
+  background: linear-gradient(90deg, #e8efec 0%, #f5f8f6 40%, #e8efec 80%);
+  background-size: 300% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.text {
+  height: 1em;
+  border-radius: var(--radius-xs);
+}
+
+.block {
+  border-radius: var(--radius-md);
+}
+
+.circle {
+  border-radius: var(--radius-round);
+}
+
+.lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+    background: #e8efec;
+  }
+}

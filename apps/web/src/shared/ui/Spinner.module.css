@@ -1,0 +1,47 @@
+.wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.spinner {
+  display: inline-block;
+  flex-shrink: 0;
+  border-radius: var(--radius-round);
+  border: 3px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-top-color: currentColor;
+  animation: spin 0.8s linear infinite;
+}
+
+.inline {
+  width: 1em;
+  height: 1em;
+  border-width: 2px;
+}
+
+.md {
+  width: 28px;
+  height: 28px;
+  color: var(--color-primary);
+}
+
+.lg {
+  width: 44px;
+  height: 44px;
+  border-width: 4px;
+  color: var(--color-primary);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+    border-top-color: color-mix(in srgb, currentColor 22%, transparent);
+    border-right-color: currentColor;
+  }
+}
