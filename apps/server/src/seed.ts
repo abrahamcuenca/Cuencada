@@ -202,7 +202,9 @@ async function seedCuencada2026(
       slug: String(data.cuencada.year),
       startsAt: new Date(data.cuencada.startsAt),
       endsAt: new Date(data.cuencada.endsAt),
-      rsvpDeadline: data.cuencada.rsvpDeadline === null ? null : new Date(data.cuencada.rsvpDeadline)
+      rsvpDeadline: data.cuencada.rsvpDeadline === null ? null : new Date(data.cuencada.rsvpDeadline),
+      // Seeded already published: record it, like T2 does on a first publish.
+      firstPublishedAt: data.cuencada.isPublished ? new Date() : null
     })
     .onConflictDoNothing({ target: cuencadas.year })
     .returning({ id: cuencadas.id });

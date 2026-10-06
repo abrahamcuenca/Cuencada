@@ -77,9 +77,31 @@ export interface ItineraryItem {
   locationId: string | null;
   /** Free text such as "$1,000 p/p". Display only; never used for arithmetic. */
   priceNote: string | null;
+  /**
+   * Short labels such as "Incluye comida" (WP-2.1). At most
+   * {@link ITINERARY_TAGS_MAX}, each 1–{@link ITINERARY_TAG_MAX_LENGTH} chars.
+   */
+  tags: string[];
   visibility: Visibility;
   sortOrder: number;
 }
+
+/** Maximum number of tags on one itinerary item (DB CHECK `cardinality(tags) <= 6`). */
+export const ITINERARY_TAGS_MAX = 6;
+/** Maximum length of one itinerary tag, after trimming. */
+export const ITINERARY_TAG_MAX_LENGTH = 24;
+
+/** One itinerary tag on input: trimmed, 1–24 characters. */
+export const itineraryTagSchema = z
+  .string()
+  .trim()
+  .min(1, { error: "La etiqueta no puede estar vacía." })
+  .max(ITINERARY_TAG_MAX_LENGTH, { error: `Cada etiqueta admite hasta ${ITINERARY_TAG_MAX_LENGTH} caracteres.` });
+
+/** Itinerary tags on input: at most {@link ITINERARY_TAGS_MAX}. */
+export const itineraryTagsSchema = z
+  .array(itineraryTagSchema)
+  .max(ITINERARY_TAGS_MAX, { error: `Máximo ${ITINERARY_TAGS_MAX} etiquetas.` });
 
 export const itineraryItemSchema = z.object({
   id: idSchema,
@@ -91,6 +113,7 @@ export const itineraryItemSchema = z.object({
   locationName: z.string().max(200).nullable(),
   locationId: idSchema.nullable(),
   priceNote: z.string().max(120).nullable(),
+  tags: z.array(z.string().max(ITINERARY_TAG_MAX_LENGTH)).max(ITINERARY_TAGS_MAX),
   visibility: visibilitySchema,
   sortOrder: z.number().int()
 }) satisfies z.ZodType<ItineraryItem>;
@@ -427,6 +450,7 @@ const itineraryFields = {
   locationName: nullableTextSchema(200),
   locationId: idSchema.nullable(),
   priceNote: nullableTextSchema(120),
+  tags: itineraryTagsSchema,
   visibility: visibilitySchema
 };
 
@@ -447,6 +471,7 @@ export const createItineraryItemInputSchema = z
     locationName: nullableTextSchema(200).default(null),
     locationId: idSchema.nullable().default(null),
     priceNote: nullableTextSchema(120).default(null),
+    tags: itineraryTagsSchema.default([]),
     visibility: visibilitySchema.default(Visibility.Public)
   })
   .refine(endTimeAfterStart, endTimeIssue);

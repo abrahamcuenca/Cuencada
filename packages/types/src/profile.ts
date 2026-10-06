@@ -11,17 +11,28 @@ import { cursorQuerySchema, dateTimeSchema, displayTextSchema, idSchema, nullabl
 import { displayNameSchema } from "./auth.js";
 import { AVATAR_MAX_BYTES, MediaMimeType } from "./media.js";
 
-/** Who may see each optional contact field. All default to hidden. */
+/**
+ * Who may see each optional contact field (all default to hidden), and
+ * whether the member appears in member-facing lists at all.
+ */
 export interface ProfileVisibility {
   showEmail: boolean;
   showPhone: boolean;
   showCity: boolean;
+  /**
+   * "Aparecer en el directorio" (`profiles.listed_in_directory`, default `true`,
+   * WP-2.1). When `false` the member is left out of `GET /api/directory` and is
+   * shown anonymously (no name, avatar or ids) in attendee lists, except to
+   * themselves. Enforced by the queries, not by {@link toDirectoryEntry}.
+   */
+  listedInDirectory: boolean;
 }
 
 export const profileVisibilitySchema = z.object({
   showEmail: z.boolean(),
   showPhone: z.boolean(),
-  showCity: z.boolean()
+  showCity: z.boolean(),
+  listedInDirectory: z.boolean()
 }) satisfies z.ZodType<ProfileVisibility>;
 
 /** The caller's own full profile (`GET /api/profile/me`). */
@@ -85,12 +96,16 @@ export const directoryEntrySchema = z.object({
   city: z.string().max(120).exactOptional()
 }) satisfies z.ZodType<DirectoryEntry>;
 
-/** Server-side source row for {@link toDirectoryEntry}: full profile data plus visibility flags. */
+/**
+ * Server-side source row for {@link toDirectoryEntry}: full profile data plus
+ * the contact visibility flags. `listedInDirectory` is not needed here: the
+ * directory query filters unlisted members out before mapping.
+ */
 export interface DirectoryEntrySource extends Omit<DirectoryEntry, "email" | "phone" | "city"> {
   email: string | null;
   phone: string | null;
   city: string | null;
-  visibility: ProfileVisibility;
+  visibility: Pick<ProfileVisibility, "showEmail" | "showPhone" | "showCity">;
 }
 
 /**
@@ -99,6 +114,10 @@ export interface DirectoryEntrySource extends Omit<DirectoryEntry, "email" | "ph
  * is on *and* it has a value. Server mappers must use this helper: the
  * response schema rejects `undefined`/`null` contact values, so a hand-rolled
  * mapper fails closed with a 500 rather than leaking.
+ *
+ * It does not look at `visibility.listedInDirectory`: unlisted members must be
+ * filtered out by the directory query itself (`where listed_in_directory`), so
+ * they never reach this helper, nor count in pagination or search results.
  */
 export function toDirectoryEntry(source: DirectoryEntrySource): DirectoryEntry {
   const entry: DirectoryEntry = {
@@ -134,7 +153,8 @@ export const updateProfileInputSchema = z
     bio: nullableTextSchema(500),
     showEmail: z.boolean(),
     showPhone: z.boolean(),
-    showCity: z.boolean()
+    showCity: z.boolean(),
+    listedInDirectory: z.boolean()
   })
   .partial()
   .refine((value) => Object.keys(value).length > 0, { error: "No hay cambios que guardar." });

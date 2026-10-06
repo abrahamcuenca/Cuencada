@@ -82,6 +82,11 @@ describe("updateProfileInputSchema", () => {
     expect(updateProfileInputSchema.parse({ city: "   " })).toEqual({ city: null });
   });
 
+  it("accepts listedInDirectory on its own", () => {
+    expect(updateProfileInputSchema.parse({ listedInDirectory: false })).toEqual({ listedInDirectory: false });
+    expect(updateProfileInputSchema.safeParse({ listedInDirectory: "no" }).success).toBe(false);
+  });
+
   it("rejects an empty patch and an invalid phone", () => {
     expect(updateProfileInputSchema.safeParse({}).success).toBe(false);
     expect(updateProfileInputSchema.safeParse({ phone: "llámame" }).success).toBe(false);

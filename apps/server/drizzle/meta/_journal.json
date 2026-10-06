@@ -15,6 +15,13 @@
       "when": 1791276977931,
       "tag": "0001_schema_foundation",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791284957544,
+      "tag": "0002_expand_directory_tags_fks",
+      "breakpoints": true
     }
   ]
 }
