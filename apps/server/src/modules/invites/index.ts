@@ -1,11 +1,15 @@
 /**
- * Invites module (T1 owns this folder). Registered under `/api` by
- * `app.ts`; add routes here: invite inspect/accept (`/invites/*`) and admin invites (`/admin/invites*`).
- * See `docs/coordination/WP-0.4.md` for the route checklist.
+ * Invites module (T1) [SEC]: public inspect/accept (`/invites/*`) and admin
+ * list/create/revoke/resend (`/admin/invites*`). Mounted under `/api`.
  */
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
+import adminInviteRoutes from "./adminRoutes.js";
+import publicInviteRoutes from "./publicRoutes.js";
 
-/** Invites routes under `/api` (stub until T1). */
-const invitesModule: FastifyPluginAsyncZod = async () => {};
+/** Invite routes under `/api`. */
+const invitesModule: FastifyPluginAsyncZod = async (app) => {
+  await app.register(publicInviteRoutes);
+  await app.register(adminInviteRoutes);
+};
 
 export default invitesModule;

@@ -158,7 +158,8 @@ export interface AuthInjectOptions {
 
 /**
  * Log in through the real `POST /api/auth/login` route and return headers
- * for authenticated `inject()` calls. Later WPs switch this to cookies.
+ * for authenticated `inject()` calls. The response is the contract `AuthTokenResponse`;
+ * use `loginFull` (`test/helpers/auth.ts`) when a test also needs the refresh cookie.
  *
  * @param app - App built with `createTestApp`.
  * @param user - User from `createUser` (needs the plaintext password).
