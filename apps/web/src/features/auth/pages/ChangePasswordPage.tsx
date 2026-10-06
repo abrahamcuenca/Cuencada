@@ -13,6 +13,7 @@ import { AuthLayout } from "../components/AuthLayout";
 import { FormAlert } from "../components/FormAlert";
 import { PasswordField } from "../components/PasswordField";
 import {
+  breachedPasswordError,
   confirmError,
   describeAuthError,
   type FieldErrors,
@@ -91,6 +92,12 @@ export function ChangePasswordPage(): ReactNode {
       } catch (error) {
         if (isWrongCurrentPassword(error)) {
           setErrors({ currentPassword: WRONG_CURRENT_PASSWORD_MESSAGE });
+          focusInvalid();
+          return;
+        }
+        const breached = breachedPasswordError(error, "newPassword");
+        if (breached !== undefined) {
+          setErrors({ newPassword: breached });
           focusInvalid();
           return;
         }

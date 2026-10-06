@@ -15,6 +15,7 @@ import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { users } from "../../db/schema/index.js";
 import { recordAudit } from "../../lib/audit.js";
+import { assertPasswordNotBreached } from "../../lib/breachedPasswords.js";
 import { AppError } from "../../lib/errors.js";
 import { AppLinkPath, appLink, sendTemplate } from "../../lib/mailer/index.js";
 import { hashPassword, verifyDummyPassword, verifyPassword } from "../../lib/passwords.js";
@@ -105,6 +106,8 @@ const passwordRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request, reply) => {
       const current = authUser(request);
+      // Before both argon2 calls: a breached choice costs one bounded HIBP lookup and nothing else.
+      await assertPasswordNotBreached(app.breachedPasswords, request.body.newPassword, "newPassword");
       const [user] = await app.db
         .select({ passwordHash: users.passwordHash, email: users.email, displayName: users.displayName })
         .from(users)
@@ -218,6 +221,9 @@ const passwordRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: { body: passwordResetConfirmInputSchema, response: { 204: noContent, ...errorResponses } }
     },
     async (request, reply) => {
+      // Before hashing and before the transaction that consumes the token, so a
+      // breached password leaves the single-use link valid for a retry.
+      await assertPasswordNotBreached(app.breachedPasswords, request.body.newPassword, "newPassword");
       const passwordHash = await hashPassword(request.body.newPassword);
       const now = app.clock.now();
       const result = await app.db.transaction(async (tx) => {

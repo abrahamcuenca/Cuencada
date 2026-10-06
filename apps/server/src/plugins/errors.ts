@@ -45,10 +45,13 @@ function truncate(value: string, max: number): string {
  * @returns At most {@link API_ERROR_DETAILS_MAX} entries with bounded strings.
  */
 export function capErrorDetails(details: ApiErrorDetail[]): ApiErrorDetail[] {
-  const bounded = details.map((detail) => ({
-    path: truncate(detail.path, DETAIL_PATH_MAX),
-    message: truncate(detail.message, DETAIL_MESSAGE_MAX)
-  }));
+  const bounded = details.map(
+    (detail): ApiErrorDetail => ({
+      path: truncate(detail.path, DETAIL_PATH_MAX),
+      message: truncate(detail.message, DETAIL_MESSAGE_MAX),
+      ...(detail.code === undefined ? {} : { code: detail.code })
+    })
+  );
   if (bounded.length <= API_ERROR_DETAILS_MAX) return bounded;
   const kept = bounded.slice(0, API_ERROR_DETAILS_MAX - 1);
   const remaining = bounded.length - kept.length;

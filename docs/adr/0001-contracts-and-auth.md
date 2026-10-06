@@ -60,7 +60,9 @@ Phase 1 builds frontend and backend tracks in parallel. They need one contract t
 - Every non-2xx response is `ApiError`: `{ error: { code, message, details? } }`.
   - `code` comes from the `ErrorCode` as-const object, with its HTTP status fixed in `errorHttpStatus`.
   - `message` is Spanish, produced server-side, and safe to show to the user.
-  - `details` lists `{ path, message }` for validation failures.
+  - `details` lists `{ path, message, code? }` for validation failures. `code` is an optional
+    `ValidationIssueCode` for the few reasons the web branches on; today only `PASSWORD_BREACHED`
+    (WP-2.3c: the new password is in known breaches; the web shows the Spanish message on that field).
 - The web branches on `code` only. Notable codes:
   - `TOKEN_EXPIRED` (401): the client refreshes and retries.
   - `UNAUTHENTICATED` (401): the client logs out.

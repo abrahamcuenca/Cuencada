@@ -105,6 +105,17 @@ const configSchema = z
     SUPPORT_EMAIL: z.preprocess(blankAsUndefined, z.email().optional()).default("admin@cuencada.com"),
     /** When true, new gallery uploads start as `pending_review` instead of `approved`. */
     MEDIA_REQUIRE_APPROVAL: z.preprocess(blankAsUndefined, envBoolean.optional()).default(false),
+    /**
+     * Breached-password check (HIBP k-anonymity, `lib/breachedPasswords.ts`):
+     * `on` or `off`. Defaults to `off` under `NODE_ENV=test` (tests inject a
+     * fake fetcher and turn it on explicitly) and `on` everywhere else.
+     */
+    PASSWORD_BREACH_CHECK: z.preprocess(
+      blankAsUndefined,
+      z.string().trim().toLowerCase().pipe(z.enum(["on", "off"])).optional()
+    ),
+    /** Reject a password seen in at least this many breaches (ASVS 2.1.7 default: 1). */
+    PASSWORD_BREACH_MIN_COUNT: z.preprocess(blankAsUndefined, z.coerce.number().int().min(1).max(1_000_000).optional()).default(1),
     S3_ENDPOINT: z.string().optional().default(""),
     S3_REGION: z.string().optional().default("us-southeast-1"),
     S3_BUCKET: z.string().optional().default(""),
@@ -154,7 +165,8 @@ const configSchema = z
       CORS_ORIGIN: corsOrigins,
       DEV_ALLOWED_ORIGINS: production ? [] : env.DEV_ALLOWED_ORIGINS,
       TRUST_PROXY: env.TRUST_PROXY ?? (production ? ["loopback"] : false),
-      COOKIE_SECURE: env.COOKIE_SECURE ?? production
+      COOKIE_SECURE: env.COOKIE_SECURE ?? production,
+      PASSWORD_BREACH_CHECK: env.PASSWORD_BREACH_CHECK ?? (env.NODE_ENV === "test" ? "off" : "on")
     };
   });
 

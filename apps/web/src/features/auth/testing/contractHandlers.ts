@@ -6,6 +6,7 @@
  */
 import {
   type ApiError,
+  apiErrorSchema,
   type AuthTokenResponse,
   authTokenResponseSchema,
   type CurrentUser,
@@ -13,6 +14,7 @@ import {
   errorHttpStatus,
   type InviteInspectResponse,
   inviteInspectResponseSchema,
+  PASSWORD_BREACHED_MESSAGE,
   type SessionListItem,
   sessionListItemSchema
 } from "@cuencada/types";
@@ -68,6 +70,23 @@ export function contractRoute<TBody>(
 export function apiError(code: ErrorCode, message = "Error de prueba."): Response {
   const body: ApiError = { error: { code, message } };
   return HttpResponse.json(body, { status: errorHttpStatus[code] });
+}
+
+/**
+ * The server's answer to a breached new password (WP-2.3c).
+ *
+ * @param path - The password field (`password` or `newPassword`).
+ * @returns 400 `VALIDATION` with a `PASSWORD_BREACHED` detail, checked against the contract.
+ */
+export function breachedPasswordResponse(path: string): Response {
+  const body: ApiError = apiErrorSchema.parse({
+    error: {
+      code: "VALIDATION",
+      message: "Revisa los datos enviados.",
+      details: [{ path, message: PASSWORD_BREACHED_MESSAGE, code: "PASSWORD_BREACHED" }]
+    }
+  });
+  return HttpResponse.json(body, { status: 400 });
 }
 
 /**

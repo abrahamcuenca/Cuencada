@@ -106,4 +106,12 @@ describe("apiErrorSchema", () => {
     const details = Array.from({ length: 101 }, (_, index) => ({ path: `lines.${index}`, message: "x" }));
     expect(apiErrorSchema.safeParse({ error: { code: "VALIDATION", message: "x", details } }).success).toBe(false);
   });
+
+  it("keeps a known detail code and rejects an unknown one", () => {
+    const detail = { path: "password", message: "x", code: "PASSWORD_BREACHED" };
+    const parsed = apiErrorSchema.parse({ error: { code: "VALIDATION", message: "x", details: [detail] } });
+    expect(parsed.error.details).toEqual([detail]);
+    const unknown = { error: { code: "VALIDATION", message: "x", details: [{ ...detail, code: "NOPE" }] } };
+    expect(apiErrorSchema.safeParse(unknown).success).toBe(false);
+  });
 });

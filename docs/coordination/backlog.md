@@ -123,7 +123,8 @@ Still open:
   it is aligned first.
 - **L4 (platform):** the CI `services.postgres.image` is `postgres:16-alpine`,
   pinned by tag. Actions are SHA-pinned; pin this image by digest too.
-- **L5 (backend, pre-launch):** there is no breached-password check (ASVS
+- **L5 (backend, pre-launch): fixed in WP-2.3c** (HIBP k-anonymity, option 2
+  below, fail-open). Was: no breached-password check (ASVS
   2.1.7) on password set, change or reset.
   - Option 1: an offline list of the top 100k passwords, shipped with the
     server.
@@ -145,6 +146,7 @@ Still open:
 - [ ] Real-bucket check that a PUT with the wrong length/type is rejected; bucket CORS XML from `WP-T4-BE.md`.
 - [ ] Confirm `server_1` has ≥ 700 MB free for the API; systemd `MemoryHigh`/`MemoryMax` + restart alert, else drop the video limit to 150 MB in the contract.
 - [ ] Retire the legacy root site (`index.html`, `cuencada2026.html`) and its `images/fotos` at cutover; the owner decides whether to purge them from git history.
-- [ ] **Pre-launch:** breached-password check on password set, change and reset (WP-2.3 L5, ASVS 2.1.7).
+- [x] **Pre-launch:** breached-password check on password set, change and reset (WP-2.3 L5, ASVS 2.1.7). Done in WP-2.3c.
+- [ ] **Egress (WP-2.3c):** `server_1` firewall allows outbound HTTPS (443) from the API to `api.pwnedpasswords.com`. Blocked egress does not break anything (the check fails open) but disables it silently except for `password.breach_check_unavailable` warns: after deploy, grep the API log for that event. nginx needs no change (the call is server-side). The prod seed, run from the operator's machine, needs the same egress.
 - [ ] **Pre-launch:** stricter open invites: about 5 uses, 72 h lifetime, an admin alert on each acceptance (separate WP; threat model A2).
 - [ ] Git history still contains the pre-sweep real/real-looking family names and the legacy links; owner decided "sweep forward, no history rewrite". Revisit only if the owner asks.

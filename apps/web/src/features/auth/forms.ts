@@ -2,9 +2,15 @@
  * Form helpers shared by the T1 pages: zod-driven field errors, Spanish
  * error copy for server responses, and the password-strength hint.
  */
-import { type ErrorCode, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "@cuencada/types";
+import {
+  type ErrorCode,
+  PASSWORD_BREACHED_MESSAGE,
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+  ValidationIssueCode
+} from "@cuencada/types";
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
-import { getApiErrorCode, getApiErrorMessage, isAbortError } from "../../shared/api/errors";
+import { getApiErrorCode, getApiErrorMessage, isAbortError, parseApiError } from "../../shared/api/errors";
 
 /** Field name → Spanish error message. */
 export type FieldErrors<TField extends string> = Partial<Record<TField, string | undefined>>;
@@ -103,6 +109,22 @@ export const LINK_INVALID_MESSAGE = "Este enlace ya se usó o caducó. Pide uno 
 export const INVITE_INVALID_MESSAGE = "Esta invitación ya no es válida. Pide a quien te invitó que te mande una nueva.";
 /** The link had no usable `#t=` token. */
 export const LINK_MISSING_MESSAGE = "Este enlace no es válido o está incompleto. Pide uno nuevo.";
+
+/**
+ * Whether the server rejected the new password as breached (WP-2.3c): 400
+ * `VALIDATION` with a `PASSWORD_BREACHED` detail on `field`. The check runs
+ * server-side only; the browser never calls a third party.
+ *
+ * @param error - What `.unwrap()` rejected with.
+ * @param field - The password field's body name (`password` or `newPassword`).
+ * @returns The Spanish field message, or `undefined` for any other error.
+ */
+export function breachedPasswordError(error: unknown, field: string): string | undefined {
+  if (getApiErrorCode(error) !== "VALIDATION") return undefined;
+  const details = parseApiError(error)?.error.details ?? [];
+  const hit = details.some((detail) => detail.code === ValidationIssueCode.PASSWORD_BREACHED && detail.path === field);
+  return hit ? PASSWORD_BREACHED_MESSAGE : undefined;
+}
 
 /**
  * Turns an RTK Query error into a message for the form's alert region.

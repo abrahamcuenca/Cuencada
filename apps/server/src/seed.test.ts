@@ -1,7 +1,9 @@
 import argon2 from "argon2";
 import { eq } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { fakeRange } from "../test/helpers/breach.js";
 import { getTestDb } from "../test/helpers/db.js";
+import { createBreachedPasswordChecker } from "./lib/breachedPasswords.js";
 import {
   announcements,
   chatRooms,
@@ -14,6 +16,7 @@ import {
 } from "./db/schema/index.js";
 import { LEGACY_DEV_LINKS } from "./seed-data.js";
 import {
+  assertSeedPasswordNotBreached,
   DEFAULT_DAILY_MESSAGES_FILE,
   resolveSeedOptions,
   runSeed,
@@ -239,6 +242,39 @@ describe("resolveSeedOptions", () => {
     expect(() =>
       resolveSeedOptions({ NODE_ENV: "production", SEED_ADMIN_TEMP_PASSWORD: STRONG, SEED_LYRICS_URL: "http://x.example.com" })
     ).toThrow(SeedConfigError);
+  });
+
+  it("refuses a breached admin temporary password in production with a clear seed error", async () => {
+    const range = fakeRange([STRONG]);
+    const checker = createBreachedPasswordChecker({ enabled: true, minCount: 1, logger: { warn: vi.fn() }, fetcher: range.fetcher });
+
+    await expect(
+      assertSeedPasswordNotBreached({ adminTempPassword: STRONG }, { NODE_ENV: "production" }, checker)
+    ).rejects.toThrow(/SEED_ADMIN_TEMP_PASSWORD appears in known data breaches/);
+    await expect(
+      assertSeedPasswordNotBreached({ adminTempPassword: "otra-frase-temporal-larga" }, { NODE_ENV: "production" }, checker)
+    ).resolves.toBeUndefined();
+  });
+
+  it("skips the seed breach check outside production, when turned off, and fails open when unreachable", async () => {
+    const range = fakeRange([STRONG]);
+    const checker = createBreachedPasswordChecker({ enabled: true, minCount: 1, logger: { warn: vi.fn() }, fetcher: range.fetcher });
+    await assertSeedPasswordNotBreached({ adminTempPassword: STRONG }, { NODE_ENV: "development" }, checker);
+    await assertSeedPasswordNotBreached({ adminTempPassword: STRONG }, { NODE_ENV: "production", PASSWORD_BREACH_CHECK: "OFF" }, checker);
+    expect(range.urls).toEqual([]);
+
+    const logger = { warn: vi.fn() };
+    const offline = createBreachedPasswordChecker({
+      enabled: true,
+      minCount: 1,
+      logger,
+      fetcher: fakeRange([STRONG], { networkError: true }).fetcher
+    });
+    await expect(
+      assertSeedPasswordNotBreached({ adminTempPassword: STRONG }, { NODE_ENV: "production" }, offline)
+    ).resolves.toBeUndefined();
+    expect(logger.warn).toHaveBeenCalledOnce();
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(STRONG);
   });
 
   it("falls back to the development password and legacy links only in development and test", () => {

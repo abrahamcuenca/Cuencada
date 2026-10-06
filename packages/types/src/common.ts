@@ -81,10 +81,24 @@ export const errorHttpStatus = {
   INTERNAL: 500
 } as const satisfies Record<ErrorCode, number>;
 
+/**
+ * Stable machine-readable reasons for a `VALIDATION` detail. Most details have
+ * none (the client shows `message`); a code is added only where the web
+ * branches on the reason.
+ */
+export const ValidationIssueCode = {
+  /** The new password appears in known data breaches (HIBP, ASVS 2.1.7). Retry with another. */
+  PASSWORD_BREACHED: "PASSWORD_BREACHED"
+} as const;
+export type ValidationIssueCode = (typeof ValidationIssueCode)[keyof typeof ValidationIssueCode];
+export const validationIssueCodeSchema = z.enum(ValidationIssueCode);
+
 /** One field-level validation problem. `path` is dot-joined, e.g. `itinerary.0.title` or `lines.12`. */
 export interface ApiErrorDetail {
   path: string;
   message: string;
+  /** Optional stable reason (see {@link ValidationIssueCode}). */
+  code?: ValidationIssueCode;
 }
 
 /**
@@ -102,7 +116,8 @@ export interface ApiError {
 
 export const apiErrorDetailSchema = z.object({
   path: z.string().max(200),
-  message: z.string().max(500)
+  message: z.string().max(500),
+  code: validationIssueCodeSchema.exactOptional()
 }) satisfies z.ZodType<ApiErrorDetail>;
 
 /** Maximum number of `details` entries in an error envelope. Producers must cap/summarize. */

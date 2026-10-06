@@ -19,6 +19,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { invites, people, profiles, users } from "../../db/schema/index.js";
 import { recordAudit, type Transaction } from "../../lib/audit.js";
+import { assertPasswordNotBreached } from "../../lib/breachedPasswords.js";
 import { AppError } from "../../lib/errors.js";
 import { hashPassword } from "../../lib/passwords.js";
 import { extraRateLimitHook, rateLimitByIp } from "../../lib/rateLimit.js";
@@ -146,6 +147,9 @@ const publicInviteRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request, reply) => {
       const { token, email, displayName, password } = request.body;
+      // Before hashing and before the transaction: a breached password never
+      // touches the invite row, so the token (and its use count) stays intact for a retry.
+      await assertPasswordNotBreached(app.breachedPasswords, password, "password");
       // Hash before taking the row lock: argon2 is slow by design.
       const passwordHash = await hashPassword(password);
       const now = app.clock.now();

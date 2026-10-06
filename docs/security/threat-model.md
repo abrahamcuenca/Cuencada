@@ -59,6 +59,7 @@ flowchart LR
   B -- presigned PUT/GET (bucket host only) --> S[(Linode bucket, private)]
   A -- presign + HEAD/GET/PUT/DELETE --> S
   A -- HTTPS API key --> R[Resend]
+  A -- HTTPS, 5-char SHA-1 prefix only --> H[api.pwnedpasswords.com]
   R -- email with #t= link --> U[Mailbox]
   B -- wss + single-use ticket --> N
   B -- sandboxed iframe + postMessage --> W[weatherwidget.io]
@@ -76,6 +77,18 @@ flowchart LR
   keep them out of logs and `Referer` headers.
 - **TB5, SPA ↔ weatherwidget.io.** A cross-origin sandboxed frame with a
   validated `postMessage`.
+- **TB7, API → api.pwnedpasswords.com (WP-2.3c).** The breached-password
+  check sends only the first 5 hex characters of the new password's SHA-1
+  (k-anonymity, `Add-Padding: true` so the answer size reveals nothing); the
+  suffix is compared locally and never logged. This is the API's only
+  outbound call besides Resend and the bucket, so `server_1` needs egress
+  HTTPS to that host. It **fails open** (1.5 s timeout, non-200, network
+  error → password allowed, `password.breach_check_unavailable` warn with a
+  counter): an HIBP outage or an egress block must not stop signups and
+  resets, the length policy still applies, and the counter in the logs makes
+  a persistent outage visible. Calls are bounded by the routes' existing
+  rate limits plus a 10-minute prefix cache. The browser never calls HIBP,
+  so the CSP is unchanged.
 - **TB6, CI/supply chain.** GitHub Actions pinned by SHA, the pnpm lockfile,
   `minimumReleaseAge`.
 
@@ -98,6 +111,7 @@ Each row lists the main mitigation and where it's enforced or tested.
 | **I**: cached PII or tokens on a shared computer | **WP-2.3 M1 (fixed): every `/api/` response is `Cache-Control: no-store`.** The SW never caches private API responses (T9) and purges on logout. | [`headers.test.ts`](../../apps/server/src/__tests__/security/headers.test.ts), `check:sw` |
 | **E**: temporary password reused for everything | `must_change_password` → 403 `PASSWORD_CHANGE_REQUIRED` everywhere except `/me` and change-password. | matrix column "pending" |
 | **E**: unverified account reading PII | `requireVerifiedEmail` on the directory, family, attendees, chat, **the gallery and every media route, and the member edition details (WhatsApp/album links)** → 403 `EMAIL_UNVERIFIED`. The media and member-details gating was WP-2.3 L2 (Medium, fixed by owner decision). Still open to unverified members: announcements, the RSVP summary (counts only), their own RSVP, profile and avatar, and `/me`. | matrix column "unverified"; [`verified-gating.test.ts`](../../apps/server/src/__tests__/security/verified-gating.test.ts); ADR 0001; residual risk A4 |
+| **S**: account takeover with a password known from other breaches | **WP-2.3c (L5 fixed):** invite accept, change-password and reset-password reject passwords seen in breaches (HIBP k-anonymity, TB7) before hashing; fail-open by design. | `breachedPasswords.test.ts`, `breachedPasswordRoutes.test.ts` |
 | **D**: email or argon2 flooding | Per-recipient mail budget (1 per 2 min per purpose, 3/h, 10/day). Global daily cap of 300 plus a reserved 100. Global limit of 300/min per IP. | `mailBudget.ts`, `mailSafety.test.ts` |
 
 ### 4.2 Invites and onboarding (`modules/invites`)
@@ -211,7 +225,7 @@ These come from [`backlog.md`](../coordination/backlog.md), plus the WP-2.3 find
 
 **Before launch:**
 
-- Breached-password check (WP-2.3 L5).
+- ~~Breached-password check (WP-2.3 L5).~~ Done in WP-2.3c; needs egress HTTPS to `api.pwnedpasswords.com` from `server_1` (cutover checklist).
 - Stricter open invites: about 5 uses, 72 h lifetime, an admin alert on each acceptance (separate WP; accepted risk A2).
 
 **Process:**

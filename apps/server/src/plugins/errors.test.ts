@@ -137,6 +137,12 @@ describe("capErrorDetails", () => {
     expect(detail?.path).toHaveLength(200);
     expect(detail?.message).toHaveLength(500);
   });
+
+  it("keeps a detail's stable code", () => {
+    const details = [{ path: "password", message: "m", code: "PASSWORD_BREACHED" as const }];
+
+    expect(capErrorDetails(details)).toEqual(details);
+  });
 });
 
 describe("resolveError", () => {

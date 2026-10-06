@@ -1,4 +1,4 @@
-import { inviteAcceptInputSchema, inviteInspectInputSchema } from "@cuencada/types";
+import { inviteAcceptInputSchema, inviteInspectInputSchema, PASSWORD_BREACHED_MESSAGE } from "@cuencada/types";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -8,7 +8,7 @@ import { renderApp } from "../../../../test/renderApp";
 import { clearFragmentToken, readAndScrubFragmentToken } from "../../../shared/lib/fragmentToken";
 import { cancelOnlineLogoutRetry } from "../session";
 import { INVITE_INVALID_MESSAGE, LINK_MISSING_MESSAGE, PASSWORDS_DIFFER_MESSAGE, RATE_LIMITED_MESSAGE } from "../forms";
-import { apiError, contractRoute, FRAGMENT_TOKEN, makeInvite, tokenResponse } from "../testing/contractHandlers";
+import { apiError, breachedPasswordResponse, contractRoute, FRAGMENT_TOKEN, makeInvite, tokenResponse } from "../testing/contractHandlers";
 import { INVITE_ACCEPT_REJECTED_MESSAGE, INVITE_EMAIL_MISMATCH_MESSAGE, INVITE_EMAIL_TAKEN_MESSAGE } from "./InvitePage";
 import { createTestServer } from "../../../../test/msw";
 
@@ -110,6 +110,19 @@ describe("InvitePage", () => {
     await fillForm({ password: "corta", confirm: "corta" });
 
     expect(await screen.findByText("La contraseña debe tener al menos 12 caracteres.")).toBeInTheDocument();
+  });
+
+  it("shows the breached-password message on the password field and keeps the invite form", async () => {
+    server.use(contractRoute("post", "/invites/accept", inviteAcceptInputSchema, () => breachedPasswordResponse("password")));
+    openInvite();
+
+    await fillForm();
+
+    expect(await screen.findByText(PASSWORD_BREACHED_MESSAGE)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Crea una contraseña")).toHaveFocus());
+    expect(screen.getByLabelText("Crea una contraseña")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("button", { name: "Crear mi cuenta" })).toBeEnabled();
+    expect(screen.queryByText(INVITE_INVALID_MESSAGE)).not.toBeInTheDocument();
   });
 
   it("shows a generic message when the server rejects a bound invite on accept", async () => {

@@ -13,6 +13,11 @@ import argon2 from "argon2";
 import { and, eq, sql } from "drizzle-orm";
 import { type Database, createDatabase } from "./db/client.js";
 import {
+  type BreachCheckLogger,
+  type BreachedPasswordChecker,
+  createBreachedPasswordChecker
+} from "./lib/breachedPasswords.js";
+import {
   announcements,
   chatRooms,
   cuencadaItineraryItems,
@@ -147,6 +152,45 @@ export function resolveSeedOptions(env: NodeJS.ProcessEnv = process.env): SeedOp
     dailyMessagesFile: env.SEED_DAILY_MESSAGES_FILE || DEFAULT_DAILY_MESSAGES_FILE,
     links: resolveLinks(env, devOrTest)
   };
+}
+
+/** Writes the seed's fail-open warning to stderr (no secret data is ever passed in). */
+const stderrLogger: BreachCheckLogger = {
+  warn: (object, message) => {
+    process.stderr.write(`seed: warning: ${message} ${JSON.stringify(object)}\n`);
+  }
+};
+
+/**
+ * In production, refuse an admin temporary password that appears in known
+ * breaches (HIBP k-anonymity; only a 5-char SHA-1 prefix leaves the machine).
+ * Skipped outside production and when `PASSWORD_BREACH_CHECK=off`. Like the
+ * API, it fails open when the range service is unreachable: it warns on stderr
+ * and continues, since the admin must change this password at first login,
+ * where the API checks the new one.
+ *
+ * @param options - Resolved seed options.
+ * @param env - Environment (reads `NODE_ENV`, `PASSWORD_BREACH_CHECK`, `PASSWORD_BREACH_MIN_COUNT`).
+ * @param checker - Injected in tests; defaults to a live checker.
+ * @throws SeedConfigError when the password is breached.
+ */
+export async function assertSeedPasswordNotBreached(
+  options: Pick<SeedOptions, "adminTempPassword">,
+  env: NodeJS.ProcessEnv = process.env,
+  checker?: BreachedPasswordChecker
+): Promise<void> {
+  if (env.NODE_ENV !== "production") return;
+  if (env.PASSWORD_BREACH_CHECK?.trim().toLowerCase() === "off") return;
+  const minCount = Number(env.PASSWORD_BREACH_MIN_COUNT?.trim() || "1");
+  if (!Number.isInteger(minCount) || minCount < 1) {
+    throw new SeedConfigError("PASSWORD_BREACH_MIN_COUNT must be a positive integer.");
+  }
+  const active = checker ?? createBreachedPasswordChecker({ enabled: true, minCount, logger: stderrLogger });
+  if ((await active.check(options.adminTempPassword)) === "breached") {
+    throw new SeedConfigError(
+      "SEED_ADMIN_TEMP_PASSWORD appears in known data breaches (Have I Been Pwned). Generate a new random one in vault."
+    );
+  }
 }
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -339,6 +383,7 @@ async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new SeedConfigError("Set DATABASE_URL to the database to seed.");
   const options = resolveSeedOptions();
+  await assertSeedPasswordNotBreached(options);
   const db = createDatabase({ DATABASE_URL: databaseUrl }, { max: 1 });
   try {
     const result = await runSeed(db, options);

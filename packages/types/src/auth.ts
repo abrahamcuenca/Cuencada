@@ -58,13 +58,18 @@ export const PASSWORD_MAX_LENGTH = 128;
 /**
  * New-password policy (NIST 800-63B style): 12–128 characters, not only
  * whitespace. No composition rules. Never trimmed: spaces are significant.
- * Breached-password checks, if any, happen server-side.
+ * The breached-password check (HIBP k-anonymity) happens server-side only:
+ * a hit answers 400 `VALIDATION` with a detail on the password field whose
+ * `code` is `PASSWORD_BREACHED` and whose message is {@link PASSWORD_BREACHED_MESSAGE}.
  */
 export const passwordSchema = z
   .string()
   .min(PASSWORD_MIN_LENGTH, { error: `La contraseña debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres.` })
   .max(PASSWORD_MAX_LENGTH, { error: `La contraseña puede tener como máximo ${PASSWORD_MAX_LENGTH} caracteres.` })
   .refine((value) => value.trim().length > 0, { error: "La contraseña no puede ser solo espacios." });
+
+/** Spanish copy for a password found in known breaches (server detail message and web field error). */
+export const PASSWORD_BREACHED_MESSAGE = "Esta contraseña apareció en filtraciones de datos conocidas. Elige otra.";
 
 /** Password as typed at login: no policy (old passwords may predate it), only bounds. */
 export const currentPasswordSchema = z
