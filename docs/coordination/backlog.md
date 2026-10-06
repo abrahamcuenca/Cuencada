@@ -64,7 +64,9 @@ family, profile, admin, chat, media, cuencadas) · **0.8c** web features
 - T5-FE: directory cursor 400 after self-unlist → reload page 1; show the number on the WhatsApp button; city filter prefix match/suggestions; cancel avatar confirm on unmount; "Aparecer en el directorio" help text says chat messages still show your name/photo.
 - T6-FE (L1): breadcrumb history state keeps ids only (names from the cache) or is tagged with the userId.
 - T8-FE: `createInvite` with `track: false`; shorten entity ids on mobile; clipboard warning copy; audit viewer shows `adminAlertSkipped`/limit flags; move T2/T4/T6 admin pages under the admin layout (cross-track).
-- Privacy sweep inside `features/**` (WP-0.8a swept everything else): fictional people only.
+- Privacy sweep inside `features/**` (WP-0.8a swept everything else): fictional people only. First: "Jorge Cuenca", "Lupe Cuenca", "Rosa Cuenca" in `features/auth/**` tests and `contractHandlers.ts`.
+- **Real family photos are members-only (owner decision, PR #31).** `apps/web/public/images/fotos/` is gone: replace the public HomePage "Últimos momentos" mosaic with a non-identifying image + "Inicia sesión para ver las fotos" teaser; members see recent photos from the private gallery (presigned URLs). Until then the mosaic images 404.
+- Re-take with placeholder images the screenshots WP-0.8a deleted: `t2/home-memories-{375,1280}`, `t4/{grid,lightbox,upload-sheet,upload-progress,admin-queue}-{375,1280}`, `t9/offline-home-375` (WP-0.7's `styleguide-*`, `overlays-375`, `lightbox-1280`: orchestrator).
 - Adopt `warmRoutes()` (`apps/web/test/renderApp.tsx`) in other route-level tests whose first test flakes (admin.test.tsx, GalleryPage.test.tsx were seen failing once under load).
 
 ### 0.8c: chat (T7-FE follow-ups after PR #28)
@@ -94,4 +96,5 @@ family, profile, admin, chat, media, cuencadas) · **0.8c** web features
 - [ ] `VITE_MEDIA_UPLOAD_ORIGIN=https://<bucket>.us-southeast-1.linodeobjects.com` in infra `build_env` for every environment (uploads are refused if unset); T5 avatar uploads apply the same origin check.
 - [ ] Real-bucket check that a PUT with the wrong length/type is rejected; bucket CORS XML from `WP-T4-BE.md`.
 - [ ] Confirm `server_1` has ≥ 700 MB free for the API; systemd `MemoryHigh`/`MemoryMax` + restart alert, else drop the video limit to 150 MB in the contract.
+- [ ] Retire the legacy root site (`index.html`, `cuencada2026.html`) and its `images/fotos` at cutover; the owner decides whether to purge them from git history.
 - [ ] Git history still contains the pre-sweep real/real-looking family names and the legacy links; owner decided "sweep forward, no history rewrite". Revisit only if the owner asks.

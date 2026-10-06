@@ -28,7 +28,7 @@
 - RSVP requires an account. Admins manually create past/future Cuencadas and historical attendance.
 - Invite tokens, magic-link tokens, and refresh/session tokens must be stored hashed, not plaintext.
 - Directory contact fields and family tree data are PII; default to member-only and honor profile visibility.
-- This repository is public. Fixtures, seeds, docs, wireframes, style guides and screenshots use fictional people only (e.g. "Ana Morales Vega", branch "Rama Norte", phones `+52 555 0…`, `@example.com` emails). Never use real family names or real family photos.
+- This repository is public. Fixtures, seeds, docs, wireframes, style guides and screenshots use fictional people only (e.g. "Ana Morales Vega", branch "Rama Norte", phones `+52 555 0…`, `@example.com` emails). Never use real family names or real family photos: real photos are members-only (private gallery). The only exception is the legacy root site (`index.html`, `cuencada2026.html`, root `images/`), pending retirement at cutover.
 - Never interpolate PII (emails, names, phones, tokens) into `Error` messages or log lines; errors get logged. Keep identifiers in structured fields that the logger redacts.
 
 ## Agent Workflow

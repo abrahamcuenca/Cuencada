@@ -28,6 +28,15 @@ Owner: Senior SWE (platform) · Reviewers: TL, Sec · Branch: wp/0.8a-platform-h
 - Privacy sweep: "Familia Cuenca" stays only as the portal/brand name (web `index.html`, seed chat-room title). The StyleGuide uses generated SVG placeholder photos instead of the legacy family photos, and a placeholder WhatsApp link. The real legacy links remain only in `seed-data.ts` `LEGACY_DEV_LINKS` (dev/test fallback, reset at cutover).
 - Module tests owned by 0.8b were touched only for the `EMAIL_UNVERIFIED` assertions, fixture names/phones and the admin race-test timeout (line-local edits).
 
+## PR #31 round 1 (Security M1/L1, Tech Lead N1–N3)
+- **Real family photos are members-only (owner decision).** Deleted `apps/web/public/images/fotos/foto01–04.jpg`. The legacy root `index.html`, `cuencada2026.html` and root `images/` are untouched (live legacy site; retirement is on the cutover checklist). The public HomePage mosaic (`features/cuencadas`, 0.8c) still points at the deleted files and 404s until 0.8c replaces it.
+- **Deleted screenshots that showed the real photos** (owners re-take them with placeholders):
+  - T2 (0.8c): `docs/ux/screenshots/t2/home-memories-375.webp`, `home-memories-1280.webp`
+  - T4 (0.8c): `docs/ux/screenshots/t4/grid-*`, `lightbox-*`, `upload-sheet-*`, `upload-progress-*`, `admin-queue-*` (375 and 1280)
+  - T9 (0.8c): `docs/ux/screenshots/t9/offline-home-375.webp` (the mosaic peeks under the toast)
+  - WP-0.7 (orchestrator): `docs/ux/screenshots/styleguide-375.webp`, `styleguide-1280.webp`, `overlays-375.webp`, `lightbox-1280.webp`
+  - Checked and kept (no photos): T2 `cuencada-2026-*`, `dialog-1280`, `web-foundation/layout-375`, T9 install/update/offline-programa.
+
 ## Open questions (→ orchestrator)
 - None.
 
