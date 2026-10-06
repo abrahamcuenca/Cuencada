@@ -20,10 +20,10 @@ describe("validateUploadFile", () => {
     expect(result).toMatchObject({ ok: false, reason: "Esta foto pesa más de 25 MB." });
   });
 
-  it("accepts a MOV video up to 300 MB and rejects one over it", () => {
-    expect(validateUploadFile(fileOf("clip.mov", "video/quicktime", 300 * MB)).ok).toBe(true);
-    const result = validateUploadFile(fileOf("clip.mov", "video/quicktime", 300 * MB + 1));
-    expect(result).toMatchObject({ ok: false, reason: expect.stringContaining("Este video pesa más de 300 MB") });
+  it("accepts a MOV video up to 150 MB and rejects one over it", () => {
+    expect(validateUploadFile(fileOf("clip.mov", "video/quicktime", 150 * MB)).ok).toBe(true);
+    const result = validateUploadFile(fileOf("clip.mov", "video/quicktime", 150 * MB + 1));
+    expect(result).toMatchObject({ ok: false, reason: expect.stringContaining("Este video pesa más de 150 MB") });
   });
 
   it("explains HEIC instead of uploading it", () => {

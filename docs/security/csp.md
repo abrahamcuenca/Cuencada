@@ -12,7 +12,10 @@ There are two policies:
 2. **SPA HTML and static files** (`index.html`, `/assets/**`, `sw.js`,
    `workbox-*.js`, `sw-purge.js`, the manifest and icons). nginx serves these
    files, not Fastify, so **WP-2.4 must send the policy below from nginx.**
-   This is the policy that protects users.
+   This is the policy that protects users. WP-2.4 put it in
+   [`infra/nginx/cuencada.conf`](../../infra/nginx/cuencada.conf). If you
+   change the policy here, change every copy there too:
+   `mise run deploy-preflight` fails while they differ.
 
 ## SPA policy for nginx (WP-2.4)
 
@@ -107,6 +110,19 @@ Result on `main` @ `e75e718` (PR #34 merged) + WP-2.3, 2026-10-06:
 Re-run the harness in WP-2.4 against the final nginx config. Also recheck it
 whenever a dependency that might inject `<style>` (CSS-in-JS) or use `eval` is
 added.
+
+**WP-2.4 re-run (2026-10-06, branch `wp/2.4-deploy-prep`):**
+
+- The harness passed again: 0 unexpected violations on every public and
+  member route, the weather iframes rendered, the service worker activated,
+  and the resize worker loaded. The only blocked items were the known zod
+  probes.
+- The nginx site sends this exact string in all three static locations. A
+  unit test checks the copies byte-for-byte against this file.
+- Served by nginx 1.24 locally, `scripts/deploy-smoke.mjs` found the policy
+  and the other headers on `/`, `sw.js` and a hashed asset.
+- Repeat the browser-console check on production after the cutover (runbook
+  § 7).
 
 ## Future hardening (optional)
 

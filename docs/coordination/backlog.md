@@ -42,6 +42,7 @@ family, profile, admin, chat, media, cuencadas) · **0.8c** web features
 | WP-2.3: route inventory drift guard, authorization matrix (99 routes × 7 principals, 27 state-checked IDOR/rule/mass-assignment probes, CSRF, WS), PII leak scans (bodies and WS frames), header/CSP tests, threat model, OWASP/ASVS checklist, dependency review, SPA CSP verified in Chromium (incl. the resize worker); M1 `Cache-Control: no-store` on every `/api/` response; **M2 (owner decision) gallery, media routes and member edition links need a verified email**; L6 stored photo/avatar cache ≤ 1 h | WP-2.3 (`docs/security/`, PR #35) |
 | WP-0.8a: Toast never evicts an action toast, clears evicted timers; Badge `max` ("999+"); BottomNav "Programa" fits at 320 px | WP-0.8a |
 | WP-0.8a: emails Container `width="600"`, Button no-VML JSDoc, LICENSE title + repo URL, test script `--config` | WP-0.8a |
+| WP-2.4 deploy prep: `infra/project.yml` maps every config key (vault refs for secrets), `deploy-preflight` (config.ts ↔ project.yml ↔ nginx ↔ csp.md, unit-tested), nginx site (CSP verbatim, XFF overwrite, CF-* dropped, chat WS, redacted access log, no-cache SW/HTML, immutable assets, legacy redirects), DB roles SQL + proof script, bucket CORS/lifecycle + real-bucket check, systemd drop-in, Resend DNS, runbook, smoke script; seed requires all `SEED_*_URL` in production and no longer contains the legacy links; video cap 150 MB; observability queries for `mail.cap_reached` / `mail.queue_full` / restarts | WP-2.4 (`docs/deploy/`, `infra/`) |
 | WP-2.2: Playwright e2e (iPhone 13 / Pixel 7 / desktop subset), mobile gates (overflow, 44 px targets, 16 px inputs, axe), Lighthouse mobile, CI `e2e.yml` | WP-2.2 |
 | WP-2.2 bug: invite page stuck on "Revisando tu invitación…" when the boot refresh 401 aborted the inspect (waits for the session gate now) | WP-2.2 |
 | WP-2.2 bug: chat message log not keyboard-focusable (axe `scrollable-region-focusable`) | WP-2.2 |
@@ -55,7 +56,7 @@ family, profile, admin, chat, media, cuencadas) · **0.8c** web features
 - T5: store phones as E.164 server-side (10-digit numbers are assumed +52 today).
 - T8-BE (optional): coalesce admin alerts per target per 10 min. Nits: summary SQL via ORM table refs; comment on the unreachable 409; comment on target filtering.
 - T7-BE: ping re-checks session + user status.
-- `lib/storage`: `getStream`/`putStream` (video jobs buffer up to 300 MB, ~600 MB peak). Until then consider a 150 MB video cap.
+- `lib/storage`: `getStream`/`putStream` (a video job buffers the whole file). WP-2.4 lowered the video cap to 150 MB for `server_1` (961 MB RAM); raise it back (DB CHECK still allows 300 MB) once streaming lands.
 - Media: `incoming/` prefix + server-side copy on confirm, so a bucket lifecycle rule can expire orphans (with WP-2.1/2.4).
 - Optional: `audit_logs.action` format CHECK (with a migration, WP-2.x).
 
@@ -92,7 +93,7 @@ family, profile, admin, chat, media, cuencadas) · **0.8c** web features
 - Next contract-phase migration (0003): drop redundant single-column location FKs; optional `first_published_at` refine from audit.
 - Migrations from 0002 on must be expand/contract (run before new code is live).
 - **Minimum client version mechanism** (force-reload/upgrade prompt for stale PWA clients after a breaking API change, e.g. the `EMAIL_UNVERIFIED` split).
-- Observability: alert on `mail.cap_reached` and `mail.queue_full` (Loki/Grafana).
+- Observability: LogQL alert rules are written in `docs/deploy/runbook.md` § 10; the owner wires them into Grafana (and confirms journald → Loki shipping on `server_1`).
 - Process: lint/review rule for "no PII interpolated into Error messages" (Security L7, PR #8). AGENTS.md states the rule; an automated check is still open.
 - T8-BE (from WP-0.8c): `GET /admin/users/:id`, so T6-FE's admin person form can show the linked account exactly (today it searches `GET /admin/users?q=<person name>`, which misses accounts whose display name differs).
 - T5-BE (from WP-0.8c): store phones as E.164 (or a country code) so the directory can offer WhatsApp for numbers typed without `+`; the web never guesses `+52`.
@@ -143,19 +144,25 @@ Still open:
 
 ## Cutover checklist (WP-2.4–2.5)
 
-- [ ] Reset the WhatsApp group invite link and the OneDrive share links (public in the legacy `index.html` and git history; the dev fallbacks live only in `apps/server/src/seed-data.ts` `LEGACY_DEV_LINKS`). Set the new values only via vault `SEED_*_URL` or the admin UI.
-- [ ] Set **all** `SEED_*_URL` vars on the **first** prod seed (links only reach the edition row on first insert).
-- [ ] Prod seed: run once, manually, over the tunnel (user-approved), after migrations.
-- [ ] Separate DB roles: owner for `MIGRATE_DATABASE_URL`, least-privilege runtime `DATABASE_URL`.
+WP-2.4 prepared every item below; **the owner applies them** following
+[`docs/deploy/runbook.md`](../deploy/runbook.md). [x] = done in the repo,
+[ ] = owner action (or a later WP) still to do.
+
+- [x] **Platform:** Acleron `nginx.site_template` + `server.credentials` (LoadCredential=, Security M1), on branch `cuencada-nginx-credentials` (commits `03f8049`, `1023ab9`, `46d71eb`: project sites copied verbatim, rejected nginx sites rolled back, stale credstores removed, systemd ≥ 247 asserted) in the local `acleron-platform` checkout; tests 66/66. [ ] Owner reviews it, merges it and pushes it. `deploy-preflight` blocks on a platform without it.
+- [ ] **Bucket name:** replace `<bucket>` in `infra/project.yml` (2 lines) and `infra/nginx/cuencada.conf` (3 CSP lines).
+- [ ] Reset the WhatsApp group invite link and the OneDrive share links; new values only in the vault (`vault_cuencada_seed_*_url`) or the admin UI. [x] The legacy links are gone from `seed-data.ts` (dev uses example.com placeholders).
+- [x] The production seed refuses to run unless **all** `SEED_*_URL` are set (links only reach the edition row on first insert). [ ] Owner runs the seed once, manually, over the tunnel, after the first migration (runbook § 6).
+- [x] Separate DB roles: `infra/db/roles.sql` (owner for `MIGRATE_DATABASE_URL` through the tunnel, DML-only runtime for `DATABASE_URL` over the VPC; passwords via `\password` or SCRAM verifiers only), proven by `infra/db/verify-roles.sh`. [ ] Owner creates them on the PG18 server, with `pg_hba` (`hostssl` from server_1's VPC IP; owner from loopback) and TLS (runbook § 3).
 - [ ] Recreate any local dev DB that applied the pre-review 0001.
-- [ ] Not behind Cloudflare: nginx sets `X-Forwarded-For $remote_addr` (overwrite) and ignores `CF-Connecting-IP`; TLS terminates on the VPS (verify cert + HSTS); rate limits rely on the direct IP.
-- [ ] **Paste the `Content-Security-Policy` string from [`docs/security/csp.md`](../security/csp.md) verbatim** into nginx. Don't render it from `contentSecurityPolicy(config)`, which is looser (WP-2.3 L3).
-- [ ] nginx CSP and headers for the SPA, exactly as in [`docs/security/csp.md`](../security/csp.md). That covers the weather widget frame, the bucket host only, `wss:`, `base-uri 'none'`, HSTS, nosniff, DENY, `Referrer-Policy`, `Permissions-Policy`, and `always` on every `add_header`. Then re-run `node docs/security/csp-check.mjs` against staging and repeat the OWASP sign-off.
-- [ ] nginx access logs redact `?q=`, `?search=`, `?ticket=` (and ideally mirror the API allowlist in `apps/server/src/logging.ts`).
-- [ ] `VITE_MEDIA_UPLOAD_ORIGIN=https://<bucket>.us-southeast-1.linodeobjects.com` in infra `build_env` for every environment (uploads are refused if unset); T5 avatar uploads apply the same origin check.
-- [ ] Real-bucket check that a PUT with the wrong length/type is rejected; bucket CORS XML from `WP-T4-BE.md`.
-- [ ] Confirm `server_1` has ≥ 700 MB free for the API; systemd `MemoryHigh`/`MemoryMax` + restart alert, else drop the video limit to 150 MB in the contract.
-- [ ] Retire the legacy root site (`index.html`, `cuencada2026.html`) and its `images/fotos` at cutover; the owner decides whether to purge them from git history.
-- [ ] **Pre-launch:** breached-password check on password set, change and reset (WP-2.3 L5, ASVS 2.1.7).
-- [ ] **Pre-launch:** stricter open invites: about 5 uses, 72 h lifetime, an admin alert on each acceptance (separate WP; threat model A2).
+- [x] Not behind Cloudflare: nginx sets `X-Forwarded-For $remote_addr` (overwrite), drops `CF-Connecting-IP`/`Forwarded`/`X-Forwarded-Host`/`True-Client-IP`; TLS on the VPS with HSTS. [ ] Verify cert + HSTS after the first deploy (runbook § 7).
+- [x] CSP from `csp.md` pasted verbatim in all static locations (drift-checked); harness re-run green. [ ] Browser-console check on production; repeat the OWASP sign-off for the deployed headers.
+- [x] nginx access logs drop query strings and cut the Referer.
+- [x] `VITE_MEDIA_UPLOAD_ORIGIN` in `build_env`, checked against `S3_BUCKET` + `S3_ENDPOINT` by the preflight.
+- [x] Bucket CORS (`infra/bucket/cors.xml`/`.json`), lifecycle (abort multipart; no prefix expiry, see the file) and the real-bucket check script. [ ] Owner applies them and runs `check-presigned-put.mjs`.
+- [x] Memory: video cap 150 MB (may return to 300 MB after the resize, no migration); systemd `MemoryHigh=700M`/`MemoryMax=900M` + hardening drop-in (`infra/systemd/`); OOM/restart alert queries. [ ] Owner resizes server_1 to 2 GB, then installs the drop-in.
+- [ ] Resend: DNS records (runbook § Resend DNS), domain verified, sending-only key. `admin@cuencada.com` must receive mail (the seeded admin starts unverified).
+- [x] Legacy URLs redirected by nginx. [ ] `git rm` the root `index.html`, `cuencada2026.html`, `images/`, `mensajes.json`, root `canciones/` in a PR after cutover (owner: history stays).
+- [ ] **Pre-launch:** breached-password check on password set, change and reset (WP-2.3 L5, ASVS 2.1.7): being built in a separate WP; launch waits for it.
+- [x] **Pre-launch:** stricter open invites (#36).
+- [ ] Minimum client version mechanism, then "bump min client version" in the release checklist for security fixes (runbook § 11).
 - [ ] Git history still contains the pre-sweep real/real-looking family names and the legacy links; owner decided "sweep forward, no history rewrite". Revisit only if the owner asks.

@@ -1,7 +1,42 @@
+# Acleron deployment contract for cuencada.com (bundle mode).
+#
+# Checked without secrets by `mise run deploy-preflight` (apps/server/deploy/preflight.ts):
+# every variable config.ts reads must be mapped here, secrets must be vault
+# references under server.credentials, and the nginx site must match
+# docs/security/csp.md.
+# Runbook: docs/deploy/runbook.md. Decisions: docs/coordination/WP-2.4.md.
+#
+# Topology: the API runs on server_1. PostgreSQL 18 runs on a separate DB
+# server, reached from server_1 over the private VPC (the runtime
+# DATABASE_URL, in the vault). The operator reaches the same DB from their
+# machine through an SSH tunnel (deploy.migrate_tunnel) for migrations and
+# the one-off seed.
+#
+# Release order (Acleron bundle mode, `mise run deploy` from the operator's machine):
+#   1. verify   mise run verify (lint, typecheck, tests, prod audit)
+#   2. build    deploy.build_command, with deploy.build_env (public values only)
+#   3. migrate  server.migrate_command (`pnpm --filter @cuencada/server db:migrate`,
+#               i.e. `node apps/server/dist/db/migrate.js`), run on the
+#               operator's machine through the tunnel with MIGRATE_DATABASE_URL =
+#               the OWNER role. The owner role never reaches the VPS. A failed
+#               migration ships nothing.
+#   4. ship     upload, pnpm install --prod on the VPS, swap the current symlink
+#   5. restart  systemd restarts cuencada-server; Acleron waits for is-active
+#   6. health   https://cuencada.com/healthz (liveness) and, over SSH,
+#               curl http://127.0.0.1:3104/health/ready (DB over the VPC)
+# The production seed is NOT part of the deploy: it runs once, manually, over
+# the tunnel, after the first migration (runbook § 6).
+#
+# Migrations run BEFORE the new code is live, so every migration from 0002 on
+# must be expand/contract (the old code must keep working on the new schema).
+
 id: cuencada
 domain: cuencada.com
 aliases:
   - www.cuencada.com
+# www answers 301 to the apex: CORS and the CSRF Origin check allow only
+# https://cuencada.com.
+canonical_redirect: true
 
 repo: git@github.com:abrahamcuenca/Cuencada.git
 branch: main
@@ -15,10 +50,21 @@ deploy:
   releases_dir: /srv/cuencada/releases
   current_dir: /srv/cuencada/current
   mode: bundle
+  # The LOCAL end of the operator's SSH tunnel to the DB server's VPC address
+  # (ssh -N -L <port>:<db VPC host>:5432 …). build-bundle refuses a
+  # MIGRATE_DATABASE_URL that points anywhere else. Change the port here if
+  # the operator's tunnel uses another one.
+  migrate_tunnel: 127.0.0.1:15432
   build_command: pnpm turbo build --concurrency=1
+  # Public, build-time values only: they are inlined into the client bundle.
+  # Vault values are NOT available at build time.
   build_env:
     VITE_API_BASE_URL: /api
     VITE_PLATFORM_DOMAIN: cuencada.com
+    # Must equal https://<S3_BUCKET>.<S3_ENDPOINT host>: the presigned PUT
+    # origin. Unset or wrong = gallery uploads are refused. The bucket name is
+    # not a secret (it is in the CSP). OPEN QUESTION (owner): bucket name.
+    VITE_MEDIA_UPLOAD_ORIGIN: https://<bucket>.us-southeast-1.linodeobjects.com
 
 tls:
   enabled: true
@@ -26,18 +72,27 @@ tls:
   cert_name: cuencada.com
   webroot: /var/www/_letsencrypt
 
+# The project's own nginx site (Acleron `nginx.site_template`, platform branch
+# cuencada-nginx-credentials). The stock template can't express it: chat
+# WebSocket under /api, SPA CSP, redacted access log, X-Forwarded-For
+# overwrite. See docs/deploy/nginx.md.
+nginx:
+  site_template: infra/nginx/cuencada.conf
+
 frontend:
   enabled: true
   kind: static
   app: apps/web
   artifact_dir: apps/web/dist
   public_root: /srv/cuencada/web/current
+  immutable_dir: /assets/
 
 dashboard:
   enabled: false
 
 server:
   enabled: true
+  # Runs on the operator's machine in bundle mode (see the release order above).
   migrate_command: [pnpm, --filter, "@cuencada/server", "db:migrate"]
   kind: node
   app: apps/server
@@ -45,23 +100,49 @@ server:
   port: 3104
   service_name: cuencada-server
   websocket: true
-  api_max_body_size: 2m
+  # Liveness only (no DB): nginx exposes it as /healthz.
+  health_path: /health
+  # Fastify's JSON body limit is 1 MiB; media goes straight to the bucket.
+  api_max_body_size: 1m
+  # NON-SECRETS ONLY. These become systemd Environment= lines, which any local
+  # user can read with `systemctl show cuencada-server -p Environment`.
+  # Together with server.credentials: every variable apps/server/src/config.ts
+  # reads (except DEV_ALLOWED_ORIGINS, ignored in production). Quoted strings.
   env:
     NODE_ENV: production
     HOST: 127.0.0.1
     PORT: "3104"
+    LOG_LEVEL: info
     APP_BASE_URL: https://cuencada.com
     CORS_ORIGIN: https://cuencada.com
+    # nginx on the same host is the only proxy; it overwrites X-Forwarded-For.
     TRUST_PROXY: loopback
-    DATABASE_URL: "{{ vault_cuencada_database_url }}"
-    JWT_SECRET: "{{ vault_cuencada_jwt_secret }}"
-    RESEND_API_KEY: "{{ vault_cuencada_resend_api_key }}"
+    COOKIE_SECURE: "true"
+    ACCESS_TOKEN_TTL_SECONDS: "900"
+    REFRESH_IDLE_DAYS: "30"
+    REFRESH_ABSOLUTE_DAYS: "90"
     MAIL_FROM: "Cuencada <no-reply@cuencada.com>"
     SUPPORT_EMAIL: admin@cuencada.com
     MEDIA_REQUIRE_APPROVAL: "false"
-    S3_ENDPOINT: "{{ vault_cuencada_s3_endpoint }}"
-    S3_REGION: "{{ vault_cuencada_s3_region | default('us-southeast-1') }}"
-    S3_BUCKET: "{{ vault_cuencada_s3_bucket }}"
+    S3_ENDPOINT: https://us-southeast-1.linodeobjects.com
+    S3_REGION: us-southeast-1
+    # Not a secret (it is in the CSP and every presigned URL). Same value as
+    # in VITE_MEDIA_UPLOAD_ORIGIN and infra/nginx/cuencada.conf.
+    S3_BUCKET: <bucket>
+    # Private bucket: everything is presigned, no public base URL.
+    S3_PUBLIC_BASE_URL: ""
+    # libuv pool shared by argon2, sharp and DNS/fs: 6 keeps a long image job
+    # from queueing logins behind it (WP-2.2). See docs/deploy/runbook.md.
+    UV_THREADPOOL_SIZE: "6"
+  # SECRETS (Acleron `server.credentials`): written to root-only files in
+  # /etc/credstore/cuencada-server/ and loaded with LoadCredential=; the app
+  # reads them from $CREDENTIALS_DIRECTORY (config.ts). Values live in
+  # ~/.acleron/vault-server_1.yml. Generate them as hex (openssl rand -hex 32).
+  credentials:
+    # The RUNTIME role (DML only, infra/db/roles.sql), over the VPC to the DB
+    # server. The owner role's URL is operator-only and never appears here.
+    DATABASE_URL: "{{ vault_cuencada_database_url }}"
+    JWT_SECRET: "{{ vault_cuencada_jwt_secret }}"
+    RESEND_API_KEY: "{{ vault_cuencada_resend_api_key }}"
     S3_ACCESS_KEY_ID: "{{ vault_cuencada_s3_access_key_id }}"
     S3_SECRET_ACCESS_KEY: "{{ vault_cuencada_s3_secret_access_key }}"
-    S3_PUBLIC_BASE_URL: "{{ vault_cuencada_s3_public_base_url | default('') }}"

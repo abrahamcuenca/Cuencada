@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Cuencada media bucket lifecycle (WP-2.4).
+     One rule: abort multipart uploads left incomplete for a day. The app
+     uploads with single presigned PUTs, so this is a backstop for any client
+     or tool that starts a multipart upload and dies.
+     No expiration rule: the media code writes originals straight to
+     cuencadas/<year>/originals/ (there is no incoming/ prefix), and accepted
+     originals live there too, so a prefix expiry would delete real photos.
+     The app's cleanup job removes orphaned uploads instead. If an incoming/
+     prefix is ever added (backlog), add an Expiration rule for it here. -->
+<LifecycleConfiguration>
+  <Rule>
+    <ID>abort-incomplete-multipart-uploads</ID>
+    <Filter>
+      <Prefix></Prefix>
+    </Filter>
+    <Status>Enabled</Status>
+    <AbortIncompleteMultipartUpload>
+      <DaysAfterInitiation>1</DaysAfterInitiation>
+    </AbortIncompleteMultipartUpload>
+  </Rule>
+</LifecycleConfiguration>

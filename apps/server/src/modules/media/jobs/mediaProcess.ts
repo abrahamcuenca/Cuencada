@@ -219,7 +219,7 @@ async function processImage(
 }
 
 /**
- * Videos are read into one preallocated buffer (≤ 300 MB, one at a time on
+ * Videos are read into one preallocated buffer (≤ 150 MB, one at a time on
  * the serial queue) and scrubbed in place, so peak memory is ≈ 1× the file
  * plus one 8 MB chunk; `put` then hands that same buffer to the SDK.
  * `StorageService` has no streaming read/write yet (WP Request 1).

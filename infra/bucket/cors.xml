@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Cuencada media bucket CORS (WP-T4-BE / WP-2.4). Browsers PUT uploads and
+     GET/HEAD photos and videos straight from the bucket with presigned URLs,
+     from https://cuencada.com only, without credentials. Add x-amz-* headers
+     to AllowedHeader only if the signer ever starts adding them. A dev bucket
+     may add http://localhost:5173; the production bucket never does. -->
+<CORSConfiguration>
+  <CORSRule>
+    <AllowedOrigin>https://cuencada.com</AllowedOrigin>
+    <AllowedMethod>PUT</AllowedMethod>
+    <AllowedMethod>GET</AllowedMethod>
+    <AllowedMethod>HEAD</AllowedMethod>
+    <AllowedHeader>content-type</AllowedHeader>
+    <ExposeHeader>ETag</ExposeHeader>
+    <MaxAgeSeconds>3600</MaxAgeSeconds>
+  </CORSRule>
+</CORSConfiguration>
