@@ -1,0 +1,262 @@
+/*
+ * Cuencada base styles (WP-0.7): modern reset, base typography, focus,
+ * reduced motion, safe areas and a few global utilities.
+ * Depends on tokens.css. Mobile-first: only `min-width` media queries.
+ */
+
+/* ---------- Reset ---------- */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+* {
+  margin: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  scroll-padding-top: calc(var(--safe-top) + var(--space-4));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: var(--text-md);
+  line-height: var(--leading-body);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: clip; /* belt and braces: no horizontal scroll at 320px */
+}
+
+img,
+picture,
+video,
+canvas,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+img,
+video {
+  height: auto;
+}
+
+input,
+button,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+/* iOS zooms any focused field under 16px — never allow it. */
+input,
+textarea,
+select {
+  font-size: max(16px, 1em);
+}
+
+button {
+  cursor: pointer;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+a {
+  color: var(--color-primary);
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.18em;
+}
+
+p,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  overflow-wrap: break-word;
+}
+
+p,
+li {
+  text-wrap: pretty;
+}
+
+ul[role="list"],
+ol[role="list"] {
+  list-style: none;
+  padding: 0;
+}
+
+/* ---------- Typography ---------- */
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  line-height: var(--leading-snug);
+  text-wrap: balance;
+  color: inherit;
+}
+
+h1 {
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-black);
+  line-height: var(--leading-tight);
+  letter-spacing: -0.03em;
+}
+
+h2 {
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-black);
+  line-height: var(--leading-tight);
+  letter-spacing: -0.02em;
+}
+
+h3 {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+}
+
+h4 {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+}
+
+small {
+  font-size: var(--text-sm);
+}
+
+strong,
+b {
+  font-weight: var(--weight-bold);
+}
+
+::selection {
+  background: var(--color-focus-halo);
+  color: var(--brand-ink);
+}
+
+/* ---------- Focus ---------- */
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-xs);
+}
+
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------- Utilities ---------- */
+
+/** Hide visually, keep for screen readers. */
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/** Centered content column with safe-area-aware gutters. */
+.cu-container {
+  width: 100%;
+  max-width: calc(var(--content-max) + 2 * var(--gutter));
+  margin-inline: auto;
+  padding-inline: max(var(--gutter), var(--safe-left)) max(var(--gutter), var(--safe-right));
+}
+
+/** Legacy hero kicker ("MÉRIDA · YUCATÁN · …"). Use once per hero, not as a generic label. */
+.cu-kicker {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-kicker);
+  text-transform: uppercase;
+  color: var(--color-accent-on-dark);
+}
+
+/** Legacy hero surface: green gradient with a gold glow. */
+.cu-hero-surface {
+  background: var(--gradient-hero);
+  color: var(--color-text-inverse);
+}
+
+/**
+ * Papel picado edge — the one signature flourish of the system.
+ * Cuts a scalloped bottom edge like the tissue-paper banners strung over
+ * a Mexican fiesta. Use on the hero and on at most one feature panel per page.
+ */
+.cu-papel-picado {
+  --scallop: 12px;
+  padding-bottom: calc(var(--scallop) + var(--space-4));
+  -webkit-mask:
+    linear-gradient(#000 0 0) top / 100% calc(100% - var(--scallop)) no-repeat,
+    radial-gradient(circle at 50% 0, #000 calc(var(--scallop) - 0.5px), transparent var(--scallop)) bottom /
+    calc(var(--scallop) * 2) var(--scallop) repeat-x;
+  mask:
+    linear-gradient(#000 0 0) top / 100% calc(100% - var(--scallop)) no-repeat,
+    radial-gradient(circle at 50% 0, #000 calc(var(--scallop) - 0.5px), transparent var(--scallop)) bottom /
+    calc(var(--scallop) * 2) var(--scallop) repeat-x;
+}
+
+@media (min-width: 900px) {
+  .cu-papel-picado {
+    --scallop: 18px;
+  }
+}
+
+/** Skip link: first focusable element on every page. */
+.cu-skip-link {
+  position: fixed;
+  top: calc(var(--safe-top) + var(--space-2));
+  left: calc(var(--safe-left) + var(--space-2));
+  z-index: var(--z-toast);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-primary);
+  font-weight: var(--weight-bold);
+  transform: translateY(-200%);
+}
+
+.cu-skip-link:focus-visible {
+  transform: none;
+}

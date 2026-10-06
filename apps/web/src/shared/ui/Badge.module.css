@@ -1,0 +1,69 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.pill {
+  min-height: 28px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
+}
+
+.count {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  box-shadow: 0 0 0 2px var(--color-surface);
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-round);
+  box-shadow: 0 0 0 2px var(--color-surface);
+}
+
+.neutral {
+  background: #edf1ef;
+  color: var(--color-text);
+}
+
+.brand {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.accent {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-text);
+}
+
+.festive {
+  background: var(--color-festive);
+  color: #ffffff;
+}
+
+.success {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.danger {
+  background: var(--color-danger);
+  color: #ffffff;
+}
+
+/* Counts and dots are always solid so they read at small sizes. */
+.count.brand,
+.dot.brand {
+  background: var(--color-primary);
+  color: #ffffff;
+}

@@ -1,0 +1,151 @@
+.header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  padding-top: var(--safe-top);
+}
+
+.solid {
+  background: rgb(255 250 240 / 0.94);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+}
+
+@supports (backdrop-filter: blur(12px)) {
+  .solid {
+    background: rgb(255 250 240 / 0.82);
+    backdrop-filter: saturate(1.4) blur(12px);
+  }
+}
+
+.hero {
+  position: absolute;
+  inset: 0 0 auto;
+  background: transparent;
+  color: #ffffff;
+}
+
+.hideOnMobile {
+  display: none;
+}
+
+.inner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 60px;
+  max-width: calc(var(--content-max) + 2 * var(--gutter));
+  margin-inline: auto;
+  padding-inline: max(var(--gutter), var(--safe-left)) max(var(--gutter), var(--safe-right));
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.brandLink,
+.brand a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap-min);
+  color: inherit;
+  text-decoration: none;
+  font-family: var(--font-display);
+  font-weight: var(--weight-black);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.logo {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  background: #ffffff;
+  border: 2px solid #ffffff;
+  border-radius: 10px;
+  box-shadow: 0 3px 10px rgb(0 0 0 / 0.18);
+}
+
+.nav {
+  display: none;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.list {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap-min);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  color: inherit;
+  font-weight: var(--weight-bold);
+  text-decoration: none;
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.link:focus-visible {
+  border-radius: var(--radius-pill);
+}
+
+.solid .link:hover {
+  background: var(--color-primary-soft);
+}
+
+.hero .link:hover {
+  background: rgb(255 255 255 / 0.12);
+}
+
+.solid .active {
+  color: var(--color-primary);
+  background: var(--color-accent-soft);
+  box-shadow: inset 0 -3px 0 var(--color-accent);
+}
+
+.hero .active {
+  color: var(--color-accent-on-dark);
+  box-shadow: inset 0 -3px 0 var(--color-accent);
+}
+
+@media (min-width: 900px) {
+  .hideOnMobile {
+    display: block;
+  }
+
+  .inner {
+    min-height: var(--top-nav-height);
+  }
+
+  .logo {
+    width: 52px;
+    height: 52px;
+  }
+
+  .nav {
+    display: block;
+    margin-left: auto;
+  }
+
+  .actions {
+    margin-left: var(--space-2);
+  }
+}
