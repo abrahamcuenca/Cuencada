@@ -1,0 +1,144 @@
+import { describe, expect, it } from "vitest";
+import { readAuditFilters, toAuditQuery, writeAuditFilters, zonedMidnight } from "./auditFilters";
+import { INVITE_FORM_DEFAULTS, normalizeInviteForm, validateInviteForm } from "./inviteForm";
+import { auditActionLabel, auditEntityLabel } from "./labels";
+import { formatMetadataValue, METADATA_VALUE_MAX, metadataRows } from "./metadata";
+import { LAST_ADMIN_MESSAGE, SELF_CHANGE_MESSAGE, userActionErrorMessage } from "./userErrors";
+
+describe("validateInviteForm", () => {
+  it("builds an email invite body with maxUses 1", () => {
+    expect(validateInviteForm({ ...INVITE_FORM_DEFAULTS, email: " ana.prieto@example.com ", maxUses: "9" })).toEqual({
+      ok: true,
+      request: { email: "ana.prieto@example.com", role: "member", maxUses: 1, expiresInDays: 7, sendEmail: true, note: null }
+    });
+  });
+
+  it("requires an email for an admin invite", () => {
+    expect(validateInviteForm({ ...INVITE_FORM_DEFAULTS, role: "admin" })).toEqual({
+      ok: false,
+      errors: { email: "Una invitación de administrador debe ir a un correo." }
+    });
+  });
+
+  it("forces email delivery for the admin role", () => {
+    expect(normalizeInviteForm({ ...INVITE_FORM_DEFAULTS, role: "admin", delivery: "link" }).delivery).toBe("email");
+    expect(normalizeInviteForm({ ...INVITE_FORM_DEFAULTS, role: "member", delivery: "link" }).delivery).toBe("link");
+  });
+
+  it("builds an open invite body without an email", () => {
+    expect(validateInviteForm({ ...INVITE_FORM_DEFAULTS, delivery: "link", email: "ignored@example.com", maxUses: "20", expiresInDays: "14" })).toEqual({
+      ok: true,
+      request: { email: null, role: "member", maxUses: 20, expiresInDays: 14, sendEmail: false, note: null }
+    });
+  });
+
+  it("rejects open invites over the contract limits", () => {
+    const result = validateInviteForm({ ...INVITE_FORM_DEFAULTS, delivery: "link", maxUses: "21", expiresInDays: "15" });
+    expect(result).toEqual({
+      ok: false,
+      errors: { maxUses: "Una invitación abierta admite como máximo 20 usos.", expiresInDays: "Una invitación abierta dura como máximo 14 días." }
+    });
+  });
+
+  it.each([
+    ["0", "maxUses"],
+    ["abc", "maxUses"],
+    ["60", "maxUses"]
+  ])("rejects %s uses with a plain message", (maxUses) => {
+    const result = validateInviteForm({ ...INVITE_FORM_DEFAULTS, delivery: "link", maxUses });
+    expect(result.ok ? null : result.errors.maxUses).toBe("Escribe un número de usos entre 1 y 20.");
+  });
+
+  it("rejects a bound invite past 30 days", () => {
+    const result = validateInviteForm({ ...INVITE_FORM_DEFAULTS, email: "ana.prieto@example.com", expiresInDays: "31" });
+    expect(result.ok ? null : result.errors.expiresInDays).toBe("Escribe un número de días entre 1 y 30.");
+  });
+
+  it("rejects an invalid email", () => {
+    const result = validateInviteForm({ ...INVITE_FORM_DEFAULTS, email: "no-es-correo" });
+    expect(result.ok).toBe(false);
+    expect(result.ok ? null : result.errors.email).toEqual(expect.any(String));
+  });
+});
+
+describe("audit filters", () => {
+  it("reads only valid params", () => {
+    const params = new URLSearchParams("accion=user.disabled&tipo=invite&desde=2026-10-01&hasta=2026-13-01&actor=0b9c2f7e-1d2a-4c3b-8e4f-5a6b7c8d9e01");
+    expect(readAuditFilters(params)).toEqual({
+      action: "user.disabled",
+      entityType: "invite",
+      from: "2026-10-01",
+      to: "",
+      actorUserId: "0b9c2f7e-1d2a-4c3b-8e4f-5a6b7c8d9e01"
+    });
+    expect(readAuditFilters(new URLSearchParams("accion=<b>&tipo=foo&actor=1"))).toEqual({ action: "", entityType: "", from: "", to: "", actorUserId: "" });
+  });
+
+  it("writes only non-empty params", () => {
+    expect(writeAuditFilters({ action: "", entityType: "user", from: "", to: "2026-10-06", actorUserId: "" }).toString()).toBe("tipo=user&hasta=2026-10-06");
+  });
+
+  it("computes local midnight in a fixed-offset and a DST zone", () => {
+    expect(new Date(zonedMidnight("2026-10-06", "America/Merida")).toISOString()).toBe("2026-10-06T06:00:00.000Z");
+    expect(new Date(zonedMidnight("2026-03-29", "Europe/Madrid")).toISOString()).toBe("2026-03-28T23:00:00.000Z");
+    expect(new Date(zonedMidnight("2026-07-01", "Europe/Madrid")).toISOString()).toBe("2026-06-30T22:00:00.000Z");
+  });
+
+  it("turns a day range into an inclusive instant range", () => {
+    expect(toAuditQuery({ action: "", entityType: "", from: "2026-10-01", to: "2026-10-01", actorUserId: "" }, "America/Merida")).toEqual({
+      ok: true,
+      filter: { from: "2026-10-01T06:00:00.000Z", to: "2026-10-02T05:59:59.999Z" }
+    });
+  });
+
+  it("refuses an inverted range", () => {
+    expect(toAuditQuery({ action: "", entityType: "", from: "2026-10-02", to: "2026-10-01", actorUserId: "" }, "America/Merida").ok).toBe(false);
+  });
+});
+
+describe("metadata", () => {
+  it("formats every JSON value as plain text", () => {
+    expect(formatMetadataValue(true)).toBe("Sí");
+    expect(formatMetadataValue(false)).toBe("No");
+    expect(formatMetadataValue(null)).toBe("—");
+    expect(formatMetadataValue(3)).toBe("3");
+    expect(formatMetadataValue(["role", "status"])).toBe("role, status");
+    expect(formatMetadataValue([])).toBe("—");
+    expect(formatMetadataValue({ from: "member", to: "admin" })).toBe('{"from":"member","to":"admin"}');
+    expect(formatMetadataValue("<b>hola</b>")).toBe("<b>hola</b>");
+  });
+
+  it("cuts long values", () => {
+    expect(formatMetadataValue("x".repeat(METADATA_VALUE_MAX + 10))).toHaveLength(METADATA_VALUE_MAX + 1);
+  });
+
+  it("keeps the stored key order", () => {
+    expect(metadataRows({ b: 1, a: "x" })).toEqual([
+      { key: "b", value: "1" },
+      { key: "a", value: "x" }
+    ]);
+  });
+});
+
+describe("labels", () => {
+  it("falls back to the raw value for unknown actions and types", () => {
+    expect(auditActionLabel("user.disabled")).toBe("Deshabilitó una cuenta");
+    expect(auditActionLabel("future.thing_done")).toBe("future.thing_done");
+    expect(auditActionLabel("toString")).toBe("toString");
+    expect(auditEntityLabel("media")).toBe("Foto o video");
+    expect(auditEntityLabel("legacy")).toBe("legacy");
+  });
+});
+
+describe("userActionErrorMessage", () => {
+  const error = (status: number, code: string, message?: string): unknown => ({
+    status,
+    data: message === undefined ? {} : { error: { code, message } }
+  });
+
+  it("maps the guardrails to Spanish", () => {
+    expect(userActionErrorMessage(error(409, "CONFLICT", "x"))).toBe(LAST_ADMIN_MESSAGE);
+    expect(userActionErrorMessage(error(403, "FORBIDDEN", "No puedes cambiar tu propio rol ni desactivar tu propia cuenta."))).toBe(SELF_CHANGE_MESSAGE);
+    expect(userActionErrorMessage(error(429, "RATE_LIMITED", "x"))).toMatch(/Espera un minuto/);
+  });
+});

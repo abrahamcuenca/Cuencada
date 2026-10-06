@@ -95,9 +95,10 @@ describe("RequireAdmin", () => {
   });
 
   it("renders /admin/* for an admin", async () => {
-    renderApp("/admin/usuarios", authenticatedState(makeUser({ role: "admin" })));
+    // An unknown admin path needs no API call: the T8 layout and its own not-found state render.
+    renderApp("/admin/no-existe", authenticatedState(makeUser({ role: "admin" })));
 
-    expect(await screen.findByRole("heading", { name: "Panel de la Cuencada" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "No encontramos esta sección de administración" })).toBeInTheDocument();
   });
 
   it("sends an admin with a temporary password to /cambiar-contrasena first", async () => {

@@ -22,6 +22,8 @@ import {
 } from "@cuencada/types";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { CreatedEmailToken } from "../auth/emailTokens.js";
+import type { LockedUser } from "./users.js";
 import type { AdminAccountChange } from "@cuencada/emails";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
@@ -37,6 +39,7 @@ import {
   issueBudgetedEmailToken,
   sendInBackground
 } from "../auth/emailTokens.js";
+import { closeChatSockets as closeUserChatSockets } from "../auth/chatSockets.js";
 import { revokeSessions } from "../auth/sessions.js";
 import { adminAlertMetadata, type AdminAlert, type AdminAlertPlan, planAdminAlert, queueAdminAlerts } from "./adminAlerts.js";
 import {
@@ -64,17 +67,14 @@ const errorResponses = {
 } as const;
 
 /**
- * Close the user's live chat sockets after a disable or revocation.
+ * Close the user's live chat sockets after a disable or revocation (after
+ * commit). Non-fatal: the chat hub's 5-minute re-check is the backstop.
  *
- * TODO(T7): call `closeSocketsForUser(app, userId)` from `modules/chat` once
- * T7 lands on main. Until then a socket opened before the disable keeps
- * running until it reconnects (the ticket and REST guard already refuse it).
- *
- * @param _app - The app.
- * @param _userId - The user whose sockets should close.
+ * @param app - The app.
+ * @param userId - The user whose sockets should close.
  */
-function closeChatSockets(_app: FastifyInstance, _userId: string): void {
-  // Intentionally empty until T7's helper exists (see TODO above).
+function closeChatSockets(app: FastifyInstance, userId: string): void {
+  closeUserChatSockets(app, { userId });
 }
 
 /**
@@ -94,6 +94,19 @@ function perAdminLimit(app: FastifyInstance): RateLimitHook {
 interface PendingAlert {
   plan: AdminAlertPlan;
   alert: AdminAlert;
+}
+
+/** Result of the PATCH transaction. */
+interface PatchOutcome {
+  disabled: boolean;
+  alert: PendingAlert | null;
+}
+
+/** Result of the force-reset transaction. */
+interface ForceResetOutcome {
+  target: LockedUser;
+  token: CreatedEmailToken | null;
+  alert: PendingAlert | null;
 }
 
 /** Inputs of {@link adminAccountChanges}. */
@@ -162,7 +175,7 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
       const targetId = request.params.id;
       const now = app.clock.now();
 
-      const outcome = await app.db.transaction(async (tx) => {
+      const outcome = await app.db.transaction(async (tx): Promise<PatchOutcome> => {
         await lockAdminUserChanges(tx);
         const target = await lockTargetUser(tx, admin.id, targetId);
         const nextRole = input.role ?? target.role;
@@ -173,6 +186,10 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
         if (target.id === admin.id && (roleChanged || statusChanged)) {
           throw new AppError("FORBIDDEN", AdminUserMessages.SelfChange);
         }
+        // Defence in depth, unreachable today: the caller was just re-checked as an
+        // active admin and cannot change themselves, so another active admin (the
+        // caller) always exists. It keeps the invariant if a future path (a system
+        // job, a script, or a relaxed self rule) reaches this code without that guarantee.
         const losesAdmin =
           target.role === "admin" && target.status === "active" && (nextRole !== "admin" || nextStatus !== "active");
         if (losesAdmin && (await countOtherActiveAdmins(tx, target.id)) === 0) {
@@ -212,7 +229,7 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
           disabling,
           mustChangeChanged
         });
-        const plan = changes.length > 0 ? await planAdminAlert(app, tx, admin.id, now) : null;
+        const plan = changes.length > 0 ? await planAdminAlert(app, tx, { actorId: admin.id, target, changes, now }) : null;
         if (plan !== null) Object.assign(metadata, adminAlertMetadata(plan));
         const action = disabling
           ? AuditAction.UserDisabled
@@ -248,7 +265,7 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
       preHandler: adminLimit,
       schema: { params: idParamSchema, response: { 204: noContent, ...errorResponses } }
     },
-    async (request, reply) => {
+    async (request, reply): Promise<void> => {
       const admin = authUser(request);
       const targetId = request.params.id;
       if (targetId === admin.id) throw new AppError("FORBIDDEN", SELF_ACCOUNT_MESSAGE);
@@ -267,7 +284,7 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
         });
       });
       closeChatSockets(app, targetId);
-      return reply.code(204).send(null);
+      await reply.code(204).send(null);
     }
   );
 
@@ -289,7 +306,7 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
       if (targetId === admin.id) throw new AppError("FORBIDDEN", SELF_ACCOUNT_MESSAGE);
       const now = app.clock.now();
 
-      const outcome = await app.db.transaction(async (tx) => {
+      const outcome = await app.db.transaction(async (tx): Promise<ForceResetOutcome> => {
         await lockAdminUserChanges(tx);
         const target = await lockTargetUser(tx, admin.id, targetId);
         await tx.update(users).set({ mustChangePassword: true }).where(eq(users.id, target.id));
@@ -305,7 +322,10 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
                 now
               })
             : null;
-        const plan = target.role === "admin" ? await planAdminAlert(app, tx, admin.id, now) : null;
+        const plan =
+          target.role === "admin"
+            ? await planAdminAlert(app, tx, { actorId: admin.id, target, changes: ["password_reset_forced"], now })
+            : null;
         const auditId = await recordAudit(tx, {
           actorUserId: admin.id,
           action: AuditAction.UserPasswordResetForced,

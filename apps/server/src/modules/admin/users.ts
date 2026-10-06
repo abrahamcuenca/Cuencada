@@ -49,6 +49,7 @@ export interface AdminUserListOptions {
   now: Date;
 }
 
+/** Live (not revoked, not idle/absolute-expired) sessions of the row's user. */
 function activeSessionCountSql(now: Date): SQL<number> {
   const at = now.toISOString();
   return sql<number>`(select count(*) from ${sessions}
@@ -60,7 +61,20 @@ function activeSessionCountSql(now: Date): SQL<number> {
 
 const cursorMicrosSql = sql<string>`(extract(epoch from ${users.createdAt}) * 1000000)::bigint::text`;
 
-function selectAdminUsers(db: DbOrTx, now: Date) {
+/** Filter and size of a {@link queryAdminUsers} call. */
+interface AdminUserQuery {
+  where: SQL | undefined;
+  limit: number;
+}
+
+/**
+ * Run the admin user query (newest first) and return typed rows.
+ *
+ * @param db - Client or transaction.
+ * @param now - Current time (active-session count).
+ * @param query - Filter and page size.
+ */
+async function queryAdminUsers(db: DbOrTx, now: Date, query: AdminUserQuery): Promise<AdminUserRow[]> {
   return db
     .select({
       id: users.id,
@@ -77,7 +91,10 @@ function selectAdminUsers(db: DbOrTx, now: Date) {
       cursorMicros: cursorMicrosSql
     })
     .from(users)
-    .leftJoin(people, eq(people.userId, users.id));
+    .leftJoin(people, eq(people.userId, users.id))
+    .where(query.where)
+    .orderBy(desc(users.createdAt), desc(users.id))
+    .limit(query.limit);
 }
 
 function toListItem(row: AdminUserRow): AdminUserListItem {
@@ -121,10 +138,7 @@ export async function listAdminUsers(
       sql`(${users.createdAt}, ${users.id}) < (to_timestamp(0) + ${cursor.micros}::bigint * interval '1 microsecond', ${cursor.id}::uuid)`
     );
   }
-  const rows = await selectAdminUsers(db, options.now)
-    .where(and(...conditions))
-    .orderBy(desc(users.createdAt), desc(users.id))
-    .limit(options.limit + 1);
+  const rows = await queryAdminUsers(db, options.now, { where: and(...conditions), limit: options.limit + 1 });
   const page = rows.slice(0, options.limit);
   const last = page.at(-1);
   return {
@@ -143,7 +157,7 @@ export async function listAdminUsers(
  * @throws AppError `NOT_FOUND`.
  */
 export async function getAdminUser(db: DbOrTx, userId: string, now: Date): Promise<AdminUserListItem> {
-  const [row] = await selectAdminUsers(db, now).where(eq(users.id, userId)).limit(1);
+  const [row] = await queryAdminUsers(db, now, { where: eq(users.id, userId), limit: 1 });
   if (row === undefined) throw new AppError("NOT_FOUND");
   return toListItem(row);
 }
