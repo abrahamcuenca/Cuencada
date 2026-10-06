@@ -14,7 +14,7 @@ export function chatId(namespace: number, n: number): string {
 }
 
 /** The signed-in user in tests: matches `makeUser()` from `test/auth.ts`. */
-export const ME: ChatSender = { userId: "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b", displayName: "Prima Cuenca", avatarUrl: null };
+export const ME: ChatSender = { userId: "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b", displayName: "Prima Morales", avatarUrl: null };
 
 /** Other (fictional) family members. */
 export const PEOPLE = {
@@ -119,6 +119,8 @@ export interface ChatDb {
   ticketStatus: 201 | 403 | 500;
   /** Status to answer rooms/history with (200 by default). */
   readStatus: 200 | 403;
+  /** Error code of every 403 above (`EMAIL_UNVERIFIED` by default, like the server for unverified accounts). */
+  forbiddenCode: "EMAIL_UNVERIFIED" | "FORBIDDEN";
 }
 
 /**
@@ -139,7 +141,8 @@ export function makeChatDb(messageCount = 5): ChatDb {
     deleted: [],
     historyRequests: [],
     ticketStatus: 201,
-    readStatus: 200
+    readStatus: 200,
+    forbiddenCode: "EMAIL_UNVERIFIED"
   };
 }
 
@@ -153,10 +156,10 @@ export function makeChatDb(messageCount = 5): ChatDb {
 export function chatHandlers(db: ChatDb): HttpHandler[] {
   return [
     http.get(apiUrl("/chat/rooms"), () =>
-      db.readStatus === 403 ? HttpResponse.json(errorBody("FORBIDDEN", "Verifica tu correo."), { status: 403 }) : HttpResponse.json(db.rooms)
+      db.readStatus === 403 ? HttpResponse.json(errorBody(db.forbiddenCode, "Sin acceso."), { status: 403 }) : HttpResponse.json(db.rooms)
     ),
     http.get(apiUrl("/chat/rooms/:id/messages"), ({ params, request }) => {
-      if (db.readStatus === 403) return HttpResponse.json(errorBody("FORBIDDEN", "Verifica tu correo."), { status: 403 });
+      if (db.readStatus === 403) return HttpResponse.json(errorBody(db.forbiddenCode, "Sin acceso."), { status: 403 });
       const roomId = String(params.id);
       const all = db.messages.get(roomId);
       if (all === undefined) return HttpResponse.json(errorBody("NOT_FOUND", "No existe."), { status: 404 });
@@ -174,7 +177,7 @@ export function chatHandlers(db: ChatDb): HttpHandler[] {
       return new HttpResponse(null, { status: 204 });
     }),
     http.post(apiUrl("/chat/ticket"), () => {
-      if (db.ticketStatus === 403) return HttpResponse.json(errorBody("FORBIDDEN", "Verifica tu correo."), { status: 403 });
+      if (db.ticketStatus === 403) return HttpResponse.json(errorBody(db.forbiddenCode, "Sin acceso."), { status: 403 });
       if (db.ticketStatus === 500) return HttpResponse.json(errorBody("INTERNAL", "Falla."), { status: 500 });
       const ticket = ticketValue(db.tickets.length + 1);
       db.tickets.push(ticket);

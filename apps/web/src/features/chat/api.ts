@@ -2,7 +2,7 @@ import type { ChatRoom } from "@cuencada/types";
 import { baseApi } from "../../shared/api/baseApi";
 import type { WithAuthState } from "../auth/authSlice";
 import { type ChatHubEvent, getViewingRoom, subscribeChatEventsOnceLoaded } from "./events";
-import { applyDeletedToRooms, applyMessageToRooms, type ChatRoomView, mergeRoomLists, roomsFromResponse } from "./lib/rooms";
+import { applyDeletedToRooms, applyMessageToRooms, applyRoomPreview, type ChatRoomView, mergeRoomLists, roomsFromResponse } from "./lib/rooms";
 
 function currentUserId(state: unknown): string | null {
   // RTK Query types lifecycle `getState()` as its own RootState; the store's state always has `auth` (store.ts).
@@ -51,6 +51,9 @@ export const chatApi = baseApi.injectEndpoints({
             if (!found) dispatch(chatApi.util.invalidateTags([{ type: "ChatRoom", id: "LIST" }]));
           } else if (frame.type === "message_deleted") {
             updateCachedData((rooms) => applyDeletedToRooms(rooms, frame.roomId, frame.messageId));
+          } else if (frame.type === "room_preview") {
+            // The server's word on the room's new last live message (after a deletion).
+            updateCachedData((rooms) => applyRoomPreview(rooms, frame.roomId, frame.lastMessageAt, frame.lastMessage));
           }
         });
         if (unsubscribe === null) return;
