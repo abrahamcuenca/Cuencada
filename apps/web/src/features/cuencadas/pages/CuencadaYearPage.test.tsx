@@ -23,7 +23,12 @@ const server = setupServer(
   http.get(apiUrl("/cuencadas/1999"),() => HttpResponse.json(errorBody("NOT_FOUND", "No encontramos esa Cuencada."), { status: 404 }))
 );
 
-beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+beforeAll(async () => {
+  server.listen({ onUnhandledRequest: "error" });
+  // Warm the lazily imported route module so the first test's findByRole doesn't race a cold
+  // transform under a loaded machine (it timed out once in a full parallel run).
+  await import("./CuencadaYearPage");
+}, 30_000);
 afterEach(() => {
   server.resetHandlers();
   memberRequests = 0;

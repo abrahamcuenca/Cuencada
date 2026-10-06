@@ -1,4 +1,4 @@
-import type { LocationItem, MyRsvp, MyRsvpResponse, PublicCuencada, RsvpStatus } from "@cuencada/types";
+import type { MyRsvp, MyRsvpResponse, PublicCuencada, RsvpStatus } from "@cuencada/types";
 import { type FormEvent, type ReactNode, useRef, useState } from "react";
 import { getApiErrorCode, getApiErrorMessage, isAbortError } from "../../../shared/api/errors";
 import { formatDate } from "../../../shared/lib/dates";
@@ -8,13 +8,16 @@ import { Card } from "../../../shared/ui/Card";
 import { Skeleton } from "../../../shared/ui/Skeleton";
 import { useToast } from "../../../shared/ui/Toast";
 import { useGetCuencadaMembersQuery, useGetCuencadaQuery } from "../../cuencadas/api";
+import { useZonedToday } from "../../cuencadas/hooks/useZonedToday";
 import { useGetMyRsvpQuery, useListAttendeesQuery, usePutMyRsvpMutation } from "../api";
 import { useMember } from "../lib/members";
 import {
   type DateWindow,
   draftFromRsvp,
   editionDateWindow,
-  isPastDeadline,
+  type HotelChoice,
+  hotelChoices,
+  isDeadlineDayOver,
   optimisticRsvp,
   type RsvpDraft,
   type RsvpFieldErrors,
@@ -113,9 +116,13 @@ function RsvpBody({ cuencada, data, onClosed }: RsvpBodyProps): ReactNode {
   const [errors, setErrors] = useState<RsvpFieldErrors>({});
   const summaryRef = useRef<HTMLDivElement>(null);
 
-  const hotels: LocationItem[] = (members.data?.locations ?? []).filter((location) => location.kind === "hotel");
+  const hotelListLoaded = members.data !== undefined;
+  const hotels = hotelChoices(members.data?.locations ?? [], data.rsvp?.hotelLocationId ?? null, hotelListLoaded);
+  const hotelHint = !hotelListLoaded && members.error !== undefined ? "No pudimos cargar la lista de hoteles; conservamos el que ya elegiste." : undefined;
   const dateWindow: DateWindow = editionDateWindow(cuencada.startsAt, cuencada.endsAt, timezone);
-  const deadlinePassed = isPastDeadline(data.deadline, new Date(), timezone);
+  // Re-renders at local midnight, so the card locks when the deadline's day ends with the page open.
+  const today = useZonedToday(timezone);
+  const deadlinePassed = isDeadlineDayOver(data.deadline, today, timezone);
   const closed = !data.editable || deadlinePassed;
 
   if (closed) {
@@ -196,6 +203,7 @@ function RsvpBody({ cuencada, data, onClosed }: RsvpBodyProps): ReactNode {
         draft={draft}
         errors={errors}
         hotels={hotels}
+        hotelHint={hotelHint}
         dateWindow={dateWindow}
         saving={putState.isLoading}
         onChange={setDraft}
@@ -218,7 +226,7 @@ function companions(count: number): string {
 }
 
 /** Read-only view of a saved RSVP. */
-function RsvpSummary({ rsvp, hotels, timeZone }: { rsvp: MyRsvp; hotels: readonly LocationItem[]; timeZone: string }): ReactNode {
+function RsvpSummary({ rsvp, hotels, timeZone }: { rsvp: MyRsvp; hotels: readonly HotelChoice[]; timeZone: string }): ReactNode {
   const hotel = hotels.find((candidate) => candidate.id === rsvp.hotelLocationId);
   const dateOptions: Intl.DateTimeFormatOptions = { weekday: "short", day: "numeric", month: "short" };
   const attending = rsvp.status !== "no";
