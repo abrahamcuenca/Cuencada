@@ -23,6 +23,14 @@ export const attendeeSourceSchema = z.enum(AttendeeSource);
 
 export const RSVP_MAX_GUESTS = 20;
 export const RSVP_NOTES_MAX_LENGTH = 500;
+/**
+ * Arrival/departure must fall within this many days before the edition's
+ * first day and after its last day (calendar days in the edition's timezone).
+ * Checked server-side; clients may mirror it for date pickers.
+ */
+export const RSVP_DATE_WINDOW_DAYS = 14;
+/** Max person ids in one attendance write. */
+export const ATTENDANCE_MAX_PEOPLE = 1000;
 
 /* -------------------------------------------------------------------------- */
 /* My RSVP                                                                     */
@@ -57,7 +65,10 @@ export interface MyRsvpResponse {
   rsvp: MyRsvp | null;
   /** RSVP deadline (ISO) or `null` if none. */
   deadline: string | null;
-  /** False after the deadline or once the edition is `past`. */
+  /**
+   * False once the edition is `past` or after the deadline. The deadline
+   * counts to the end of its calendar day in the edition's timezone.
+   */
   editable: boolean;
 }
 
@@ -69,7 +80,10 @@ export const myRsvpResponseSchema = z.object({
 
 /**
  * `PUT /api/cuencadas/:year/rsvp/me` (idempotent upsert). `hotelLocationId`
- * must be a `hotel` location of the same Cuencada (checked server-side).
+ * must be a `hotel` location of the same Cuencada and the dates must fall in
+ * the `RSVP_DATE_WINDOW_DAYS` window around the edition (both checked
+ * server-side, 400 `VALIDATION`). When the edition is not editable
+ * (`MyRsvpResponse.editable === false`) the server answers 409 `CONFLICT`.
  */
 export const upsertRsvpInputSchema = z
   .object({
@@ -131,16 +145,22 @@ export const rsvpSummarySchema = z.object({
 
 /**
  * One circle in the attendee strip (`GET /api/cuencadas/:year/attendees`).
- * Union of `yes`/`maybe` RSVPs and historical attendance, deduplicated by person.
+ * Verified members only. Union of `yes` RSVPs (active accounts) and
+ * historical attendance, deduplicated by person (by user when the account has
+ * no linked person), sorted by `displayName`. Never carries contact fields.
  */
 export interface Attendee {
   personId: string | null;
   userId: string | null;
   displayName: string;
+  /** Short-lived presigned URL of the account's avatar, or `null`. */
   avatarUrl: string | null;
+  /** `rsvp` when a `yes` RSVP exists (even if attendance is also recorded). */
   source: AttendeeSource;
   /** `null` for attendance-only rows. */
   rsvpStatus: RsvpStatus | null;
+  /** True for the caller's own row. */
+  isMe: boolean;
 }
 
 export const attendeeSchema = z.object({
@@ -149,7 +169,8 @@ export const attendeeSchema = z.object({
   displayName: z.string().max(200),
   avatarUrl: z.string().max(4096).nullable(),
   source: attendeeSourceSchema,
-  rsvpStatus: rsvpStatusSchema.nullable()
+  rsvpStatus: rsvpStatusSchema.nullable(),
+  isMe: z.boolean()
 }) satisfies z.ZodType<Attendee>;
 
 /* -------------------------------------------------------------------------- */
@@ -204,8 +225,8 @@ export const attendanceRecordSchema = z.object({
  */
 export const adminAttendanceBulkInputSchema = z
   .object({
-    add: z.array(idSchema).max(1000).default([]),
-    remove: z.array(idSchema).max(1000).default([])
+    add: z.array(idSchema).max(ATTENDANCE_MAX_PEOPLE).default([]),
+    remove: z.array(idSchema).max(ATTENDANCE_MAX_PEOPLE).default([])
   })
   .refine((value) => value.add.length + value.remove.length > 0, { error: "No hay cambios que guardar." })
   .refine((value) => !value.add.some((id) => value.remove.includes(id)), {
@@ -214,3 +235,18 @@ export const adminAttendanceBulkInputSchema = z
   });
 export type AdminAttendanceBulkInput = z.infer<typeof adminAttendanceBulkInputSchema>;
 export type AdminAttendanceBulkRequest = z.input<typeof adminAttendanceBulkInputSchema>;
+
+/**
+ * `PUT /api/admin/cuencadas/:id/attendance` body: the complete set of people
+ * who attended. People missing from the list are removed and new ones added,
+ * in one transaction; responds with the full `AttendanceRecord[]`. An empty
+ * list clears the edition's attendance. Duplicate ids are rejected.
+ */
+export const adminAttendanceReplaceInputSchema = z.object({
+  personIds: z
+    .array(idSchema)
+    .max(ATTENDANCE_MAX_PEOPLE, { error: `Máximo ${ATTENDANCE_MAX_PEOPLE} personas.` })
+    .refine((ids) => new Set(ids).size === ids.length, { error: "Hay personas repetidas en la lista." })
+});
+export type AdminAttendanceReplaceInput = z.infer<typeof adminAttendanceReplaceInputSchema>;
+export type AdminAttendanceReplaceRequest = z.input<typeof adminAttendanceReplaceInputSchema>;

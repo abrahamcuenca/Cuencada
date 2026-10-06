@@ -72,9 +72,30 @@ export const currentPasswordSchema = z
   .min(1, { error: "Escribe tu contraseña." })
   .max(PASSWORD_MAX_LENGTH, { error: "Contraseña inválida." });
 
-/** Display name shown across the portal. */
-/** Display name shown across the portal: NFC, no bidi/invisible characters (anti-spoofing). */
-export const displayNameSchema = displayTextSchema(80);
+/**
+ * Characters that render as nothing (or as blank space) but are not all caught
+ * by `displayTextSchema`'s bidi/zero-width rule: Hangul fillers (U+115F, U+1160,
+ * U+3164, U+FFA0), word joiner and invisible operators (U+2060–2064), soft
+ * hyphen (U+00AD), combining grapheme joiner (U+034F), Mongolian vowel
+ * separator (U+180E), Khmer inherent vowels (U+17B4/17B5), braille blank
+ * (U+2800), the zero-width set (U+200B–200F, U+FEFF) and whitespace.
+ */
+const INVISIBLE_NAME_CHARS =
+  /(?:[\s\u00AD\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u2060-\u2064\u2800\u3164\uFEFF\uFFA0]|\u034F)/gu;
+
+/** True when `value` has at least one character that is neither invisible nor blank (see `INVISIBLE_NAME_CHARS`). */
+export function hasVisibleNameChars(value: string): boolean {
+  return value.replace(INVISIBLE_NAME_CHARS, "").length > 0;
+}
+
+/**
+ * Display name shown across the portal: NFC, no bidi/invisible characters
+ * (anti-spoofing), and (T1 amendment) not made only of blank-rendering
+ * characters such as U+3164 or U+2060, so nobody can take an empty-looking name.
+ */
+export const displayNameSchema = displayTextSchema(80).refine(hasVisibleNameChars, {
+  error: "El nombre debe tener al menos un carácter visible."
+});
 
 /* -------------------------------------------------------------------------- */
 /* Current user and token responses                                            */
@@ -137,8 +158,13 @@ export const refreshResponseSchema = authTokenResponseSchema;
 
 /** Name of the CSRF header required on cookie-authenticated routes (refresh, logout). */
 export const CSRF_HEADER = "x-cuencada-csrf";
-/** Name of the refresh-token cookie. */
+/** Name of the refresh-token cookie (`COOKIE_SECURE=true`, i.e. production). */
 export const REFRESH_COOKIE = "__Secure-cuencada_rt";
+/**
+ * Name of the refresh-token cookie when cookies are not `Secure` (local http
+ * development): browsers reject a `__Secure-` cookie without `Secure`.
+ */
+export const REFRESH_COOKIE_INSECURE = "cuencada_rt";
 
 /* -------------------------------------------------------------------------- */
 /* Inputs                                                                      */
@@ -193,6 +219,17 @@ export type EmailVerifyConfirmRequest = z.input<typeof emailVerifyConfirmInputSc
 /* -------------------------------------------------------------------------- */
 /* Sessions                                                                    */
 /* -------------------------------------------------------------------------- */
+
+/*
+ * Session endpoints:
+ * - `POST /api/auth/logout` (C): revokes the cookie's session and clears the
+ *   cookie, 204. 401 `UNAUTHENTICATED` when there is no cookie or its session
+ *   is already dead (the client treats 401 as a confirmed logout).
+ * - `POST /api/auth/logout-all` (U, T1 amendment): revokes **every** session of
+ *   the caller, including the current one, and clears the cookie. 204.
+ * - `POST /api/auth/sessions/revoke-others` (U): every session but the current one. 204.
+ * - `DELETE /api/auth/sessions/:id` (U): own live sessions only, otherwise 404.
+ */
 
 /** One of the caller's own sessions (`GET /api/auth/sessions`). */
 export interface SessionListItem {
@@ -293,6 +330,8 @@ export const OPEN_INVITE_MAX_DAYS = 14;
  * `POST /api/admin/invites`.
  * - Admin invites: bound to an email, single-use, and **must be sent by email**
  *   (no copy-link), so holding the token implies controlling the mailbox.
+ * - Email-bound member invites are single-use too (T1 amendment): one bound
+ *   address can create only one account.
  * - Open member invites (`email: null`): at most 20 uses and 14 days.
  */
 export const adminInviteCreateInputSchema = z
@@ -324,6 +363,10 @@ export const adminInviteCreateInputSchema = z
     error: "Una invitación de administrador debe enviarse por correo.",
     path: ["sendEmail"]
   })
+  .refine((value) => value.email === null || value.maxUses === 1, {
+    error: "Una invitación ligada a un correo solo puede usarse una vez.",
+    path: ["maxUses"]
+  })
   .refine((value) => value.email !== null || value.maxUses <= OPEN_INVITE_MAX_USES, {
     error: `Una invitación abierta admite como máximo ${OPEN_INVITE_MAX_USES} usos.`,
     path: ["maxUses"]
@@ -354,6 +397,8 @@ export interface AdminInviteListItem {
   createdByName: string | null;
   personId: string | null;
   note: string | null;
+  /** When the invite email was last sent (create or resend); `null` for copy-link invites (T1 amendment). */
+  lastSentAt: string | null;
 }
 
 export const adminInviteListItemSchema = z.object({
@@ -367,19 +412,30 @@ export const adminInviteListItemSchema = z.object({
   createdAt: dateTimeSchema,
   createdByName: z.string().max(80).nullable(),
   personId: idSchema.nullable(),
-  note: z.string().max(200).nullable()
+  note: z.string().max(200).nullable(),
+  lastSentAt: dateTimeSchema.nullable()
 }) satisfies z.ZodType<AdminInviteListItem>;
 
 /**
  * Response to invite creation. `inviteUrl` (`…/invitacion#t=…`) is shown
  * exactly once so the admin can share it; only its hash is stored.
+ * T1 amendment: `inviteUrl` is `null` when the invite was sent by email
+ * (`sendEmail: true`, always the case for admin invites), so an emailed invite
+ * has no copy-link and keeps its "delivered by email" guarantee.
  */
 export interface AdminInviteCreated {
   invite: AdminInviteListItem;
-  inviteUrl: string;
+  inviteUrl: string | null;
 }
 
 export const adminInviteCreatedSchema = z.object({
   invite: adminInviteListItemSchema,
-  inviteUrl: z.string().max(2048)
+  inviteUrl: z.string().max(2048).nullable()
 }) satisfies z.ZodType<AdminInviteCreated>;
+
+/*
+ * `POST /api/admin/invites/:id/resend` (A, T1 amendment): only pending,
+ * unexpired, email-bound invites (otherwise 409 `CONFLICT`). Issues a **new**
+ * token (the previous link stops working), emails it, sets `lastSentAt` and
+ * answers `AdminInviteListItem`.
+ */

@@ -44,6 +44,7 @@ describe("createUploadInputSchema", () => {
 
   it("accepts an empty or missing confirm body but rejects extra keys", () => {
     expect(confirmUploadInputSchema.safeParse(undefined).success).toBe(true);
+    expect(confirmUploadInputSchema.safeParse(null).success).toBe(true);
     expect(confirmUploadInputSchema.safeParse({}).success).toBe(true);
     expect(confirmUploadInputSchema.safeParse({ objectKey: "x" }).success).toBe(false);
   });
