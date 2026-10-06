@@ -220,6 +220,7 @@ describe("GET /api/chat/rooms/:id/messages", () => {
     });
     expect(tombstone?.sender?.displayName).toBe("Ana");
     expect(tombstone?.sender?.avatarUrl).toContain(encodeURIComponent(me.user.id));
+    expect(tombstone?.sender?.avatarUrl).toContain("-64.webp");
     expect(orphan).toMatchObject({ body: "huérfano", sender: null });
   });
 

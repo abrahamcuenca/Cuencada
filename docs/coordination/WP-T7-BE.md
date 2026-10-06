@@ -1,7 +1,7 @@
 # WP-T7-BE Chat (backend) [SEC]
 Owner: Backend · Reviewers: TL, Security · Branch: wp/t7-be-chat · PR: # (not opened)
 
-Based on `origin/main` (2bcb7a0: T1-BE, T2-BE, T3-BE, T4-BE, T6-BE, WP-2.1 merged; T5-BE and T8-BE not yet).
+Based on `origin/main` (2bcb7a0), then merged with `origin/main` 9718d54 (T5-BE/FE). T8-BE was not on main at hand-off.
 
 ## Scope
 - `apps/server/src/modules/chat/**`:
@@ -12,7 +12,7 @@ Based on `origin/main` (2bcb7a0: T1-BE, T2-BE, T3-BE, T4-BE, T6-BE, WP-2.1 merge
   - `tickets.ts`: in-memory hashed ticket store
   - `limits.ts`: sliding-window limiter and typing throttle
   - `repository.ts`: room visibility, room list with unread counts, keyset history, idempotent insert, monotonic read state, soft delete, session checks
-  - `mappers.ts`, `cursor.ts`, `avatars.ts` (interim avatar signing, see Requests)
+  - `mappers.ts`, `cursor.ts`, `avatars.ts` (batched `avatarUrlFor`)
   - tests: `routes.test.ts` (REST), `socket.test.ts` (WebSocket via `injectWS`), `units.test.ts`; fixtures in `apps/server/test/helpers/chat.ts` (new file)
 - `packages/types/src/chat.ts`: contract amendments (below) and `chat.test.ts`.
 
@@ -103,11 +103,12 @@ location = /api/chat/ws {
 - CSP `connect-src` already lists the `wss://` app origin (WP-0.4).
 
 ## Requests (→ orchestrator)
-1. **T5 follow-up (after T5-BE merges):** replace `modules/chat/avatars.ts#presignAvatar` with `avatarUrlFor(app, key, AvatarSize.Small)` from `modules/profile`. The interim copy follows the same rules (only `avatars/<uuid>/<uuid>-256.webp` keys, 1 h TTL, failures → `null`, logged without the key).
+1. Resolved: T5-BE merged before hand-off, so sender avatars use `avatarUrlFor(app, key, AvatarSize.Small)` from `modules/profile` (64 px; the interim copy is gone).
 2. **T1 follow-up:** call `closeSocketsForSession(app, sessionId)` after logout / revoke-others / password change, and `closeSocketsForUser(app, userId)` after logout-all, from `modules/auth` (not owned here).
 3. **T8 follow-up:** replace the `TODO(T7)` placeholder (`closeChatSockets()`) in the admin module with `closeSocketsForUser(app, userId)` on disable / revoke sessions / force reset, plus a test that an open socket closes. T8 was not on `origin/main` when this WP finished.
 4. **T7-FE:** reconnect with backoff on any close except `4010` (re-auth first) and `1008` (new ticket; on 401 refresh/log in). Track unread with `lastMessage`/`unreadCount`; show `999+` at the cap. Keep under 60 frames / 10 s and do not burst more than 32 frames.
 5. **Optional:** `MemberCuencadaDetails.chatRoomId` (WP-T2-BE request 4) if T7-FE wants to deep-link from an edition page.
 
-## Verification
-See the final section below (filled at hand-off).
+## Verification (2026-10-06)
+- After merging `origin/main` (9718d54): `pnpm lint && pnpm turbo run typecheck --force && pnpm test && pnpm build` all green (111 files, 1274 tests).
+- Chat tests (49 server + 12 contract): `routes.test.ts` 17 (REST happy/400/401/403-unverified, keyset paging with timestamp ties, tombstones + avatars, unread counts, monotonic read, delete own/other/admin+audit, no room deletion, ticket shape/no-store/10-per-min), `socket.test.ts` 21 (bad/missing Origin, single use, expiry with the injected clock, session binding, disabled/unverified/must-change, fan-out to two clients, idempotent `clientMessageId`, invalid frames + close after 5, 8 KB cap → 1009, hidden rooms, 20/10 s send limit, 60/10 s frame limit, queue flood → 4008, ping/typing, WS read, delete broadcast, re-check closes revoked/disabled/expired sessions, `closeSocketsForSession`/`User`, heartbeat terminate, no bodies/tickets in logs), `units.test.ts` 11, contract `chat.test.ts` +2.
