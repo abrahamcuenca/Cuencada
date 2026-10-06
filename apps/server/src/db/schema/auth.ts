@@ -154,7 +154,9 @@ export const invites = pgTable(
     checkIn("invites_status_check", "status", InviteStatus),
     check("invites_uses_check", sql`"max_uses" >= 1 and "use_count" >= 0 and "use_count" <= "max_uses"`),
     // Admin invites must be bound to an email and single-use (contract rule, enforced twice).
-    check("invites_admin_bound_check", sql`"role" <> 'admin' or ("email" is not null and "max_uses" = 1)`)
+    check("invites_admin_bound_check", sql`"role" <> 'admin' or ("email" is not null and "max_uses" = 1)`),
+    // Open (email-less) invites are capped at 20 uses (contract rule; the 14-day cap is service-level).
+    check("invites_open_max_uses_check", sql`"email" is not null or "max_uses" <= 20`)
   ]
 );
 

@@ -1,5 +1,5 @@
 {
-  "id": "cd71a1fa-10b9-49ef-89be-bae524c67e4c",
+  "id": "8d6d14e8-2caa-46e0-87a4-c7b001c85ce8",
   "prevId": "6b9c836b-4aee-4b43-a1f2-e8a16eaec3f7",
   "version": "7",
   "dialect": "postgresql",
@@ -388,6 +388,10 @@
         "invites_admin_bound_check": {
           "name": "invites_admin_bound_check",
           "value": "\"role\" <> 'admin' or (\"email\" is not null and \"max_uses\" = 1)"
+        },
+        "invites_open_max_uses_check": {
+          "name": "invites_open_max_uses_check",
+          "value": "\"email\" is not null or \"max_uses\" <= 20"
         }
       },
       "isRLSEnabled": false

@@ -4,18 +4,25 @@
 -- USING casts. The end state matches meta/0001_snapshot.json exactly.
 
 -- Refuse to silently discard family data: the old user-keyed table is replaced
--- by people/person_relationships and has no automatic mapping.
+-- by people/person_relationships and has no automatic mapping. The drizzle
+-- migrator runs all of 0001 in one transaction, so this RAISE rolls everything
+-- back and leaves the database at 0000 (covered by migrations.test.ts).
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM "family_relationships") THEN
     RAISE EXCEPTION 'family_relationships has rows; migrate them to people/person_relationships by hand before 0001';
   END IF;
 END $$;--> statement-breakpoint
+-- profiles.user_id becomes NOT NULL UNIQUE: drop orphans, keep the newest profile per user.
 DELETE FROM "profiles" WHERE "user_id" IS NULL;--> statement-breakpoint
 DELETE FROM "profiles" AS "older" USING "profiles" AS "newer"
 WHERE "older"."user_id" = "newer"."user_id"
   AND ("older"."updated_at", "older"."id") < ("newer"."updated_at", "newer"."id");--> statement-breakpoint
+-- Pre-0001 sessions have no refresh tokens or idle/absolute expiry: everyone logs in again.
 DELETE FROM "sessions";--> statement-breakpoint
+-- Normalize emails so T1 lookups by lower(email) always match the stored value. Addresses
+-- that differ only by case make users_email_lower_unique (below) fail, rolling back 0001.
+UPDATE "users" SET "email" = lower(btrim("email")) WHERE "email" <> lower(btrim("email"));--> statement-breakpoint
 UPDATE "cuencadas" SET "theme_color" = lower(btrim("theme_color"));--> statement-breakpoint
 UPDATE "cuencadas" SET "theme_color" = '#0b5e55' WHERE "theme_color" !~ '^#[0-9a-f]{6}$';--> statement-breakpoint
 UPDATE "cuencada_locations" SET "kind" = 'attraction' WHERE "kind" = 'map';--> statement-breakpoint
@@ -118,6 +125,10 @@ ALTER TABLE "audit_logs" ALTER COLUMN "metadata" SET DEFAULT '{}'::jsonb;--> sta
 ALTER TABLE "chat_rooms" RENAME COLUMN "room_type" TO "kind";--> statement-breakpoint
 UPDATE "chat_rooms" SET "kind" = CASE WHEN "cuencada_id" IS NULL THEN 'global' ELSE 'cuencada' END;--> statement-breakpoint
 ALTER TABLE "cuencada_itinerary_items" RENAME COLUMN "item_date" TO "date";--> statement-breakpoint
+-- ASSUMPTION: legacy item_date values were written as local Mérida midnight (or any
+-- Mérida wall-clock time). A value written as UTC midnight (e.g. new Date("2026-09-13"))
+-- would land on the PREVIOUS day here. No legacy itinerary rows exist (the scaffold never
+-- wrote any), so do not reuse this cast for data stored as UTC dates.
 ALTER TABLE "cuencada_itinerary_items" ALTER COLUMN "date" SET DATA TYPE date USING ("date" AT TIME ZONE 'America/Merida')::date;--> statement-breakpoint
 ALTER TABLE "cuencada_itinerary_items" RENAME COLUMN "item_time" TO "start_time";--> statement-breakpoint
 ALTER TABLE "cuencada_itinerary_items" ALTER COLUMN "start_time" SET DATA TYPE time USING (
@@ -314,6 +325,7 @@ ALTER TABLE "invites" ADD CONSTRAINT "invites_role_check" CHECK ("role" in ('adm
 ALTER TABLE "invites" ADD CONSTRAINT "invites_status_check" CHECK ("status" in ('pending', 'accepted', 'revoked', 'expired'));--> statement-breakpoint
 ALTER TABLE "invites" ADD CONSTRAINT "invites_uses_check" CHECK ("max_uses" >= 1 and "use_count" >= 0 and "use_count" <= "max_uses");--> statement-breakpoint
 ALTER TABLE "invites" ADD CONSTRAINT "invites_admin_bound_check" CHECK ("role" <> 'admin' or ("email" is not null and "max_uses" = 1));--> statement-breakpoint
+ALTER TABLE "invites" ADD CONSTRAINT "invites_open_max_uses_check" CHECK ("email" is not null or "max_uses" <= 20);--> statement-breakpoint
 ALTER TABLE "magic_links" ADD CONSTRAINT "magic_links_purpose_check" CHECK ("purpose" in ('login', 'password_reset', 'email_verify'));--> statement-breakpoint
 ALTER TABLE "media_items" ADD CONSTRAINT "media_items_kind_check" CHECK ("kind" in ('image', 'video'));--> statement-breakpoint
 ALTER TABLE "media_items" ADD CONSTRAINT "media_items_mime_type_check" CHECK ("mime_type" in ('image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'video/quicktime'));--> statement-breakpoint

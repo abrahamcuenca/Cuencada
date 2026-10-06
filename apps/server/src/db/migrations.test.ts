@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { quoteIdent, TEST_DATABASE_URL, withDatabase, workerDatabaseName } from "../../test/env.js";
 import { currentRunId } from "../../test/helpers/db.js";
 import { migrationsFolder } from "./migrate.js";
@@ -55,42 +55,59 @@ async function sqlState(query: Promise<unknown>): Promise<string | undefined> {
   }
 }
 
-beforeAll(async () => {
+async function dropScratch(): Promise<void> {
   const admin = postgres(TEST_DATABASE_URL, { max: 1, onnotice: () => {} });
   try {
     await admin.unsafe(`drop database if exists ${quoteIdent(scratchName)} with (force)`);
+  } finally {
+    await admin.end();
+  }
+}
+
+beforeAll(async () => {
+  partialFolder = await migrationsUpTo(1);
+});
+
+// Every test starts from a brand-new database migrated to 0000 only.
+beforeEach(async () => {
+  await sql?.end();
+  await dropScratch();
+  const admin = postgres(TEST_DATABASE_URL, { max: 1, onnotice: () => {} });
+  try {
     await admin.unsafe(`create database ${quoteIdent(scratchName)}`);
   } finally {
     await admin.end();
   }
   sql = postgres(withDatabase(TEST_DATABASE_URL, scratchName), { max: 1, onnotice: () => {} });
-  partialFolder = await migrationsUpTo(1);
+  await migrate(drizzle(sql), { migrationsFolder: partialFolder });
 });
 
 afterAll(async () => {
   await sql?.end();
   if (partialFolder) await rm(partialFolder, { recursive: true, force: true });
-  const admin = postgres(TEST_DATABASE_URL, { max: 1, onnotice: () => {} });
-  try {
-    await admin.unsafe(`drop database if exists ${quoteIdent(scratchName)} with (force)`);
-  } finally {
-    await admin.end();
-  }
+  await dropScratch();
 });
 
 describe("migration 0001", () => {
   it("upgrades a seeded 0000 database, keeps its data and enforces the new constraints", async () => {
-    await migrate(drizzle(sql), { migrationsFolder: partialFolder });
-
     // Seed-era rows, written with the 0000 column set.
     const [admin] = await sql<{ id: string }[]>`
       insert into users (email, password_hash, display_name, role, status, must_change_password)
-      values ('admin@cuencada.com', 'argon2-hash', 'Administrador Cuencada', 'admin', 'active', true)
+      values (' Admin@Cuencada.com ', 'argon2-hash', 'Administrador Cuencada', 'admin', 'active', true)
       returning id
     `;
     if (!admin) throw new Error("admin insert returned no row");
     await sql`insert into profiles (user_id, full_name, city, photo_url) values (${admin.id}, 'Administrador Cuencada', 'México', 'avatars/admin.webp')`;
     await sql`insert into profiles (user_id, full_name) values (null, 'Huérfano')`;
+    // An older duplicate profile for the same user: the dedupe keeps the newest one.
+    await sql`
+      insert into profiles (user_id, full_name, created_at, updated_at)
+      values (${admin.id}, 'Perfil viejo', now() - interval '1 day', now() - interval '1 day')
+    `;
+    await sql`
+      insert into sessions (user_id, refresh_token_hash, expires_at)
+      values (${admin.id}, 'old-refresh-hash', now() + interval '30 days')
+    `;
     const [cuencada] = await sql<{ id: string }[]>`
       insert into cuencadas (year, slug, title, status, starts_at, ends_at, city, state, description, theme_color)
       values (2026, '2026', 'Cuencada 2026', 'upcoming', '2026-09-13T00:00:00-06:00', '2026-09-18T23:59:59-06:00',
@@ -104,12 +121,22 @@ describe("migration 0001", () => {
     `;
     await sql`insert into cuencada_locations (cuencada_id, name, kind, display_order) values (${cuencada.id}, 'Izamal', 'map', 2)`;
     await sql`insert into audit_logs (actor_user_id, action, entity_type, metadata) values (${admin.id}, 'seed.run', 'user', '{}')`;
+    await sql`insert into chat_rooms (room_type, title) values ('general', 'Familia')`;
+    await sql`insert into chat_rooms (cuencada_id, room_type, title) values (${cuencada.id}, 'event', 'Cuencada 2026')`;
     await sql`insert into audit_logs (action, entity_type, metadata) values ('legacy.note', 'user', '[1,2]')`;
 
     await migrate(drizzle(sql), { migrationsFolder });
 
     const users = await sql`select email, role, must_change_password from users`;
     expect(users).toEqual([{ email: "admin@cuencada.com", role: "admin", must_change_password: true }]);
+
+    expect(await sql`select count(*)::int as count from sessions`).toEqual([{ count: 0 }]);
+
+    const rooms = await sql`select kind, cuencada_id, title from chat_rooms order by kind`;
+    expect(rooms).toEqual([
+      { kind: "cuencada", cuencada_id: cuencada.id, title: "Cuencada 2026" },
+      { kind: "global", cuencada_id: null, title: "Familia" }
+    ]);
 
     const profiles = await sql`select user_id, full_name, avatar_key, show_city from profiles`;
     expect(profiles).toEqual([
@@ -152,5 +179,27 @@ describe("migration 0001", () => {
 
     // profiles.user_id is now required.
     expect(await sqlState(sql`insert into profiles (full_name) values ('Sin usuario')`)).toBe("23502");
+  });
+
+  it("aborts and rolls back to 0000 when family_relationships has rows", async () => {
+    const [user] = await sql<{ id: string }[]>`
+      insert into users (email, display_name) values ('tia@example.test', 'Tía') returning id
+    `;
+    if (!user) throw new Error("user insert returned no row");
+    await sql`
+      insert into family_relationships (person_user_id, relative_user_id, relationship_type)
+      values (${user.id}, ${user.id}, 'sibling')
+    `;
+
+    await expect(migrate(drizzle(sql), { migrationsFolder })).rejects.toThrow();
+
+    // Nothing from 0001 survived: still one applied migration, old tables and columns intact.
+    expect(await sql`select count(*)::int as count from drizzle.__drizzle_migrations`).toEqual([{ count: 1 }]);
+    expect(await sql`select count(*)::int as count from family_relationships`).toEqual([{ count: 1 }]);
+    expect(await sql`select to_regclass('public.people')::text as people`).toEqual([{ people: null }]);
+    const photoColumn = await sql`
+      select 1 from information_schema.columns where table_name = 'profiles' and column_name = 'photo_url'
+    `;
+    expect(photoColumn).toHaveLength(1);
   });
 });
