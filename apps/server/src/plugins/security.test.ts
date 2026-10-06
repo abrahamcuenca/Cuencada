@@ -2,8 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   contentSecurityPolicy,
   contentSecurityPolicyDirectives,
-  storageOrigins,
-  widgetContentSecurityPolicy
+  storageOrigins
 } from "./security.js";
 
 const base = {
@@ -34,17 +33,19 @@ describe("storageOrigins", () => {
 });
 
 describe("contentSecurityPolicyDirectives", () => {
-  it("is strict in production: no third-party script, frames only from self, bucket media, wss", () => {
+  it("is strict in production: no third-party script, frames only from self and the weather widget", () => {
     const directives = contentSecurityPolicyDirectives({ ...base, NODE_ENV: "production" });
 
     expect(directives["default-src"]).toEqual(["'self'"]);
     expect(directives["script-src"]).toEqual(["'self'"]);
-    expect(directives["frame-src"]).toEqual(["'self'"]);
+    expect(directives["frame-src"]).toEqual(["'self'", "https://weatherwidget.io"]);
     expect(directives["img-src"]).toContain("https://cuencada.us-southeast-1.linodeobjects.com");
     expect(directives["connect-src"]).toContain("wss://cuencada.com");
     expect(directives["connect-src"]).not.toContain("http://localhost:5173");
     expect(directives["upgrade-insecure-requests"]).toEqual([]);
-    expect(JSON.stringify(directives)).not.toContain("weatherwidget");
+    for (const [name, values] of Object.entries(directives)) {
+      if (name !== "frame-src") expect(values).not.toContain("https://weatherwidget.io");
+    }
     expect(JSON.stringify(directives)).not.toContain('"https://us-southeast-1.linodeobjects.com"');
   });
 
@@ -65,13 +66,5 @@ describe("contentSecurityPolicy", () => {
       "connect-src 'self' wss://cuencada.com https://cuencada.us-southeast-1.linodeobjects.com"
     );
     expect(header.endsWith("upgrade-insecure-requests")).toBe(true);
-  });
-});
-
-describe("widgetContentSecurityPolicy", () => {
-  it("denies everything except the weather widget's script and iframe", () => {
-    expect(widgetContentSecurityPolicy()).toBe(
-      "default-src 'none'; script-src https://weatherwidget.io; frame-src https://weatherwidget.io; base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
-    );
   });
 });

@@ -3,9 +3,10 @@
  *
  * The CSP here applies to API responses. The SPA's HTML is served by nginx,
  * so WP-2.4 must send the same policy there: {@link contentSecurityPolicy}
- * renders the header value. The third-party weather widget is NOT allowed by
- * that policy; it lives in an isolated page under `/widgets/` with its own
- * policy, {@link widgetContentSecurityPolicy}.
+ * renders the header value. No third-party script is allowed; the weather
+ * widget is embedded only as a cross-origin, sandboxed iframe of
+ * `https://weatherwidget.io/w/` (hence `frame-src`), configured by our own
+ * code via `postMessage` (see docs/coordination/WP-0.4.md).
  */
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
@@ -13,7 +14,7 @@ import { CSRF_HEADER } from "@cuencada/types";
 import type { FastifyInstance } from "fastify";
 import { type AppConfig, allowedOrigins } from "../config.js";
 
-/** Origin of the legacy weather widget (script + its own iframe). Only `/widgets/*` may load it. */
+/** Origin of the weather widget, allowed only as a frame (never as a script source). */
 export const WEATHER_WIDGET_ORIGIN = "https://weatherwidget.io";
 
 type CspConfig = Pick<
@@ -56,8 +57,8 @@ function webSocketOrigin(origin: string): string {
 
 /**
  * CSP directives (helmet format) for the app (API responses and the SPA
- * HTML). `default-src 'self'`, no plugins, no third-party script, framing only
- * of our own pages (`frame-src 'self'` for `/widgets/*`), media from the
+ * HTML). `default-src 'self'`, no plugins, no third-party script, frames
+ * only from self and the weather widget's iframe origin, media from the
  * bucket, and `connect-src` for the API, the chat WebSocket and direct
  * uploads. Dev origins (Vite) are added only outside production.
  *
@@ -82,7 +83,7 @@ export function contentSecurityPolicyDirectives(config: CspConfig): Record<strin
     "img-src": ["'self'", "data:", "blob:", ...storage],
     "media-src": ["'self'", "blob:", ...storage],
     "connect-src": ["'self'", ...socketOrigins, ...storage, ...devOrigins],
-    "frame-src": ["'self'"],
+    "frame-src": ["'self'", WEATHER_WIDGET_ORIGIN],
     "worker-src": ["'self'"],
     "manifest-src": ["'self'"]
   };
@@ -98,38 +99,12 @@ function renderPolicy(directives: Record<string, string[]>): string {
 
 /**
  * Render the app directives as a `Content-Security-Policy` header value (for
- * nginx on every SPA response except `/widgets/*`).
+ * nginx on every SPA response).
  *
  * @param config - Validated config.
  */
 export function contentSecurityPolicy(config: CspConfig): string {
   return renderPolicy(contentSecurityPolicyDirectives(config));
-}
-
-/**
- * CSP directives for the isolated widget pages under `/widgets/*` (e.g.
- * `/widgets/clima.html`), which nginx serves with this policy instead of the
- * app policy. Verified against weatherwidget.io's loader in headless Chromium
- * (no violations): it only needs its script and its own iframe
- * (`https://weatherwidget.io/w/`), which fetches the forecast itself. The
- * loader sets styles through the CSSOM, which `style-src` does not govern, so
- * no `'unsafe-inline'` is needed as long as the page uses an external
- * `<script src>` (not the inline loader snippet) and no inline styles.
- */
-export function widgetContentSecurityPolicyDirectives(): Record<string, string[]> {
-  return {
-    "default-src": ["'none'"],
-    "script-src": [WEATHER_WIDGET_ORIGIN],
-    "frame-src": [WEATHER_WIDGET_ORIGIN],
-    "base-uri": ["'none'"],
-    "form-action": ["'none'"],
-    "frame-ancestors": ["'self'"]
-  };
-}
-
-/** Render {@link widgetContentSecurityPolicyDirectives} as a header value (nginx, `/widgets/*` only). */
-export function widgetContentSecurityPolicy(): string {
-  return renderPolicy(widgetContentSecurityPolicyDirectives());
 }
 
 /**

@@ -117,7 +117,7 @@ Cover at least: happy path, 400 `VALIDATION`, 401 without a token, 403 for the w
 - Admin scaffold routes (`POST /api/admin/cuencadas`, `PATCH …/publish`) now audit. `GET /api/cuencadas/:year` keeps serving `data.ts` without a response schema (T2).
 - **404 vs 401:** unknown URLs answer 404 even without a token (the guard skips `request.is404`); the 404 handler is rate-limited.
 - **CSP** is applied to API responses by helmet (`useDefaults: false`). nginx serves the SPA, so **WP-2.4 must set the HTML CSP in nginx** (see "WP-2.4 items"). The app policy allows **no third-party script**: `script-src 'self'`, `frame-src 'self'`. Only the bucket-specific origin (`https://<bucket>.<region>.linodeobjects.com`, derived from `S3_ENDPOINT` + `S3_BUCKET`) and `S3_PUBLIC_BASE_URL` are in `img-src`/`media-src`/`connect-src`; the shared regional endpoint is not (it would allow any customer's bucket). `wss://` app origins are in `connect-src`; the Vite origin only outside production. `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`. The SPA will likely need `style-src 'self' 'unsafe-inline'` (React inline `style` attributes); decide in WP-2.4.
-- **Weather widget** (orchestrator decision, S2): it moves out of the SPA into a static page `/widgets/clima.html` (T2-FE, `apps/web/public/widgets/`), served by nginx with its own policy `widgetContentSecurityPolicy()`: `default-src 'none'; script-src https://weatherwidget.io; frame-src https://weatherwidget.io; base-uri 'none'; form-action 'none'; frame-ancestors 'self'`. Verified in headless Chromium against the live loader: no CSP violations. The page must load `<script src="https://weatherwidget.io/js/widget.min.js">` directly (not the inline loader snippet) and use no inline styles, so no `'unsafe-inline'` is needed; the loader styles elements through the CSSOM, which CSP does not govern. **See the open question on the iframe `sandbox`.**
+- **Weather widget** (orchestrator decision, S2, option 1): no third-party script runs on cuencada.com. The SPA embeds weatherwidget.io's own widget page as a cross-origin, sandboxed iframe and configures it with `postMessage` from our code (replacing the vendor's 2.6 KB loader script). The app policy therefore has `script-src 'self'` and `frame-src 'self' https://weatherwidget.io`; there is no `/widgets/*` page and no separate widget policy. Verified in headless Chromium against the live widget: the config is accepted and the height message comes back. See "Weather widget embed contract" below.
 - `/health/ready` is rate-limited (60/min per IP) and reuses its DB ping result for 5 s (`READY_CACHE_MS`), with concurrent probes sharing one in-flight ping.
 - `NODE_ENV` is **required** (no default): a process started without it no longer fails open into development behaviour.
 - `buildApp` and `createTestApp` release the pool (and S3 client, job queue) they created if construction, fixture registration or `ready()` fails.
@@ -153,18 +153,46 @@ node apps/server/dist/seed.js
 - The login (and `/me`) response moves from the scaffold shape `{ user, accessToken, accessTokenExpiresAt }` to the contract `AuthTokenResponse` / `CurrentUser`, and login sets the refresh cookie. Update `test/helpers/factories.ts#loginAs` accordingly.
 - Reuse `credentialRateLimits(app)` on magic-link request, password-reset request/confirm and change-password.
 
+## Weather widget embed contract (T2-FE)
+The legacy `<a class="weatherwidget-io">` + `widget.min.js` loader must **not** be used. The SPA renders the widget itself:
+
+```html
+<iframe
+  title="Clima en Mérida"
+  src="https://weatherwidget.io/w/"
+  sandbox="allow-scripts allow-same-origin allow-popups"
+  referrerpolicy="no-referrer"
+  loading="lazy"
+></iframe>
+```
+Size and border come from a CSS Module class (no inline `style` attribute: `style-src 'self'`); the height is set from script via `frame.style.height`, which CSP does not block.
+- **`src`:** exactly `https://weatherwidget.io/w/` (the only origin in `frame-src` besides `'self'`).
+- **`sandbox`:** exactly `allow-scripts allow-same-origin allow-popups`. `allow-same-origin` gives the frame **weatherwidget.io's own origin** (it needs it for its cookies and for `postMessage` targeting); that origin stays cross-origin to cuencada.com, so the frame cannot touch our DOM, storage, cookies or access token. `allow-popups` lets the forecast link open. Do **not** add `allow-top-navigation`, `allow-forms` or `allow-popups-to-escape-sandbox`.
+- **Config:** on the iframe's `load` event, post the config with an explicit target origin:
+  ```ts
+  frame.contentWindow?.postMessage(
+    {
+      id: "weatherwidget-io-0",                       // echoed back as `wwId`
+      href: cuencada.weatherWidgetUrl,                // e.g. https://forecast7.com/es/20d97n89d59/merida/
+      label_1: "MÉRIDA",
+      label_2: "Clima",
+      theme: "original"                               // optional: font, icons, mode, days, basecolor, textcolor, accent, …
+    },
+    "https://weatherwidget.io"                        // never "*"
+  );
+  ```
+  The keys are the widget's `data-*` attributes (`data-label_1` → `label_1`, …). `href` must be the Cuencada's `weatherWidgetUrl` (an `https://forecast7.com/…` URL from the API), never user-typed text.
+- **Height messages:** the frame posts `{ wwId: string, wwHeight: number }` to its parent. The listener must ignore anything where `event.origin !== "https://weatherwidget.io"` or `event.source !== frame.contentWindow`, and accept only a finite number (`typeof wwHeight === "number" && Number.isFinite(wwHeight)`), clamped to a sane range (e.g. 0–600 px), before setting the iframe height. Never use the message for anything else (no HTML, no URLs). Remove the listener on unmount.
+- No `script-src` change is needed or allowed for this.
+
 ## WP-2.4 items (nginx / deploy)
 - **Client IP:** cuencada.com is **not** behind Cloudflare (DNS points at server_1; nginx terminates TLS). nginx must set `proxy_set_header X-Forwarded-For $remote_addr;` (overwrite; never `$proxy_add_x_forwarded_for`, which would append an untrusted client-supplied value) and must **not** trust `CF-Connecting-IP`. The app keeps `TRUST_PROXY=loopback`, so rate-limit, session and audit IPs are the direct client IP.
-- **HTML CSP:** send `contentSecurityPolicy(config)` (from `apps/server/src/plugins/security.ts`, rendered with the production config) on every SPA response **except** `/widgets/*`. Decide `style-src 'unsafe-inline'` there.
-- **Widget CSP mapping:** `location /widgets/ { add_header Content-Security-Policy "<widgetContentSecurityPolicy()>" always; }`, replacing (not adding to) the app policy for that location, plus `X-Content-Type-Options: nosniff`. Remember that `add_header` in a `location` drops inherited headers, so repeat the other security headers there.
+- **HTML CSP:** send `contentSecurityPolicy(config)` (from `apps/server/src/plugins/security.ts`, rendered with the production config) on every SPA response. It already allows the weather widget iframe (`frame-src 'self' https://weatherwidget.io`); no other third-party origin may be added. Decide `style-src 'unsafe-inline'` there. Remember that `add_header` inside a `location` drops inherited headers.
 - Strip the query string from access logs for `/api/chat/ws` (the ticket), and consider restricting `/health*` to localhost/monitoring.
 
 ## Open questions (→ orchestrator)
-- **Weather widget iframe `sandbox` (blocking for T2-FE, needs a decision):** I tested the planned embed in headless Chromium against the live widget. With `<iframe sandbox="allow-scripts" src="/widgets/clima.html">` the widget **does not work**: sandbox flags propagate to nested frames, so weatherwidget.io's own iframe also runs in an opaque origin, and the loader's `postMessage(config, "https://weatherwidget.io")` is dropped (`Failed to execute 'postMessage' … recipient window's origin ('null')`); its cookie access also throws. Adding `allow-same-origin` would make `/widgets/clima.html` same-origin with the SPA *and* scriptable, which defeats the isolation. Options that keep isolation:
-  1. **Recommended: no wrapper page.** The SPA embeds `<iframe src="https://weatherwidget.io/w/" sandbox="allow-scripts allow-same-origin allow-popups">` directly and posts the config itself (≈10 lines of our own code replacing the 2.6 KB loader). The frame is cross-origin, so `allow-same-origin` only gives weatherwidget.io its own origin. Verified working (config accepted, height message received). Needs the app policy's `frame-src` to become `'self' https://weatherwidget.io` (a one-line change in `security.ts`, which is otherwise frozen), and no third-party script ever runs on cuencada.com.
-  2. Serve `/widgets/clima.html` from a separate origin (e.g. `widgets.cuencada.com`) with `sandbox="allow-scripts allow-same-origin allow-popups"`; needs DNS/TLS/nginx work in WP-2.4. `widgetContentSecurityPolicy()` already fits this.
+- Resolved: weather widget embed. The planned `/widgets/clima.html` wrapper with `sandbox="allow-scripts"` broke the widget (sandbox flags propagate to its nested frame, which then gets a `null` origin and drops the config `postMessage`). The orchestrator chose the direct iframe (option 1); see the embed contract.
 
-  The policies are implemented as instructed (`frame-src 'self'`; `widgetContentSecurityPolicy()` exported). Tell me if you want option 1 and I'll make the `frame-src` change before the freeze.
 - **Linode PUT enforcement:** the presigned PUT signs `content-length` and now carries no checksum parameters (unit-tested offline). Verifying on the real bucket that a mismatched body is rejected needs credentials, so it is T4's job at integration; the `head()` size check stays the backstop.
 - **`@fastify/swagger` peer:** pulled in by `fastify-type-provider-zod@7`. Unused; fine unless we want OpenAPI docs later.
 - Resolved: `SEED_*` removed from the API service env (see "Production seed").
@@ -173,7 +201,7 @@ node apps/server/dist/seed.js
 - **PR #8 round 1: TL and Security, CHANGES REQUESTED.** Addressed:
   - **B1 (TL):** the S3 client uses `requestChecksumCalculation`/`responseChecksumValidation: "WHEN_REQUIRED"`. A test asserts the presigned PUT has no `x-amz-checksum-*`/`x-amz-sdk-checksum-algorithm` and signs exactly `content-length;content-type;host`.
   - **S1 / M1 (Security):** a custom `err`/`error` serializer drops DB params, `detail` and `where` and the params line of Drizzle messages and stacks, keeping only `type`, the SQL text, Postgres `code`/`constraint`/`table`/`column`/`schema`/`routine`/`severity` and stack frames. A regression test inserts a duplicate email through a route and asserts the log contains neither the email nor `$argon2`.
-  - **S2 / M2 (Security):** weatherwidget.io is removed from the app CSP; `frame-src 'self'`; `widgetContentSecurityPolicy()` added for `/widgets/*` (see the open question: the planned `sandbox="allow-scripts"` breaks the widget).
+  - **S2 / M2 (Security):** weatherwidget.io is removed from `script-src`/`connect-src`. After testing showed the sandboxed `/widgets/clima.html` wrapper breaks the widget, the orchestrator chose option 1: the SPA embeds `https://weatherwidget.io/w/` directly (`frame-src 'self' https://weatherwidget.io`) and posts the config itself; the interim `widgetContentSecurityPolicy()` was removed (see the embed contract).
   - **L1:** redaction is recursive (any depth, cycle-safe) and case-insensitive via `formatters.log` plus the error serializer; tests cover `Token`, `PASSWORD` and deeply nested keys.
   - **L2:** `credentialRateLimits()` adds 20/15 min per IP across emails and 10/15 min per email across IPs on login, on top of IP+email. Found and documented that stacked `app.rateLimit()` hooks silently skip each other; the extra caps use `createRateLimit`.
   - **L3:** WP-2.4 item (no Cloudflare: `X-Forwarded-For $remote_addr`, ignore `CF-Connecting-IP`).

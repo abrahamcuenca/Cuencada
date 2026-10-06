@@ -47,8 +47,8 @@ describe("buildApp", () => {
     expect(csp).toContain("object-src 'none'");
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("script-src 'self';");
-    expect(csp).toContain("frame-src 'self';");
-    expect(csp).not.toContain("weatherwidget");
+    expect(csp).toContain("frame-src 'self' https://weatherwidget.io;");
+    expect(csp).toContain("script-src 'self';");
     expect(response.headers["x-content-type-options"]).toBe("nosniff");
   });
 
