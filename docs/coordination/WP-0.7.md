@@ -71,7 +71,7 @@ Everything here was delivered. Only the paths below were touched; nothing in WP-
   ```
   `theme_color` should be `#0b5e55` and `background_color` `#fffaf0`.
 - **WP-0.1 (test infra): reconciled.** I merged `origin/wp/0.1-test-infra` into this branch with a merge commit (no rebase, because 0.5 and 0.6 already merged this branch). The merge took 0.1's `apps/web/package.json`: the `test` script (`--project web`) and its devDeps. The lockfile was regenerated with `pnpm install`, not hand-merged. `shared/ui/testing.ts` and the per-file `// @vitest-environment jsdom` docblocks are gone; the UI tests now run under the root `web` project (jsdom + `apps/web/test/setup.ts`).
-- **Asset note:** `images/fotos/foto01.jpg` is **byte-identical** to `images/Logo_Cuencada2026.jpg` (`cmp` reports no difference). It's the logo, not a photo, so don't use it as gallery or seed content. The style guide uses foto02–04 only. _(WP-0.8a: `apps/web/public/images/fotos/` was removed; real family photos are members-only, and these screenshots were deleted pending a re-take with placeholders.)_
+- **Asset note:** `images/fotos/foto01.jpg` is **byte-identical** to `images/Logo_Cuencada2026.jpg` (`cmp` reports no difference). It's the logo, not a photo, so don't use it as gallery or seed content. Since WP-0.8a, real family photos are members-only and never committed. `apps/web/public/images/fotos/` is gone, and the style guide uses generated SVG placeholder landscapes and fictional names only.
 
 ## Decisions
 - **No webfonts.** `ui-rounded` (SF Pro Rounded) leads the display stack for warmth on Apple; everything else uses the system stack. That's 0 KB, which protects LCP.
@@ -85,7 +85,7 @@ Everything here was delivered. Only the paths below were touched; nothing in WP-
 - **TopNav renders below 900px too**, as a brand-only app bar; the links appear at 900px and up. `hideOnMobile` opts out.
 - **`vite-env.d.ts` lives at `apps/web/src/vite-env.d.ts`.** It's app-wide, so it moved out of `shared/ui` after review.
 - **Flag filename is ASCII** (`Bandera_Mexico.webp`) to avoid percent-encoding issues in URLs and caches.
-- **Screenshots** are committed as WebP under `docs/ux/screenshots/` (about 600 KB total) so reviewers can see them without running the app.
+- **Screenshots** are committed as WebP under `docs/ux/screenshots/` (placeholder photos only, never real family photos) so reviewers can see them without running the app.
 
 ## Verification
 - `pnpm lint` passes (biome, 0 errors).
@@ -94,9 +94,14 @@ Everything here was delivered. Only the paths below were touched; nothing in WP-
 - `pnpm --filter @cuencada/web test` passes 54 tests (53 UI + the WP-0.1 SiteHeader test).
 - No horizontal overflow at 320, 360, 375 or 414. I checked by measuring every element's bounding box against the viewport in headless Chromium, ignoring internal scroll containers.
 - Screenshots were taken with headless Chromium against the Vite dev server, through a temporary, uncommitted mount:
-  - `docs/ux/screenshots/styleguide-375.webp` and `styleguide-1280.webp` (full page) _(WP-0.8a: `apps/web/public/images/fotos/` was removed; real family photos are members-only, and these screenshots were deleted pending a re-take with placeholders.)_
-  - `overlays-375.webp`: Dialog bottom sheet, Lightbox and toasts _(WP-0.8a: `apps/web/public/images/fotos/` was removed; real family photos are members-only, and these screenshots were deleted pending a re-take with placeholders.)_
-  - `dialog-1280.webp` and `lightbox-1280.webp` _(WP-0.8a: `apps/web/public/images/fotos/` was removed; real family photos are members-only, and these screenshots were deleted pending a re-take with placeholders.)_
+  - `docs/ux/screenshots/styleguide-375.webp` and `styleguide-1280.webp` (full page)
+  - `overlays-375.webp`: Dialog bottom sheet, Lightbox and toasts
+  - `dialog-1280.webp` and `lightbox-1280.webp`
+  - **Re-take (owner decision, after WP-0.8a):**
+    - `styleguide-375`, `styleguide-1280`, `overlays-375` and `lightbox-1280` were regenerated from the placeholder-photo StyleGuide, using headless Chromium and fictional data only.
+    - I checked every image visually: no real people appear. Photos are abstract SVG landscapes, and avatars are initials or a placeholder.
+    - The only figurative artwork is the brand logo in the TopNav, which is the public cartoon illustration from the legacy site, not a photo.
+    - `dialog-1280` contained no photos and was kept.
 
 ## Open questions (→ orchestrator)
 1. **Dark mode:** not in scope. The tokens are semantic, so a `prefers-color-scheme` layer can be added later. Do we want it?
