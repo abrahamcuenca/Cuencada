@@ -120,6 +120,76 @@ export function makeMp4(brand = "isom", durationSeconds = 42): Buffer {
   return Buffer.concat([ftyp, box("moov", box("mvhd", mvhd)), box("mdat", Buffer.alloc(256, 7))]);
 }
 
+/** Location string planted in {@link makeMp4WithLocation} (Mérida). */
+export const PLANTED_LOCATION = "+20.9674-089.6237+010.000/";
+
+/** A synthetic iPhone-like video with location/identifying metadata, plus where its chunk offset lives. */
+export interface LocatedMp4 {
+  bytes: Buffer;
+  /** Offset of the single `stco` entry (uint32). */
+  stcoEntryOffset: number;
+  /** Absolute offset of the `mdat` payload (what the `stco` entry points at). */
+  mdatPayloadOffset: number;
+  /** The `mdat` payload. */
+  payload: Buffer;
+}
+
+function fullBox(type: string, ...payload: Buffer[]): Buffer {
+  return box(type, Buffer.alloc(4), ...payload); // version + flags
+}
+
+function latin1(value: string): Buffer {
+  return Buffer.from(value, "latin1");
+}
+
+/**
+ * `ftyp` / `moov` (`mvhd`, `udta` with `©xyz`/`©mak`/`©swr`, QuickTime `meta`
+ * with the `com.apple.quicktime.location.ISO6709` key, and a `trak` with its
+ * own `udta` plus `mdia/minf/stbl/stco`) / top-level XMP `uuid` / `mdat`.
+ *
+ * @param brand - Major brand (`qt  ` for QuickTime, `isom` for MP4).
+ */
+export function makeMp4WithLocation(brand = "qt  "): LocatedMp4 {
+  const ftyp = box("ftyp", latin1(brand), Buffer.alloc(4), latin1(`${brand}isom`));
+  const mvhd = Buffer.alloc(100);
+  mvhd.writeUInt32BE(600, 12);
+  mvhd.writeUInt32BE(9 * 600, 16);
+  const userText = (type: string, value: string): Buffer => {
+    const header = Buffer.alloc(4);
+    header.writeUInt16BE(value.length, 0);
+    header.writeUInt16BE(0x15c7, 2); // language
+    return box(type, header, latin1(value));
+  };
+  const udta = box(
+    "udta",
+    userText("\xa9xyz", PLANTED_LOCATION),
+    userText("\xa9mak", "Apple"),
+    userText("\xa9swr", "17.4.1"),
+    userText("\xa9day", "2026-12-27T18:00:00-0600")
+  );
+  const keyName = "com.apple.quicktime.location.ISO6709";
+  const keys = fullBox("keys", Buffer.from([0, 0, 0, 1]), box("mdta", latin1(keyName)));
+  const ilst = box("ilst", box("\x00\x00\x00\x01", box("data", Buffer.from([0, 0, 0, 1, 0, 0, 0, 0]), latin1(PLANTED_LOCATION))));
+  const meta = fullBox("meta", fullBox("hdlr", Buffer.alloc(4), latin1("mdta"), Buffer.alloc(13)), keys, ilst);
+  const stcoEntry = Buffer.alloc(4); // patched below
+  const stco = fullBox("stco", Buffer.from([0, 0, 0, 1]), stcoEntry);
+  const trak = box(
+    "trak",
+    fullBox("tkhd", Buffer.alloc(80)),
+    box("mdia", box("minf", box("stbl", stco))),
+    box("udta", userText("\xa9mod", "iPhone 15 Pro"))
+  );
+  const moov = box("moov", fullBox("mvhd", mvhd.subarray(4)), udta, meta, trak);
+  const xmp = box("uuid", Buffer.alloc(16, 0xbe), latin1("<x:xmpmeta><exif:GPSLatitude>20,58N</exif:GPSLatitude></x:xmpmeta>"));
+  const payload = Buffer.alloc(512, 0x5a);
+  const mdat = box("mdat", payload);
+  const bytes = Buffer.concat([ftyp, moov, xmp, mdat]);
+  const mdatPayloadOffset = ftyp.length + moov.length + xmp.length + 8;
+  const stcoEntryOffset = bytes.indexOf(latin1("stco")) + 4 + 4 + 4;
+  bytes.writeUInt32BE(mdatPayloadOffset, stcoEntryOffset);
+  return { bytes, stcoEntryOffset, mdatPayloadOffset, payload };
+}
+
 /** The original object key in an upload URL (FakeStorage URLs embed the key). */
 export function keyFromFakeUrl(url: string): string {
   return decodeURIComponent(new URL(url).pathname.slice(1));

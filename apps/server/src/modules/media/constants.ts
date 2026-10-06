@@ -28,6 +28,31 @@ export const VIEW_URL_SECONDS = 60 * 60;
 /** Upload intents per user per minute. */
 export const UPLOAD_INTENT_RATE_LIMIT = { max: 30, timeWindow: "1 minute" } as const;
 
+/** Confirms per user per minute (each costs a HEAD and a ranged GET). */
+export const CONFIRM_RATE_LIMIT = { max: 60, timeWindow: "1 minute" } as const;
+
+/**
+ * Per-user upload budget over a rolling 24 h, in bytes (sum of `byte_size` of
+ * the user's non-failed items created in the window, deleted ones included so
+ * delete-and-reupload cannot bypass it). Future config key:
+ * `MEDIA_DAILY_UPLOAD_BYTES` (config.ts is frozen in Phase 1).
+ */
+export const DAILY_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
+
+/** Window of {@link DAILY_UPLOAD_BYTES}. */
+export const DAILY_UPLOAD_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Leftover-object sweep: rows deleted, failed or processed between 25 h and
+ * 1 h ago get their (idempotent) object deletes re-issued on every pass, so a
+ * transient storage failure or a late re-PUT is cleaned up within a day.
+ */
+export const SWEEP_MIN_AGE_MS = 60 * 60 * 1000;
+export const SWEEP_MAX_AGE_MS = 25 * 60 * 60 * 1000;
+
+/** Rows per sweep category per pass. */
+export const SWEEP_BATCH_SIZE = 200;
+
 /** Reports per user per minute. */
 export const REPORT_RATE_LIMIT = { max: 30, timeWindow: "1 minute" } as const;
 
@@ -46,8 +71,6 @@ export const DISPLAY_WIDTH = 1600;
 /** Bytes read on confirm to sniff the file signature. */
 export const SNIFF_BYTES = 32;
 
-/** Bytes read from a video to look for the `mvhd` duration (only found when `moov` is at the start). */
-export const VIDEO_PROBE_BYTES = 512 * 1024;
 
 /** `Cache-Control` for derivatives: their keys never change, and the bucket is private. */
 export const DERIVATIVE_CACHE_CONTROL = "private, max-age=31536000, immutable";

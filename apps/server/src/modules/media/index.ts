@@ -3,16 +3,17 @@
  * Registered under `/api` by `app.ts`.
  *
  * Lifecycle:
- * - `onReady`: re-queue items left in `processing` (crash/deploy) and start
- *   the abandoned-upload cleanup timer.
+ * - `onReady`: mark items left in `processing` (crash/deploy) as `failed`
+ *   (`interrupted`) instead of re-running them (no poison-pill crash loop),
+ *   and start the cleanup timer.
  * - `onClose`: stop the timer and wait for a running cleanup pass (the job
  *   queue itself is closed by the app).
  */
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import adminMediaRoutes from "./adminRoutes.js";
 import { CLEANUP_INTERVAL_MS } from "./constants.js";
-import { cleanupAbandonedUploads } from "./jobs/mediaCleanup.js";
-import { requeueStuckProcessing } from "./jobs/mediaProcess.js";
+import { runMediaCleanup } from "./jobs/mediaCleanup.js";
+import { failInterruptedProcessing } from "./jobs/mediaProcess.js";
 import mediaRoutes from "./routes.js";
 import { jobDeps } from "./shared.js";
 
@@ -29,7 +30,7 @@ const mediaModule: FastifyPluginAsyncZod = async (app) => {
 
   const runCleanup = (): void => {
     if (running !== null) return;
-    running = cleanupAbandonedUploads(deps)
+    running = runMediaCleanup(deps)
       .then(() => undefined)
       .catch((error: unknown) => {
         app.log.error({ errorName: error instanceof Error ? error.name : "unknown" }, "media cleanup failed");
@@ -39,14 +40,14 @@ const mediaModule: FastifyPluginAsyncZod = async (app) => {
       });
   };
 
-  let requeue: Promise<void> | null = null;
+  let startupCheck: Promise<void> | null = null;
 
   app.addHook("onReady", async () => {
     // In the background: a slow or down database must not block (or fail) boot.
-    requeue = requeueStuckProcessing(deps)
+    startupCheck = failInterruptedProcessing(deps)
       .then(() => undefined)
       .catch((error: unknown) => {
-        app.log.error({ errorName: error instanceof Error ? error.name : "unknown" }, "media re-queue failed");
+        app.log.error({ errorName: error instanceof Error ? error.name : "unknown" }, "media interrupted-item check failed");
       });
     timer = setInterval(runCleanup, CLEANUP_INTERVAL_MS);
     timer.unref();
@@ -55,7 +56,7 @@ const mediaModule: FastifyPluginAsyncZod = async (app) => {
   app.addHook("onClose", async () => {
     if (timer !== null) clearInterval(timer);
     timer = null;
-    if (requeue !== null) await requeue;
+    if (startupCheck !== null) await startupCheck;
     if (running !== null) await running;
   });
 };

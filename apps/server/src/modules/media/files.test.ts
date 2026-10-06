@@ -1,15 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { makeDecompressionBombPng, makeJpegWithGps, makeMp4, makePng, makeWebp } from "../../../test/helpers/media.js";
+import {
+  makeDecompressionBombPng,
+  makeJpegWithGps,
+  makeMp4,
+  makeMp4WithLocation,
+  makePng,
+  makeWebp,
+  PLANTED_LOCATION
+} from "../../../test/helpers/media.js";
 import { decodeCursor, encodeCursor } from "./cursor.js";
 import {
   extensionForMime,
   FILE_NAME_MAX_LENGTH,
   mediaKeys,
+  neutralizeVideoMetadata,
   normalizeContentType,
   readMp4DurationSeconds,
   sanitizeFileName,
   signatureMatches,
-  sniffMediaType
+  sniffMediaType,
+  VideoStructureError
 } from "./files.js";
 
 const ID = "6f1d3b0e-2c4a-4b8e-9f00-1234567890ab";
@@ -52,6 +62,52 @@ describe("mediaKeys", () => {
       display: `cuencadas/2026/display/${ID}.webp`
     });
     expect(extensionForMime("video/quicktime")).toBe("mov");
+  });
+
+  it("gives videos a display copy in their own container", () => {
+    expect(mediaKeys(2026, ID, "video/quicktime").display).toBe(`cuencadas/2026/display/${ID}.mov`);
+    expect(mediaKeys(2026, ID, "video/mp4").display).toBe(`cuencadas/2026/display/${ID}.mp4`);
+  });
+});
+
+describe("neutralizeVideoMetadata", () => {
+  it("turns udta/meta/uuid into same-size zeroed free boxes and keeps sizes and chunk offsets", () => {
+    const fixture = makeMp4WithLocation();
+    const original = Buffer.from(fixture.bytes);
+    const output = Buffer.from(fixture.bytes);
+
+    const neutralized = neutralizeVideoMetadata(output);
+
+    // moov/udta, moov/meta, moov/trak/udta and the top-level XMP uuid.
+    expect(neutralized).toBe(4);
+    expect(output.length).toBe(original.length);
+    for (const secret of [PLANTED_LOCATION, "+20.9674", "\xa9xyz", "\xa9mak", "\xa9mod", "\xa9swr", "\xa9day", "ISO6709", "xmpmeta", "GPSLatitude", "iPhone 15 Pro", "Apple"]) {
+      expect(output.includes(Buffer.from(secret, "latin1"))).toBe(false);
+    }
+    expect(original.includes(Buffer.from(PLANTED_LOCATION, "latin1"))).toBe(true);
+    // The chunk offset is untouched and still points at the same media bytes.
+    expect(output.readUInt32BE(fixture.stcoEntryOffset)).toBe(fixture.mdatPayloadOffset);
+    expect(output.subarray(fixture.mdatPayloadOffset, fixture.mdatPayloadOffset + fixture.payload.length)).toEqual(fixture.payload);
+    // Container structure and the playable header are intact.
+    expect(sniffMediaType(output)).toBe("video/quicktime");
+    expect(readMp4DurationSeconds(output)).toBe(9);
+    expect(output.includes(Buffer.from("free", "latin1"))).toBe(true);
+    expect(neutralizeVideoMetadata(Buffer.from(output))).toBe(0);
+  });
+
+  it("leaves a file without metadata byte-identical", () => {
+    const plain = makeMp4("isom", 5);
+    const copy = Buffer.from(plain);
+
+    expect(neutralizeVideoMetadata(copy)).toBe(0);
+    expect(copy.equals(plain)).toBe(true);
+  });
+
+  it("throws on inconsistent box sizes", () => {
+    const broken = Buffer.from(makeMp4("isom"));
+    broken.writeUInt32BE(0xffff, broken.indexOf(Buffer.from("moov")) - 4);
+    expect(() => neutralizeVideoMetadata(broken)).toThrow(VideoStructureError);
+    expect(() => neutralizeVideoMetadata(Buffer.from([0, 0, 0, 4, 0x66]))).toThrow(VideoStructureError);
   });
 });
 
@@ -127,5 +183,17 @@ describe("cursor", () => {
     expect(() => decodeCursor(Buffer.from("x:not-a-uuid").toString("base64url"))).toThrow(
       expect.objectContaining({ code: "VALIDATION" })
     );
+  });
+
+  it.each([
+    ["19 digits (bigint max)", "9223372036854775807"],
+    ["20 digits", "99999999999999999999"],
+    ["18 digits past year 9999", "253402300800000000"]
+  ])("rejects an out-of-range timestamp: %s", (_label, micros) => {
+    expect(() => decodeCursor(encodeCursor({ micros, id: ID }))).toThrow(expect.objectContaining({ code: "VALIDATION" }));
+  });
+
+  it("accepts the largest allowed timestamp", () => {
+    expect(decodeCursor(encodeCursor({ micros: "253402300799999999", id: ID })).micros).toBe("253402300799999999");
   });
 });

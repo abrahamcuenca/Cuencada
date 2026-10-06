@@ -13,15 +13,18 @@ import {
   makeDecompressionBombPng,
   makeJpegWithGps,
   makeMp4,
+  makeMp4WithLocation,
   makePng,
   makeWebp,
+  PLANTED_LOCATION,
   uploadMedia
 } from "../../../test/helpers/media.js";
 import type { App } from "../../app.js";
 import { auditLogs, mediaItems } from "../../db/schema/index.js";
 import { systemClock } from "../../lib/clock.js";
 import { S3Storage } from "../../lib/storage/s3.js";
-import { DERIVATIVE_CACHE_CONTROL, UPLOAD_URL_SECONDS } from "./constants.js";
+import { DAILY_UPLOAD_BYTES, DAILY_UPLOAD_WINDOW_MS, DERIVATIVE_CACHE_CONTROL, SNIFF_BYTES, UPLOAD_URL_SECONDS } from "./constants.js";
+import { runMediaCleanup } from "./jobs/mediaCleanup.js";
 
 const MB = 1024 * 1024;
 let app: App | undefined;
@@ -223,6 +226,9 @@ describe("POST /api/media/:id/confirm and processing", () => {
       .where(and(eq(auditLogs.action, "media.uploaded"), eq(auditLogs.entityId, result.mediaId)));
     expect(audit).toHaveLength(1);
     expect(audit[0]?.actorUserId).toBe(user.id);
+    // The original (with its GPS EXIF) is gone; only the sanitized copies remain.
+    expect(storage.objects.has(result.key)).toBe(false);
+    expect([...storage.objects.keys()].sort()).toEqual([row.displayKey, row.thumbKey].sort());
   });
 
   it("stores derivatives with immutable private caching and bounded widths", async () => {
@@ -260,7 +266,7 @@ describe("POST /api/media/:id/confirm and processing", () => {
     expect(await mediaRow(result.mediaId)).toMatchObject({ uploadStatus: "ready", moderationStatus: "pending_review" });
   });
 
-  it("marks a video ready without transcoding and reads its duration", async () => {
+  it("serves a scrubbed copy of a video under its own display key and deletes the original", async () => {
     const { app, storage } = await setup();
     await createCuencada();
     const { auth } = await createMember();
@@ -273,11 +279,66 @@ describe("POST /api/media/:id/confirm and processing", () => {
       kind: "video",
       uploadStatus: "ready",
       thumbKey: null,
-      displayKey: mp4Row.objectKey,
+      displayKey: `cuencadas/2026/display/${mp4.mediaId}.mp4`,
       durationSeconds: 42
     });
-    expect(mp4Row.objectKey).toBe(`cuencadas/2026/originals/${mp4.mediaId}.mp4`);
-    expect(await mediaRow(mov.mediaId)).toMatchObject({ uploadStatus: "ready", durationSeconds: 7 });
+    expect(storage.objects.get(mp4Row.displayKey ?? "")?.contentType).toBe("video/mp4");
+    expect(storage.objects.has(mp4.key)).toBe(false);
+    const movRow = await mediaRow(mov.mediaId);
+    expect(movRow).toMatchObject({ uploadStatus: "ready", durationSeconds: 7, displayKey: `cuencadas/2026/display/${mov.mediaId}.mov` });
+    expect(storage.objects.get(movRow.displayKey ?? "")?.contentType).toBe("video/quicktime");
+  });
+
+  it("strips location and device metadata from an iPhone-style video (M1)", async () => {
+    const { app, storage } = await setup();
+    await createCuencada();
+    const { auth } = await createMember();
+    const other = await createMember();
+    const fixture = makeMp4WithLocation("qt  ");
+
+    const result = await uploadMedia(app, storage, auth, fixture.bytes, { mimeType: "video/quicktime", fileName: "IMG_0001.MOV" });
+
+    expect(result.confirmStatus).toBe(200);
+    const row = await mediaRow(result.mediaId);
+    expect(row.uploadStatus).toBe("ready");
+    const served = Buffer.from(storage.objects.get(row.displayKey ?? "")?.body ?? []);
+    expect(served.length).toBe(fixture.bytes.length);
+    for (const secret of [PLANTED_LOCATION, "+20.9674", "\xa9xyz", "ISO6709", "xmpmeta", "iPhone 15 Pro"]) {
+      expect(served.includes(Buffer.from(secret, "latin1"))).toBe(false);
+    }
+    expect(served.readUInt32BE(fixture.stcoEntryOffset)).toBe(fixture.mdatPayloadOffset);
+    expect(served.subarray(fixture.mdatPayloadOffset, fixture.mdatPayloadOffset + fixture.payload.length)).toEqual(fixture.payload);
+    expect(storage.objects.has(result.key)).toBe(false);
+
+    const list = await app.inject({ method: "GET", url: "/api/cuencadas/2026/media", ...other.auth });
+    const item = list.json<{ items: Array<{ id: string; displayUrl: string | null; thumbUrl: string | null }> }>().items[0];
+    expect(item?.id).toBe(result.mediaId);
+    expect(item?.thumbUrl).toBeNull();
+    expect(decodeURIComponent(new URL(String(item?.displayUrl)).pathname)).toBe(`/cuencadas/2026/display/${result.mediaId}.mov`);
+  });
+
+  it("re-checks the bytes in the job: a video swapped after confirm fails and nothing is served (L1)", async () => {
+    const storage = new FakeStorage();
+    let swap: Uint8Array | null = null;
+    const realGetRange = storage.getRange.bind(storage);
+    storage.getRange = async (key, start, endInclusive) => {
+      if (swap !== null && endInclusive > SNIFF_BYTES) {
+        await storage.put({ key, body: swap, contentType: "video/mp4" });
+        swap = null;
+      }
+      return realGetRange(key, start, endInclusive);
+    };
+    app = await createTestApp({ storage });
+    await createCuencada();
+    const { auth } = await createMember();
+    const valid = makeMp4("isom", 3);
+    swap = Buffer.alloc(valid.length, 0x3c); // "<<<<": same length, not a video
+
+    const result = await uploadMedia(app, storage, auth, valid, { mimeType: "video/mp4", fileName: "v.mp4" });
+
+    expect(result.confirmStatus).toBe(200);
+    expect(await mediaRow(result.mediaId)).toMatchObject({ uploadStatus: "failed", processingError: "signature_mismatch", displayKey: null });
+    expect(storage.objects.size).toBe(0);
   });
 
   it.each([
@@ -292,7 +353,9 @@ describe("POST /api/media/:id/confirm and processing", () => {
     const result = await uploadMedia(app, storage, auth, await makeBody(), { mimeType });
 
     expect(result.confirmStatus).toBe(400);
-    expect(result.confirmBody).toMatchObject({ error: { code: "UPLOAD_INVALID" } });
+    expect(result.confirmBody).toMatchObject({
+      error: { code: "UPLOAD_INVALID", details: [{ path: "upload", message: "rejected" }] }
+    });
     expect(await mediaRow(result.mediaId)).toMatchObject({ uploadStatus: "failed", processingError: "signature_mismatch" });
     expect(storage.objects.has(result.key)).toBe(false);
     const audit = await getTestDb().select().from(auditLogs).where(eq(auditLogs.action, "media.upload_rejected"));
@@ -339,7 +402,9 @@ describe("POST /api/media/:id/confirm and processing", () => {
     const response = await app.inject({ method: "POST", url: `/api/media/${mediaId}/confirm`, ...auth });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toMatchObject({ error: { code: "UPLOAD_INVALID" } });
+    expect(response.json()).toMatchObject({
+      error: { code: "UPLOAD_INVALID", details: [{ path: "upload", message: "not_received" }] }
+    });
     expect((await mediaRow(mediaId)).uploadStatus).toBe("pending_upload");
   });
 
@@ -353,7 +418,8 @@ describe("POST /api/media/:id/confirm and processing", () => {
     expect(result.confirmStatus).toBe(200);
     const row = await mediaRow(result.mediaId);
     expect(row).toMatchObject({ uploadStatus: "failed", processingError: "pixel_limit_exceeded", thumbKey: null });
-    expect([...storage.objects.keys()].filter((key) => !key.includes("/originals/"))).toEqual([]);
+    // L3: the original of a failed item is deleted too.
+    expect(storage.objects.size).toBe(0);
   });
 
   it("is idempotent once accepted and answers 404 to anyone but the uploader", async () => {
@@ -420,12 +486,69 @@ describe("POST /api/media/:id/confirm and processing", () => {
     expect(confirm.statusCode).toBe(200);
     const row = await mediaRow(result.mediaId);
     expect(row.uploadStatus).toBe("processing");
-    expect([...storage.objects.keys()].filter((key) => !key.includes("/originals/"))).toEqual([]);
+    expect(storage.objects.size).toBe(0);
+  });
+
+  it("leaves no objects when the uploader deletes through the API while the job runs", async () => {
+    const storage = new FakeStorage();
+    let deleteDuringPut: (() => Promise<void>) | null = null;
+    const original = storage.put.bind(storage);
+    storage.put = async (input) => {
+      await original(input);
+      if (deleteDuringPut !== null && input.key.includes("/display/")) {
+        const run = deleteDuringPut;
+        deleteDuringPut = null;
+        await run();
+      }
+    };
+    app = await createTestApp({ storage });
+    const testApp = app;
+    await createCuencada();
+    const { auth } = await createMember();
+    const result = await uploadMedia(testApp, storage, auth, await makePng(), { mimeType: "image/png", confirm: false });
+    let deleteStatus = 0;
+    deleteDuringPut = async () => {
+      const response = await testApp.inject({ method: "DELETE", url: `/api/media/${result.mediaId}`, ...auth });
+      deleteStatus = response.statusCode;
+    };
+
+    await testApp.inject({ method: "POST", url: `/api/media/${result.mediaId}/confirm`, ...auth });
+    await testApp.jobs.onIdle();
+
+    expect(deleteStatus).toBe(204);
+    expect((await mediaRow(result.mediaId)).deletedAt).not.toBeNull();
+    expect(storage.objects.size).toBe(0);
+  });
+
+  it("answers 404 to a confirm after the cleanup claimed the abandoned upload, and the object is gone", async () => {
+    const { app, storage } = await setup();
+    await createCuencada();
+    const { auth } = await createMember();
+    const result = await uploadMedia(app, storage, auth, await makePng(), { mimeType: "image/png", confirm: false });
+    await getTestDb().update(mediaItems).set({ uploadExpiresAt: new Date(0) }).where(eq(mediaItems.id, result.mediaId));
+    await runMediaCleanup({ db: getTestDb(), storage, clock: systemClock, log: app.log });
+
+    const confirm = await app.inject({ method: "POST", url: `/api/media/${result.mediaId}/confirm`, ...auth });
+
+    expect(confirm.statusCode).toBe(404);
+    expect(storage.objects.has(result.key)).toBe(false);
+  });
+
+  it("rate-limits confirms per user at 60 per minute", async () => {
+    const { app } = await setup();
+    const { auth } = await createMember();
+    const statuses: number[] = [];
+    for (let index = 0; index < 61; index += 1) {
+      const response = await app.inject({ method: "POST", url: "/api/media/6f1d3b0e-2c4a-4b8e-9f00-1234567890ab/confirm", ...auth });
+      statuses.push(response.statusCode);
+    }
+    expect(statuses.slice(0, 60).every((status) => status === 404)).toBe(true);
+    expect(statuses[60]).toBe(429);
   });
 });
 
-describe("startup re-enqueue", () => {
-  it("processes items left in processing when the app starts", async () => {
+describe("startup", () => {
+  it("marks items left in processing as failed (interrupted) and deletes their objects instead of re-running them (L2)", async () => {
     const storage = new FakeStorage();
     const cuencada = await createCuencada();
     const png = await makePng();
@@ -441,13 +564,70 @@ describe("startup re-enqueue", () => {
     });
     await storage.put({ key: stuck.objectKey, body: png, contentType: "image/png" });
     const deleted = await insertMedia({ cuencadaId: cuencada.id, uploadStatus: "processing", deletedAt: new Date() });
+    const getRangeCalls: string[] = [];
+    const realGetRange = storage.getRange.bind(storage);
+    storage.getRange = async (key, start, end) => {
+      getRangeCalls.push(key);
+      return realGetRange(key, start, end);
+    };
 
     app = await createTestApp({ storage });
 
-    await vi.waitFor(async () => expect((await mediaRow(stuck.id)).uploadStatus).toBe("ready"), { timeout: 5000 });
+    await vi.waitFor(async () => expect((await mediaRow(stuck.id)).uploadStatus).toBe("failed"), { timeout: 5000 });
     await app.jobs.onIdle();
-    expect(await mediaRow(stuck.id)).toMatchObject({ uploadStatus: "ready", width: 40, height: 30 });
+    expect(await mediaRow(stuck.id)).toMatchObject({ uploadStatus: "failed", processingError: "interrupted" });
+    expect(storage.objects.has(stuck.objectKey)).toBe(false);
+    expect(getRangeCalls).toEqual([]);
     expect((await mediaRow(deleted.id)).uploadStatus).toBe("processing");
+  });
+});
+
+describe("upload quotas", () => {
+  it("caps open intents at 50 per user (TL7)", async () => {
+    const { app } = await setup();
+    const cuencada = await createCuencada();
+    const { user, auth } = await createMember();
+    for (let index = 0; index < 50; index += 1) {
+      await insertMedia({ cuencadaId: cuencada.id, uploadedByUserId: user.id, uploadStatus: "pending_upload", byteSize: 10 });
+    }
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/cuencadas/2026/media/uploads",
+      ...auth,
+      payload: { fileName: "a.jpg", mimeType: "image/jpeg", byteSize: 10 }
+    });
+
+    expect(response.statusCode).toBe(429);
+    expect(response.json()).toMatchObject({ error: { code: "RATE_LIMITED" } });
+  });
+
+  it("enforces the rolling 24 h byte budget, ignoring failed and older items (L4)", async () => {
+    const { app } = await setup();
+    const cuencada = await createCuencada();
+    const { user, auth } = await createMember();
+    const big = 300 * MB;
+    const base = { cuencadaId: cuencada.id, uploadedByUserId: user.id, kind: "video", mimeType: "video/mp4", byteSize: big } as const;
+    for (let index = 0; index < 5; index += 1) await insertMedia({ ...base }); // 1500 MB today
+    await insertMedia({ ...base, uploadStatus: "failed" });
+    await insertMedia({ ...base, createdAt: new Date(Date.now() - DAILY_UPLOAD_WINDOW_MS - 60_000) });
+    await insertMedia({ ...base, deletedAt: new Date() }); // deleted still counts: 1800 MB
+    const intent = (byteSize: number) =>
+      app.inject({
+        method: "POST",
+        url: "/api/cuencadas/2026/media/uploads",
+        ...auth,
+        payload: { fileName: "a.mp4", mimeType: "video/mp4", byteSize }
+      });
+
+    const over = await intent(DAILY_UPLOAD_BYTES - 1800 * MB + 1);
+    const fits = await intent(DAILY_UPLOAD_BYTES - 1800 * MB);
+    const nowOver = await intent(1);
+
+    expect(over.statusCode).toBe(429);
+    expect(over.json()).toMatchObject({ error: { code: "RATE_LIMITED", message: expect.stringContaining("límite") } });
+    expect(fits.statusCode).toBe(201);
+    expect(nowOver.statusCode).toBe(429);
   });
 });
 

@@ -68,14 +68,17 @@ export interface MediaKeys {
  *
  * @param year - Cuencada year.
  * @param mediaId - The item's uuid.
- * @param mimeType - Allowed MIME type (decides the original's extension).
+ * @param mimeType - Allowed MIME type (decides the extensions). Images get a
+ *   WebP display copy; videos a metadata-scrubbed copy in their own container.
  */
 export function mediaKeys(year: number, mediaId: string, mimeType: MediaMimeType): MediaKeys {
   const base = `cuencadas/${year}`;
+  const extension = extensionForMime(mimeType);
+  const displayExtension = mimeType.startsWith("video/") ? extension : "webp";
   return {
-    original: `${base}/originals/${mediaId}.${extensionForMime(mimeType)}`,
+    original: `${base}/originals/${mediaId}.${extension}`,
     thumb: `${base}/thumbs/${mediaId}.webp`,
-    display: `${base}/display/${mediaId}.webp`
+    display: `${base}/display/${mediaId}.${displayExtension}`
   };
 }
 
@@ -227,4 +230,90 @@ function findBox(view: DataView, start: number, end: number, type: string): BoxR
     offset = boxEnd;
   }
   return null;
+}
+
+/** Thrown when an MP4/QuickTime box tree is malformed (sizes out of bounds). */
+export class VideoStructureError extends Error {
+  constructor() {
+    super("invalid ISO-BMFF box structure");
+    this.name = "VideoStructureError";
+  }
+}
+
+/** Boxes whose children are walked (never `mdat`). */
+const CONTAINER_BOXES: ReadonlySet<string> = new Set([
+  "moov",
+  "trak",
+  "mdia",
+  "minf",
+  "dinf",
+  "stbl",
+  "edts",
+  "mvex",
+  "moof",
+  "traf",
+  "tref"
+]);
+
+/**
+ * Boxes that carry location or identifying metadata: `udta` (`©xyz`, `©day`,
+ * `©mak`, `©mod`, `©swr`, `loci`, …), `meta` (QuickTime keys such as
+ * `com.apple.quicktime.location.ISO6709`, make, model, software, creation
+ * date; iTunes `ilst`) and `uuid` (XMP). Replaced wholesale.
+ */
+const METADATA_BOXES: ReadonlySet<string> = new Set(["udta", "meta", "uuid", "XMP_"]);
+
+/** Padding boxes: their payload is meaningless, but editors leave stale metadata in them. */
+const PADDING_BOXES: ReadonlySet<string> = new Set(["free", "skip", "wide"]);
+
+const MAX_BOX_DEPTH = 16;
+const FREE_TYPE = [0x66, 0x72, 0x65, 0x65]; // "free"
+
+/**
+ * Neutralize location/identifying metadata in an MP4/QuickTime file **in
+ * place**: every metadata box (see `METADATA_BOXES`) at the top level or
+ * inside a container becomes a `free` box of the **same size** with a zeroed
+ * payload, and padding boxes are zeroed. No byte moves, so chunk offsets
+ * (`stco`/`co64`) stay valid and no remux is needed.
+ *
+ * @param bytes - The whole file; modified in place.
+ * @returns How many metadata boxes were neutralized.
+ * @throws VideoStructureError when a box size is inconsistent.
+ */
+export function neutralizeVideoMetadata(bytes: Uint8Array): number {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return neutralizeBoxes(view, bytes, 0, bytes.byteLength, 0);
+}
+
+function neutralizeBoxes(view: DataView, bytes: Uint8Array, start: number, end: number, depth: number): number {
+  let neutralized = 0;
+  let offset = start;
+  while (offset < end) {
+    if (offset + 8 > end) throw new VideoStructureError();
+    let size = view.getUint32(offset);
+    let header = 8;
+    if (size === 1) {
+      if (offset + 16 > end) throw new VideoStructureError();
+      const large = view.getBigUint64(offset + 8);
+      if (large > BigInt(end - offset)) throw new VideoStructureError();
+      size = Number(large);
+      header = 16;
+    } else if (size === 0) {
+      size = end - offset;
+    }
+    if (size < header || offset + size > end) throw new VideoStructureError();
+    const type = ascii(bytes, offset + 4, 4);
+    if (METADATA_BOXES.has(type)) {
+      bytes.set(FREE_TYPE, offset + 4);
+      bytes.fill(0, offset + header, offset + size);
+      neutralized += 1;
+    } else if (PADDING_BOXES.has(type)) {
+      bytes.fill(0, offset + header, offset + size);
+    } else if (CONTAINER_BOXES.has(type)) {
+      if (depth >= MAX_BOX_DEPTH) throw new VideoStructureError();
+      neutralized += neutralizeBoxes(view, bytes, offset + header, offset + size, depth + 1);
+    }
+    offset += size;
+  }
+  return neutralized;
 }

@@ -49,20 +49,4 @@ export function jobDeps(app: FastifyInstance): MediaJobDeps {
   return { db: app.db, storage: app.storage, clock: app.clock, log: app.log, jobs: app.jobs };
 }
 
-/**
- * Delete objects, logging (without keys) and continuing on failure. A later
- * idempotent `DELETE` retries them.
- *
- * @param app - For storage and the logger.
- * @param mediaId - For the log line.
- * @param keys - Object keys to remove.
- */
-export async function deleteObjectsQuietly(app: FastifyInstance, mediaId: string, keys: string[]): Promise<void> {
-  for (const key of keys) {
-    try {
-      await app.storage.delete(key);
-    } catch (error) {
-      app.log.warn({ mediaId, errorName: error instanceof Error ? error.name : "unknown" }, "media object delete failed");
-    }
-  }
-}
+export { deleteObjectsQuietly } from "./objects.js";

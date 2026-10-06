@@ -68,7 +68,7 @@ describe("GET /api/cuencadas/:year/media", () => {
       mimeType: "video/mp4",
       objectKey: videoKey,
       thumbKey: null,
-      displayKey: videoKey, // videos display their original
+      displayKey: `cuencadas/2026/display/${videoId}.mp4`, // the scrubbed copy, never the original
       width: null,
       height: null,
       durationSeconds: 12
@@ -103,7 +103,7 @@ describe("GET /api/cuencadas/:year/media", () => {
 
     const clip = asOther.items.find((entry) => entry.id === video.id);
     expect(clip).toMatchObject({ kind: "video", thumbUrl: null, durationSeconds: 12 });
-    expect(decodeURIComponent(new URL(String(clip?.displayUrl)).pathname)).toContain("/originals/");
+    expect(decodeURIComponent(new URL(String(clip?.displayUrl)).pathname)).toBe(`/cuencadas/2026/display/${videoId}.mp4`);
 
     expect(asAdmin.items.find((entry) => entry.id === item.id)).toMatchObject({ isMine: false, canEdit: true, canDelete: true });
     expect((await list(owner)).items.find((entry) => entry.id === item.id)).toMatchObject({ isMine: true, canEdit: true });

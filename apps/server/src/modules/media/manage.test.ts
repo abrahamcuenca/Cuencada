@@ -76,7 +76,7 @@ describe("PATCH /api/media/:id", () => {
 describe("DELETE /api/media/:id", () => {
   it("soft-deletes a ready item, removes every object and audits once; repeats answer 204", async () => {
     const upload = await uploadMedia(app, storage, owner.auth, await makePng(), { mimeType: "image/png" });
-    expect(storage.objects.size).toBe(3);
+    expect(storage.objects.size).toBe(2); // thumb + display; the original was deleted after processing
 
     const first = await app.inject({ method: "DELETE", url: `/api/media/${upload.mediaId}`, ...owner.auth });
     const second = await app.inject({ method: "DELETE", url: `/api/media/${upload.mediaId}`, ...owner.auth });

@@ -7,6 +7,7 @@
  */
 import { randomUUID } from "node:crypto";
 import {
+  AuditAction,
   confirmUploadInputSchema,
   createUploadInputSchema,
   createUploadResponseSchema,
@@ -20,7 +21,7 @@ import {
   updateMediaInputSchema,
   yearParamSchema
 } from "@cuencada/types";
-import { and, count, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { cuencadas, mediaItems, mediaReports } from "../../db/schema/index.js";
@@ -28,6 +29,9 @@ import { recordAudit } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
 import { authUser } from "../../plugins/auth.js";
 import {
+  CONFIRM_RATE_LIMIT,
+  DAILY_UPLOAD_BYTES,
+  DAILY_UPLOAD_WINDOW_MS,
   MAX_PENDING_UPLOADS_PER_USER,
   REPORT_RATE_LIMIT,
   SNIFF_BYTES,
@@ -51,6 +55,22 @@ import { deleteObjectsQuietly, jobDeps, mediaErrorResponses, noContentSchema, ra
 const NOT_FOUND_MESSAGE = "No encontramos esa foto o video.";
 const NO_CUENCADA_MESSAGE = "No encontramos esa Cuencada.";
 const UPLOAD_MISMATCH_MESSAGE = "El archivo no coincide con el tipo o el tamaño declarados.";
+
+/**
+ * `UPLOAD_INVALID` detail codes (path `upload`) so the web can tell a
+ * retryable confirm from a final rejection without a new `ErrorCode`.
+ */
+export const UploadInvalidReason = {
+  /** The object is not in the bucket yet: retry the PUT/confirm. */
+  NotReceived: "not_received",
+  /** The upload was checked and refused (final; upload again). */
+  Rejected: "rejected"
+} as const;
+export type UploadInvalidReason = (typeof UploadInvalidReason)[keyof typeof UploadInvalidReason];
+
+function uploadInvalid(reason: UploadInvalidReason, message: string): AppError {
+  return new AppError("UPLOAD_INVALID", message, { details: [{ path: "upload", message: reason }] });
+}
 
 /** Headers a browser may set itself; the signature also covers Content-Length, which the browser derives from the File. */
 function browserUploadHeaders(required: Record<string, string>, mimeType: string): Record<string, string> {
@@ -91,7 +111,7 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
       if (updated.length === 0) return;
       await recordAudit(tx, {
         actorUserId: userId,
-        action: "media.upload_rejected",
+        action: AuditAction.MediaUploadRejected,
         entityType: "media",
         entityId: item.id,
         metadata: { reason, mimeType: item.mimeType },
@@ -100,7 +120,7 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
     });
     await deleteObjectsQuietly(app, item.id, [item.objectKey]);
     app.log.info({ mediaId: item.id, reason }, "media upload rejected");
-    throw new AppError("UPLOAD_INVALID", UPLOAD_MISMATCH_MESSAGE);
+    throw uploadInvalid(UploadInvalidReason.Rejected, UPLOAD_MISMATCH_MESSAGE);
   }
 
   /**
@@ -122,26 +142,29 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
       const body = request.body;
       const cuencada = await findPublishedCuencada(app, request.params.year);
 
-      const [pending] = await app.db
-        .select({ total: count() })
-        .from(mediaItems)
-        .where(
-          and(
-            eq(mediaItems.uploadedByUserId, user.id),
-            eq(mediaItems.uploadStatus, "pending_upload"),
-            isNull(mediaItems.deletedAt)
-          )
-        );
-      if ((pending?.total ?? 0) >= MAX_PENDING_UPLOADS_PER_USER) {
-        throw new AppError("RATE_LIMITED", "Tienes demasiadas subidas pendientes. Espera a que terminen.");
-      }
-
       const mediaId = randomUUID();
       const keys = mediaKeys(cuencada.year, mediaId, body.mimeType);
       const now = app.clock.now();
       const needsReview = app.config.MEDIA_REQUIRE_APPROVAL && user.role !== "admin";
 
       const presigned = await app.db.transaction(async (tx) => {
+        // Serialize this user's intents so the caps below are exact under concurrency.
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`media-intent:${user.id}`}))`);
+        const since = new Date(now.getTime() - DAILY_UPLOAD_WINDOW_MS).toISOString();
+        const [usage] = await tx
+          .select({
+            open: sql<number>`(count(*) filter (where ${mediaItems.uploadStatus} = 'pending_upload' and ${mediaItems.deletedAt} is null))::int`,
+            recentBytes: sql<string>`coalesce(sum(${mediaItems.byteSize}) filter (where ${mediaItems.uploadStatus} <> 'failed' and ${mediaItems.createdAt} > ${since}::timestamptz), 0)::text`
+          })
+          .from(mediaItems)
+          .where(eq(mediaItems.uploadedByUserId, user.id));
+        if ((usage?.open ?? 0) >= MAX_PENDING_UPLOADS_PER_USER) {
+          throw new AppError("RATE_LIMITED", "Tienes demasiadas subidas pendientes. Espera a que terminen.");
+        }
+        if (Number(usage?.recentBytes ?? "0") + body.byteSize > DAILY_UPLOAD_BYTES) {
+          throw new AppError("RATE_LIMITED", "Llegaste al límite de subidas de hoy. Intenta de nuevo mañana.");
+        }
+
         await tx.insert(mediaItems).values({
           id: mediaId,
           cuencadaId: cuencada.id,
@@ -183,7 +206,7 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     "/media/:id/confirm",
     {
-      config: { auth: "user" },
+      config: { auth: "user", rateLimit: rateLimitByUser("media-confirm", CONFIRM_RATE_LIMIT) },
       schema: {
         params: idParamSchema,
         body: confirmUploadInputSchema,
@@ -200,11 +223,11 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
       if (item.uploadStatus === "processing" || item.uploadStatus === "ready") {
         return toMediaItem(app.storage, record, viewer);
       }
-      if (item.uploadStatus === "failed") throw new AppError("UPLOAD_INVALID", UPLOAD_MISMATCH_MESSAGE);
+      if (item.uploadStatus === "failed") throw uploadInvalid(UploadInvalidReason.Rejected, UPLOAD_MISMATCH_MESSAGE);
 
       const head = await app.storage.head(item.objectKey);
       if (head === null) {
-        throw new AppError("UPLOAD_INVALID", "Aún no recibimos el archivo. Vuelve a intentarlo.");
+        throw uploadInvalid(UploadInvalidReason.NotReceived, "Aún no recibimos el archivo. Vuelve a intentarlo.");
       }
       if (head.contentLength !== item.byteSize) return rejectUpload(record, user.id, request.ip, "size_mismatch");
       if (normalizeContentType(head.contentType) !== item.mimeType) {
@@ -226,7 +249,7 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
         if (row === undefined) return null;
         await recordAudit(tx, {
           actorUserId: user.id,
-          action: "media.uploaded",
+          action: AuditAction.MediaUploaded,
           entityType: "media",
           entityId: row.id,
           metadata: { kind: row.kind, mimeType: row.mimeType, byteSize: row.byteSize },
@@ -241,7 +264,9 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
         if (current === null || !isOwner(current, viewer) || current.item.uploadStatus === "pending_upload") {
           throw new AppError("NOT_FOUND", NOT_FOUND_MESSAGE);
         }
-        if (current.item.uploadStatus === "failed") throw new AppError("UPLOAD_INVALID", UPLOAD_MISMATCH_MESSAGE);
+        if (current.item.uploadStatus === "failed") {
+          throw uploadInvalid(UploadInvalidReason.Rejected, UPLOAD_MISMATCH_MESSAGE);
+        }
         return toMediaItem(app.storage, current, viewer);
       }
 
@@ -318,7 +343,7 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
         if (row === undefined) throw new AppError("NOT_FOUND", NOT_FOUND_MESSAGE);
         await recordAudit(tx, {
           actorUserId: user.id,
-          action: "media.updated",
+          action: AuditAction.MediaUpdated,
           entityType: "media",
           entityId: row.id,
           metadata: { fields: ["caption"], byAdmin: !isOwner(record, viewer) },
@@ -364,7 +389,7 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
         if (row === undefined) return found.item; // already deleted: idempotent
         await recordAudit(tx, {
           actorUserId: user.id,
-          action: "media.deleted",
+          action: AuditAction.MediaDeleted,
           entityType: "media",
           entityId: row.id,
           metadata: { byAdmin: !own, uploadStatus: row.uploadStatus, kind: row.kind },
@@ -407,7 +432,7 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
         if (report === undefined) throw new AppError("CONFLICT", "Ya habías reportado esta publicación.");
         await recordAudit(tx, {
           actorUserId: user.id,
-          action: "media.reported",
+          action: AuditAction.MediaReported,
           entityType: "media",
           entityId: record.item.id,
           metadata: { reportId: report.id, reason: request.body.reason },
