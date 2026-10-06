@@ -31,9 +31,12 @@ export interface TabsProps {
  */
 export function Tabs({ items, value, defaultValue, onChange, label, variant = "pill", className }: TabsProps): React.ReactNode {
   const baseId = useId();
-  const firstEnabled = items.find((i) => !i.disabled)?.id ?? "";
+  // With no enabled tab, still keep the first tab reachable so the tablist is never a keyboard dead end.
+  const firstEnabled = items.find((i) => !i.disabled)?.id ?? items[0]?.id ?? "";
   const [internal, setInternal] = useState(defaultValue ?? firstEnabled);
-  const selected = value ?? internal;
+  const requested = value ?? internal;
+  // Fall back when the (controlled) value matches no selectable tab, so exactly one tab has tabIndex=0.
+  const selected = items.some((i) => i.id === requested && !i.disabled) ? requested : firstEnabled;
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
 
   const select = (id: string): void => {
@@ -89,6 +92,8 @@ export function Tabs({ items, value, defaultValue, onChange, label, variant = "p
           id={`${baseId}-panel-${item.id}`}
           aria-labelledby={`${baseId}-tab-${item.id}`}
           hidden={item.id !== selected}
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: WAI-ARIA APG makes tabpanels focusable so panels without focusable content are reachable.
+          tabIndex={0}
           className={styles.panel}
         >
           {item.id === selected ? item.content : null}

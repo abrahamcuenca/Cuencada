@@ -4,6 +4,8 @@ import styles from "./TopNav.module.css";
 import { cx } from "./cx";
 import { type NavItem, type RenderNavLink, isPathActive, renderAnchor } from "./nav";
 
+const BRAND_ITEM: NavItem = { key: "brand", label: "Cuencada", href: "/", end: true };
+
 /** Props for {@link TopNav}. */
 export interface TopNavProps {
   items: readonly NavItem[];
@@ -43,12 +45,21 @@ export function TopNav({
     <header className={cx(styles.header, styles[surface], hideOnMobile && styles.hideOnMobile, className)}>
       <div className={styles.inner}>
         <div className={styles.brand}>
-          {brand ?? (
-            <a href="/" className={styles.brandLink}>
-              <img src="/images/logo-96.webp" alt="" width="44" height="44" className={styles.logo} />
-              <span>Cuencada</span>
-            </a>
-          )}
+          {brand ??
+            // Through renderLink so SPA navigation keeps the in-memory session (no full reload).
+            renderLink({
+              item: BRAND_ITEM,
+              href: BRAND_ITEM.href,
+              isActive: false,
+              "aria-current": undefined,
+              className: styles.brandLink ?? "",
+              children: (
+                <>
+                  <img src="/images/logo-96.webp" alt="" width="44" height="44" className={styles.logo} />
+                  <span>Cuencada</span>
+                </>
+              )
+            })}
         </div>
         <nav aria-label={label} className={styles.nav}>
           <ul className={styles.list}>

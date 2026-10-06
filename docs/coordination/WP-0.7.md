@@ -22,7 +22,7 @@ Everything here was delivered. Only the paths below were touched; nothing in WP-
   - Lightbox
   - nav helpers: `isPathActive`, `renderRouterLink`, `renderAnchor`
 - **Style guide:** `apps/web/src/shared/ui/StyleGuide.tsx`. It's dev-only and exports `StyleGuide`, `Component` (for react-router `lazy`) and `default`.
-- **Tests:** Dialog, Field (+ Checkbox) a11y wiring, Countdown states, BottomNav active state (+ `isPathActive`), and Lightbox keyboard, buttons and swipe. That's 32 tests.
+- **Tests:** Dialog (incl. unmount-while-open and StrictMode focus restore), Field (+ Checkbox) a11y wiring, Countdown states, BottomNav active state (+ `isPathActive`), Lightbox (keyboard, buttons, swipe, video-drag guard, focus at ends), Toast timing, Button `rel`, AvatarCircle retry and the TopNav brand link. That's 53 UI tests.
 - **Docs:**
   - `docs/ux/design-system.md`
   - `docs/ux/wireframes.md`: every screen in the plan, with Spanish microcopy
@@ -70,12 +70,7 @@ Everything here was delivered. Only the paths below were touched; nothing in WP-
    { "src": "/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }]
   ```
   `theme_color` should be `#0b5e55` and `background_color` `#fffaf0`.
-- **WP-0.1 (test infra):** There was no vitest/jsdom config in this worktree, so I added only the minimum:
-  - `apps/web` devDependencies: `jsdom`, `@testing-library/{react,dom,user-event,jest-dom}`, `vitest`
-  - an `apps/web` `"test": "vitest run"` script
-  - **no config file**: each UI test starts with `// @vitest-environment jsdom` and imports `shared/ui/testing.ts`, which sets up jest-dom matchers and RTL cleanup
-
-  This means both the root `pnpm test` (no config) and `pnpm --filter @cuencada/web test` pass today. When 0.1's root `vitest.config.ts` projects (web/jsdom + setup file) land, `testing.ts` can be folded into that setup file and the docblocks dropped. **Lockfile:** rebase and re-run `pnpm install`; don't hand-merge.
+- **WP-0.1 (test infra): reconciled.** I merged `origin/wp/0.1-test-infra` into this branch with a merge commit (no rebase, because 0.5 and 0.6 already merged this branch). The merge took 0.1's `apps/web/package.json`: the `test` script (`--project web`) and its devDeps. The lockfile was regenerated with `pnpm install`, not hand-merged. `shared/ui/testing.ts` and the per-file `// @vitest-environment jsdom` docblocks are gone; the UI tests now run under the root `web` project (jsdom + `apps/web/test/setup.ts`).
 - **Asset note:** `images/fotos/foto01.jpg` is **byte-identical** to `images/Logo_Cuencada2026.jpg` (`cmp` reports no difference). It's the logo, not a photo, so don't use it as gallery or seed content. The style guide uses foto02–04 only.
 
 ## Decisions
@@ -88,14 +83,15 @@ Everything here was delivered. Only the paths below were touched; nothing in WP-
 - **Button labels wrap; they never truncate**, so long Spanish labels stay readable at 320px.
 - **`TextInput`, `TextArea` and `Select` share `controls.module.css`** instead of three near-identical modules. This is a small deviation from the one-module-per-component convention.
 - **TopNav renders below 900px too**, as a brand-only app bar; the links appear at 900px and up. `hideOnMobile` opts out.
+- **`vite-env.d.ts` lives at `apps/web/src/vite-env.d.ts`.** It's app-wide, so it moved out of `shared/ui` after review.
 - **Flag filename is ASCII** (`Bandera_Mexico.webp`) to avoid percent-encoding issues in URLs and caches.
 - **Screenshots** are committed as WebP under `docs/ux/screenshots/` (about 600 KB total) so reviewers can see them without running the app.
 
 ## Verification
 - `pnpm lint` passes (biome, 0 errors).
 - `pnpm typecheck` passes (strict, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`).
-- `pnpm test` from the root passes 33 tests: 32 UI + 1 server.
-- `pnpm --filter @cuencada/web test` passes 32 tests.
+- `pnpm test` from the root (WP-0.1 projects) passes: 72 passed, 1 todo.
+- `pnpm --filter @cuencada/web test` passes 54 tests (53 UI + the WP-0.1 SiteHeader test).
 - No horizontal overflow at 320, 360, 375 or 414. I checked by measuring every element's bounding box against the viewport in headless Chromium, ignoring internal scroll containers.
 - Screenshots were taken with headless Chromium against the Vite dev server, through a temporary, uncommitted mount:
   - `docs/ux/screenshots/styleguide-375.webp` and `styleguide-1280.webp` (full page)
@@ -109,4 +105,39 @@ Everything here was delivered. Only the paths below were touched; nothing in WP-
 4. **Upload size limits and video length** for the copy in `wireframes.md` §7.2 depend on T4's server config. They're marked _borrador_.
 
 ## Review log
-- (pending)
+- **PR #3, Tech Lead: CHANGES REQUESTED → addressed** (no history rewrite; new commits only).
+  - **Blocking: the Lightbox swipe hijacked the video seek bar.** Fixed.
+    - `onPointerDown` ignores targets inside `<video>`/`<audio>`, and ←/→ pressed on media are left to the player.
+    - The swipe uses `setPointerCapture`.
+    - New tests: a horizontal drag starting on the video, and ArrowLeft on the video, both leave the counter unchanged.
+  - **Lightbox at the ends:** when the focused ‹/› button becomes disabled, focus moves to the opposite button, or to the close button if both are disabled.
+    - The viewer now has `aria-modal="true"`.
+    - It calls `onClose()` if `items` shrinks under the open index.
+    - Tests added.
+  - **Toast (WCAG 2.2.1):**
+    - Toasts with an `action` default to sticky (`duration` 0).
+    - An explicit duration on an action toast is raised to at least `MIN_ACTION_TOAST_MS` (10s).
+    - Every timer pauses on pointer hover or focus-within and resumes afterwards.
+    - New `Toast.test.tsx`.
+  - **`useModalDialog`:**
+    - The opener is captured before `showModal()`, once per open cycle.
+    - Close and focus-restore live in the effect cleanup, so unmount-while-open and StrictMode double-invocation both restore focus.
+    - Tests added for unmount-while-open and a StrictMode initially-open dialog.
+  - **Button:** any anchor with `target="_blank"` (via `external` or a raw `target`) gets `noopener noreferrer`, merged with caller `rel` tokens. New `Button.test.tsx`.
+  - **TopNav:** the default brand link goes through `renderLink` (synthetic `/` item), so there's no full reload that would drop in-memory auth. Test added. Hover rules are now gated by `@media (hover: hover)`.
+  - **AvatarCircle:** the error state is keyed to the `src` that failed, so a new `src` is retried. Test added.
+  - **Nits:**
+    - Tabs fall back to the first enabled tab (or the first tab) when the value matches nothing selectable, and tabpanels are `tabIndex=0` per APG.
+    - Checkbox/Switch and Field share the `hasContent` predicate, and `useToggleWiring` has an explicit return type.
+    - Hero countdown labels are solid white.
+    - `vite-env.d.ts` moved to `apps/web/src/`.
+    - The wireframes note that the sheet grabber is visual only.
+    - Phase-1 forms are told to use `noValidate`.
+    - T1 inherits the token-in-URL handling note.
+  - **Test setup:** merged WP-0.1 and dropped the duplicate setup (see "Notes for other WPs").
+  - **Verification:**
+    - `pnpm lint`: 0 issues.
+    - `pnpm typecheck`: 4/4.
+    - `pnpm test` (root): 72 passed, 1 todo. The web project ran 54 tests in 10 files.
+    - `pnpm build`: web 104.98 KB gzip JS.
+    - Screenshots re-taken: the hero countdown labels changed.

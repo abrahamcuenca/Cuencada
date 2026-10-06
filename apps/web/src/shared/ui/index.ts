@@ -32,6 +32,6 @@ export { Spinner, type SpinnerProps } from "./Spinner";
 export { Tabs, type TabItem, type TabsProps } from "./Tabs";
 export { TextArea, type TextAreaProps } from "./TextArea";
 export { TextInput, type TextInputProps } from "./TextInput";
-export { ToastProvider, useToast, type ToastApi, type ToastOptions, type ToastProviderProps, type ToastTone } from "./Toast";
+export { MIN_ACTION_TOAST_MS, ToastProvider, useToast, type ToastApi, type ToastOptions, type ToastProviderProps, type ToastTone } from "./Toast";
 export { TopNav, type TopNavProps } from "./TopNav";
 export { cx } from "./cx";

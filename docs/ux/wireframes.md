@@ -32,7 +32,7 @@ Legend: `[ Botón ]` = Button (gold unless noted) · `( Botón )` = secondary/gh
 ### 0.2 "Más" sheet (Dialog, bottom sheet)
 ```
 ┌──────────────────────────────────────┐
-│               ───                    │ grabber
+│               ───                    │ grabber (visual only; no drag-to-dismiss)
 │ Más                              (✕) │
 │ ◯ Rosa Cuenca · Ver mi perfil      › │
 │ ──────────────────────────────────── │
@@ -269,6 +269,12 @@ All auth screens use the same single-column card on cream: brand at the top, the
   - "📬 Revisa tu correo"
   - "Si {correo} tiene una cuenta, te enviamos un enlace para entrar. Caduca en 15 minutos."
   - "( Usar otro correo )"
+- **Token handling (T1, security):** the magic-link, invite and reset landings must:
+  - exchange the token via **POST**
+  - immediately call `history.replaceState` to remove the token from the URL
+  - be served with `Referrer-Policy: no-referrer` (or `same-origin`)
+
+  This keeps tokens out of Referer headers and browser history.
 - **Magic-link landing** `/entrar/enlace?token=…`:
   - A spinner with "Entrando…"
   - Then a redirect, or the error "Este enlace ya se usó o caducó. Pide uno nuevo." with "[ Pedir otro enlace ]".

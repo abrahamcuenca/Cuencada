@@ -39,40 +39,44 @@ export function useModalDialog(ref: RefObject<HTMLDialogElement | null>, open: b
 
   useEffect(() => {
     const dialog = ref.current;
-    if (!dialog) return;
+    if (!dialog || !open) return;
 
-    if (open) {
-      returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-      if (!dialog.open) {
-        if (typeof dialog.showModal === "function") {
-          try {
-            dialog.showModal();
-          } catch {
-            dialog.setAttribute("open", "");
-          }
-        } else {
+    // Capture the opener BEFORE showModal() moves focus, and only once per open
+    // cycle (StrictMode re-runs effects; the cleanup below resets it first).
+    if (returnFocus.current === null) {
+      const active = document.activeElement;
+      returnFocus.current = active instanceof HTMLElement && active !== document.body && !dialog.contains(active) ? active : null;
+    }
+
+    if (!dialog.open) {
+      if (typeof dialog.showModal === "function") {
+        try {
+          dialog.showModal();
+        } catch {
           dialog.setAttribute("open", "");
         }
+      } else {
+        dialog.setAttribute("open", "");
       }
-      const initial = dialog.querySelector<HTMLElement>("[autofocus], [data-autofocus]") ?? getFocusable(dialog)[0] ?? dialog;
-      initial.focus();
-
-      const root = document.documentElement;
-      const previousOverflow = root.style.overflow;
-      root.style.overflow = "hidden";
-      return () => {
-        root.style.overflow = previousOverflow;
-      };
     }
+    const initial = dialog.querySelector<HTMLElement>("[autofocus], [data-autofocus]") ?? getFocusable(dialog)[0] ?? dialog;
+    initial.focus();
 
-    if (dialog.open || dialog.hasAttribute("open")) {
-      if (typeof dialog.close === "function") dialog.close();
-      dialog.removeAttribute("open");
-    }
-    const target = returnFocus.current;
-    returnFocus.current = null;
-    if (target?.isConnected) target.focus();
-    return undefined;
+    const root = document.documentElement;
+    const previousOverflow = root.style.overflow;
+    root.style.overflow = "hidden";
+    // Runs when `open` turns false AND when the component unmounts while open,
+    // so every exit path closes the dialog and restores focus.
+    return () => {
+      root.style.overflow = previousOverflow;
+      if (dialog.open || dialog.hasAttribute("open")) {
+        if (typeof dialog.close === "function") dialog.close();
+        dialog.removeAttribute("open");
+      }
+      const target = returnFocus.current;
+      returnFocus.current = null;
+      if (target?.isConnected) target.focus();
+    };
   }, [open, ref]);
 
   const onKeyDown = useCallback(
