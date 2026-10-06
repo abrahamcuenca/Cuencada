@@ -148,6 +148,9 @@ export const rsvpSummarySchema = z.object({
  * Verified members only. Union of `yes` RSVPs (active accounts) and
  * historical attendance, deduplicated by person (by user when the account has
  * no linked person), sorted by `displayName`. Never carries contact fields.
+ * Accounts with `listedInDirectory = false` appear to others as
+ * `displayName: "Familiar"` with `avatarUrl`, `personId` and `userId` all
+ * `null` (they still count); the caller's own row is always complete.
  */
 export interface Attendee {
   personId: string | null;
