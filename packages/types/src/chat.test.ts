@@ -29,6 +29,18 @@ describe("wsClientMessageSchema", () => {
     expect(wsClientMessageSchema.safeParse({ type: "send", roomId, body: "a".repeat(2001), clientMessageId: messageId }).success).toBe(false);
   });
 
+  it("strips bidi controls and rejects invisible-only bodies", () => {
+    const send = (body: string): unknown => ({ type: "send", roomId, body, clientMessageId: messageId });
+    expect(wsClientMessageSchema.parse(send("hola\u202E mundo"))).toMatchObject({ body: "hola mundo" });
+    expect(wsClientMessageSchema.safeParse(send("\u200B")).success).toBe(false);
+    expect(wsClientMessageSchema.safeParse(send("\u200D\u200D")).success).toBe(false);
+    expect(wsClientMessageSchema.parse(send("👨\u200D👩\u200D👧"))).toMatchObject({ body: "👨\u200D👩\u200D👧" });
+  });
+
+  it("requires a uuid clientMessageId", () => {
+    expect(wsClientMessageSchema.safeParse({ type: "send", roomId, body: "x", clientMessageId: "abc" }).success).toBe(false);
+  });
+
   it("strips unknown keys such as a spoofed sender", () => {
     const parsed = wsClientMessageSchema.parse({ type: "typing", roomId, userId });
     expect(parsed).toEqual({ type: "typing", roomId });
@@ -58,6 +70,11 @@ describe("wsServerMessageSchema", () => {
     expect(wsServerMessageSchema.parse({ type: "presence", onlineUserIds: [userId] }).type).toBe("presence");
     expect(wsServerMessageSchema.parse({ type: "error", code: "RATE_LIMITED", message: "Más despacio.", clientMessageId: null }).type).toBe("error");
     expect(wsServerMessageSchema.parse({ type: "pong", ts: 1 }).type).toBe("pong");
+  });
+
+  it("requires the echoed clientMessageId to be a uuid or null", () => {
+    expect(wsServerMessageSchema.safeParse({ type: "error", code: "VALIDATION", message: "x", clientMessageId: messageId }).success).toBe(true);
+    expect(wsServerMessageSchema.safeParse({ type: "error", code: "VALIDATION", message: "x", clientMessageId: "abc" }).success).toBe(false);
   });
 
   it("rejects error frames with unknown codes", () => {

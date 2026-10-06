@@ -7,7 +7,7 @@
  * responses through `directoryEntrySchema`, which strips anything else.
  */
 import { z } from "zod";
-import { cursorQuerySchema, dateTimeSchema, idSchema, nullableTextSchema, requiredTextSchema } from "./common.js";
+import { cursorQuerySchema, dateTimeSchema, displayTextSchema, idSchema, nullableTextSchema } from "./common.js";
 import { displayNameSchema } from "./auth.js";
 import { AVATAR_MAX_BYTES, MediaMimeType } from "./media.js";
 
@@ -85,6 +85,37 @@ export const directoryEntrySchema = z.object({
   city: z.string().max(120).exactOptional()
 }) satisfies z.ZodType<DirectoryEntry>;
 
+/** Server-side source row for {@link toDirectoryEntry}: full profile data plus visibility flags. */
+export interface DirectoryEntrySource extends Omit<DirectoryEntry, "email" | "phone" | "city"> {
+  email: string | null;
+  phone: string | null;
+  city: string | null;
+  visibility: ProfileVisibility;
+}
+
+/**
+ * Builds the member-facing {@link DirectoryEntry}. Each contact field is
+ * **omitted** (key absent, never `undefined`/`null`) unless its `show*` flag
+ * is on *and* it has a value. Server mappers must use this helper: the
+ * response schema rejects `undefined`/`null` contact values, so a hand-rolled
+ * mapper fails closed with a 500 rather than leaking.
+ */
+export function toDirectoryEntry(source: DirectoryEntrySource): DirectoryEntry {
+  const entry: DirectoryEntry = {
+    userId: source.userId,
+    personId: source.personId,
+    displayName: source.displayName,
+    fullName: source.fullName,
+    familyBranch: source.familyBranch,
+    avatarUrl: source.avatarUrl,
+    bio: source.bio
+  };
+  if (source.visibility.showEmail && source.email !== null) entry.email = source.email;
+  if (source.visibility.showPhone && source.phone !== null) entry.phone = source.phone;
+  if (source.visibility.showCity && source.city !== null) entry.city = source.city;
+  return entry;
+}
+
 /** Phone as typed by family members: digits, spaces, `+ ( ) -`. */
 export const phoneSchema = z
   .string()
@@ -96,7 +127,7 @@ export const phoneSchema = z
 export const updateProfileInputSchema = z
   .object({
     displayName: displayNameSchema,
-    fullName: requiredTextSchema(200),
+    fullName: displayTextSchema(200),
     familyBranch: nullableTextSchema(120),
     city: nullableTextSchema(120),
     phone: phoneSchema.nullable(),
@@ -108,22 +139,28 @@ export const updateProfileInputSchema = z
   .partial()
   .refine((value) => Object.keys(value).length > 0, { error: "No hay cambios que guardar." });
 export type UpdateProfileInput = z.infer<typeof updateProfileInputSchema>;
+export type UpdateProfileRequest = z.input<typeof updateProfileInputSchema>;
 
-/** `GET /api/directory` query. */
+/**
+ * `GET /api/directory` query. The server must match `q` only against fields
+ * the target member has made visible (displayName, fullName, familyBranch;
+ * city/email/phone only when their `show*` flag is on), otherwise search
+ * becomes an oracle for hidden contact data.
+ */
 export const directoryQuerySchema = cursorQuerySchema.extend({
   q: z.string().trim().max(100).exactOptional(),
   familyBranch: z.string().trim().max(120).exactOptional()
 });
 export type DirectoryQuery = z.infer<typeof directoryQuerySchema>;
+export type DirectoryQueryRequest = z.input<typeof directoryQuerySchema>;
 
 /* -------------------------------------------------------------------------- */
 /* Avatar                                                                      */
 /* -------------------------------------------------------------------------- */
 
-export const avatarMimeTypeSchema = z.enum(
-  [MediaMimeType.Jpeg, MediaMimeType.Png, MediaMimeType.Webp, MediaMimeType.Heic],
-  { error: "La foto debe ser JPG, PNG, WebP o HEIC." }
-);
+export const avatarMimeTypeSchema = z.enum([MediaMimeType.Jpeg, MediaMimeType.Png, MediaMimeType.Webp], {
+  error: "La foto debe ser JPG, PNG o WebP."
+});
 
 /** `POST /api/profile/me/avatar/uploads` body. */
 export const avatarUploadInputSchema = z.object({
@@ -135,6 +172,7 @@ export const avatarUploadInputSchema = z.object({
     .max(AVATAR_MAX_BYTES, { error: "La foto supera el máximo de 10 MB." })
 });
 export type AvatarUploadInput = z.infer<typeof avatarUploadInputSchema>;
+export type AvatarUploadRequest = z.input<typeof avatarUploadInputSchema>;
 
 /** Presigned PUT for an avatar (same mechanics as gallery uploads). */
 export interface AvatarUploadResponse {
@@ -154,3 +192,4 @@ export const avatarUploadResponseSchema = z.object({
 /** `POST /api/profile/me/avatar/confirm` body. Responds with the updated `OwnProfile`. */
 export const avatarConfirmInputSchema = z.object({ uploadId: idSchema });
 export type AvatarConfirmInput = z.infer<typeof avatarConfirmInputSchema>;
+export type AvatarConfirmRequest = z.input<typeof avatarConfirmInputSchema>;

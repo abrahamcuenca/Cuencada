@@ -98,11 +98,14 @@ export const apiErrorDetailSchema = z.object({
   message: z.string().max(500)
 }) satisfies z.ZodType<ApiErrorDetail>;
 
+/** Maximum number of `details` entries in an error envelope. Producers must cap/summarize. */
+export const API_ERROR_DETAILS_MAX = 100;
+
 export const apiErrorSchema = z.object({
   error: z.object({
     code: errorCodeSchema,
     message: z.string().max(500),
-    details: z.array(apiErrorDetailSchema).max(100).exactOptional()
+    details: z.array(apiErrorDetailSchema).max(API_ERROR_DETAILS_MAX).exactOptional()
   })
 }) satisfies z.ZodType<ApiError>;
 
@@ -163,12 +166,27 @@ export const hexColorSchema = z
   .regex(/^#[0-9a-fA-F]{6}$/, { error: "Color inválido (#rrggbb)." })
   .toLowerCase();
 
-/** IANA time zone name, e.g. `America/Merida`. */
+/** True when the runtime's `Intl` knows the IANA zone (an unknown zone makes `Intl` throw `RangeError`). */
+export function isKnownTimezone(timeZone: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * IANA time zone name, e.g. `America/Merida`. Shape-checked first (cheap, no
+ * traversal characters), then verified with `Intl.DateTimeFormat` so a zone
+ * that would crash status/countdown computation can never be stored.
+ */
 export const timezoneSchema = z
   .string()
   .trim()
   .max(64)
-  .regex(/^[A-Za-z]+(?:\/[A-Za-z0-9_+-]+){0,2}$|^UTC$/, { error: "Zona horaria inválida." });
+  .regex(/^[A-Za-z]+(?:\/[A-Za-z0-9_+-]+){0,2}$|^UTC$/, { error: "Zona horaria inválida." })
+  .refine(isKnownTimezone, { error: "Zona horaria desconocida." });
 
 /** Max email length per RFC 5321. */
 export const EMAIL_MAX_LENGTH = 254;
@@ -186,14 +204,43 @@ export const emailSchema = z
   .pipe(z.email({ error: "Correo electrónico inválido." }));
 
 /**
+ * Parses an admin-entered link and returns its canonical `URL.href`, or `null`
+ * when it is not an acceptable public https URL: it must literally start with
+ * `https://`, carry no userinfo (`https://cuencada.com@evil.com`), and have a
+ * dotted hostname (no single-label/intranet hosts).
+ */
+export function canonicalHttpsUrl(value: string): string | null {
+  if (!/^https:\/\/[^/\\]/i.test(value)) return null;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" || url.username !== "" || url.password !== "") return null;
+  const host = url.hostname;
+  if (!host.includes(".") || host.startsWith(".") || host.endsWith(".")) return null;
+  return url.href;
+}
+
+/**
  * External link entered by an admin (hotel, WhatsApp, OneDrive, Maps, song…).
- * Only `https:` is accepted, which also rules out `javascript:` and `data:` URLs.
+ * Output is the canonical `URL.href` (store that, never the raw input). Only
+ * `https://` with a dotted host and no userinfo is accepted, which also rules
+ * out `javascript:` and `data:` URLs. Input-only: never use in a response schema.
  */
 export const httpsUrlSchema = z
   .string()
   .trim()
   .max(2048, { error: "El enlace es demasiado largo." })
-  .pipe(z.url({ protocol: /^https$/, error: "El enlace debe empezar con https://" }));
+  .transform((value, ctx) => {
+    const href = canonicalHttpsUrl(value);
+    if (href === null || href.length > 2048) {
+      ctx.addIssue({ code: "custom", message: "El enlace debe ser una dirección https:// válida." });
+      return z.NEVER;
+    }
+    return href;
+  });
 
 /**
  * Site asset reference (hero image, song): an `https:` URL or a site-relative path
@@ -206,7 +253,7 @@ export const assetUrlSchema = z.union([
     .trim()
     .max(512)
     .regex(/^\/(?:images|canciones)\/[A-Za-z0-9._\-/]+$/, { error: "Ruta de archivo inválida." })
-    .refine((value) => !value.includes(".."), { error: "Ruta de archivo inválida." })
+    .refine((value) => !value.includes("..") && !value.includes("//"), { error: "Ruta de archivo inválida." })
 ]);
 
 /** Opaque, URL-safe token (base64url). Used for invite, magic-link, reset, verify and chat tickets. */
@@ -242,11 +289,74 @@ export function nullableTextSchema(max: number): z.ZodType<string | null, string
     .transform((value) => (value === null || value === "" ? null : value));
 }
 
+/* -------------------------------------------------------------------------- */
+/* Unsafe characters (spoofing)                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Bidi embeddings/overrides/isolates (U+202A–202E, U+2066–2069), zero-width
+ * and direction marks (U+200B–200F), line/paragraph separators (U+2028/2029)
+ * and BOM (U+FEFF). They allow RTL-reversed or invisible names and file names.
+ */
+const UNSAFE_CHARS = /[\u200B-\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069\uFEFF]/;
+const UNSAFE_CHARS_GLOBAL = /[\u200B-\u200F\u2028\u2029\u202A-\u202E\u2066-\u2069\uFEFF]/g;
+/** Bidi controls and invisible marks, but *not* ZWJ/ZWNJ (U+200C/U+200D), which emoji sequences need. */
+const STRIPPABLE_CHARS_GLOBAL = /[\u200B\u200E\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g;
+
+/** True when `value` contains bidi controls or invisible characters (see `UNSAFE_CHARS`). */
+export function hasUnsafeChars(value: string): boolean {
+  return UNSAFE_CHARS.test(value);
+}
+
+/**
+ * Removes bidi controls and invisible marks while keeping ZWJ/ZWNJ (emoji),
+ * and turns U+2028/2029 into `\n`. Used for free text like chat bodies.
+ */
+export function stripUnsafeChars(value: string): string {
+  return value.replace(/[\u2028\u2029]/g, "\n").replace(STRIPPABLE_CHARS_GLOBAL, "");
+}
+
+/** True when `value` has at least one visible character (ignores whitespace and every invisible mark). */
+export function hasVisibleChars(value: string): boolean {
+  return value.replace(UNSAFE_CHARS_GLOBAL, "").trim().length > 0;
+}
+
+/**
+ * Text that identifies a person or file (display names, full names, nicknames):
+ * NFC-normalized, trimmed, non-empty, bounded, and **rejecting** bidi/invisible
+ * characters so nobody can take a blank, reversed or lookalike name.
+ */
+export function displayTextSchema(max: number): z.ZodString {
+  return z
+    .string()
+    .normalize("NFC")
+    .trim()
+    .min(1, { error: "Este campo es obligatorio." })
+    .max(max, { error: `Máximo ${max} caracteres.` })
+    .refine((value) => !hasUnsafeChars(value), { error: "Contiene caracteres no permitidos." });
+}
+
+/** Nullable variant of {@link displayTextSchema}; blank becomes `null`. */
+export function nullableDisplayTextSchema(max: number): z.ZodType<string | null, string | null> {
+  return z
+    .string()
+    .normalize("NFC")
+    .trim()
+    .max(max, { error: `Máximo ${max} caracteres.` })
+    .refine((value) => !hasUnsafeChars(value), { error: "Contiene caracteres no permitidos." })
+    .nullable()
+    .transform((value) => (value === null || value === "" ? null : value));
+}
+
 /**
  * Boolean in a query string. `z.coerce.boolean()` would treat `"false"` as
- * `true`, so only the literals `"true"`/`"false"` are accepted.
+ * `true`, so only `true`/`false` (from typed callers such as RTK Query) and
+ * the wire literals `"true"`/`"false"` are accepted.
  */
-export const queryBooleanSchema = z.enum(["true", "false"]).transform((value) => value === "true");
+export const queryBooleanSchema = z.union([
+  z.boolean(),
+  z.enum(["true", "false"]).transform((value) => value === "true")
+]);
 
 /* -------------------------------------------------------------------------- */
 /* Params                                                                      */
@@ -257,7 +367,7 @@ export const idParamSchema = z.object({ id: idSchema });
 export type IdParam = z.infer<typeof idParamSchema>;
 
 /** `:year` path parameter (string in the URL, coerced). */
-export const yearParamSchema = z.object({ year: z.coerce.number().pipe(yearSchema) });
+export const yearParamSchema = z.object({ year: z.coerce.number<number | string>().pipe(yearSchema) });
 export type YearParam = z.infer<typeof yearParamSchema>;
 
 /* -------------------------------------------------------------------------- */
@@ -278,9 +388,15 @@ export const cursorSchema = z
 /** Query string for every paginated list endpoint. */
 export const cursorQuerySchema = z.object({
   cursor: cursorSchema.exactOptional(),
-  limit: z.coerce.number().int().min(1).max(PAGE_LIMIT_MAX).default(PAGE_LIMIT_DEFAULT)
+  limit: z.coerce.number<number | string>().int().min(1).max(PAGE_LIMIT_MAX).default(PAGE_LIMIT_DEFAULT)
 });
 export type CursorQuery = z.infer<typeof cursorQuerySchema>;
+/**
+ * Request-side type (what a client may send). Convention for every input
+ * schema: `XxxInput = z.infer` (parsed, server side) and `XxxRequest = z.input`
+ * (pre-defaults/pre-coercion, for RTK Query args and form values).
+ */
+export type CursorQueryRequest = z.input<typeof cursorQuerySchema>;
 
 /** A page of results. `nextCursor` is `null` on the last page. */
 export interface Page<TItem> {

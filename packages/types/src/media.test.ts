@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { createUploadInputSchema, maxBytesForMime, MEDIA_SIZE_LIMITS, mediaKindOfMime } from "./media.js";
+import {
+  adminMediaQuerySchema,
+  confirmUploadInputSchema,
+  createUploadInputSchema,
+  MEDIA_SIZE_LIMITS,
+  maxBytesForMime,
+  mediaKindOfMime
+} from "./media.js";
 import { avatarUploadInputSchema } from "./profile.js";
 
 const MB = 1024 * 1024;
@@ -7,14 +14,15 @@ const MB = 1024 * 1024;
 describe("mediaKindOfMime", () => {
   it("classifies mp4 as video and the rest as images", () => {
     expect(mediaKindOfMime("video/mp4")).toBe("video");
-    expect(mediaKindOfMime("image/heic")).toBe("image");
+    expect(mediaKindOfMime("video/quicktime")).toBe("video");
+    expect(mediaKindOfMime("image/webp")).toBe("image");
     expect(maxBytesForMime("image/jpeg")).toBe(MEDIA_SIZE_LIMITS.image);
   });
 });
 
 describe("createUploadInputSchema", () => {
   it("accepts an image at exactly 25 MB", () => {
-    const parsed = createUploadInputSchema.parse({ fileName: "IMG_0001.HEIC", mimeType: "image/heic", byteSize: 25 * MB });
+    const parsed = createUploadInputSchema.parse({ fileName: "IMG_0001.JPG", mimeType: "image/jpeg", byteSize: 25 * MB });
     expect(parsed.caption).toBeNull();
   });
 
@@ -29,8 +37,25 @@ describe("createUploadInputSchema", () => {
     expect(createUploadInputSchema.safeParse({ fileName: "v.mp4", mimeType: "video/mp4", byteSize: 300 * MB + 1 }).success).toBe(false);
   });
 
+  it("accepts iPhone .mov videos up to 300 MB", () => {
+    expect(createUploadInputSchema.safeParse({ fileName: "IMG_0002.MOV", mimeType: "video/quicktime", byteSize: 300 * MB }).success).toBe(true);
+    expect(createUploadInputSchema.safeParse({ fileName: "IMG_0002.MOV", mimeType: "video/quicktime", byteSize: 300 * MB + 1 }).success).toBe(false);
+  });
+
+  it("accepts an empty or missing confirm body but rejects extra keys", () => {
+    expect(confirmUploadInputSchema.safeParse(undefined).success).toBe(true);
+    expect(confirmUploadInputSchema.safeParse({}).success).toBe(true);
+    expect(confirmUploadInputSchema.safeParse({ objectKey: "x" }).success).toBe(false);
+  });
+
+  it("parses the reported filter from wire strings and booleans", () => {
+    expect(adminMediaQuerySchema.parse({ reported: "false" }).reported).toBe(false);
+    expect(adminMediaQuerySchema.parse({ reported: true }).reported).toBe(true);
+    expect(adminMediaQuerySchema.safeParse({ reported: "yes" }).success).toBe(false);
+  });
+
   it("rejects MIME types outside the allowlist", () => {
-    for (const mimeType of ["image/gif", "image/svg+xml", "video/quicktime", "text/html", "application/pdf"]) {
+    for (const mimeType of ["image/heic", "image/gif", "image/svg+xml", "text/html", "application/pdf"]) {
       expect(createUploadInputSchema.safeParse({ fileName: "x", mimeType, byteSize: 10 }).success).toBe(false);
     }
   });
@@ -42,7 +67,7 @@ describe("createUploadInputSchema", () => {
   });
 
   it("rejects file names with path separators or control characters", () => {
-    for (const fileName of ["../etc/passwd", "a\\b.jpg", "a\u0000.jpg", ""]) {
+    for (const fileName of ["../etc/passwd", "a\\b.jpg", "a\u0000.jpg", "", "a\u202Egpj.exe", "\u200B"]) {
       expect(createUploadInputSchema.safeParse({ fileName, mimeType: "image/png", byteSize: 10 }).success).toBe(false);
     }
   });
@@ -53,5 +78,6 @@ describe("avatarUploadInputSchema", () => {
     expect(avatarUploadInputSchema.safeParse({ mimeType: "image/webp", byteSize: 10 * MB }).success).toBe(true);
     expect(avatarUploadInputSchema.safeParse({ mimeType: "image/webp", byteSize: 10 * MB + 1 }).success).toBe(false);
     expect(avatarUploadInputSchema.safeParse({ mimeType: "video/mp4", byteSize: 10 }).success).toBe(false);
+    expect(avatarUploadInputSchema.safeParse({ mimeType: "image/heic", byteSize: 10 }).success).toBe(false);
   });
 });

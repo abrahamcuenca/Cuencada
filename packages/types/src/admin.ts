@@ -27,7 +27,39 @@ export const AuditEntityType = {
 export type AuditEntityType = (typeof AuditEntityType)[keyof typeof AuditEntityType];
 export const auditEntityTypeSchema = z.enum(AuditEntityType);
 
-/** Audit action, dotted lowercase, e.g. `user.disable`, `auth.refresh_reuse`, `media.hide`. */
+/**
+ * Well-known audit actions. Tracks may add more following the same
+ * `entity.verb_past` pattern (validated by `auditActionSchema`).
+ */
+export const AuditAction = {
+  UserUpdated: "user.updated",
+  UserDisabled: "user.disabled",
+  UserSessionsRevoked: "user.sessions_revoked",
+  RefreshReuseDetected: "auth.refresh_reuse_detected",
+  PasswordChanged: "auth.password_changed",
+  PasswordReset: "auth.password_reset",
+  InviteCreated: "invite.created",
+  InviteRevoked: "invite.revoked",
+  InviteAccepted: "invite.accepted",
+  CuencadaCreated: "cuencada.created",
+  CuencadaUpdated: "cuencada.updated",
+  /** Written (instead of/in addition to `updated`) when `isPublished` flips to true. */
+  CuencadaPublished: "cuencada.published",
+  CuencadaUnpublished: "cuencada.unpublished",
+  CuencadaDeleted: "cuencada.deleted",
+  DailyMessagesImported: "daily_message.imported",
+  AttendanceUpdated: "attendance.updated",
+  MediaModerated: "media.moderated",
+  PersonCreated: "person.created",
+  PersonUpdated: "person.updated",
+  PersonDeleted: "person.deleted",
+  RelationshipCreated: "relationship.created",
+  RelationshipDeleted: "relationship.deleted",
+  ChatMessageDeleted: "chat_message.deleted"
+} as const;
+export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
+
+/** Audit action, dotted lowercase, e.g. `user.disabled`, `cuencada.published`, `media.moderated`. */
 export const auditActionSchema = z
   .string()
   .trim()
@@ -74,6 +106,7 @@ export const adminUserListQuerySchema = cursorQuerySchema.extend({
   status: userStatusSchema.exactOptional()
 });
 export type AdminUserListQuery = z.infer<typeof adminUserListQuerySchema>;
+export type AdminUserListQueryRequest = z.input<typeof adminUserListQuerySchema>;
 
 /**
  * `PATCH /api/admin/users/:id`. Disabling revokes every session.
@@ -90,6 +123,7 @@ export const adminUserPatchInputSchema = z
   .partial()
   .refine((value) => Object.keys(value).length > 0, { error: "No hay cambios que guardar." });
 export type AdminUserPatchInput = z.infer<typeof adminUserPatchInputSchema>;
+export type AdminUserPatchRequest = z.input<typeof adminUserPatchInputSchema>;
 
 /* -------------------------------------------------------------------------- */
 /* Audit log                                                                   */
@@ -101,6 +135,7 @@ export interface AuditLogEntry {
   actorUserId: string | null;
   actorName: string | null;
   action: string;
+  /** Free string on purpose: older rows may predate `AuditEntityType`. Filter with `auditEntityTypeSchema`. */
   entityType: string;
   entityId: string | null;
   metadata: Record<string, unknown>;
@@ -135,3 +170,4 @@ export const auditLogQuerySchema = cursorQuerySchema
     path: ["to"]
   });
 export type AuditLogQuery = z.infer<typeof auditLogQuerySchema>;
+export type AuditLogQueryRequest = z.input<typeof auditLogQuerySchema>;

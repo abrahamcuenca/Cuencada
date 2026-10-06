@@ -5,6 +5,7 @@
  */
 import { z } from "zod";
 import {
+  API_ERROR_DETAILS_MAX,
   type ApiErrorDetail,
   assetUrlSchema,
   dateSchema,
@@ -256,12 +257,19 @@ export interface CuencadaHome {
   featured: PublicCuencada | null;
   /** Most recent past edition, for memories mode. */
   latestPast: CuencadaSummary | null;
+  /**
+   * Portal-wide (`cuencadaId: null`) announcements with `visibility: "public"`.
+   * This is the only public endpoint that returns them; member-visible
+   * portal-wide ones come from `GET /api/announcements`.
+   */
+  announcements: Announcement[];
 }
 
 export const cuencadaHomeSchema = z.object({
   mode: homeModeSchema,
   featured: publicCuencadaSchema.nullable(),
-  latestPast: cuencadaSummarySchema.nullable()
+  latestPast: cuencadaSummarySchema.nullable(),
+  announcements: z.array(announcementSchema)
 }) satisfies z.ZodType<CuencadaHome>;
 
 /**
@@ -331,7 +339,14 @@ export const adminCuencadaDetailSchema = z.object({
 
 const optionalHttpsUrl = httpsUrlSchema.nullable();
 
-/** Fields shared by create and update, without defaults (so PATCH never resets). */
+/**
+ * Fields shared by create and update, without defaults (so PATCH never resets).
+ *
+ * PATCH refines can only check fields present in the patch. Services MUST
+ * re-validate the merged row before writing: `endsAt > startsAt` (cuencada),
+ * `endTime > startTime` (itinerary), lat/lng both set or both null (location),
+ * `deathYear >= birthYear` (person).
+ */
 const cuencadaFields = {
   year: yearSchema,
   title: requiredTextSchema(200),
@@ -376,6 +391,7 @@ export const createCuencadaInputSchema = z
   })
   .refine(endsAfterStart, endsAfterStartIssue);
 export type CreateCuencadaInput = z.infer<typeof createCuencadaInputSchema>;
+export type CreateCuencadaRequest = z.input<typeof createCuencadaInputSchema>;
 
 /** `PATCH /api/admin/cuencadas/:id`. Publishing is `{ isPublished: true }`. */
 export const updateCuencadaInputSchema = z
@@ -384,6 +400,7 @@ export const updateCuencadaInputSchema = z
   .refine(endsAfterStart, endsAfterStartIssue)
   .refine((value) => Object.keys(value).length > 0, { error: "No hay cambios que guardar." });
 export type UpdateCuencadaInput = z.infer<typeof updateCuencadaInputSchema>;
+export type UpdateCuencadaRequest = z.input<typeof updateCuencadaInputSchema>;
 
 const itineraryFields = {
   date: dateSchema,
@@ -418,6 +435,7 @@ export const createItineraryItemInputSchema = z
   })
   .refine(endTimeAfterStart, endTimeIssue);
 export type CreateItineraryItemInput = z.infer<typeof createItineraryItemInputSchema>;
+export type CreateItineraryItemRequest = z.input<typeof createItineraryItemInputSchema>;
 
 /** `PATCH /api/admin/itinerary/:id`. */
 export const updateItineraryItemInputSchema = z
@@ -426,6 +444,7 @@ export const updateItineraryItemInputSchema = z
   .refine(endTimeAfterStart, endTimeIssue)
   .refine((value) => Object.keys(value).length > 0, { error: "No hay cambios que guardar." });
 export type UpdateItineraryItemInput = z.infer<typeof updateItineraryItemInputSchema>;
+export type UpdateItineraryItemRequest = z.input<typeof updateItineraryItemInputSchema>;
 
 const locationFields = {
   name: requiredTextSchema(200),
@@ -439,9 +458,16 @@ const locationFields = {
   visibility: visibilitySchema
 };
 
+/**
+ * Coordinates are set or cleared together. In a patch, sending only one of
+ * `lat`/`lng` is rejected; if both are sent they must both be numbers or both `null`.
+ */
 function latLngTogether(value: { lat?: number | null | undefined; lng?: number | null | undefined }): boolean {
-  if (value.lat === undefined && value.lng === undefined) return true;
-  return (value.lat === null || value.lat === undefined) === (value.lng === null || value.lng === undefined);
+  const hasLat = value.lat !== undefined;
+  const hasLng = value.lng !== undefined;
+  if (hasLat !== hasLng) return false;
+  if (!hasLat) return true;
+  return (value.lat === null) === (value.lng === null);
 }
 
 const latLngIssue = { error: "Latitud y longitud van juntas.", path: ["lng"] };
@@ -461,6 +487,7 @@ export const createLocationInputSchema = z
   })
   .refine(latLngTogether, latLngIssue);
 export type CreateLocationInput = z.infer<typeof createLocationInputSchema>;
+export type CreateLocationRequest = z.input<typeof createLocationInputSchema>;
 
 /** `PATCH /api/admin/locations/:id`. */
 export const updateLocationInputSchema = z
@@ -469,6 +496,7 @@ export const updateLocationInputSchema = z
   .refine(latLngTogether, latLngIssue)
   .refine((value) => Object.keys(value).length > 0, { error: "No hay cambios que guardar." });
 export type UpdateLocationInput = z.infer<typeof updateLocationInputSchema>;
+export type UpdateLocationRequest = z.input<typeof updateLocationInputSchema>;
 
 const announcementFields = {
   title: requiredTextSchema(200),
@@ -485,6 +513,7 @@ export const createAnnouncementInputSchema = z.object({
   pinned: z.boolean().default(false)
 });
 export type CreateAnnouncementInput = z.infer<typeof createAnnouncementInputSchema>;
+export type CreateAnnouncementRequest = z.input<typeof createAnnouncementInputSchema>;
 
 /** `PATCH /api/admin/announcements/:id`. */
 export const updateAnnouncementInputSchema = z
@@ -492,12 +521,14 @@ export const updateAnnouncementInputSchema = z
   .partial()
   .refine((value) => Object.keys(value).length > 0, { error: "No hay cambios que guardar." });
 export type UpdateAnnouncementInput = z.infer<typeof updateAnnouncementInputSchema>;
+export type UpdateAnnouncementRequest = z.input<typeof updateAnnouncementInputSchema>;
 
 /** `GET /api/admin/announcements` query. */
 export const adminAnnouncementQuerySchema = z.object({
   cuencadaId: idSchema.exactOptional()
 });
 export type AdminAnnouncementQuery = z.infer<typeof adminAnnouncementQuerySchema>;
+export type AdminAnnouncementQueryRequest = z.input<typeof adminAnnouncementQuerySchema>;
 
 /**
  * Full new order for itinerary items or locations of one Cuencada
@@ -511,6 +542,7 @@ export const reorderInputSchema = z.object({
     .refine((ids) => new Set(ids).size === ids.length, { error: "Hay elementos repetidos." })
 });
 export type ReorderInput = z.infer<typeof reorderInputSchema>;
+export type ReorderRequest = z.input<typeof reorderInputSchema>;
 
 /* -------------------------------------------------------------------------- */
 /* Daily messages                                                              */
@@ -521,6 +553,7 @@ export const dailyMessageUpsertInputSchema = z.object({
   message: requiredTextSchema(DAILY_MESSAGE_MAX_LENGTH)
 });
 export type DailyMessageUpsertInput = z.infer<typeof dailyMessageUpsertInputSchema>;
+export type DailyMessageUpsertRequest = z.input<typeof dailyMessageUpsertInputSchema>;
 
 /** `:date` path parameter. */
 export const dateParamSchema = z.object({ id: idSchema, date: dateSchema });
@@ -574,6 +607,7 @@ export const dailyMessagesImportInputSchema = z.object({
   mode: dailyMessagesImportModeSchema.default(DailyMessagesImportMode.Merge)
 });
 export type DailyMessagesImportInput = z.infer<typeof dailyMessagesImportInputSchema>;
+export type DailyMessagesImportRequest = z.input<typeof dailyMessagesImportInputSchema>;
 
 /** Successful import summary. */
 export interface DailyMessagesImportResult {
@@ -591,8 +625,14 @@ export const dailyMessagesImportResultSchema = z.object({
 /** Result of {@link parseDailyMessagesText}. */
 export interface ParsedDailyMessages {
   entries: DailyMessageEntry[];
-  /** `path` is `lines.<1-based line number>`. */
+  /**
+   * `path` is `lines.<1-based line number>`. Never longer than
+   * `API_ERROR_DETAILS_MAX`: past the cap, the last entry is a summary with
+   * `path: "lines"`, so it can be returned as `ApiError.details` as-is.
+   */
   errors: ApiErrorDetail[];
+  /** Total number of invalid lines (may exceed `errors.length`). */
+  errorCount: number;
 }
 
 /**
@@ -603,6 +643,11 @@ export interface ParsedDailyMessages {
 export function parseDailyMessagesText(text: string): ParsedDailyMessages {
   const entries: DailyMessageEntry[] = [];
   const errors: ApiErrorDetail[] = [];
+  let errorCount = 0;
+  const pushError = (detail: ApiErrorDetail): void => {
+    errorCount += 1;
+    if (errors.length < API_ERROR_DETAILS_MAX) errors.push(detail);
+  };
   const seen = new Map<string, number>();
   const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
 
@@ -614,18 +659,24 @@ export function parseDailyMessagesText(text: string): ParsedDailyMessages {
     const parsed = dailyMessageLineSchema.safeParse(line);
     if (!parsed.success) {
       const message = parsed.error.issues[0]?.message ?? "Línea inválida.";
-      errors.push({ path: `lines.${lineNumber}`, message });
+      pushError({ path: `lines.${lineNumber}`, message });
       return;
     }
 
     const firstLine = seen.get(parsed.data.date);
     if (firstLine !== undefined) {
-      errors.push({ path: `lines.${lineNumber}`, message: `Fecha repetida (ya aparece en la línea ${firstLine}).` });
+      pushError({ path: `lines.${lineNumber}`, message: `Fecha repetida (ya aparece en la línea ${firstLine}).` });
       return;
     }
     seen.set(parsed.data.date, lineNumber);
     entries.push(parsed.data);
   });
 
-  return { entries, errors };
+  if (errorCount > API_ERROR_DETAILS_MAX) {
+    const shown = API_ERROR_DETAILS_MAX - 1;
+    errors.length = shown;
+    errors.push({ path: "lines", message: `Demasiados errores: se muestran ${shown} y hay ${errorCount - shown} más.` });
+  }
+
+  return { entries, errors, errorCount };
 }

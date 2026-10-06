@@ -90,6 +90,7 @@ export const upsertRsvpInputSchema = z
     { error: "La salida debe ser igual o posterior a la llegada.", path: ["departureDate"] }
   );
 export type UpsertRsvpInput = z.infer<typeof upsertRsvpInputSchema>;
+export type UpsertRsvpRequest = z.input<typeof upsertRsvpInputSchema>;
 
 /* -------------------------------------------------------------------------- */
 /* Summary and attendees                                                       */
@@ -212,3 +213,4 @@ export const adminAttendanceBulkInputSchema = z
     path: ["remove"]
   });
 export type AdminAttendanceBulkInput = z.infer<typeof adminAttendanceBulkInputSchema>;
+export type AdminAttendanceBulkRequest = z.input<typeof adminAttendanceBulkInputSchema>;
