@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { UserRole, UserStatus } from "@cuencada/types";
 import argon2 from "argon2";
-import type { FastifyInstance } from "fastify";
-import { profiles, users } from "../../src/db/schema/index.js";
+import type { App } from "../../src/app.js";
+import { profiles, sessions, users } from "../../src/db/schema/index.js";
+import { accessTokenSettings, signAccessToken } from "../../src/lib/tokens.js";
+import { TEST_JWT_SECRET } from "./app.js";
 import { getTestDb } from "./db.js";
 
 /** Default password for factory users; long enough for the change-password rule. */
@@ -25,6 +27,8 @@ export interface CreateUserOptions {
   status?: UserStatus;
   password?: string;
   mustChangePassword?: boolean;
+  /** Sets `email_verified_at` to now; defaults to `false` (the DB default). */
+  emailVerified?: boolean;
   profile?: Partial<Omit<typeof profiles.$inferInsert, "id" | "userId">>;
 }
 
@@ -54,7 +58,8 @@ export async function createUser(options: CreateUserOptions = {}): Promise<TestU
       passwordHash: await argon2.hash(password, TEST_HASH_OPTIONS),
       role: options.role ?? "member",
       status: options.status ?? "active",
-      mustChangePassword: options.mustChangePassword ?? false
+      mustChangePassword: options.mustChangePassword ?? false,
+      emailVerifiedAt: options.emailVerified === true ? new Date() : null
     })
     .returning();
   if (!user) throw new Error("createUser: insert returned no user row");
@@ -66,6 +71,84 @@ export async function createUser(options: CreateUserOptions = {}): Promise<TestU
   if (!profile) throw new Error("createUser: insert returned no profile row");
 
   return { ...user, password, profile };
+}
+
+type SessionRow = typeof sessions.$inferSelect;
+
+/** Options for {@link createSession}. */
+export interface CreateSessionOptions {
+  /** Base time for expiries; defaults to now. */
+  now?: Date;
+  idleExpiresAt?: Date;
+  absoluteExpiresAt?: Date;
+  lastUsedAt?: Date;
+  revoked?: boolean;
+}
+
+/**
+ * Insert a session row for `userId` directly (bypassing login), e.g. to test
+ * expired or revoked sessions.
+ *
+ * @param userId - Owner.
+ * @param options - Expiry and revocation overrides; defaults to a live 30/90-day session.
+ */
+export async function createSession(userId: string, options: CreateSessionOptions = {}): Promise<SessionRow> {
+  const now = options.now ?? new Date();
+  const day = 24 * 60 * 60 * 1000;
+  const [session] = await getTestDb()
+    .insert(sessions)
+    .values({
+      userId,
+      lastUsedAt: options.lastUsedAt ?? now,
+      idleExpiresAt: options.idleExpiresAt ?? new Date(now.getTime() + 30 * day),
+      absoluteExpiresAt: options.absoluteExpiresAt ?? new Date(now.getTime() + 90 * day),
+      ...(options.revoked === true ? { revokedAt: now, revokedReason: "logout" as const } : {})
+    })
+    .returning();
+  if (!session) throw new Error("createSession: insert returned no row");
+  return session;
+}
+
+/** Options for {@link bearerFor}. */
+export interface BearerOptions {
+  /** Claimed role; defaults to the user's real role. */
+  role?: UserRole;
+  mustChangePassword?: boolean;
+  /** Issue time; defaults to now. */
+  now?: Date;
+  /** Override the signing secret (e.g. to forge a bad signature). */
+  secret?: string;
+  ttlSeconds?: number;
+}
+
+/**
+ * Sign an access token by hand for `user` and `session` and return inject
+ * headers. Lets tests forge claims (role, must-change, expiry) that the real
+ * login route would never issue.
+ *
+ * @param user - The user (`id`, `role`, `mustChangePassword`).
+ * @param session - The session row whose id becomes `sid`.
+ * @param options - Claim and signing overrides.
+ */
+export async function bearerFor(
+  user: Pick<UserRow, "id" | "role" | "mustChangePassword">,
+  session: Pick<SessionRow, "id">,
+  options: BearerOptions = {}
+): Promise<AuthInjectOptions> {
+  const signed = await signAccessToken(
+    accessTokenSettings({
+      JWT_SECRET: options.secret ?? TEST_JWT_SECRET,
+      ACCESS_TOKEN_TTL_SECONDS: options.ttlSeconds ?? 900
+    }),
+    {
+      userId: user.id,
+      sessionId: session.id,
+      role: options.role ?? user.role,
+      mustChangePassword: options.mustChangePassword ?? user.mustChangePassword
+    },
+    options.now ?? new Date()
+  );
+  return { headers: { authorization: `Bearer ${signed.token}` } };
 }
 
 /** Request options to spread into `app.inject()` for an authenticated call. */
@@ -81,7 +164,7 @@ export interface AuthInjectOptions {
  * @param user - User from `createUser` (needs the plaintext password).
  */
 export async function loginAs(
-  app: FastifyInstance,
+  app: App,
   user: Pick<TestUser, "email" | "password">
 ): Promise<AuthInjectOptions> {
   const response = await app.inject({

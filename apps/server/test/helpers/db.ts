@@ -50,8 +50,14 @@ export async function ensureWorkerDatabase(): Promise<void> {
   const runId = currentRunId();
   const name = workerDatabaseName(runId);
   const template = templateDatabaseName(runId);
+  // max: 1 keeps the advisory lock and the CREATE on the same session.
   const admin = postgres(TEST_DATABASE_URL, { max: 1, onnotice: () => {} });
   try {
+    // Serialize clones of this run's template across workers. Without it,
+    // every worker's first test file raced on CREATE DATABASE … TEMPLATE and
+    // could exhaust the 55006 retries under cold-start load, failing that
+    // file's beforeAll (the intermittent `logging.test.ts` failure).
+    await admin`select pg_advisory_lock(hashtext(${template}))`;
     for (let attempt = 1; ; attempt += 1) {
       const existing = await admin`select 1 from pg_database where datname = ${name}`;
       if (existing.length > 0) return;
@@ -72,6 +78,7 @@ export async function ensureWorkerDatabase(): Promise<void> {
       }
     }
   } finally {
+    // Ending the session also releases the advisory lock.
     await admin.end();
   }
 }

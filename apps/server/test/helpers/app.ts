@@ -1,12 +1,31 @@
-import type { FastifyInstance } from "fastify";
-import { buildApp } from "../../src/app.js";
+import { type App, type AppDeps, buildApp } from "../../src/app.js";
 import { type AppConfig, loadConfig } from "../../src/config.js";
+import type { Clock } from "../../src/lib/clock.js";
+import type { LogStream } from "../../src/logging.js";
+import type { Mailer } from "../../src/lib/mailer/types.js";
+import type { StorageService } from "../../src/lib/storage/types.js";
 import { workerDatabaseUrl } from "./db.js";
+import { FakeMailer, FakeStorage } from "./fakes.js";
 
-/** Overrides accepted by {@link createTestApp}. WP-0.4 adds `mailer` / `storage` fakes here. */
+/** Overrides accepted by {@link createTestApp}. */
 export interface TestAppOverrides {
   config?: Partial<AppConfig>;
+  /** Defaults to a new {@link FakeMailer}; pass your own to assert on its outbox. */
+  mailer?: Mailer;
+  /** Defaults to a new {@link FakeStorage}. */
+  storage?: StorageService;
+  clock?: Clock;
+  /** Capture the app's pino output (tests log nothing otherwise). */
+  logStream?: LogStream;
+  /**
+   * Register extra routes before `ready()` (test-only fixtures such as a
+   * route that throws). They inherit the real guard and error handler.
+   */
+  routes?: (app: App) => void | Promise<void>;
 }
+
+/** Test JWT secret (also used by tests that sign tokens by hand). */
+export const TEST_JWT_SECRET = "test-secret-at-least-thirty-two-characters-long";
 
 /**
  * Validated application config for tests, pointing at the current worker's
@@ -19,7 +38,8 @@ export function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig 
   const base = loadConfig({
     NODE_ENV: "test",
     DATABASE_URL: workerDatabaseUrl(),
-    JWT_SECRET: "test-secret-at-least-thirty-two-characters-long",
+    JWT_SECRET: TEST_JWT_SECRET,
+    APP_BASE_URL: "http://localhost:5173",
     CORS_ORIGIN: "http://localhost:5173"
   });
   return { ...base, ...overrides };
@@ -27,18 +47,26 @@ export function createTestConfig(overrides: Partial<AppConfig> = {}): AppConfig 
 
 /**
  * Build the real Fastify app (all plugins and routes) against the worker's
- * test database. Use `app.inject()` to exercise routes; call `app.close()`
- * when done, which also ends the app's database pool.
+ * test database, with a fake mailer and fake storage by default. Use
+ * `app.inject()` to exercise routes; `app.close()` also ends the app's pool.
  *
- * @param overrides - Optional config overrides.
+ * @param overrides - Optional config overrides and injected services.
  */
-export async function createTestApp(overrides: TestAppOverrides = {}): Promise<FastifyInstance> {
-  const app = await buildApp(createTestConfig(overrides.config));
-  // buildApp does not close its pool yet (WP-0.4 adds onClose); do it here so
-  // test files do not leak connections between runs.
-  app.addHook("onClose", async () => {
-    await app.db.$client.end();
-  });
-  await app.ready();
+export async function createTestApp(overrides: TestAppOverrides = {}): Promise<App> {
+  const deps: AppDeps = {
+    mailer: overrides.mailer ?? new FakeMailer(),
+    storage: overrides.storage ?? new FakeStorage()
+  };
+  if (overrides.clock !== undefined) deps.clock = overrides.clock;
+  if (overrides.logStream !== undefined) deps.logStream = overrides.logStream;
+  const app = await buildApp(createTestConfig(overrides.config), deps);
+  try {
+    if (overrides.routes !== undefined) await overrides.routes(app);
+    await app.ready();
+  } catch (error) {
+    // Release the app's pool before surfacing the fixture/boot error.
+    await app.close();
+    throw error;
+  }
   return app;
 }
