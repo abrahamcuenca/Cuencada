@@ -1,4 +1,4 @@
-import { type ReactNode, type Ref, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, type Ref, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../../../shared/ui/Button";
 import { cx } from "../../../shared/ui/cx";
 import styles from "../chat.module.css";
@@ -128,6 +128,17 @@ export function MessageList({
     previous.current = next;
     previousHeight.current = list.scrollHeight;
   }, [items]);
+
+  // The keyboard opening (or the composer growing) shrinks the list: stay on the newest message.
+  useEffect(() => {
+    const list = listRef.current;
+    if (list === null || typeof ResizeObserver === "undefined") return undefined;
+    const observer = new ResizeObserver(() => {
+      if (nearBottom.current) list.scrollTop = list.scrollHeight;
+    });
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, []);
 
   const onScroll = (): void => {
     const list = listRef.current;

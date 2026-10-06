@@ -1,7 +1,8 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { authenticatedState, makeUser } from "../../../../test/auth";
+import { HttpResponse, http } from "msw";
+import { apiUrl, authenticatedState, makeUser } from "../../../../test/auth";
 import { createTestServer } from "../../../../test/msw";
 import { renderApp } from "../../../../test/renderApp";
 import { resetChatEventsForTests } from "../events";
@@ -197,6 +198,22 @@ describe("ChatPage", { timeout: 20_000 }, () => {
     expect(await screen.findByText("Mensaje 1")).toBeInTheDocument();
     expect(screen.getAllByText(/^Mensaje \d+$/)).toHaveLength(120);
     await waitFor(() => expect(screen.queryByRole("button", { name: "Cargar anteriores" })).not.toBeInTheDocument());
+  });
+
+  it("keeps at most 300 messages in the DOM and reveals cached older ones without a request", async () => {
+    const many = Array.from({ length: 400 }, (_, index) => makeMessage(index + 1));
+    server.use(http.get(apiUrl(`/chat/rooms/${ROOMS.familia}/messages`), () => HttpResponse.json({ messages: many, nextBefore: null })));
+    const user = userEvent.setup();
+    renderApp(`/chat/${ROOMS.familia}`, authenticatedState());
+
+    expect(await screen.findByText("Mensaje 400")).toBeInTheDocument();
+    expect(log().querySelectorAll("[data-message-id]")).toHaveLength(300);
+    expect(screen.queryByText("Mensaje 100")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Cargar anteriores" }));
+    expect(await screen.findByText("Mensaje 51")).toBeInTheDocument();
+    expect(log().querySelectorAll("[data-message-id]")).toHaveLength(350);
+    expect(db.historyRequests).toHaveLength(0);
   });
 
   it("deletes my message after confirming, and only offers delete on others' messages to admins", async () => {
