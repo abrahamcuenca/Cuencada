@@ -64,6 +64,8 @@ Phase 1 builds frontend and backend tracks in parallel. They need one contract t
     reason for the few cases the web branches on. The schema accepts any string (≤ 64 chars) so older
     clients still parse new codes; the known values are `ValidationIssueCode`, today only `PASSWORD_BREACHED`
     (WP-2.3c: the new password is in known breaches; the web shows the Spanish message on that field).
+    The check is server-side and deliberately uncached, so its response time reveals nothing about
+    earlier attempts with the same password.
 - The web branches on `code` only. Notable codes:
   - `TOKEN_EXPIRED` (401): the client refreshes and retries.
   - `UNAUTHENTICATED` (401): the client logs out.

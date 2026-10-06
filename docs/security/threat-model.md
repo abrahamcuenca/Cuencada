@@ -94,7 +94,9 @@ flowchart LR
   counter): an HIBP outage or an egress block must not stop signups and
   resets, the length policy still applies, and the counter in the logs makes
   a persistent outage visible. Calls are bounded by the routes' existing
-  rate limits plus a 10-minute per-password outcome cache (HMAC-keyed, never the plain SHA-1). The browser never calls HIBP,
+  rate limits. There is **no result cache**: a cache hit would answer faster and turn the
+  response time into an oracle for "this exact password was chosen or tried recently"
+  (Security review of WP-2.3c), so every check makes one CDN-served range request. The browser never calls HIBP,
   so the CSP is unchanged.
 - **TB6, CI/supply chain.** GitHub Actions pinned by SHA, the pnpm lockfile,
   `minimumReleaseAge`.
