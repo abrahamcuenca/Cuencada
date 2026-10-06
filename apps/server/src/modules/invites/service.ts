@@ -6,12 +6,13 @@
 import {
   type AdminInviteListItem,
   type InviteStatus,
+  OPEN_INVITE_MAX_HOURS,
   OPEN_INVITE_MAX_LIFETIME_MS,
   OPEN_INVITE_MAX_USES
 } from "@cuencada/types";
-import { eq } from "drizzle-orm";
+import { eq, type SQL, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
-import { type invites, people } from "../../db/schema/index.js";
+import { invites, people } from "../../db/schema/index.js";
 import type { DbOrTx } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
 import { AppLinkPath, appLink, sendTemplate } from "../../lib/mailer/index.js";
@@ -48,6 +49,36 @@ export function effectiveInviteMaxUses(invite: Pick<InviteRow, "email" | "maxUse
 }
 
 /**
+ * Whether an invite has used up its effective (clamped) uses.
+ *
+ * @param invite - The row.
+ */
+export function isInviteExhausted(invite: Pick<InviteRow, "email" | "maxUses" | "useCount">): boolean {
+  return invite.useCount >= effectiveInviteMaxUses(invite);
+}
+
+/** SQL twin of {@link effectiveInviteExpiresAt}. */
+export const effectiveInviteExpiresAtSql: SQL = sql`(case when ${invites.email} is null
+  then least(${invites.expiresAt}, ${invites.createdAt} + make_interval(hours => ${OPEN_INVITE_MAX_HOURS}))
+  else ${invites.expiresAt} end)`;
+
+/** SQL twin of {@link isInviteExhausted}. */
+export const inviteExhaustedSql: SQL = sql`(${invites.useCount} >= case when ${invites.email} is null
+  then least(${invites.maxUses}, ${OPEN_INVITE_MAX_USES}) else ${invites.maxUses} end)`;
+
+/**
+ * SQL twin of "pending" in {@link effectiveInviteStatus}: stored as pending,
+ * not exhausted and not past the effective expiry. For the admin list filter
+ * and the dashboard count.
+ *
+ * @param now - Current time.
+ */
+export function invitePendingSql(now: Date): SQL {
+  return sql`(${invites.status} = 'pending' and not ${inviteExhaustedSql}
+    and ${effectiveInviteExpiresAtSql} > ${now.toISOString()}::timestamptz)`;
+}
+
+/**
  * Whether an invite can still be accepted: pending, unexpired, uses left,
  * using the effective (clamped) limits for open invites.
  *
@@ -64,13 +95,20 @@ export function isInviteUsable(
 }
 
 /**
- * Status as admins see it: a pending invite past its effective expiry reads `expired`.
+ * Status as admins see it. A stored `pending` invite reads `accepted` once
+ * its effective uses are used up (an older open invite clamped to 10 uses),
+ * and `expired` once past its effective expiry.
  *
  * @param invite - The row.
  * @param now - Current time.
  */
-export function effectiveInviteStatus(invite: InviteLimitFields & Pick<InviteRow, "status">, now: Date): InviteStatus {
-  return invite.status === "pending" && effectiveInviteExpiresAt(invite) <= now ? "expired" : invite.status;
+export function effectiveInviteStatus(
+  invite: InviteLimitFields & Pick<InviteRow, "status" | "useCount">,
+  now: Date
+): InviteStatus {
+  if (invite.status !== "pending") return invite.status;
+  if (isInviteExhausted(invite)) return "accepted";
+  return effectiveInviteExpiresAt(invite) <= now ? "expired" : "pending";
 }
 
 /**

@@ -7,6 +7,7 @@ import { cuencadaRsvps, cuencadas, invites, mediaItems, mediaReports, users } fr
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import type { DbOrTx } from "../../lib/audit.js";
+import { invitePendingSql } from "../invites/service.js";
 
 /** Row shape returned by {@link loadAdminSummary}'s query (validated, never trusted). */
 const summaryRowSchema = z.object({
@@ -59,8 +60,7 @@ export async function loadAdminSummary(db: DbOrTx, now: Date): Promise<AdminSumm
       (select count(*) from ${users} where ${users.status} = 'disabled')::int as users_disabled,
       (select count(*) from ${users} where ${users.status} = 'active' and ${users.emailVerifiedAt} is null)::int as users_unverified,
       (select count(*) from ${users} where ${users.status} = 'active' and ${users.role} = 'admin')::int as active_admins,
-      (select count(*) from ${invites}
-         where ${invites.status} = 'pending' and ${invites.expiresAt} > ${at}::timestamptz)::int as invites_pending,
+      (select count(*) from ${invites} where ${invitePendingSql(now)})::int as invites_pending,
       (select count(*) from ${mediaItems}
          where ${mediaItems.deletedAt} is null and ${mediaItems.uploadStatus} <> 'pending_upload'
            and ${mediaItems.moderationStatus} = 'pending_review')::int as media_pending_review,

@@ -31,7 +31,10 @@ import { authUser } from "../../plugins/auth.js";
 import { MailTier, withinGlobalMailCap } from "../auth/mailBudget.js";
 import {
   decodeInviteCursor,
+  effectiveInviteExpiresAtSql,
   encodeInviteCursor,
+  inviteExhaustedSql,
+  invitePendingSql,
   type InviteRow,
   isInviteUsable,
   sendInviteEmail,
@@ -51,22 +54,22 @@ const errorResponses = {
 const createdAtMs = sql<Date>`date_trunc('milliseconds', ${invites.createdAt})`;
 
 /**
- * Effective expiry in SQL, matching `effectiveInviteExpiresAt`: open invites
- * end at most {@link OPEN_INVITE_MAX_HOURS} after creation (WP-2.3b).
+ * Status filter matching `effectiveInviteStatus` (WP-2.3b): a stored pending
+ * invite counts as `accepted` once its effective uses are used up, and as
+ * `expired` once past its effective expiry.
  */
-const effectiveExpiresAt = sql`case when ${invites.email} is null
-  then least(${invites.expiresAt}, ${invites.createdAt} + make_interval(hours => ${OPEN_INVITE_MAX_HOURS}))
-  else ${invites.expiresAt} end`;
-
 function statusCondition(status: InviteStatus, now: Date): SQL | undefined {
+  const storedPending = and(eq(invites.status, "pending"), sql`not ${inviteExhaustedSql}`);
   switch (status) {
     case "pending":
-      return and(eq(invites.status, "pending"), sql`${effectiveExpiresAt} > ${now.toISOString()}::timestamptz`);
+      return invitePendingSql(now);
     case "expired":
       return or(
         eq(invites.status, "expired"),
-        and(eq(invites.status, "pending"), sql`${effectiveExpiresAt} <= ${now.toISOString()}::timestamptz`)
+        and(storedPending, sql`${effectiveInviteExpiresAtSql} <= ${now.toISOString()}::timestamptz`)
       );
+    case "accepted":
+      return or(eq(invites.status, "accepted"), and(eq(invites.status, "pending"), inviteExhaustedSql));
     default:
       return eq(invites.status, status);
   }

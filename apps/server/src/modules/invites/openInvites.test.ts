@@ -166,6 +166,31 @@ describe("accepting open invites past their limits (WP-2.3b)", () => {
     expect(pendingList.json<{ items: Array<{ id: string }> }>().items.map((item) => item.id)).toEqual([fresh.id]);
   });
 
+  it("lists an older open invite past its clamped uses as accepted, not pending (TL)", async () => {
+    app = await createTestApp();
+    const { admin, auth } = await adminAuth(app);
+    const now = new Date();
+    const exhausted = await insertLegacyOpenInvite(admin.id, {
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + DAY_MS),
+      maxUses: 20,
+      useCount: 12
+    });
+    const fresh = await createInvite(app, auth, { sendEmail: false });
+
+    const list = async (query: string): Promise<Array<{ id: string; status: string }>> =>
+      (await app?.inject({ method: "GET", url: `/api/admin/invites${query}`, ...auth }))?.json<{
+        items: Array<{ id: string; status: string }>;
+      }>().items ?? [];
+
+    expect((await list("")).find((item) => item.id === exhausted.id)).toMatchObject({ status: "accepted" });
+    expect((await list("?status=pending")).map((item) => item.id)).toEqual([fresh.inviteId]);
+    expect((await list("?status=accepted")).map((item) => item.id)).toEqual([exhausted.id]);
+    expect(await list("?status=expired")).toEqual([]);
+    const summary = await app.inject({ method: "GET", url: "/api/admin/summary", ...auth });
+    expect(summary.json<{ invitesPending: number }>().invitesPending).toBe(1);
+  });
+
   it("inspect shows the clamped expiry of an older open invite (Security L3)", async () => {
     const clock = new TestClock();
     app = await createTestApp({ clock });

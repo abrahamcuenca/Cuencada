@@ -126,3 +126,9 @@ Verifying an email proves that someone controls a mailbox, not that they belong 
     - The bitácora shows a "Límite de avisos alcanzado" badge for `inviteAlertLimitNotice`.
     - Supersedes decision 5's "no separate limit email".
   - **L3 (also TL nit 1):** `POST /api/invites/inspect` now returns the effective (clamped) `expiresAt`, so an older open invite shows its real 72 h end. Tested.
+- **Tech Lead: APPROVED at 4d5af70.** Non-blocking item folded in:
+  - **Older open invites clamped by uses** (for example 12 of 20 used) are refused at accept, but the list showed them as pending ("Usos: 12 de 10").
+  - `effectiveInviteStatus` now reports a stored `pending` invite whose uses reach the clamped maximum as `accepted` (used up), which wins over `expired`.
+  - The SQL twins (`inviteExhaustedSql`, `effectiveInviteExpiresAtSql`, `invitePendingSql` in `invites/service.ts`) drive the list's `pending`, `expired` and `accepted` filters, and also the dashboard's `invitesPending` count (`admin/summaryRoutes.ts`), so all three agree.
+  - `useCount` is still shown as stored (history), next to the clamped maximum and the "used" status.
+  - Tested.
