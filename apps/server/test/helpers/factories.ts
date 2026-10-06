@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import type { UserRole } from "@cuencada/types";
+import type { UserRole, UserStatus } from "@cuencada/types";
 import argon2 from "argon2";
 import type { FastifyInstance } from "fastify";
-import { profiles, users } from "../../src/db/schema.js";
+import { profiles, users } from "../../src/db/schema/index.js";
 import { getTestDb } from "./db.js";
 
 /** Default password for factory users; long enough for the change-password rule. */
@@ -14,13 +14,6 @@ export const DEFAULT_TEST_PASSWORD = "correct-horse-battery-staple";
  */
 const TEST_HASH_OPTIONS = { type: argon2.argon2id, memoryCost: 4096, timeCost: 2, parallelism: 1 } as const;
 
-/**
- * User account states the factory may create. `users.status` is still plain
- * text in the schema; replace this with the shared `UserStatus` union once
- * WP-0.2 adds it to `@cuencada/types`.
- */
-export type TestUserStatus = "active" | "disabled";
-
 type UserRow = typeof users.$inferSelect;
 type ProfileRow = typeof profiles.$inferSelect;
 
@@ -29,7 +22,7 @@ export interface CreateUserOptions {
   email?: string;
   displayName?: string;
   role?: UserRole;
-  status?: TestUserStatus;
+  status?: UserStatus;
   password?: string;
   mustChangePassword?: boolean;
   profile?: Partial<Omit<typeof profiles.$inferInsert, "id" | "userId">>;

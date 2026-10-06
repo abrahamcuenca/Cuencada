@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { cuencadas } from "../../db/schema.js";
+import { cuencadas } from "../../db/schema/index.js";
 import { seededCuencada2026 } from "./data.js";
 
 export async function registerCuencadaRoutes(app: FastifyInstance): Promise<void> {

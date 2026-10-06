@@ -2,7 +2,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import { inject } from "vitest";
 import type { Database } from "../../src/db/client.js";
-import * as schema from "../../src/db/schema.js";
+import * as schema from "../../src/db/schema/index.js";
 import {
   quoteIdent,
   RUN_ID_KEY,
