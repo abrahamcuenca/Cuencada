@@ -14,6 +14,13 @@ export const DEFAULT_TEST_PASSWORD = "correct-horse-battery-staple";
  */
 const TEST_HASH_OPTIONS = { type: argon2.argon2id, memoryCost: 4096, timeCost: 2, parallelism: 1 } as const;
 
+/**
+ * User account states the factory may create. `users.status` is still plain
+ * text in the schema; replace this with the shared `UserStatus` union once
+ * WP-0.2 adds it to `@cuencada/types`.
+ */
+export type TestUserStatus = "active" | "disabled";
+
 type UserRow = typeof users.$inferSelect;
 type ProfileRow = typeof profiles.$inferSelect;
 
@@ -22,7 +29,7 @@ export interface CreateUserOptions {
   email?: string;
   displayName?: string;
   role?: UserRole;
-  status?: string;
+  status?: TestUserStatus;
   password?: string;
   mustChangePassword?: boolean;
   profile?: Partial<Omit<typeof profiles.$inferInsert, "id" | "userId">>;

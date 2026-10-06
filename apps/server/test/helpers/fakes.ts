@@ -23,8 +23,15 @@ export interface SentMail extends MailMessage {
 export class FakeMailer implements Mailer {
   readonly outbox: SentMail[] = [];
 
-  /** Record the message and return a fake provider id. */
+  /**
+   * Record the message and return a fake provider id. Like Resend, a repeated
+   * `idempotencyKey` returns the original id without sending again.
+   */
   async send(message: MailMessage): Promise<MailSendResult> {
+    if (message.idempotencyKey !== undefined) {
+      const previous = this.outbox.find((mail) => mail.idempotencyKey === message.idempotencyKey);
+      if (previous) return { id: previous.id };
+    }
     const id = `fake-mail-${randomUUID()}`;
     this.outbox.push({ ...message, id, sentAt: new Date() });
     return { id };
@@ -74,7 +81,8 @@ export class FakeStorage implements StorageService {
     const presigned: PresignedPut = {
       url: `${FAKE_STORAGE_BASE_URL}/${encodeKey(input.key)}?X-Fake-Signature=put&X-Fake-Expires=${expiresAt.getTime()}`,
       method: "PUT",
-      headers: { "content-type": input.contentType, "content-length": String(input.contentLength) },
+      requiredHeaders: { "content-type": input.contentType },
+      signed: { contentType: input.contentType, contentLength: input.contentLength },
       expiresAt
     };
     this.presignedPuts.push({ ...input, ...presigned });
