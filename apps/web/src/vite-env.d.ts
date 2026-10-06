@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  /** API base: a same-origin path (default `/api`) or an absolute http(s) URL. Never a secret. */
+  /** API base: a same-origin path (default `/api`) or an absolute URL (`https:` only in production). Never a secret. */
   readonly VITE_API_BASE_URL?: string;
 }
 

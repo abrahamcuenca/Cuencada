@@ -1,5 +1,3 @@
-// @vitest-environment jsdom
-import "./testing";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
@@ -83,5 +81,47 @@ describe("Lightbox", () => {
     fireEvent.pointerDown(stage, { pointerId: 2, isPrimary: true, clientX: 50, clientY: 100 });
     fireEvent.pointerUp(stage, { pointerId: 2, isPrimary: true, clientX: 250, clientY: 110 });
     expect(screen.getByText("1 de 3")).toBeInTheDocument();
+  });
+
+  it("does not navigate when a horizontal drag starts on the video (seek bar scrubbing)", () => {
+    render(<Harness start={2} />);
+    const video = screen.getByLabelText("Mariachi en el Cuencada Fest");
+    const stage = video.parentElement;
+    if (!stage) throw new Error("stage missing");
+
+    fireEvent.pointerDown(video, { pointerId: 3, isPrimary: true, clientX: 40, clientY: 300 });
+    fireEvent.pointerUp(stage, { pointerId: 3, isPrimary: true, clientX: 300, clientY: 300 });
+    expect(screen.getByText("3 de 3")).toBeInTheDocument();
+  });
+
+  it("does not hijack arrow keys pressed on the video", () => {
+    render(<Harness start={2} />);
+    fireEvent.keyDown(screen.getByLabelText("Mariachi en el Cuencada Fest"), { key: "ArrowLeft" });
+    expect(screen.getByText("3 de 3")).toBeInTheDocument();
+  });
+
+  it("moves focus to the opposite nav button when the focused one becomes disabled", async () => {
+    const user = userEvent.setup();
+    render(<Harness start={1} />);
+    await user.click(screen.getByRole("button", { name: "Siguiente" }));
+    expect(screen.getByText("3 de 3")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Anterior" })).toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: "Anterior" }));
+    await user.click(screen.getByRole("button", { name: "Anterior" }));
+    expect(screen.getByText("1 de 3")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Siguiente" })).toHaveFocus();
+  });
+
+  it("is an aria-modal dialog", () => {
+    render(<Harness />);
+    expect(screen.getByRole("dialog", { name: "Visor de fotos" })).toHaveAttribute("aria-modal", "true");
+  });
+
+  it("closes when the open item disappears from the list", () => {
+    const onClose = vi.fn();
+    const { rerender } = render(<Lightbox items={ITEMS} index={2} onIndexChange={() => {}} onClose={onClose} />);
+    rerender(<Lightbox items={ITEMS.slice(0, 2)} index={2} onIndexChange={() => {}} onClose={onClose} />);
+    expect(onClose).toHaveBeenCalled();
   });
 });

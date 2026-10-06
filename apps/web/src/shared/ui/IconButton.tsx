@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
 import styles from "./IconButton.module.css";
 import { cx } from "./cx";
 
@@ -12,6 +12,7 @@ export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonEle
   variant?: "soft" | "plain" | "inverse" | "solid";
   /** 44px (default) or 56px. Never smaller than the tap minimum. */
   size?: "md" | "lg";
+  ref?: Ref<HTMLButtonElement>;
 }
 
 /** Round, icon-only button with a mandatory accessible label and a 44×44px minimum target. */

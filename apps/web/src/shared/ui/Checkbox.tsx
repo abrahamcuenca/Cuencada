@@ -1,6 +1,6 @@
 import { type InputHTMLAttributes, type ReactNode, type Ref, useId } from "react";
 import styles from "./Checkbox.module.css";
-import { cx } from "./cx";
+import { cx, hasContent } from "./cx";
 
 /** Props shared by {@link Checkbox} and {@link Switch}. */
 export interface ToggleProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "children"> {
@@ -13,11 +13,18 @@ export interface ToggleProps extends Omit<InputHTMLAttributes<HTMLInputElement>,
   ref?: Ref<HTMLInputElement>;
 }
 
-function useToggleWiring(id: string | undefined, hint: ReactNode, error: ReactNode, describedBy: string | undefined) {
+interface ToggleWiring {
+  inputId: string;
+  hintId: string | undefined;
+  errorId: string | undefined;
+  describedBy: string | undefined;
+}
+
+function useToggleWiring(id: string | undefined, hint: ReactNode, error: ReactNode, describedBy: string | undefined): ToggleWiring {
   const generated = useId();
   const inputId = id ?? `toggle-${generated}`;
-  const hintId = hint ? `${inputId}-hint` : undefined;
-  const errorId = error ? `${inputId}-error` : undefined;
+  const hintId = hasContent(hint) ? `${inputId}-hint` : undefined;
+  const errorId = hasContent(error) ? `${inputId}-error` : undefined;
   const ids = [describedBy, hintId, errorId].filter(Boolean).join(" ");
   return { inputId, hintId, errorId, describedBy: ids || undefined };
 }
@@ -41,19 +48,19 @@ function ToggleRow({
         type="checkbox"
         role={kind === "switch" ? "switch" : undefined}
         aria-describedby={describedBy}
-        aria-invalid={error ? true : undefined}
+        aria-invalid={errorId ? true : undefined}
         className={cx(styles.input, kind === "switch" ? styles.switch : styles.checkbox)}
       />
       <div className={styles.text}>
         <label htmlFor={inputId} className={styles.label}>
           {label}
         </label>
-        {hint ? (
+        {hintId ? (
           <p id={hintId} className={styles.hint}>
             {hint}
           </p>
         ) : null}
-        {error ? (
+        {errorId ? (
           <p id={errorId} className={styles.error}>
             {error}
           </p>
