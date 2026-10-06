@@ -6,7 +6,7 @@ import { EmptyState } from "../../../shared/ui/EmptyState";
 import { Skeleton } from "../../../shared/ui/Skeleton";
 import styles from "../chat.module.css";
 import { roomTimeLabel } from "../lib/format";
-import type { ChatRoomView, RoomPreview } from "../lib/thread";
+import type { ChatRoomView, RoomPreview } from "../lib/rooms";
 import { unreadCountText, unreadLabel } from "../unread";
 
 /** Props for {@link RoomList}. */

@@ -4,7 +4,7 @@
  */
 import { chatBodySchema } from "@cuencada/types";
 import type { AppDispatch, RootState } from "../../app/store";
-import { chatApi } from "./api";
+import { conversationApi } from "./conversationApi";
 import { sendChatFrame } from "./events";
 import { appendPendingMessage, prependOlderPage, removeLocalMessage, setLocalStatus, type ThreadMessage } from "./lib/thread";
 import { createClientMessageId } from "./lib/uuid";
@@ -45,7 +45,7 @@ export function sendChatMessage(roomId: string, rawBody: string): ChatThunk<Send
       clientMessageId,
       status: "pending"
     };
-    dispatch(chatApi.util.updateQueryData("getMessages", roomId, (thread) => appendPendingMessage(thread, message)));
+    dispatch(conversationApi.util.updateQueryData("getMessages", roomId, (thread) => appendPendingMessage(thread, message)));
     sendChatFrame({ type: "send", roomId, body: message.body, clientMessageId });
     return { ok: true, clientMessageId };
   };
@@ -61,10 +61,10 @@ export function sendChatMessage(roomId: string, rawBody: string): ChatThunk<Send
  */
 export function retryChatMessage(roomId: string, clientMessageId: string): ChatThunk<void> {
   return (dispatch, getState) => {
-    const thread = chatApi.endpoints.getMessages.select(roomId)(getState()).data;
+    const thread = conversationApi.endpoints.getMessages.select(roomId)(getState()).data;
     const message = thread?.messages.find((entry) => entry.status !== "sent" && entry.clientMessageId === clientMessageId);
     if (message === undefined) return;
-    dispatch(chatApi.util.updateQueryData("getMessages", roomId, (draft) => setLocalStatus(draft, clientMessageId, "pending")));
+    dispatch(conversationApi.util.updateQueryData("getMessages", roomId, (draft) => setLocalStatus(draft, clientMessageId, "pending")));
     sendChatFrame({ type: "send", roomId, body: message.body, clientMessageId });
   };
 }
@@ -78,7 +78,7 @@ export function retryChatMessage(roomId: string, clientMessageId: string): ChatT
  */
 export function discardChatMessage(roomId: string, clientMessageId: string): ChatThunk<void> {
   return (dispatch) => {
-    dispatch(chatApi.util.updateQueryData("getMessages", roomId, (thread) => removeLocalMessage(thread, clientMessageId)));
+    dispatch(conversationApi.util.updateQueryData("getMessages", roomId, (thread) => removeLocalMessage(thread, clientMessageId)));
   };
 }
 
@@ -90,15 +90,15 @@ export function discardChatMessage(roomId: string, clientMessageId: string): Cha
  */
 export function loadOlderMessages(roomId: string): ChatThunk<Promise<LoadOlderResult>> {
   return async (dispatch, getState) => {
-    const before = chatApi.endpoints.getMessages.select(roomId)(getState()).data?.nextBefore ?? null;
+    const before = conversationApi.endpoints.getMessages.select(roomId)(getState()).data?.nextBefore ?? null;
     if (before === null) return { status: "end" };
     try {
       const page = await dispatch(
-        chatApi.endpoints.getMessagesBefore.initiate({ roomId, before }, { subscribe: false, forceRefetch: true })
+        conversationApi.endpoints.getMessagesBefore.initiate({ roomId, before }, { subscribe: false, forceRefetch: true })
       ).unwrap();
       // Only apply it if nothing else moved the cursor meanwhile (a double tap, a gap refetch).
-      dispatch(chatApi.util.updateQueryData("getMessages", roomId, (thread) => (thread.nextBefore === before ? prependOlderPage(thread, page) : thread)));
-      const firstId = chatApi.endpoints.getMessages.select(roomId)(getState()).data?.messages[0]?.id ?? null;
+      dispatch(conversationApi.util.updateQueryData("getMessages", roomId, (thread) => (thread.nextBefore === before ? prependOlderPage(thread, page) : thread)));
+      const firstId = conversationApi.endpoints.getMessages.select(roomId)(getState()).data?.messages[0]?.id ?? null;
       return { status: "loaded", firstId };
     } catch {
       return { status: "error" };

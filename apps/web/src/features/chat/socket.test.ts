@@ -295,9 +295,11 @@ describe("ChatConnection lifecycle", { timeout: 15_000 }, () => {
     // Typing is dropped while over budget rather than queued.
     expect(sendChatFrame({ type: "typing", roomId })).toBe(false);
 
-    await vi.advanceTimersByTimeAsync(SEND_BUDGET.windowMs);
+    // Bursts of 8 per second until the 10 s send budget (18) is used up…
+    await vi.advanceTimersByTimeAsync(SEND_BUDGET.windowMs / 2);
     expect(sent()).toHaveLength(SEND_BUDGET.max);
-    await vi.advanceTimersByTimeAsync(SEND_BUDGET.windowMs);
+    // …then the rest once the window slides.
+    await vi.advanceTimersByTimeAsync(SEND_BUDGET.windowMs * 1.5);
     expect(sent().map((frame) => (frame as { clientMessageId: string }).clientMessageId)).toEqual(ids); // Test-only: filtered to send frames above.
   });
 

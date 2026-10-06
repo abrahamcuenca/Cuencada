@@ -1,25 +1,20 @@
 import type { ChatSender } from "@cuencada/types";
 import { describe, expect, it } from "vitest";
 import { makeMessage, makeRooms, ME, PEOPLE, ROOMS } from "../testing/fixtures";
+import { applyDeletedToRooms, applyMessageToRooms, applyReadToRooms, mergeRoomLists, roomsFromResponse, totalUnread } from "./rooms";
 import {
   applyDeletedMessage,
-  applyDeletedToRooms,
   applyIncomingMessage,
-  applyMessageToRooms,
-  applyReadToRooms,
   appendPendingMessage,
   type ChatThread,
   firstUnreadMessageId,
   lastServerMessage,
   mergeLatestPage,
-  mergeRoomLists,
   prependOlderPage,
   removeLocalMessage,
-  roomsFromResponse,
   setLocalStatus,
   type ThreadMessage,
-  threadFromPage,
-  totalUnread
+  threadFromPage
 } from "./thread";
 
 const CLIENT_ID = "aaaaaaaa-0000-4000-8000-000000000001";

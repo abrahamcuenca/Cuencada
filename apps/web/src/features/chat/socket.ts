@@ -53,6 +53,7 @@ import { getApiErrorCode, isAbortError, isFetchBaseQueryError } from "../../shar
 import { env } from "../../shared/lib/env";
 import { reportUnexpected } from "../../shared/lib/reportUnexpected";
 import { chatApi } from "./api";
+import { conversationApi } from "./conversationApi";
 import { emitChatEvent, setChatTransport } from "./events";
 
 /** What the conversation shows about the connection. */
@@ -487,7 +488,7 @@ export class ChatConnection {
 
     let ticket: unknown;
     try {
-      ticket = await this.store.dispatch(chatApi.endpoints.createChatTicket.initiate(undefined, { track: false })).unwrap();
+      ticket = await this.store.dispatch(conversationApi.endpoints.createChatTicket.initiate(undefined, { track: false })).unwrap();
     } catch (error) {
       if (generation !== this.generation) return;
       // An abort with the same session (the API cache was reset by an account switch): try again shortly.
