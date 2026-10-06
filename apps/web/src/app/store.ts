@@ -3,8 +3,8 @@
  * `baseApi.injectEndpoints` instead of new reducers. If a track truly needs
  * client-only state, raise it with the orchestrator first.
  */
-import { combineReducers, configureStore, createListenerMiddleware } from "@reduxjs/toolkit";
-import { authReducer, credentialsReceived, loggedOut } from "../features/auth/authSlice";
+import { combineReducers, configureStore, createListenerMiddleware, isAnyOf } from "@reduxjs/toolkit";
+import { authReducer, credentialsReceived, didSwitchUser, loggedOut, tokenRefreshed } from "../features/auth/authSlice";
 import { clearPendingLogout } from "../features/auth/pendingLogout";
 import { cancelOnlineLogoutRetry } from "../features/auth/session";
 import { baseApi } from "../shared/api/baseApi";
@@ -38,6 +38,16 @@ function buildStore(preloadedState: Partial<RootState> | undefined) {
       // A new login replaced the refresh cookie; the old unconfirmed logout is moot.
       cancelOnlineLogoutRetry();
       clearPendingLogout();
+    }
+  });
+  listener.startListening({
+    matcher: isAnyOf(credentialsReceived, tokenRefreshed),
+    effect: (_action, listenerApi) => {
+      // [SEC] Account switch A → B without a logout (T1 Security M1): A's cached member
+      // data must not render under B. The reducer already bumped `sessionEpoch`.
+      if (didSwitchUser(listenerApi.getOriginalState().auth, listenerApi.getState().auth)) {
+        listenerApi.dispatch(baseApi.util.resetApiState());
+      }
     }
   });
 

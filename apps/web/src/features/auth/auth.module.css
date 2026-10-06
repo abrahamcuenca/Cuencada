@@ -1,0 +1,309 @@
+/* T1 auth screens. Mobile-first: base styles are the 375px design; min-width queries only. */
+
+.page {
+  display: grid;
+  gap: var(--space-6);
+  padding: var(--space-6) max(var(--gutter), var(--safe-right)) var(--space-8) max(var(--gutter), var(--safe-left));
+}
+
+/* The hero panel only appears in the ≥900px split layout. */
+.hero {
+  display: none;
+}
+
+.card {
+  display: grid;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: 28rem;
+  margin-inline: auto;
+  min-width: 0;
+}
+
+.logo {
+  width: 72px;
+  height: 72px;
+  margin-inline: auto;
+  border-radius: var(--radius-md);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  line-height: var(--leading-snug);
+  letter-spacing: normal;
+  overflow-wrap: anywhere;
+}
+
+.lead {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-md);
+  line-height: var(--leading-body);
+}
+
+.form {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.actions {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
+
+.links {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Text links keep a 44px tap target. */
+.link {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-min);
+  color: var(--color-primary);
+  font-weight: var(--weight-semibold);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.note {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+}
+
+.notice {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-sunken);
+  text-align: center;
+}
+
+.notice p {
+  margin: 0;
+}
+
+.noticeIcon {
+  font-size: 2.5rem;
+  line-height: 1;
+}
+
+/* Live region for form-level messages: always mounted, empty when quiet. */
+.alertRegion:empty {
+  display: none;
+}
+
+.alert {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-snug);
+}
+
+.alertDanger {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.alertSuccess {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.passwordRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.passwordRow > input {
+  flex: 1;
+  min-width: 0;
+}
+
+.strength {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+}
+
+.strength[data-level="short"] {
+  color: var(--color-danger);
+}
+
+.strength[data-level="strong"],
+.strength[data-level="good"] {
+  color: var(--color-success);
+}
+
+.meter {
+  display: inline-grid;
+  grid-template-columns: repeat(4, 1.25rem);
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.meterStep {
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--color-border);
+}
+
+.meterStep[data-on] {
+  background: var(--color-primary);
+}
+
+.readonlyEmail {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+/* Sessions page: one readable column, no hero split. */
+.listPage {
+  display: grid;
+  gap: var(--space-4);
+  max-width: var(--reading-max);
+  margin-inline: auto;
+  padding: var(--space-6) max(var(--gutter), var(--safe-right)) var(--space-8) max(var(--gutter), var(--safe-left));
+}
+
+/* Sessions list */
+.sessionList {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.sessionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-weight: var(--weight-bold);
+  overflow-wrap: anywhere;
+}
+
+.sessionMeta {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.sessionActions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Verify-email banner */
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) max(var(--gutter), var(--safe-right)) var(--space-3) max(var(--gutter), var(--safe-left));
+  background: var(--color-warning-soft);
+  color: var(--color-text);
+}
+
+.bannerText {
+  flex: 1 1 14rem;
+  margin: 0;
+  line-height: var(--leading-snug);
+}
+
+@media (min-width: 600px) {
+  .page {
+    padding-top: var(--space-10);
+  }
+}
+
+@media (min-width: 900px) {
+  .page {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+    gap: var(--space-10);
+    max-width: var(--content-max);
+    margin-inline: auto;
+  }
+
+  .hero {
+    display: grid;
+    align-content: center;
+    gap: var(--space-4);
+    min-height: 26rem;
+    padding: var(--space-10) var(--space-8);
+    border-radius: var(--radius-xl);
+    position: sticky;
+    top: calc(var(--top-nav-height) + var(--space-6));
+  }
+
+  .heroWordmark {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: var(--text-3xl);
+    font-weight: var(--weight-black);
+    letter-spacing: var(--tracking-display);
+    text-transform: uppercase;
+    line-height: var(--leading-tight);
+  }
+
+  .heroTagline {
+    margin: 0;
+    font-size: var(--text-lg);
+    color: var(--color-accent-on-dark);
+    font-weight: var(--weight-semibold);
+  }
+
+  .card {
+    padding: var(--space-8);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-md);
+  }
+}
