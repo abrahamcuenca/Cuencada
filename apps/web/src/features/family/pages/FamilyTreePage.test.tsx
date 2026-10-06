@@ -56,6 +56,19 @@ describe("FamilyTreePage", { timeout: 15_000 }, () => {
     for (const svg of document.querySelectorAll("svg")) expect(svg).toHaveAttribute("aria-hidden", "true");
   });
 
+  it("shows no year at all when the server hides a living relative's birth year (WP-0.8b)", async () => {
+    const ines = db.people.get(IDS.ines);
+    if (!ines) throw new Error("fixture");
+    db.people.set(IDS.ines, { ...ines, birthYear: null, familyBranch: "Herrera Morales" });
+    renderApp(`/arbol/${IDS.ines}`, authenticatedState(me));
+
+    const heading = await focusHeading(/^Inés Herrera Morales/);
+    const card = heading.closest("article");
+    if (!card) throw new Error("no focus card");
+    expect(within(card).getByText("Rama Herrera Morales")).toBeInTheDocument();
+    expect(card.textContent).not.toMatch(/n\. |null|undefined/);
+  });
+
   it("shows empty states for groups without people", async () => {
     renderApp(`/arbol/${IDS.valeria}`, authenticatedState(me));
 
