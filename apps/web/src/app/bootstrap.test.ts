@@ -1,0 +1,73 @@
+import { HttpResponse, http } from "msw";
+import { setupServer } from "msw/node";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { apiUrl, errorBody, makeUser, tokenBody } from "../../test/auth";
+import { LEGACY_DEMO_USER_KEY, removeLegacyDemoSession } from "../features/auth/legacy";
+import { bootstrapApp } from "./bootstrap";
+import { makeStore } from "./store";
+
+const server = setupServer();
+const stops: Array<() => void> = [];
+
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+afterAll(() => server.close());
+afterEach(() => {
+  server.resetHandlers();
+  for (const stop of stops.splice(0)) stop();
+});
+
+const legacyDemoUser = JSON.stringify({ id: "demo-admin", role: "admin", email: "admin@cuencada.com" });
+
+describe("removeLegacyDemoSession", () => {
+  it("removes only the cuencada-demo-user key and reports it", () => {
+    window.localStorage.setItem(LEGACY_DEMO_USER_KEY, legacyDemoUser);
+    window.localStorage.setItem("otra-clave", "x");
+
+    expect(removeLegacyDemoSession()).toBe(true);
+    expect(window.localStorage.getItem(LEGACY_DEMO_USER_KEY)).toBeNull();
+    expect(window.localStorage.getItem("otra-clave")).toBe("x");
+  });
+
+  it("returns false when there is nothing to remove", () => {
+    expect(removeLegacyDemoSession()).toBe(false);
+  });
+});
+
+describe("bootstrapApp", () => {
+  it("removes the legacy demo key and restores the session through a silent refresh", async () => {
+    window.localStorage.setItem(LEGACY_DEMO_USER_KEY, legacyDemoUser);
+    const user = makeUser({ displayName: "Abuela Cuenca" });
+    server.use(http.post(apiUrl("/auth/refresh"), () => HttpResponse.json(tokenBody("fresh", user))));
+    const store = makeStore();
+
+    stops.push(bootstrapApp(store));
+
+    expect(window.localStorage.getItem(LEGACY_DEMO_USER_KEY)).toBeNull();
+    expect(store.getState().auth.status).toBe("restoring");
+    await vi.waitFor(() => expect(store.getState().auth.status).toBe("authenticated"));
+    expect(store.getState().auth).toMatchObject({ accessToken: "fresh", user });
+  });
+
+  it("ends anonymous when there is no valid refresh cookie", async () => {
+    server.use(
+      http.post(apiUrl("/auth/refresh"), () => HttpResponse.json(errorBody("UNAUTHENTICATED"), { status: 401 }))
+    );
+    const store = makeStore();
+
+    stops.push(bootstrapApp(store));
+
+    await vi.waitFor(() => expect(store.getState().auth.status).toBe("anonymous"));
+  });
+
+  it("never writes the token or user to web storage", async () => {
+    server.use(http.post(apiUrl("/auth/refresh"), () => HttpResponse.json(tokenBody("secret-token"))));
+    const store = makeStore();
+
+    stops.push(bootstrapApp(store));
+    await vi.waitFor(() => expect(store.getState().auth.status).toBe("authenticated"));
+
+    const stored = JSON.stringify({ ...window.localStorage }) + JSON.stringify({ ...window.sessionStorage });
+    expect(stored).not.toContain("secret-token");
+    expect(stored).not.toContain("prima@example.com");
+  });
+});
