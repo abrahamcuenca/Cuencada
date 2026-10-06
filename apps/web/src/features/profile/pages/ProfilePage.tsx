@@ -89,7 +89,7 @@ const TEXT_FIELDS: Record<ProfileTextField, TextFieldSpec> = {
   city: { label: "Ciudad", autoComplete: "address-level2", maxLength: 120 },
   phone: {
     label: "Teléfono / WhatsApp",
-    hint: "Con lada, por ejemplo +52 999 123 4567.",
+    hint: "Con lada, por ejemplo +52 555 010 0101.",
     type: "tel",
     inputMode: "tel",
     autoComplete: "tel",

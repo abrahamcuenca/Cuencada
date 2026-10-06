@@ -16,7 +16,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
 beforeEach(() => {
   db = makeDirectoryDb([
-    makeEntry(1, { fullName: "Rosa Elena Ejemplo", city: "Mérida", phone: "999 123 4567", email: "rosa@example.com" }),
+    makeEntry(1, { fullName: "Rosa Elena Ejemplo", city: "Mérida", phone: "555 010 0101", email: "rosa@example.com" }),
     makeEntry(2, { fullName: "Tomás Ejemplo", familyBranch: "Rama Sur", city: "Monterrey" }),
     makeEntry(3, { fullName: "Rosario Ejemplo" })
   ]);
@@ -208,9 +208,9 @@ describe("DirectoryPage detail", () => {
     expect(within(card).getByRole("heading", { name: "Rosa Elena Ejemplo" })).toHaveFocus();
     expect(within(card).getByText("Mérida")).toBeInTheDocument();
     expect(within(card).getByText("rosa@example.com")).toBeInTheDocument();
-    expect(within(card).getByRole("link", { name: /WhatsApp/ })).toHaveAttribute("href", "https://wa.me/529991234567");
+    expect(within(card).getByRole("link", { name: /WhatsApp/ })).toHaveAttribute("href", "https://wa.me/525550100101");
     expect(within(card).getByRole("link", { name: /WhatsApp/ })).toHaveAttribute("rel", expect.stringContaining("noopener"));
-    expect(within(card).getByRole("link", { name: /Llamar/ })).toHaveAttribute("href", "tel:+529991234567");
+    expect(within(card).getByRole("link", { name: /Llamar/ })).toHaveAttribute("href", "tel:+525550100101");
     expect(within(card).getByRole("link", { name: /Correo/ })).toHaveAttribute("href", "mailto:rosa@example.com");
   });
 
@@ -232,6 +232,22 @@ describe("DirectoryPage detail", () => {
 
     const card = await screen.findByRole("article", { name: "Jorge Ejemplo" });
     expect(within(card).getByRole("link", { name: /Ver en el árbol/ })).toHaveAttribute("href", "/arbol/5b000000-0000-4000-8000-000000000004");
+  });
+
+  it.each(["..", "no-es-un-uuid", "%2e%2e%2Fadmin"])("shows not found and sends no request for the id %s", async (id) => {
+    const requests: string[] = [];
+    server.events.on("request:start", ({ request }) => {
+      requests.push(new URL(request.url).pathname);
+    });
+    try {
+      renderApp(`/directorio/${id}`, authenticatedState());
+
+      expect(await screen.findByRole("heading", { name: "No encontramos a este familiar" })).toBeInTheDocument();
+      await screen.findByRole("link", { name: /Rosa Elena Ejemplo/ });
+      expect(requests.filter((path) => path.startsWith("/api/directory/"))).toEqual([]);
+    } finally {
+      server.events.removeAllListeners();
+    }
   });
 
   it("says when the member is not found", async () => {

@@ -83,11 +83,11 @@ describe("ProfilePage form", () => {
     const city = screen.getByLabelText(/Ciudad/);
     await user.clear(city);
     await user.type(city, "Monterrey");
-    await user.type(screen.getByLabelText(/Teléfono/), "+52 999 123 4567");
+    await user.type(screen.getByLabelText(/Teléfono/), "+52 555 010 0101");
     await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
 
     expect(await screen.findByText("Cambios guardados.")).toBeInTheDocument();
-    expect(db.patches).toEqual([{ city: "Monterrey", phone: "+52 999 123 4567" }]);
+    expect(db.patches).toEqual([{ city: "Monterrey", phone: "+52 555 010 0101" }]);
     await waitFor(() => expect(screen.getByRole("button", { name: "Guardar cambios" })).toBeDisabled());
     expect(screen.getByLabelText(/Ciudad/)).toHaveValue("Monterrey");
   });

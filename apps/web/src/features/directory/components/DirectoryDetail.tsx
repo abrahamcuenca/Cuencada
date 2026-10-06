@@ -1,4 +1,4 @@
-import type { DirectoryEntry } from "@cuencada/types";
+import { type DirectoryEntry, idSchema } from "@cuencada/types";
 import { type ReactNode, useEffect, useRef } from "react";
 import { getApiErrorCode, isAbortError } from "../../../shared/api/errors";
 import { AvatarCircle } from "../../../shared/ui/AvatarCircle";
@@ -16,26 +16,16 @@ import { DirectoryError } from "./AccessStates";
  * response carries: hidden contact fields are absent, and so are their buttons.
  */
 export function DirectoryDetail({ userId }: { userId: string }): ReactNode {
-  const { currentData: data, error, isLoading, refetch } = useGetDirectoryEntryQuery(userId);
+  // [SEC] The route param is untrusted: only a UUID is ever put in the request path.
+  const validId = idSchema.safeParse(userId).success;
+  const { currentData: data, error, isLoading, refetch } = useGetDirectoryEntryQuery(userId, { skip: !validId });
   // The avatar URL is a 1h presigned GET: when it fails to load, refetch the entry once.
   const onImageError = useExpiredUrlRefetch(refetch);
 
+  if (!validId) return <NotFound />;
   if (data) return <EntryCard key={data.userId} entry={data} onImageError={onImageError} />;
   if (error && !isAbortError(error)) {
-    if (getApiErrorCode(error) === "NOT_FOUND") {
-      return (
-        <EmptyState
-          icon="🔎"
-          title="No encontramos a este familiar"
-          description="Puede que haya ocultado su ficha del directorio."
-          action={
-            <Button variant="secondary" to="/directorio">
-              Volver al directorio
-            </Button>
-          }
-        />
-      );
-    }
+    if (getApiErrorCode(error) === "NOT_FOUND") return <NotFound />;
     return <DirectoryError error={error} onRetry={() => void refetch()} />;
   }
   return (
@@ -44,6 +34,22 @@ export function DirectoryDetail({ userId }: { userId: string }): ReactNode {
       <Skeleton shape="text" width="60%" />
       <Skeleton shape="text" width="40%" />
     </div>
+  );
+}
+
+/** Unknown, hidden or malformed member id. */
+function NotFound(): ReactNode {
+  return (
+    <EmptyState
+      icon="🔎"
+      title="No encontramos a este familiar"
+      description="Puede que haya ocultado su ficha del directorio."
+      action={
+        <Button variant="secondary" to="/directorio">
+          Volver al directorio
+        </Button>
+      }
+    />
   );
 }
 

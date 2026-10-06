@@ -404,7 +404,7 @@ describe("GET /api/cuencadas/:year/attendees", () => {
       .update(profiles)
       .set({
         avatarKey: "avatars/beto.webp",
-        phone: "9991234567",
+        phone: "5550100101",
         city: "Mérida"
       })
       .where(eq(profiles.userId, member.id));
@@ -452,7 +452,7 @@ describe("GET /api/cuencadas/:year/attendees", () => {
       avatarUrl: null
     });
     expect(body.find((row) => row.displayName === "Abuela Rosa")).toMatchObject({ personId: historic, userId: null });
-    expect(res.body).not.toContain("9991234567");
+    expect(res.body).not.toContain("5550100101");
     expect(res.body).not.toContain(member.email);
     for (const row of body)
       expect(Object.keys(row).sort()).toEqual([

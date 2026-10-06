@@ -3,12 +3,12 @@ import { internationalDigits, mailtoHref, telHref, whatsappHref } from "./contac
 
 describe("whatsappHref", () => {
   it.each([
-    ["+52 999 123 4567", "https://wa.me/529991234567"],
-    ["+52 (999) 123-4567", "https://wa.me/529991234567"],
-    ["999 123 4567", "https://wa.me/529991234567"],
-    ["0052 999 123 4567", "https://wa.me/529991234567"],
+    ["+52 555 010 0101", "https://wa.me/525550100101"],
+    ["+52 (555) 010-0101", "https://wa.me/525550100101"],
+    ["555 010 0101", "https://wa.me/525550100101"],
+    ["0052 555 010 0101", "https://wa.me/525550100101"],
     ["+1 (512) 555-0100", "https://wa.me/15125550100"],
-    ["52 999 123 4567", "https://wa.me/529991234567"]
+    ["52 555 010 0101", "https://wa.me/525550100101"]
   ])("formats %s as %s", (phone, href) => {
     expect(whatsappHref(phone)).toBe(href);
   });
@@ -20,7 +20,7 @@ describe("whatsappHref", () => {
 
 describe("telHref", () => {
   it("dials the international number", () => {
-    expect(telHref("999 123 4567")).toBe("tel:+529991234567");
+    expect(telHref("555 010 0101")).toBe("tel:+525550100101");
   });
 });
 
@@ -35,7 +35,7 @@ describe("mailtoHref", () => {
     expect(mailtoHref("rosa@example.com")).toBe("mailto:rosa@example.com");
   });
 
-  it.each(["rosa@example.com?bcc=otro@example.com", "a b@example.com", "rosa@example.com#x", "sin-arroba"])("refuses %s, which would add parameters or is not an address", (email) => {
+  it.each(["rosa@example.com?bcc=otro@example.com", "a b@example.com", "rosa@example.com#x", "rosa@example.com,otro@example.com", "rosa@example.com;otro@example.com", "sin-arroba"])("refuses %s, which would add parameters or is not an address", (email) => {
     expect(mailtoHref(email)).toBeNull();
   });
 });

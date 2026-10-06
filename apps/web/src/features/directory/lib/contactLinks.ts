@@ -11,7 +11,7 @@ const MAX_DIGITS = 15;
 
 /**
  * International digits of a phone as family members type it
- * ("+52 (999) 123-4567", "999 123 4567", "0052 999…").
+ * ("+52 (555) 010-0101", "555 010 0101", "0052 555…").
  *
  * @param phone - The phone as stored.
  * @returns Digits with the country code, or `null` when it can't be a full number.
@@ -48,10 +48,10 @@ export function telHref(phone: string): string | null {
 /**
  * @param email - The address as stored.
  * @returns `mailto:<address>`, or `null` when it has characters that would
- * add headers or parameters to the link (`?`, `&`, `#`, `%`, spaces…).
+ * add headers, parameters or more recipients to the link (`?`, `&`, `#`, `%`, `,`, `;`, spaces…).
  */
 export function mailtoHref(email: string): string | null {
   const trimmed = email.trim();
-  if (!/^[^\s@?&#%/\\:<>"]+@[^\s@?&#%/\\:<>"]+$/.test(trimmed)) return null;
+  if (!/^[^\s@?&#%/\\:<>",;]+@[^\s@?&#%/\\:<>",;]+$/.test(trimmed)) return null;
   return `mailto:${trimmed}`;
 }
