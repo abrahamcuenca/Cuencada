@@ -1,6 +1,7 @@
 import { AuditAction } from "@cuencada/types";
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
+import { ZodError } from "zod";
 import { getTestDb } from "../../test/helpers/db.js";
 import { createUser } from "../../test/helpers/factories.js";
 import { auditLogs } from "../db/schema/index.js";
@@ -86,8 +87,13 @@ describe("recordAudit", () => {
     await expect(
       recordAudit(db, { actorUserId: null, action: "rsvp.updated", entityType: "rsvp", entityId: null })
     ).resolves.toEqual(expect.any(String));
-    await expect(
-      recordAudit(db, { actorUserId: null, action: "Not An Action", entityType: "rsvp", entityId: null })
-    ).rejects.toThrow();
+    const error = await recordAudit(db, {
+      actorUserId: null,
+      action: "Not An Action",
+      entityType: "rsvp",
+      entityId: null
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(ZodError);
   });
 });

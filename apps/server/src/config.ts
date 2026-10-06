@@ -72,7 +72,10 @@ const trustProxy = z
 
 const configSchema = z
   .object({
-    NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+    /** Required, no default: a missing value must not fail open into development behaviour. */
+    NODE_ENV: z.enum(["development", "test", "production"], {
+      error: "is required: development, test or production"
+    }),
     HOST: z.string().default("127.0.0.1"),
     PORT: z.coerce.number().int().positive().default(3006),
     LOG_LEVEL: z

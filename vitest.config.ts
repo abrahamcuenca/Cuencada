@@ -11,6 +11,12 @@ const sharedAlias = {
   "@cuencada/types": fromRoot("./packages/types/src/index.ts")
 };
 
+/** The server also renders emails; resolve them from source too (no `pnpm build` needed). */
+const serverAlias = {
+  ...sharedAlias,
+  "@cuencada/emails": fromRoot("./packages/emails/src/index.ts")
+};
+
 // Each project's root is its own package directory. Vite resolves SSR
 // externals (drizzle-orm, postgres, argon2, ...) from the project root, and
 // with pnpm those packages are only linked under the package that depends on
@@ -20,7 +26,9 @@ export default defineConfig({
     projects: [
       {
         root: fromRoot("./apps/server"),
-        resolve: { alias: sharedAlias },
+        resolve: { alias: serverAlias },
+        // packages/emails is TSX.
+        esbuild: { jsx: "automatic" },
         test: {
           name: "server",
           environment: "node",

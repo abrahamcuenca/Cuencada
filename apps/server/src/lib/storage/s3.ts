@@ -15,6 +15,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { AppConfig } from "../../config.js";
+import { type Clock, systemClock } from "../clock.js";
 import { AppError } from "../errors.js";
 import type {
   ObjectHead,
@@ -60,11 +61,16 @@ function isNotFound(error: unknown): boolean {
 /** S3-compatible object storage for the private media bucket. */
 export class S3Storage implements StorageService {
   readonly #settings: S3Settings;
+  readonly #clock: Clock;
   #client: S3Client | undefined;
 
-  /** @param settings - S3 endpoint, region, bucket and credentials. */
-  constructor(settings: S3Settings) {
+  /**
+   * @param settings - S3 endpoint, region, bucket and credentials.
+   * @param clock - Time source for signing dates and `expiresAt` (inject in tests).
+   */
+  constructor(settings: S3Settings, clock: Clock = systemClock) {
     this.#settings = settings;
+    this.#clock = clock;
   }
 
   #getClient(): S3Client {
@@ -78,7 +84,13 @@ export class S3Storage implements StorageService {
         accessKeyId: this.#settings.S3_ACCESS_KEY_ID,
         secretAccessKey: this.#settings.S3_SECRET_ACCESS_KEY
       },
-      forcePathStyle: false
+      forcePathStyle: false,
+      // Since SDK 3.729 the default ("WHEN_SUPPORTED") adds a CRC32 checksum
+      // computed at signing time to presigned PUTs and checksum headers to
+      // server uploads. Browsers then upload bytes that do not match the
+      // signed checksum, and S3-compatible stores (Linode/Ceph RGW) reject it.
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED"
     });
     return this.#client;
   }
@@ -90,6 +102,7 @@ export class S3Storage implements StorageService {
   async presignPut(input: PresignPutInput): Promise<PresignedPut> {
     const client = this.#getClient();
     const expiresIn = clampExpiry(input.expiresInSeconds);
+    const now = this.#clock.now();
     const url = await getSignedUrl(
       client,
       new PutObjectCommand({
@@ -98,14 +111,14 @@ export class S3Storage implements StorageService {
         ContentType: input.contentType,
         ContentLength: input.contentLength
       }),
-      { expiresIn, signableHeaders: new Set(["content-type", "content-length"]) }
+      { expiresIn, signingDate: now, signableHeaders: new Set(["content-type", "content-length"]) }
     );
     return {
       url,
       method: "PUT",
       requiredHeaders: { "content-type": input.contentType },
       signed: { contentType: input.contentType, contentLength: input.contentLength },
-      expiresAt: new Date(Date.now() + expiresIn * 1000)
+      expiresAt: new Date(now.getTime() + expiresIn * 1000)
     };
   }
 
@@ -113,6 +126,7 @@ export class S3Storage implements StorageService {
   async presignGet(input: PresignGetInput): Promise<PresignedGet> {
     const client = this.#getClient();
     const expiresIn = clampExpiry(input.expiresInSeconds);
+    const now = this.#clock.now();
     const url = await getSignedUrl(
       client,
       new GetObjectCommand({
@@ -122,9 +136,9 @@ export class S3Storage implements StorageService {
           ? {}
           : { ResponseContentDisposition: input.responseContentDisposition })
       }),
-      { expiresIn }
+      { expiresIn, signingDate: now }
     );
-    return { url, expiresAt: new Date(Date.now() + expiresIn * 1000) };
+    return { url, expiresAt: new Date(now.getTime() + expiresIn * 1000) };
   }
 
   /** Object metadata, or `null` when the key does not exist. */

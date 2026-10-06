@@ -70,10 +70,16 @@ export function scrubAuditMetadata(metadata: Record<string, unknown>): Record<st
  * @param db - The transaction performing the change (preferred) or the root client.
  * @param entry - Who did what to which entity.
  * @returns The new audit row id.
- * @throws Error when `action` is not a dotted lowercase `entity.verb` string.
+ * @throws Error (plain, not a ZodError) when `action` is not a dotted lowercase `entity.verb` string.
  */
 export async function recordAudit(db: DbOrTx, entry: AuditEntry): Promise<string> {
-  const action = auditActionSchema.parse(entry.action);
+  // A bad action is a programming error, not client input: throw a plain
+  // Error (→ logged 500), never a ZodError (which the handler maps to 400).
+  const parsed = auditActionSchema.safeParse(entry.action);
+  if (!parsed.success) {
+    throw new Error(`recordAudit: action "${entry.action.slice(0, 100)}" is not a dotted lowercase entity.verb string`);
+  }
+  const action = parsed.data;
   const [row] = await db
     .insert(auditLogs)
     .values({

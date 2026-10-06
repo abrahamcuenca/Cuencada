@@ -70,6 +70,8 @@ describe("global error handler", () => {
     expect(body.error.code).toBe("VALIDATION");
     expect(body.error.details).toHaveLength(API_ERROR_DETAILS_MAX);
     expect(body.error.details?.[0]?.path).toBe("values.0");
+    // zod defaults are Spanish (z.config(z.locales.es()) at boot).
+    expect(body.error.details?.[0]?.message).toMatch(/esperaba/);
     expect(body.error.details?.at(-1)).toEqual({ path: "", message: "Y 51 problemas más." });
   });
 

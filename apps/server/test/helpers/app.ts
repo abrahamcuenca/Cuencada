@@ -60,7 +60,13 @@ export async function createTestApp(overrides: TestAppOverrides = {}): Promise<A
   if (overrides.clock !== undefined) deps.clock = overrides.clock;
   if (overrides.logStream !== undefined) deps.logStream = overrides.logStream;
   const app = await buildApp(createTestConfig(overrides.config), deps);
-  if (overrides.routes !== undefined) await overrides.routes(app);
-  await app.ready();
+  try {
+    if (overrides.routes !== undefined) await overrides.routes(app);
+    await app.ready();
+  } catch (error) {
+    // Release the app's pool before surfacing the fixture/boot error.
+    await app.close();
+    throw error;
+  }
   return app;
 }

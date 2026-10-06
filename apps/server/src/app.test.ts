@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestApp } from "../test/helpers/app.js";
 import { getTestDb } from "../test/helpers/db.js";
 import { createUser, loginAs } from "../test/helpers/factories.js";
@@ -46,8 +46,9 @@ describe("buildApp", () => {
     expect(csp).toContain("default-src 'self'");
     expect(csp).toContain("object-src 'none'");
     expect(csp).toContain("frame-ancestors 'none'");
-    expect(csp).toContain("script-src 'self' https://weatherwidget.io");
-    expect(csp).toContain("frame-src https://weatherwidget.io");
+    expect(csp).toContain("script-src 'self';");
+    expect(csp).toContain("frame-src 'self';");
+    expect(csp).not.toContain("weatherwidget");
     expect(response.headers["x-content-type-options"]).toBe("nosniff");
   });
 
@@ -82,6 +83,28 @@ describe("buildApp", () => {
 });
 
 describe("/health/ready", () => {
+  it("caches the DB ping for about 5 seconds and is rate-limited", async () => {
+    let now = new Date("2026-10-06T12:00:00Z").getTime();
+    const app = await createTestApp({ clock: { now: () => new Date(now) } });
+    try {
+      const ping = vi.spyOn(app.db, "$client");
+      const ready = () => app.inject({ method: "GET", url: "/health/ready" });
+
+      expect((await ready()).statusCode).toBe(200);
+      expect((await ready()).statusCode).toBe(200);
+      expect(ping).toHaveBeenCalledTimes(1);
+      now += 6000;
+      expect((await ready()).statusCode).toBe(200);
+      expect(ping).toHaveBeenCalledTimes(2);
+
+      let last = 0;
+      for (let index = 0; index < 60; index += 1) last = (await ready()).statusCode;
+      expect(last).toBe(429);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("answers 503 with db false when the database is unreachable", async () => {
     const app = await createTestApp({
       config: { DATABASE_URL: "postgresql://cuencada:cuencada@127.0.0.1:1/cuencada_test" }
@@ -217,6 +240,45 @@ describe("POST /api/auth/login", () => {
       payload: { email: "otra@example.test", password: "wrong-password" }
     });
     expect(otherEmail.statusCode).toBe(401);
+  });
+});
+
+describe("login rate limits across emails and IPs", () => {
+  let app: App | undefined;
+
+  afterEach(async () => {
+    await app?.close();
+  });
+
+  async function attempt(instance: App, email: string, forwardedFor?: string): Promise<number> {
+    const response = await instance.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      payload: { email, password: "wrong-password" },
+      ...(forwardedFor === undefined ? {} : { headers: { "x-forwarded-for": forwardedFor } })
+    });
+    return response.statusCode;
+  }
+
+  it("caps one IP spraying many emails at 20 per window", async () => {
+    app = await createTestApp();
+    const statuses: number[] = [];
+    for (let index = 0; index < 21; index += 1) statuses.push(await attempt(app, `rociada${index}@example.test`));
+
+    expect(statuses.slice(0, 20).every((status) => status === 401)).toBe(true);
+    expect(statuses[20]).toBe(429);
+  });
+
+  it("caps one email attacked from many IPs at 10 per window", async () => {
+    app = await createTestApp({ config: { TRUST_PROXY: ["loopback"] } });
+    const statuses: number[] = [];
+    for (let index = 0; index < 11; index += 1) {
+      statuses.push(await attempt(app, "objetivo@example.test", `203.0.113.${index + 1}`));
+    }
+
+    expect(statuses.slice(0, 10).every((status) => status === 401)).toBe(true);
+    expect(statuses[10]).toBe(429);
+    expect(await attempt(app, "otra@example.test", "203.0.113.200")).toBe(401);
   });
 });
 

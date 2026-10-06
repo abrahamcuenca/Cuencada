@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { allowedOrigins, ConfigError, loadConfig } from "./config.js";
 
 const DEV_ENV = {
+  NODE_ENV: "development",
   DATABASE_URL: "postgresql://u:p@127.0.0.1:5432/db",
   JWT_SECRET: "dev-secret-sixteen+"
 };
@@ -28,6 +29,15 @@ function problemsOf(env: NodeJS.ProcessEnv): string[] {
 }
 
 describe("loadConfig", () => {
+  it("requires NODE_ENV instead of defaulting to development", () => {
+    const { NODE_ENV: _omitted, ...withoutNodeEnv } = DEV_ENV;
+
+    expect(problemsOf(withoutNodeEnv)).toEqual(["NODE_ENV: is required: development, test or production"]);
+    expect(problemsOf({ ...DEV_ENV, NODE_ENV: "staging" })).toEqual([
+      "NODE_ENV: is required: development, test or production"
+    ]);
+  });
+
   it("applies development defaults", () => {
     const config = loadConfig(DEV_ENV);
 

@@ -11,8 +11,9 @@
  * normalized and hashed, so the limiter's memory holds no PII.
  */
 import { createHash } from "node:crypto";
-import type { RateLimitOptions } from "@fastify/rate-limit";
-import type { FastifyRequest } from "fastify";
+import type { CreateRateLimitOptions, RateLimitOptions } from "@fastify/rate-limit";
+import type { FastifyReply, FastifyRequest } from "fastify";
+import { AppError } from "./errors.js";
 
 /** How many requests per window. `timeWindow` is ms or a string like `"15 minutes"`. */
 export interface RateLimitWindow {
@@ -63,7 +64,8 @@ export function rateLimitByIp(window: RateLimitWindow): RateLimitOptions {
 /**
  * Limit by client IP + the `email` field in the JSON body (login, magic link,
  * password reset). Runs in `preHandler`, after body validation, so the email
- * is available.
+ * is available. Requests rejected by validation (malformed bodies) never
+ * reach it and are bounded only by the global per-IP limit.
  *
  * @param window - Max requests per time window.
  */
@@ -87,5 +89,80 @@ export function rateLimitByEmail(window: RateLimitWindow): RateLimitOptions {
     ...window,
     hook: "preHandler",
     keyGenerator: (request) => `email:${emailKeyPart(bodyEmail(request))}`
+  };
+}
+
+/** Windows for credential endpoints (login; reuse for magic-link/reset/change-password in T1). */
+export interface CredentialRateLimits {
+  /** Same IP + same email (brute force on one account from one place). */
+  ipAndEmail: RateLimitWindow;
+  /** Same IP across all emails (password spraying). */
+  ip: RateLimitWindow;
+  /** Same email across all IPs (distributed attack on one account). */
+  email: RateLimitWindow;
+}
+
+/** Default credential limits: 10 per IP+email, 20 per IP, 10 per email, each per 15 minutes. */
+export const LOGIN_RATE_LIMITS: CredentialRateLimits = {
+  ipAndEmail: { max: 10, timeWindow: "15 minutes" },
+  ip: { max: 20, timeWindow: "15 minutes" },
+  email: { max: 10, timeWindow: "15 minutes" }
+};
+
+/** Result of a `createRateLimit()` check (the fields we use). */
+type RateLimitCheck = { isAllowed: true } | { isAllowed: false; isExceeded: boolean; ttlInSeconds: number };
+
+/** What {@link credentialRateLimits} needs from the app: `@fastify/rate-limit`'s `createRateLimit()` decorator. */
+export interface RateLimitFactory {
+  createRateLimit(options?: CreateRateLimitOptions): (request: FastifyRequest) => Promise<RateLimitCheck>;
+}
+
+/** A `preHandler` hook that enforces one extra limiter. */
+export type RateLimitHook = (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+
+/**
+ * Turn a limiter into a hook. `@fastify/rate-limit`'s own `app.rateLimit()`
+ * hooks mark the request as limited and skip every later limiter, so several
+ * caps on one route must use `createRateLimit()` like this. Add the hook to a
+ * route's `preHandler` (alongside its `config.rateLimit`).
+ *
+ * @param factory - The Fastify instance.
+ * @param options - Window plus a `keyGenerator` with a prefix unique to this cap.
+ */
+export function extraRateLimitHook(factory: RateLimitFactory, options: CreateRateLimitOptions): RateLimitHook {
+  const check = factory.createRateLimit(options);
+  return async (request, reply) => {
+    const result = await check(request);
+    if (!result.isAllowed && result.isExceeded) {
+      void reply.header("retry-after", String(result.ttlInSeconds));
+      throw new AppError("RATE_LIMITED");
+    }
+  };
+}
+
+/**
+ * Route options for a credential endpoint: the IP+email limiter as the
+ * route's `config.rateLimit`, plus `preHandler` hooks for the per-IP cap
+ * (password spraying) and the per-email cap across IPs (distributed attacks).
+ * Each call creates its own counters, so call it once per route.
+ *
+ * ```ts
+ * const limits = credentialRateLimits(app);
+ * app.post("/auth/login", { config: { auth: "public", rateLimit: limits.rateLimit }, preHandler: limits.preHandler, schema }, handler);
+ * ```
+ *
+ * @param app - The Fastify instance (`createRateLimit` comes from `@fastify/rate-limit`).
+ * @param limits - Windows; defaults to {@link LOGIN_RATE_LIMITS}.
+ */
+export function credentialRateLimits(
+  app: RateLimitFactory,
+  limits: CredentialRateLimits = LOGIN_RATE_LIMITS
+): { rateLimit: RateLimitOptions; preHandler: RateLimitHook[] } {
+  return {
+    rateLimit: rateLimitByIpAndEmail(limits.ipAndEmail),
+    preHandler: [
+      extraRateLimitHook(app, { ...limits.ip, keyGenerator: (request) => `credential-${ipKey(request)}` }),
+      extraRateLimitHook(app, { ...limits.email, keyGenerator: (request) => `credential-email:${emailKeyPart(bodyEmail(request))}` })
+    ]
   };
 }

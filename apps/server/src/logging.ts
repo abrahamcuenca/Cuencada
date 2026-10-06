@@ -1,8 +1,13 @@
 /**
  * Pino logger options with redaction [SEC].
  *
- * - Credentials in headers (`authorization`, `cookie`, `set-cookie`) and any
- *   `token`/`password`/`ticket`-like field are replaced with `[REDACTED]`.
+ * - Every logged object is scrubbed recursively (any depth, case-insensitive):
+ *   keys containing `token`, `password`, `ticket`, `secret`, `authorization`,
+ *   `cookie`, `hash`, `apikey` or `credential` are replaced with `[REDACTED]`.
+ * - Errors go through {@link serializeError}: database errors keep only the
+ *   SQL text and the Postgres code/constraint/table/column/schema, never the
+ *   bound parameters (`params`, `detail`, `where`), which carry emails,
+ *   password hashes and token hashes.
  * - The request serializer logs a scrubbed URL: sensitive query parameters
  *   (the chat WebSocket `ticket`, any `token`) are redacted, so the one token
  *   that travels in a URL never reaches the logs.
@@ -15,6 +20,175 @@ export const REDACTED = "[REDACTED]";
 
 /** Query parameters whose values are always redacted from logged URLs. */
 const SENSITIVE_QUERY_PARAMS = new Set(["ticket", "token", "t", "code", "key", "signature", "x-amz-signature"]);
+/** Query parameter name prefixes that are always redacted (`ticket[]`, `token_x`, …). */
+const SENSITIVE_QUERY_PREFIXES = ["ticket", "token"];
+
+/** Object keys whose values never reach the logs (case-insensitive, substring). */
+export const SENSITIVE_LOG_KEY = /token|password|passwd|ticket|secret|authorization|cookie|hash|api[-_]?key|credential/i;
+
+const MAX_SCRUB_DEPTH = 32;
+
+function isPlainObject(value: object): boolean {
+  const proto: unknown = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * Deep-copy a value, replacing the value of every sensitive key (see
+ * {@link SENSITIVE_LOG_KEY}) with `[REDACTED]`. Errors are serialized with
+ * {@link serializeError}; non-plain objects (class instances, buffers) are
+ * reduced to their type name so nothing unexpected is walked or dumped.
+ *
+ * @param value - Anything about to be logged.
+ */
+export function scrubForLog(value: unknown): unknown {
+  return scrubValue(value, 0, new WeakSet());
+}
+
+function scrubValue(value: unknown, depth: number, seen: WeakSet<object>): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (value instanceof Error) return serializeErrorInner(value, depth, seen);
+  if (value instanceof Date) return value;
+  if (seen.has(value)) return "[Circular]";
+  if (depth >= MAX_SCRUB_DEPTH) return "[TRUNCATED]";
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((item) => scrubValue(item, depth + 1, seen));
+  if (!isPlainObject(value)) return `[${value.constructor?.name ?? "Object"}]`;
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    result[key] = SENSITIVE_LOG_KEY.test(key) ? REDACTED : scrubValue(item, depth + 1, seen);
+  }
+  return result;
+}
+
+/** The Postgres error fields that are safe to log (no values). */
+const SAFE_PG_FIELDS = {
+  code: "code",
+  constraint_name: "constraint",
+  table_name: "table",
+  column_name: "column",
+  schema_name: "schema",
+  routine: "routine",
+  severity: "severity"
+} as const;
+
+/** Own properties that are never copied from an error (they can embed bound values). */
+const UNSAFE_ERROR_KEYS = new Set([
+  "message",
+  "stack",
+  "name",
+  "cause",
+  "params",
+  "parameters",
+  "args",
+  "detail",
+  "where",
+  "hint",
+  "internal_query",
+  "query",
+  "types"
+]);
+
+/** A database error: Drizzle's `DrizzleQueryError` or a postgres-js `PostgresError`. */
+function isDatabaseError(error: Error): boolean {
+  const record = error as unknown as Record<string, unknown>; // reading optional properties of an Error for detection
+  return (
+    error.name === "DrizzleQueryError" ||
+    error.constructor?.name === "DrizzleQueryError" ||
+    error.name === "PostgresError" ||
+    (typeof record.query === "string" && ("params" in record || "parameters" in record))
+  );
+}
+
+function stackFrames(stack: string | undefined): string {
+  if (stack === undefined) return "";
+  return stack
+    .split("\n")
+    .filter((line) => line.trimStart().startsWith("at "))
+    .join("\n");
+}
+
+/** Shape of a serialized error (what Fastify's logger types expect). */
+export type SerializedError = { [key: string]: unknown; type: string; message: string; stack: string };
+
+function serializeDatabaseError(error: Error): SerializedError {
+  const record = error as unknown as Record<string, unknown>; // reading optional properties of an Error
+  const cause = record.cause;
+  const pgSource: Record<string, unknown> =
+    error.name === "PostgresError"
+      ? record
+      : typeof cause === "object" && cause !== null
+        ? (cause as Record<string, unknown>) // the postgres-js error Drizzle wraps
+        : {};
+  const query =
+    typeof record.query === "string" ? record.query : typeof pgSource.query === "string" ? pgSource.query : undefined;
+  const result: SerializedError = {
+    type: error.constructor?.name ?? error.name,
+    // Only the SQL text with $n placeholders; the values are never logged.
+    message: query === undefined ? "database error" : `Failed query: ${query}`,
+    // Stack frames only: the first line of a Drizzle stack repeats the message with params.
+    stack: stackFrames(error.stack)
+  };
+  for (const [source, target] of Object.entries(SAFE_PG_FIELDS)) {
+    const value = pgSource[source];
+    if (typeof value === "string") result[target] = value;
+  }
+  return result;
+}
+
+function serializeErrorInner(error: Error, depth: number, seen: WeakSet<object>): SerializedError {
+  if (seen.has(error)) return { type: error.name, message: "[Circular]", stack: "" };
+  seen.add(error);
+  if (isDatabaseError(error)) return serializeDatabaseError(error);
+
+  const result: SerializedError = {
+    type: error.constructor?.name ?? error.name,
+    message: error.message,
+    stack: `${error.name}: ${error.message}\n${stackFrames(error.stack)}`
+  };
+  for (const [key, value] of Object.entries(error)) {
+    if (UNSAFE_ERROR_KEYS.has(key)) continue;
+    result[key] = SENSITIVE_LOG_KEY.test(key) ? REDACTED : scrubValue(value, depth + 1, seen);
+  }
+  const cause: unknown = error.cause;
+  if (cause !== undefined && depth < MAX_SCRUB_DEPTH) {
+    result.cause = cause instanceof Error ? serializeErrorInner(cause, depth + 1, seen) : scrubValue(cause, depth + 1, seen);
+  }
+  return result;
+}
+
+/**
+ * Pino `err` serializer. Database errors keep only `{ type, message: <SQL
+ * without params>, code, constraint, table, column, schema, routine,
+ * severity, stack frames }`. Other errors keep `type`, `message`, `stack`
+ * and their own properties with sensitive keys redacted at any depth, plus
+ * a serialized `cause`.
+ *
+ * @param error - Usually an `Error`; anything else is scrubbed as data.
+ */
+export function serializeError(error: unknown): SerializedError {
+  if (error instanceof Error) return serializeErrorInner(error, 0, new WeakSet());
+  return { type: typeof error, message: "non-error value thrown", stack: "", value: scrubForLog(error) };
+}
+
+/** Keys whose values Fastify passes raw and dedicated serializers handle. */
+const SERIALIZED_KEYS = new Set(["req", "res", "err", "error"]);
+
+/**
+ * Pino `formatters.log`: scrub every key of the merging object except the
+ * ones handled by serializers (`req`, `res`, `err`, `error`).
+ *
+ * @param object - The object passed to `log.info(object, msg)`.
+ */
+export function scrubLogObject(object: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(object)) {
+    if (SENSITIVE_LOG_KEY.test(key)) result[key] = REDACTED;
+    else if (SERIALIZED_KEYS.has(key)) result[key] = value;
+    else result[key] = scrubForLog(value);
+  }
+  return result;
+}
 
 /** Field names redacted wherever they appear (top level and two levels deep). */
 const SENSITIVE_FIELDS = [
@@ -69,7 +243,9 @@ export function scrubUrl(rawUrl: string): string {
         // Undecodable name: redact the whole pair rather than risk leaking it.
         return REDACTED;
       }
-      return SENSITIVE_QUERY_PARAMS.has(name) ? `${rawName}=${REDACTED}` : pair;
+      const sensitive =
+        SENSITIVE_QUERY_PARAMS.has(name) || SENSITIVE_QUERY_PREFIXES.some((prefix) => name.startsWith(prefix));
+      return sensitive ? `${rawName}=${REDACTED}` : pair;
     })
     .join("&");
   return `${path}?${scrubbed}`;
@@ -123,7 +299,8 @@ export function loggerOptions(
   const base = {
     level: config.LOG_LEVEL,
     redact: { paths: REDACT_PATHS, censor: REDACTED },
-    serializers: { req: serializeRequest }
+    serializers: { req: serializeRequest, err: serializeError, error: serializeError },
+    formatters: { log: scrubLogObject }
   };
   if (overrides.stream !== undefined) return { ...base, stream: overrides.stream };
   if (config.NODE_ENV === "development") {

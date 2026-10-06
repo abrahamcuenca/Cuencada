@@ -19,7 +19,7 @@ import { sessions, users } from "../../db/schema/index.js";
 import { recordAudit } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
 import { hashPassword, needsRehash, verifyDummyPassword, verifyPassword } from "../../lib/passwords.js";
-import { rateLimitByIp, rateLimitByIpAndEmail } from "../../lib/rateLimit.js";
+import { credentialRateLimits, rateLimitByIp, rateLimitByIpAndEmail } from "../../lib/rateLimit.js";
 import { accessTokenSettings, signAccessToken } from "../../lib/tokens.js";
 import { authUser } from "../../plugins/auth.js";
 
@@ -29,11 +29,13 @@ const USER_AGENT_MAX = 512;
 /** Auth routes under `/api`. */
 const authModule: FastifyPluginAsyncZod = async (app) => {
   const tokenSettings = accessTokenSettings(app.config);
+  const loginLimits = credentialRateLimits(app);
 
   app.post(
     "/auth/login",
     {
-      config: { auth: "public", rateLimit: rateLimitByIpAndEmail({ max: 10, timeWindow: "15 minutes" }) },
+      config: { auth: "public", rateLimit: loginLimits.rateLimit },
+      preHandler: loginLimits.preHandler,
       schema: { body: loginInputSchema }
     },
     async (request) => {
