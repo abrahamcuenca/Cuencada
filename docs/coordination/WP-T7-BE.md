@@ -104,7 +104,7 @@ location = /api/chat/ws {
 
 ## Requests (→ orchestrator)
 1. Resolved: T5-BE merged before hand-off, so sender avatars use `avatarUrlFor(app, key, AvatarSize.Small)` from `modules/profile` (64 px; the interim copy is gone).
-2. **T1 follow-up:** call `closeSocketsForSession(app, sessionId)` after logout / revoke-others / password change, and `closeSocketsForUser(app, userId)` after logout-all, from `modules/auth` (not owned here).
+2. Resolved (authorized cross-module edit, `modules/auth/**`): `auth/chatSockets.ts#closeChatSockets` runs **after commit** and is non-fatal (logs the error name; the 5-minute re-check is the backstop). Logout, revoke-one, revoke-others and refresh-token reuse close the revoked session ids; logout-all, change-password and password-reset confirm close every socket of the user (the new session from change-password has no socket yet, since its token has not been sent). Tests: `auth/chatSockets.test.ts` (logout keeps the other session's socket, logout-all, revoke-one/others, change-password + the new session can connect, reset confirm).
 3. **T8 follow-up:** replace the `TODO(T7)` placeholder (`closeChatSockets()`) in the admin module with `closeSocketsForUser(app, userId)` on disable / revoke sessions / force reset, plus a test that an open socket closes. T8 was not on `origin/main` when this WP finished.
 4. **T7-FE:** reconnect with backoff on any close except `4010` (re-auth first) and `1008` (new ticket; on 401 refresh/log in). Track unread with `lastMessage`/`unreadCount`; show `999+` at the cap. Keep under 60 frames / 10 s and do not burst more than 32 frames.
 5. **Optional:** `MemberCuencadaDetails.chatRoomId` (WP-T2-BE request 4) if T7-FE wants to deep-link from an edition page.
