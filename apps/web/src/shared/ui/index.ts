@@ -18,7 +18,7 @@ export {
 } from "./Button";
 export { Card, type CardProps } from "./Card";
 export { Checkbox, Switch, type ToggleProps } from "./Checkbox";
-export { Countdown, getCountdown, type CountdownParts, type CountdownPhase, type CountdownProps } from "./Countdown";
+export { Countdown, type CountdownPhase, type CountdownProps } from "./Countdown";
 export { Dialog, type DialogProps } from "./Dialog";
 export { EmptyState, type EmptyStateProps } from "./EmptyState";
 export { Field, type FieldControlProps, type FieldProps } from "./Field";

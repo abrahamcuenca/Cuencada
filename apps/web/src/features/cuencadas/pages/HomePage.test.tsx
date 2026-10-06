@@ -1,4 +1,4 @@
-import { configure, screen, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -19,19 +19,12 @@ const server = setupServer(
   )
 );
 
-// Lazy route chunks can take over a second on a loaded CI machine.
-beforeAll(() => {
-  configure({ asyncUtilTimeout: 5000 });
-  server.listen({ onUnhandledRequest: "error" });
-});
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   server.resetHandlers();
   vi.useRealTimers();
 });
-afterAll(() => {
-  configure({ asyncUtilTimeout: 1000 });
-  server.close();
-});
+afterAll(() => server.close());
 
 describe("HomePage", () => {
   it("shows memories mode for a past edition: thanks, gallery link and past editions", async () => {

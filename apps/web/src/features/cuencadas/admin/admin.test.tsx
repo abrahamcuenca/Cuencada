@@ -1,4 +1,4 @@
-import { configure, fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
@@ -32,19 +32,12 @@ const server = setupServer(
   })
 );
 
-// Lazy route chunks can take over a second on a loaded CI machine.
-beforeAll(() => {
-  configure({ asyncUtilTimeout: 5000 });
-  server.listen({ onUnhandledRequest: "error" });
-});
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   server.resetHandlers();
   requests.length = 0;
 });
-afterAll(() => {
-  configure({ asyncUtilTimeout: 1000 });
-  server.close();
-});
+afterAll(() => server.close());
 
 const admin = (): ReturnType<typeof authenticatedState> => authenticatedState(makeUser({ role: "admin" }));
 

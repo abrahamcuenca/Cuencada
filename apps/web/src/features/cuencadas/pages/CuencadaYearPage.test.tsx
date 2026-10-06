@@ -1,4 +1,4 @@
-import { configure, screen, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -17,19 +17,12 @@ const server = setupServer(
   http.get(apiUrl("/cuencadas/1999"), () => HttpResponse.json(errorBody("NOT_FOUND", "No encontramos esa Cuencada."), { status: 404 }))
 );
 
-// Lazy route chunks can take over a second on a loaded CI machine.
-beforeAll(() => {
-  configure({ asyncUtilTimeout: 5000 });
-  server.listen({ onUnhandledRequest: "error" });
-});
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   server.resetHandlers();
   memberRequests = 0;
 });
-afterAll(() => {
-  configure({ asyncUtilTimeout: 1000 });
-  server.close();
-});
+afterAll(() => server.close());
 
 /** Intl uses narrow no-break spaces in times; normalise for readable assertions. */
 function plain(value: string | null): string {

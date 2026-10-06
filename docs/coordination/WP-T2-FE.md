@@ -95,7 +95,7 @@ Owner: Frontend · Reviewers: TL, Sec · Branch: wp/t2-fe-cuencadas · PR: # (no
   - `testing/fixtures.ts` (contract-shaped 2026 fixtures for tests and screenshots; test-only)
 
 ## Decisions
-- **Members endpoint is `/cuencadas/:year/members`**, per the WP-0.2 table and the `MemberCuencadaDetails` JSDoc. The dispatch brief said `/details`; the contract wins. T2-BE, please confirm.
+- **Members endpoint is `/cuencadas/:year/members`**, per the WP-0.2 table and the `MemberCuencadaDetails` JSDoc. Confirmed by the orchestrator; T2-BE is aligned.
 - **Tags are derived.** `ItineraryItem` has no tags field, so the badges come from `locationName` (📍), a missing `startTime` ("Horario por confirmar") and `visibility: members` ("Solo familia"). See R1.
 - **Announcement bodies are plain text.** `https://` links are made clickable by `LinkifiedText`, the only "markup" (the seed puts the "Ver letra oficial"/"Ver programa completo" links in bodies). No HTML from the API is ever interpreted.
 - **Links are not rewritten.** Legacy production links are rendered exactly as the API returns them, but only if they are `https:` (defence in depth, `safeHttpsUrl`). Song and hero paths also accept `/images/…` and `/canciones/…`.
@@ -150,4 +150,10 @@ Owner: Frontend · Reviewers: TL, Sec · Branch: wp/t2-fe-cuencadas · PR: # (no
 - **320 px check:** `scrollWidth === clientWidth` on all 5 pages, and no element extends past the viewport outside a scroll container.
 
 ## Review log
+- 2026-10-06, follow-up commit (cross-boundary changes authorized by the orchestrator):
+  - **R5 done:** `AppLayout`'s "Programa" (TopNav and BottomNav) links to `/cuencada/{featured.year ?? latestPast.year}` from the same cached `useGetCuencadaHomeQuery` the Home page uses, so there is one shared request. It falls back to `/` while loading or when there is no edition (briefly sharing the active state with Inicio on `/`). `BOTTOM_NAV_ITEMS` became `bottomNavItems(programaPath)`. `AppLayout.test.tsx` now stubs the home query and covers the featured, latest-past and fallback cases.
+  - **R6 done:** `shared/ui/Countdown` computes with `computeCountdown` from `shared/lib/dates.ts`. The duplicate `getCountdown` and the `CountdownParts` type are deleted, along with their barrel exports. The phase tests moved to component tests (start instant is live, no end stays live, end instant is past, epoch-ms input).
+  - **R10 done:** `apps/web/test/setup.ts` sets `configure({ asyncUtilTimeout: 5000 })`. My per-file overrides are removed.
+  - **Note for other tracks:** every page now issues `GET /cuencadas/home` from the layout. Test files with `onUnhandledRequest: "error"` and no handler for it log "[MSW] Error … GET /api/cuencadas/home" (25 occurrences, all tests passing). Add `http.get(apiUrl("/cuencadas/home"), () => HttpResponse.json(makeMemoriesHome()))` to silence it.
+  - Initial JS is 166.88 KB gzip (was 166.52), because `cuencadas/api.ts` is now in the layout chunk.
 - 2026-10-06: Clima redesigned twice at the orchestrator's request: script injection → sandboxed same-origin page → direct weatherwidget.io frame with the postMessage config. The Security L6 clamp is 150–250 px.
