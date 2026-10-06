@@ -18,8 +18,50 @@ export interface OverflowResult {
   /** `window.innerWidth`: above `clientWidth` when the browser zoomed out to fit wider content. */
   innerWidth: number;
   culprits: GateFinding[];
+  /** Fixed elements (and their children) that pass the viewport, reported apart from in-flow culprits. */
+  fixedCulprits: GateFinding[];
   /** The worst overflow seen while the page loaded (see {@link recordTransientOverflow}), or null. */
-  transient: { scrollWidth: number; clientWidth: number; atMs: number; culprits: GateFinding[] } | null;
+  transient: {
+    scrollWidth: number;
+    clientWidth: number;
+    atMs: number;
+    culprits: GateFinding[];
+    fixedCulprits: GateFinding[];
+    /** Viewport and load state at that moment. */
+    state: string;
+  } | null;
+}
+
+/**
+ * In-page finder for `position: fixed` elements (or their descendants) that
+ * pass the viewport. They are not counted as the cause of document overflow
+ * but are listed, so an overflowing fixed bar can never hide.
+ */
+function findFixedCulprits(): { element: string; detail: string }[] {
+  const clientWidth = document.documentElement.clientWidth;
+  const fixedRoot = (element: Element): Element | null => {
+    for (let node: Element | null = element; node !== null && node !== document.body; node = node.parentElement) {
+      if (getComputedStyle(node).position === "fixed") return node;
+    }
+    return null;
+  };
+  const found: { element: string; detail: string }[] = [];
+  for (const element of Array.from(document.body.querySelectorAll("*"))) {
+    if (found.length >= 8) break;
+    const rect = element.getBoundingClientRect();
+    if (rect.width === 0 || (rect.right <= clientWidth + 0.5 && rect.left >= -0.5)) continue;
+    const root = fixedRoot(element);
+    if (root === null) continue;
+    const cls = typeof element.className === "string" && element.className !== "" ? `.${element.className.split(" ")[0]}` : "";
+    const rootCls = typeof root.className === "string" && root.className !== "" ? `.${root.className.split(" ")[0]}` : "";
+    const style = getComputedStyle(element);
+    const text = (element.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 30);
+    found.push({
+      element: `${element.tagName.toLowerCase()}${cls}`,
+      detail: `left=${rect.left.toFixed(1)}px right=${rect.right.toFixed(1)}px width=${rect.width.toFixed(1)}px minWidth=${style.minWidth} in=${root.tagName.toLowerCase()}${rootCls} text="${text}"`
+    });
+  }
+  return found;
 }
 
 /**
@@ -69,14 +111,24 @@ function findOverflowCulprits(): { element: string; detail: string }[] {
 export async function recordTransientOverflow(context: BrowserContext): Promise<void> {
   await context.addInitScript(`(() => {
     const find = ${findOverflowCulprits.toString()};
+    const findFixed = ${findFixedCulprits.toString()};
     const start = performance.now();
     window.__e2eOverflow = null;
     const tick = () => {
       const root = document.documentElement;
-      if (root && document.body && root.scrollWidth > root.clientWidth) {
+      if (root && document.body && (root.scrollWidth > root.clientWidth || window.innerWidth > root.clientWidth)) {
         const worst = window.__e2eOverflow;
         if (worst === null || root.scrollWidth > worst.scrollWidth) {
-          window.__e2eOverflow = { scrollWidth: root.scrollWidth, clientWidth: root.clientWidth, atMs: Math.round(performance.now() - start), culprits: find() };
+          const vv = window.visualViewport;
+          window.__e2eOverflow = {
+            scrollWidth: root.scrollWidth,
+            clientWidth: root.clientWidth,
+            atMs: Math.round(performance.now() - start),
+            culprits: find(),
+            fixedCulprits: findFixed(),
+            state: "innerWidth=" + window.innerWidth + " vv=" + (vv ? vv.width.toFixed(1) + "@" + vv.scale.toFixed(4) : "none") +
+              " readyState=" + document.readyState + " sheets=" + document.styleSheets.length + " fonts=" + document.fonts.status
+          };
         }
       }
       if (performance.now() - start < 15000) requestAnimationFrame(tick);
@@ -89,12 +141,15 @@ export async function recordTransientOverflow(context: BrowserContext): Promise<
 export async function horizontalOverflow(page: Page): Promise<OverflowResult> {
   const now = await page.evaluate(`(() => {
     const find = ${findOverflowCulprits.toString()};
+    const findFixed = ${findFixedCulprits.toString()};
     const root = document.documentElement;
+    const over = root.scrollWidth > root.clientWidth || window.innerWidth > root.clientWidth;
     return {
       scrollWidth: root.scrollWidth,
       clientWidth: root.clientWidth,
       innerWidth: window.innerWidth,
-      culprits: root.scrollWidth > root.clientWidth || window.innerWidth > root.clientWidth ? find() : [],
+      culprits: over ? find() : [],
+      fixedCulprits: findFixed(),
       transient: window.__e2eOverflow ?? null
     };
   })()`);

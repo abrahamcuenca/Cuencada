@@ -138,6 +138,7 @@ function assertGates(results: RouteResult[]): void {
       overflow.clientWidth
     );
     expect.soft(overflow.transient, `${where}: horizontal overflow while the page loaded`).toBeNull();
+    expect.soft(overflow.fixedCulprits, `${where}: fixed elements wider than the screen`).toEqual([]);
     expect.soft(result.inputFonts, `${where}: form controls under 16px`).toEqual([]);
     expect.soft(result.targets.findings, `${where}: touch targets under 44px (${result.targets.sampled} sampled)`).toEqual([]);
     const serious = (result.axe ?? []).filter((violation) => violation.impact === "serious" || violation.impact === "critical");
@@ -177,6 +178,7 @@ test.describe("mobile quality gates", () => {
     await page.waitForTimeout(800);
     const overflow = await horizontalOverflow(page);
     expect(overflow.culprits.some((culprit) => culprit.element.startsWith("nav") || culprit.element === "a")).toBe(false);
+    expect(overflow.fixedCulprits.map((culprit) => culprit.element)).toContain("nav.bar");
     expect(overflow.transient?.culprits.map((culprit) => culprit.element)).toContain("div.transient");
   });
 
@@ -191,6 +193,26 @@ test.describe("mobile quality gates", () => {
     await recordTransientOverflow(page.context());
     await login(page, castMember(ProjectKey.Iphone, CastRole.Fede));
     assertGates(await checkRoutes(page, testInfo, MEMBER_ROUTES));
+  });
+
+  test("the bottom nav with a 99+ chat badge fits at 320 px", async ({ page }, testInfo) => {
+    await recordTransientOverflow(page.context());
+    await login(page, castMember(ProjectKey.Iphone, CastRole.Fede));
+    // Force the largest unread badge on the Chat tab (the server caps unread counts at 999).
+    await page.route("**/api/chat/rooms", async (route) => {
+      const response = await route.fetch();
+      const rooms: unknown = await response.json();
+      const patched = Array.isArray(rooms)
+        ? rooms.map((room: unknown) => (typeof room === "object" && room !== null ? { ...room, unreadCount: 999 } : room))
+        : rooms;
+      await route.fulfill({ response, json: patched });
+    });
+    const results = await checkRoutes(page, testInfo, [
+      { name: "directorio-badge", open: "/directorio", ready: "Directorio familiar" },
+      { name: "mas-badge", open: "/mas" }
+    ]);
+    await expect(page.getByRole("navigation", { name: "Navegación inferior" }).getByRole("link", { name: /Chat.*sin leer/ })).toBeVisible();
+    assertGates(results);
   });
 
   test("admin routes", async ({ page }, testInfo) => {

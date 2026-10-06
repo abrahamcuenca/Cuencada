@@ -136,6 +136,14 @@ Both live in `tests/e2e/harness/`, **outside `apps/server/src`**. They aren't co
   - **CI's DOM and CSS are fine:** the DOM snapshot from the CI trace (CI DOM and CSS, rendered locally at 320 px) lays out at exactly 320 (search bar 0–320, "Filtros" 209–304).
   - **Fonts match:** CI's DejaVu and Noto Color Emoji are the same package versions as local.
   - **Conclusion:** I couldn't reproduce or find the culprit, so I haven't guessed a product fix. The next CI run reports the transient culprits and the font fingerprint.
+  - **Follow-up, CI run 37521295809:**
+    - CI reported no in-flow culprits, either now or transiently. The overflow started at 125 ms and stayed (`innerWidth` 322).
+    - CI's font fingerprint is **identical** to local, which rules fonts out.
+    - The chat-badge hypothesis isn't confirmed locally: Fede with 30, 53 and 999 unread (nav badge "99+") still lays out at 320 on `/directorio`, `/perfil` and `/mas`.
+  - **Gate changes in response:**
+    - Fixed elements that pass the viewport are now reported **separately** (`fixedCulprits`, with width, `min-width` and the fixed ancestor) and asserted empty, both now and in the transient snapshot.
+    - The transient snapshot records `innerWidth`, the visual viewport width and scale, `readyState`, the stylesheet count and font status.
+    - A new gate test ("the bottom nav with a 99+ chat badge fits at 320 px") forces `unreadCount: 999` and checks `/directorio` and `/mas`.
 - **Touch targets ≥ 44 px:** every visible interactive element is sampled (3–38 per route), 0 failures. The exemptions follow WCAG 2.5.8:
   - links inline in a sentence
   - the off-screen skip link
