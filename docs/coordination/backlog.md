@@ -36,7 +36,7 @@ family, profile, admin, chat, media, cuencadas) · **0.8c** web features
 | WP-0.8a: AGENTS.md rules (fictional fixtures, no PII in Error messages, explicit git paths, WP-prefixed scratch files, merge main + full suite before merge) | WP-0.8a |
 | WP-0.8a: privacy sweep forward (wireframes, StyleGuide, test helpers, server/types tests outside `features/**`); StyleGuide uses generated placeholder photos and a placeholder WhatsApp link | WP-0.8a |
 | WP-0.8a: Vitest 4.1.11 (tinypool/vitest advisories), esbuild override for drizzle-kit; full `pnpm audit` clean | WP-0.8a |
-| WP-0.8a: flaky tests: web `testTimeout` 15 s / `hookTimeout` 30 s, `maxWorkers` 50 %, admin "two admins demote each other" 3 rounds / 60 s, `warmRoutes()` for lazy pages (CuencadaYearPage) | WP-0.8a |
+| WP-0.8a: flaky tests: web `testTimeout` 15 s / `hookTimeout` 30 s, `maxWorkers` 50 %, admin "two admins demote each other" (root cause: the legitimate 401 interleaving, now accepted; 3 rounds / 60 s), `warmRoutes()` for lazy pages (CuencadaYearPage) | WP-0.8a |
 | WP-0.8a: Toast never evicts an action toast, clears evicted timers; Badge `max` ("999+"); BottomNav "Programa" fits at 320 px | WP-0.8a |
 | WP-0.8a: emails Container `width="600"`, Button no-VML JSDoc, LICENSE title + repo URL, test script `--config` | WP-0.8a |
 
