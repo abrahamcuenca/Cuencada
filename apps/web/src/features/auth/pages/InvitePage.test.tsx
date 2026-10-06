@@ -42,9 +42,9 @@ describe("InvitePage", () => {
   it("shows who invited the user and only the masked email", async () => {
     openInvite();
 
-    expect(await screen.findByText(/Jorge Cuenca te invitó/)).toBeInTheDocument();
+    expect(await screen.findByText(/Jorge Ejemplo te invitó/)).toBeInTheDocument();
     expect(screen.getAllByText(/t\*\*\*@e\*\*\*\.com/)).toHaveLength(1);
-    expect(screen.getByLabelText("Nombre completo")).toHaveValue("Lupe Cuenca");
+    expect(screen.getByLabelText("Nombre completo")).toHaveValue("Lupe Ejemplo");
     expect(screen.getByLabelText("Correo electrónico")).toHaveValue("");
     expect(screen.queryByText(/tia\.lupe@example\.com/)).not.toBeInTheDocument();
   });
@@ -62,7 +62,7 @@ describe("InvitePage", () => {
     await fillForm({ email: "Tia.Lupe@example.com" });
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/"));
-    expect(accepted).toHaveBeenCalledWith({ token: FRAGMENT_TOKEN, email: "tia.lupe@example.com", displayName: "Lupe Cuenca", password: PASSWORD });
+    expect(accepted).toHaveBeenCalledWith({ token: FRAGMENT_TOKEN, email: "tia.lupe@example.com", displayName: "Lupe Ejemplo", password: PASSWORD });
     expect(store.getState().auth.accessToken).toBe("token-invitacion");
     expect(await screen.findByText("¡Bienvenida/o a la familia!")).toBeInTheDocument();
     window.history.replaceState(null, "", "/invitacion");
@@ -178,9 +178,9 @@ describe("InvitePage", () => {
         return tokenResponse();
       })
     );
-    const { store } = openInvite(makeInvite(), authenticatedState(makeUser({ displayName: "Rosa Cuenca" }), "token-A"));
+    const { store } = openInvite(makeInvite(), authenticatedState(makeUser({ displayName: "Rosa Ejemplo" }), "token-A"));
 
-    expect(await screen.findByText(/Ya tienes la sesión abierta como/)).toHaveTextContent("Rosa Cuenca");
+    expect(await screen.findByText(/Ya tienes la sesión abierta como/)).toHaveTextContent("Rosa Ejemplo");
     expect(screen.queryByRole("button", { name: "Crear mi cuenta" })).not.toBeInTheDocument();
     expect(accepted).not.toHaveBeenCalled();
     expect(store.getState().auth.accessToken).toBe("token-A");
@@ -188,7 +188,7 @@ describe("InvitePage", () => {
 
   it("shows the accept form after the user logs out from the interstitial", async () => {
     server.use(http.post(apiUrl("/auth/logout"), () => new HttpResponse(null, { status: 204 })));
-    const { store } = openInvite(makeInvite(), authenticatedState(makeUser({ displayName: "Rosa Cuenca" })));
+    const { store } = openInvite(makeInvite(), authenticatedState(makeUser({ displayName: "Rosa Ejemplo" })));
 
     await userEvent.click(await screen.findByRole("button", { name: "Cerrar sesión y continuar" }));
 

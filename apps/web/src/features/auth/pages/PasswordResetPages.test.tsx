@@ -107,9 +107,9 @@ describe("ResetPasswordPage", () => {
         return noContent();
       })
     );
-    const { store, router } = openReset(authenticatedState(makeUser({ displayName: "Rosa Cuenca" })));
+    const { store, router } = openReset(authenticatedState(makeUser({ displayName: "Rosa Ejemplo" })));
 
-    expect(await screen.findByText(/Ya tienes la sesión abierta como/)).toHaveTextContent("Rosa Cuenca");
+    expect(await screen.findByText(/Ya tienes la sesión abierta como/)).toHaveTextContent("Rosa Ejemplo");
     expect(screen.queryByLabelText("Nueva contraseña")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Cerrar sesión y continuar" }));
     await waitFor(() => expect(store.getState().auth.status).toBe("anonymous"));
@@ -120,9 +120,9 @@ describe("ResetPasswordPage", () => {
   });
 
   it("keeps the session and discards the reset link on Seguir como", async () => {
-    const { store, router } = openReset(authenticatedState(makeUser({ displayName: "Rosa Cuenca" })));
+    const { store, router } = openReset(authenticatedState(makeUser({ displayName: "Rosa Ejemplo" })));
 
-    await userEvent.click(await screen.findByRole("button", { name: "Seguir como Rosa Cuenca" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Seguir como Rosa Ejemplo" }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/"));
     expect(store.getState().auth.status).toBe("authenticated");
