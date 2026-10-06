@@ -320,7 +320,7 @@ describe("DELETE /api/admin/relationships/:id", () => {
 });
 
 describe("logging", () => {
-  it("never writes people's names to the logs, including on errors", async () => {
+  it("never writes people's names to the logs, including on errors and search URLs", async () => {
     const secretName = "Zacarías Quintanilla";
     const user = await createUser();
     const created = await app.inject({
@@ -334,8 +334,15 @@ describe("logging", () => {
     // A conflicting link (DB unique) and a CHECK failure both go through error paths.
     await app.inject({ method: "POST", url: "/api/admin/people", payload: { fullName: secretName, userId: user.id }, ...adminAuth });
     await app.inject({ method: "PATCH", url: `/api/admin/people/${person.id}`, payload: { fullName: secretName, deathYear: 2000 }, ...adminAuth });
+    const search = await app.inject({
+      method: "GET",
+      url: `/api/family/people?q=${encodeURIComponent("Zacarías Quintanilla")}`,
+      ...memberAuth
+    });
+    expect(search.statusCode).toBe(200);
     await app.inject({ method: "DELETE", url: `/api/admin/people/${person.id}`, ...adminAuth });
 
+    expect(logLines.some((line) => line.includes("/api/family/people?q=[REDACTED]"))).toBe(true);
     expect(logLines.length).toBeGreaterThan(0);
     const output = logLines.join("\n");
     expect(output).not.toContain("Zaca");
