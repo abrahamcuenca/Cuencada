@@ -32,7 +32,7 @@ describe("directoryEntrySchema", () => {
   it("rejects null contact fields: they must be absent when hidden", () => {
     const base = { userId, personId: null, displayName: "Ana", fullName: "Ana", familyBranch: null, avatarUrl: null, bio: null };
     expect(directoryEntrySchema.safeParse({ ...base, phone: null }).success).toBe(false);
-    expect(directoryEntrySchema.safeParse({ ...base, phone: "+52 999 123 4567" }).success).toBe(true);
+    expect(directoryEntrySchema.safeParse({ ...base, phone: "+52 555 010 0101" }).success).toBe(true);
   });
 });
 
@@ -46,7 +46,7 @@ describe("toDirectoryEntry", () => {
     avatarUrl: null,
     bio: null,
     email: "ana@familia.mx",
-    phone: "+52 999 123 4567",
+    phone: "+52 555 010 0101",
     city: null,
     visibility: { showEmail: false, showPhone: true, showCity: true }
   };
@@ -61,7 +61,7 @@ describe("toDirectoryEntry", () => {
       familyBranch: null,
       avatarUrl: null,
       bio: null,
-      phone: "+52 999 123 4567"
+      phone: "+52 555 010 0101"
     });
     expect("email" in entry).toBe(false);
     expect("city" in entry).toBe(false);
