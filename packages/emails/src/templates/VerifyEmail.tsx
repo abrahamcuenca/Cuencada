@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import { EmailLayout } from "../components/EmailLayout.js";
-import type { EmailContent } from "../content.js";
+import { type EmailContent, FOOTER_IGNORE } from "../content.js";
 import {
   type EmailRenderOptions,
   type ResolvedEmailOptions,
@@ -42,11 +42,20 @@ export function buildVerifyContent(
     heading: "Confirma tu correo",
     greeting: name === null ? "¡Hola!" : `¡Hola, ${name}!`,
     paragraphs: [
-      "Para terminar de configurar tu cuenta en el portal de la Cuencada, confirma que este correo es tuyo.",
+      {
+        id: "intro",
+        text: "Para terminar de configurar tu cuenta en el portal de la Cuencada, confirma que este correo es tuyo.",
+      },
     ],
     cta: { label: "Confirmar mi correo", url },
-    notes: [`El enlace funciona una sola vez y vence en ${ttl}.`],
+    notes: [
+      {
+        id: "expiry",
+        text: `El enlace funciona una sola vez y vence en ${ttl}.`,
+      },
+    ],
     warning: null,
+    footerNote: FOOTER_IGNORE,
   };
 }
 

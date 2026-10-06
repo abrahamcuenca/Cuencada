@@ -1,6 +1,6 @@
 import type { ReactElement } from "react";
 import { EmailLayout } from "../components/EmailLayout.js";
-import type { EmailContent } from "../content.js";
+import { type EmailContent, FOOTER_IGNORE } from "../content.js";
 import {
   type EmailRenderOptions,
   type ResolvedEmailOptions,
@@ -41,14 +41,24 @@ export function buildMagicLinkContent(
     heading: "Tu enlace para entrar",
     greeting: name === null ? "¡Hola!" : `¡Hola, ${name}!`,
     paragraphs: [
-      "Pediste entrar al portal de la Cuencada sin contraseña. Toca el botón para iniciar sesión.",
+      {
+        id: "intro",
+        text: "Pediste entrar al portal de la Cuencada sin contraseña. Toca el botón para iniciar sesión.",
+      },
     ],
     cta: { label: "Entrar a la Cuencada", url },
     notes: [
-      `El enlace funciona una sola vez y vence en ${ttl}.`,
-      "Si no lo pediste tú, no tienes que hacer nada: tu cuenta sigue segura.",
+      {
+        id: "expiry",
+        text: `El enlace funciona una sola vez y vence en ${ttl}.`,
+      },
+      {
+        id: "not-you",
+        text: "Si no lo pediste tú, no tienes que hacer nada: tu cuenta sigue segura.",
+      },
     ],
     warning: null,
+    footerNote: FOOTER_IGNORE,
   };
 }
 
