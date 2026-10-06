@@ -1,0 +1,32 @@
+/* Loading, error, 404 and offline states for the Cuencada pages. Mobile-first. */
+.state {
+  padding-block: var(--space-section);
+}
+
+.skeleton {
+  display: grid;
+  gap: var(--space-6);
+  padding-bottom: var(--space-section);
+}
+
+.skeletonHero {
+  border-radius: 0;
+}
+
+.skeletonBody {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-6);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-soft);
+  color: var(--color-text);
+}

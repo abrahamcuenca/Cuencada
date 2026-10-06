@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { selectCurrentUser, selectIsAdmin, selectIsOffline, selectLogoutPending } from "../features/auth/authSlice";
 import { logout } from "../features/auth/session";
+import { useGetCuencadaHomeQuery } from "../features/cuencadas/api";
 // Direct imports (not the shared/ui barrel) keep unused primitives' CSS out of the initial chunk.
 import { BottomNav } from "../shared/ui/BottomNav";
 import { Button } from "../shared/ui/Button";
@@ -11,8 +12,8 @@ import { TopNav } from "../shared/ui/TopNav";
 import { useAppDispatch, useAppSelector } from "./hooks";
 import styles from "./layout.module.css";
 
-// TODO(T2): point "Programa" at the current Cuencada from `GET /api/cuencadas/home`.
-const PROGRAMA_PATH = "/cuencada/2026";
+/** "Programa" before the home query answers (or when there is no edition yet). */
+export const PROGRAMA_FALLBACK_PATH = "/";
 /** Mobile "Más" menu (Directorio, Árbol, Perfil, Sesiones, Admin, Cerrar sesión). */
 export const MORE_PATH = "/mas";
 
@@ -22,22 +23,42 @@ export const LOGOUT_PENDING_NOTICE =
 /** Shown while a refresh cannot reach the server. */
 export const OFFLINE_NOTICE = "Sin conexión. Reintentaremos al volver la conexión.";
 
-/** Mobile tab bar destinations (Inicio, Programa, Fotos, Chat, Más). */
-export const BOTTOM_NAV_ITEMS: readonly NavItem[] = [
-  { key: "inicio", label: "Inicio", href: "/", icon: "🏠", end: true },
-  { key: "programa", label: "Programa", href: PROGRAMA_PATH, icon: "📅" },
-  { key: "fotos", label: "Fotos", href: "/galeria", icon: "📸" },
-  { key: "chat", label: "Chat", href: "/chat", icon: "💬" },
-  { key: "mas", label: "Más", href: MORE_PATH, icon: "☰" }
-];
+/**
+ * Mobile tab bar destinations (Inicio, Programa, Fotos, Chat, Más).
+ *
+ * @param programaPath - `/cuencada/{year}` of the current or latest edition.
+ * @returns The five BottomNav items.
+ */
+export function bottomNavItems(programaPath: string): readonly NavItem[] {
+  return [
+    { key: "inicio", label: "Inicio", href: "/", icon: "🏠", end: true },
+    { key: "programa", label: "Programa", href: programaPath, icon: "📅" },
+    { key: "fotos", label: "Fotos", href: "/galeria", icon: "📸" },
+    { key: "chat", label: "Chat", href: "/chat", icon: "💬" },
+    { key: "mas", label: "Más", href: MORE_PATH, icon: "☰" }
+  ];
+}
 
-const TOP_NAV_ITEMS: readonly NavItem[] = [
-  { key: "programa", label: "Programa", href: PROGRAMA_PATH },
-  { key: "galeria", label: "Galería", href: "/galeria" },
-  { key: "directorio", label: "Directorio", href: "/directorio" },
-  { key: "arbol", label: "Árbol", href: "/arbol" },
-  { key: "chat", label: "Chat", href: "/chat" }
-];
+function topNavItems(programaPath: string): NavItem[] {
+  return [
+    { key: "programa", label: "Programa", href: programaPath },
+    { key: "galeria", label: "Galería", href: "/galeria" },
+    { key: "directorio", label: "Directorio", href: "/directorio" },
+    { key: "arbol", label: "Árbol", href: "/arbol" },
+    { key: "chat", label: "Chat", href: "/chat" }
+  ];
+}
+
+/**
+ * The "Programa" destination: the featured (upcoming/live) edition, else the
+ * latest past one, from the same cached `GET /cuencadas/home` the Home page
+ * uses (one shared request). `/` while it loads or when there is none.
+ */
+function useProgramaPath(): string {
+  const { data } = useGetCuencadaHomeQuery();
+  const year = data?.featured?.year ?? data?.latestPast?.year;
+  return year === undefined ? PROGRAMA_FALLBACK_PATH : `/cuencada/${year}`;
+}
 
 const ADMIN_NAV_ITEM: NavItem = { key: "admin", label: "Admin", href: "/admin" };
 
@@ -94,7 +115,8 @@ export function AppLayout(): ReactNode {
   const { pathname } = useLocation();
   const isAdmin = useAppSelector(selectIsAdmin);
   const showBanner = useAppSelector((state) => selectIsOffline(state) || selectLogoutPending(state));
-  const topItems = isAdmin ? [...TOP_NAV_ITEMS, ADMIN_NAV_ITEM] : TOP_NAV_ITEMS;
+  const programaPath = useProgramaPath();
+  const topItems = isAdmin ? [...topNavItems(programaPath), ADMIN_NAV_ITEM] : topNavItems(programaPath);
 
   return (
     <PageShell
@@ -111,7 +133,7 @@ export function AppLayout(): ReactNode {
       }
       bottomNav={
         <BottomNav
-          items={BOTTOM_NAV_ITEMS}
+          items={bottomNavItems(programaPath)}
           currentPath={pathname}
           renderLink={renderRouterLink}
           label="Navegación inferior"

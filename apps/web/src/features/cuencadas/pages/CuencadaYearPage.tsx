@@ -1,62 +1,200 @@
-import { Link, useParams } from "react-router-dom";
+import { type PublicCuencada, yearParamSchema } from "@cuencada/types";
+import { type ReactNode, useEffect } from "react";
+import { useLocation, useParams } from "react-router-dom";
 import { useAppSelector } from "../../../app/hooks";
-// TODO(T2): replace the hardcoded 2026 data with `GET /api/cuencadas/:year` and delete src/data/cuencada2026.ts.
-import { cuencada2026 } from "../../../data/cuencada2026";
-import { selectCurrentUser } from "../../auth/authSlice";
+import { isFetchBaseQueryError } from "../../../shared/api/errors";
+import { Button } from "../../../shared/ui/Button";
+import { Countdown } from "../../../shared/ui/Countdown";
+import { selectAuthStatus, selectCurrentUser, selectPasswordChangeRequired } from "../../auth/authSlice";
+import { useGetCuencadaMembersQuery, useGetCuencadaQuery } from "../api";
+import { AnnouncementList } from "../components/AnnouncementList";
+import { CuencadaHero } from "../components/CuencadaHero";
+import { CuencadaNotFound, LoadErrorState, OfflineNotice, PageSkeleton } from "../components/PageStates";
+import { DailyMessageCard } from "../components/DailyMessageCard";
+import { LocationCards } from "../components/LocationCards";
+import { MembersBlock, type MembersBlockState } from "../components/MembersBlock";
+import { ProgramaTimeline } from "../components/ProgramaTimeline";
+import { Section } from "../components/Section";
+import { SongPlayer } from "../components/SongPlayer";
+import { forecastUrl, WeatherWidget } from "../components/WeatherWidget";
+import styles from "../components/content.module.css";
+import { useNow } from "../hooks/useNow";
+import { formatKicker, messageForToday, safeAssetUrl } from "../lib/format";
 
-export function CuencadaYearPage(): React.ReactNode {
-  const { year } = useParams();
-  const user = useAppSelector(selectCurrentUser);
+/**
+ * Parses the `:year` route param with the contract schema.
+ *
+ * @param raw - The URL segment.
+ * @returns The year, or `null` when it is not a valid year.
+ */
+function parseYear(raw: string | undefined): number | null {
+  const parsed = yearParamSchema.safeParse({ year: raw });
+  return parsed.success ? parsed.data.year : null;
+}
 
-  if (year !== "2026") {
-    return <section className="shell"><h1>No encontramos esa Cuencada</h1><p>Por ahora los eventos anteriores se capturarán manualmente desde administración.</p></section>;
+/**
+ * `/cuencada/:year`: the partially public edition page, ported from the
+ * legacy `index.html` (hero, mensaje del día, programa, ¿dónde estamos?,
+ * clima, canción) plus the members-only block.
+ *
+ * Offline: the public response is cached by the PWA (T9). When a refetch
+ * fails, RTK Query keeps the last data, so the page keeps rendering it with a
+ * "Sin conexión" note instead of an error.
+ */
+export function CuencadaYearPage(): ReactNode {
+  const year = parseYear(useParams().year);
+  const query = useGetCuencadaQuery(year ?? 0, { skip: year === null });
+  const members = useMembersState(year);
+
+  if (year === null) return <CuencadaNotFound />;
+  if (query.data === undefined) {
+    if (query.error === undefined) return <PageSkeleton />;
+    if (isFetchBaseQueryError(query.error) && query.error.status === 404) return <CuencadaNotFound />;
+    return <LoadErrorState error={query.error} onRetry={() => void query.refetch()} />;
   }
 
   return (
+    <CuencadaYearContent
+      cuencada={query.data}
+      members={members}
+      stale={query.error !== undefined}
+      onRetry={() => void query.refetch()}
+    />
+  );
+}
+
+/** Decides what the members block shows from the session and the members query. */
+function useMembersState(year: number | null): MembersBlockState {
+  const status = useAppSelector(selectAuthStatus);
+  const user = useAppSelector(selectCurrentUser);
+  const mustChange = useAppSelector(selectPasswordChangeRequired);
+  const isMember = status === "authenticated" && user !== null && !mustChange;
+  const query = useGetCuencadaMembersQuery(year ?? 0, { skip: !isMember || year === null });
+
+  if (status === "idle" || status === "restoring") return { kind: "checking" };
+  if (!isMember) return { kind: "anonymous" };
+  if (query.data !== undefined) return { kind: "member", details: query.data };
+  if (query.error !== undefined) {
+    const offline = isFetchBaseQueryError(query.error) && query.error.status === "FETCH_ERROR";
+    return { kind: "unavailable", offline, retry: () => void query.refetch() };
+  }
+  return { kind: "loading" };
+}
+
+/** Scrolls to `#programa` (etc.) once the content exists, e.g. after "Ver programa" on Home. */
+function useScrollToHash(ready: boolean): void {
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (!ready || hash.length < 2) return;
+    document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView();
+  }, [ready, hash]);
+}
+
+interface ContentProps {
+  cuencada: PublicCuencada;
+  members: MembersBlockState;
+  stale: boolean;
+  onRetry: () => void;
+}
+
+function CuencadaYearContent({ cuencada, members, stale, onRetry }: ContentProps): ReactNode {
+  const now = useNow(cuencada.endsAt);
+  useScrollToHash(true);
+  const details = members.kind === "member" ? members.details : null;
+  // Members get every item (public + members-only); visitors only the public ones.
+  const itinerary = details?.itinerary ?? cuencada.publicItinerary;
+  const locations = details?.locations ?? cuencada.publicLocations;
+  const todayMessage = messageForToday(cuencada.todayMessage, now, cuencada.timezone);
+  const weatherUrl = forecastUrl(cuencada.weatherWidgetUrl);
+  const songUrl = safeAssetUrl(cuencada.songUrl);
+
+  const sectionLinks = [
+    { id: "programa", label: "Programa" },
+    { id: "lugares", label: "Lugares" },
+    ...(weatherUrl ? [{ id: "clima", label: "Clima" }] : []),
+    ...(songUrl ? [{ id: "cancion", label: "Canción" }] : []),
+    { id: "familia", label: "Familia" }
+  ];
+
+  return (
     <>
-      <section className="hero event-hero">
-        <div className="hero-inner compact">
-          <p className="kicker">Mérida · Yucatán · 13-18 septiembre 2026</p>
-          <h1>{cuencada2026.title}</h1>
-          <p className="hero-copy">{cuencada2026.description}</p>
-          <div className="actions">
-            <a className="btn primary" href="#programa">📅 Ver programa</a>
-            {user ? <Link className="btn light" to="/galeria">📸 Subir fotos</Link> : <Link className="btn light" to="/entrar">✅ Iniciar sesión para RSVP</Link>}
-            <a className="btn ghost" href="#mapa">🗺️ Ver lugares</a>
-          </div>
+      <CuencadaHero
+        kicker={formatKicker(cuencada)}
+        titleStyle="page"
+        title={cuencada.title}
+        lead={cuencada.description}
+        imageUrl={safeAssetUrl(cuencada.heroImageUrl)}
+        actions={
+          <>
+            <Button href="#programa" surface="dark" icon="📅">
+              Ver programa
+            </Button>
+            <Button href="#lugares" variant="secondary" surface="dark" icon="🗺️">
+              Ver lugares
+            </Button>
+          </>
+        }
+      >
+        <Countdown
+          target={new Date(cuencada.startsAt)}
+          end={new Date(cuencada.endsAt)}
+          now={now}
+          pastMessage={`La Cuencada ${cuencada.year} en ${cuencada.city} ya es parte de nuestra historia. ¡Gracias por acompañarnos!`}
+        />
+      </CuencadaHero>
+
+      <div className="cu-container">
+        {stale ? <OfflineNotice onRetry={onRetry} /> : null}
+        {todayMessage ? <DailyMessageCard message={todayMessage} timeZone={cuencada.timezone} /> : null}
+        <nav aria-label="Secciones de la Cuencada" className={styles.sectionNav}>
+          <ul className={styles.sectionNavList}>
+            {sectionLinks.map((link) => (
+              <li key={link.id}>
+                <a className={styles.sectionNavLink} href={`#${link.id}`}>
+                  {link.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      </div>
+
+      {cuencada.publicAnnouncements.length > 0 ? (
+        <Section id="avisos" icon="📣" title="Avisos">
+          <AnnouncementList announcements={cuencada.publicAnnouncements} timeZone={cuencada.timezone} />
+        </Section>
+      ) : null}
+
+      <Section id="programa" icon="📅" title={`Programa ${cuencada.title}`}>
+        <ProgramaTimeline items={itinerary} timeZone={cuencada.timezone} />
+      </Section>
+
+      <Section id="lugares" icon="🗺️" title="¿Dónde estamos?" intro="Accesos rápidos a hoteles y lugares del recorrido.">
+        <LocationCards locations={locations} />
+      </Section>
+
+      {weatherUrl || songUrl ? (
+        <div className={`cu-container ${styles.media}`}>
+          {weatherUrl ? (
+            <section id="clima" aria-labelledby="clima-titulo" className={styles.section}>
+              <h2 id="clima-titulo" className={styles.sectionTitle}>
+                <span aria-hidden="true">🌤️ </span>Clima en {cuencada.city}
+              </h2>
+              <WeatherWidget href={weatherUrl} city={cuencada.city} state={cuencada.state} />
+            </section>
+          ) : null}
+          {songUrl ? (
+            <section id="cancion" aria-labelledby="cancion-titulo" className={styles.section}>
+              <h2 id="cancion-titulo" className={styles.sectionTitle}>
+                <span aria-hidden="true">🎵 </span>Nuestra canción
+              </h2>
+              <SongPlayer src={songUrl} title={cuencada.title} />
+            </section>
+          ) : null}
         </div>
-      </section>
+      ) : null}
 
-      <section className="shell locked-grid">
-        <article className="card"><div className="icon">🌤️</div><h3>Información pública</h3><p>Fechas, ciudad, hoteles base, mapas y programa general están disponibles para todos.</p></article>
-        <article className="card"><div className="icon">🔒</div><h3>Solo miembros</h3><p>Fotos, asistentes, RSVP, chat, árbol familiar y directorio requieren cuenta familiar.</p></article>
-        <article className="card"><div className="icon">🎵</div><h3>Nuestra canción</h3><p>La canción oficial se conservará dentro del portal.</p><audio controls src="/canciones/Cancion_Oficial.mp3"><track kind="captions" src="/canciones/Cancion_Oficial.vtt" srcLang="es" label="Español" /></audio></article>
-      </section>
-
-      <section id="programa" className="shell">
-        <h2 className="section-title">📅 Programa Cuencada 2026</h2>
-        <p className="intro">Del domingo 13 al viernes 18 de septiembre.</p>
-        <div className="timeline">
-          {cuencada2026.publicItinerary.map((item) => (
-            <article className="day" key={item.id}>
-              <div className="date">{new Date(`${item.date}T12:00:00`).toLocaleDateString("es-MX", { day: "numeric" })}<span>{new Date(`${item.date}T12:00:00`).toLocaleDateString("es-MX", { weekday: "long" })}</span></div>
-              <div><h3>{item.title}</h3><p>{item.description}</p><div className="tags"><span className="tag">{item.startTime ?? "Horario por confirmar"}</span>{item.locationName ? <span className="tag">📍 {item.locationName}</span> : null}</div></div>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="shell attendee-strip">
-        <p className="kicker">Familia que asistirá</p>
-        {user ? <div className="avatar-row"><span>AC</span><span>JC</span><span>MC</span><span>LC</span><span>FC</span></div> : <p>Inicia sesión para ver RSVPs y fotos circulares de quienes asistirán.</p>}
-      </section>
-
-      <section id="mapa" className="shell">
-        <h2 className="section-title">🗺️ Lugares principales</h2>
-        <div className="mapgrid">
-          {cuencada2026.publicLocations.map((location) => <article className="mapcard" key={location.id}><h3>{location.name}</h3><p>{location.kind === "hotel" ? "Hotel base de la Cuencada." : "Lugar importante del recorrido."}</p>{location.url ? <a href={location.url} target="_blank" rel="noreferrer">Abrir enlace →</a> : null}</article>)}
-        </div>
-      </section>
+      <MembersBlock year={cuencada.year} timeZone={cuencada.timezone} state={members} />
     </>
   );
 }

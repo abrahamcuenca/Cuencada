@@ -1,45 +1,27 @@
 import type { ReactNode } from "react";
 import styles from "./Countdown.module.css";
+import { type Countdown as CountdownTime, computeCountdown } from "../lib/dates";
 import { cx } from "./cx";
 
 /** Phase of an edition relative to `now`. */
 export type CountdownPhase = "upcoming" | "live" | "past";
 
-/** Result of {@link getCountdown}. */
-export interface CountdownParts {
-  phase: CountdownPhase;
-  days: number;
-  hours: number;
-  minutes: number;
-  seconds: number;
-}
-
 type Instant = Date | number;
 
-const toMs = (value: Instant): number => (typeof value === "number" ? value : value.getTime());
+const toDate = (value: Instant): Date => (typeof value === "number" ? new Date(value) : value);
 
 /**
- * Splits the time between `now` and `target` into días/horas/minutos/segundos.
+ * Phase and remaining time, built on `computeCountdown` (the single countdown
+ * implementation, `shared/lib/dates.ts`).
  * - `upcoming` while now < target
  * - `live` from target until `end` (or forever when `end` is omitted)
  * - `past` once now ≥ end
- * Pure: the caller owns the clock (pass a ticking `now` from a hook).
  */
-export function getCountdown(target: Instant, now: Instant, end?: Instant): CountdownParts {
-  const nowMs = toMs(now);
-  const diff = toMs(target) - nowMs;
-  if (diff <= 0) {
-    const phase: CountdownPhase = end !== undefined && nowMs >= toMs(end) ? "past" : "live";
-    return { phase, days: 0, hours: 0, minutes: 0, seconds: 0 };
-  }
-  const totalSeconds = Math.floor(diff / 1000);
-  return {
-    phase: "upcoming",
-    days: Math.floor(totalSeconds / 86_400),
-    hours: Math.floor((totalSeconds % 86_400) / 3_600),
-    minutes: Math.floor((totalSeconds % 3_600) / 60),
-    seconds: totalSeconds % 60
-  };
+function countdownState(target: Instant, now: Instant, end: Instant | undefined): { phase: CountdownPhase; remaining: CountdownTime } {
+  const remaining = computeCountdown(toDate(target), toDate(now));
+  if (!remaining.isPast) return { phase: "upcoming", remaining };
+  const over = end !== undefined && computeCountdown(toDate(end), toDate(now)).isPast;
+  return { phase: over ? "past" : "live", remaining };
 }
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
@@ -76,10 +58,10 @@ export function Countdown({
   surface = "dark",
   className
 }: CountdownProps): React.ReactNode {
-  const parts = getCountdown(target, now, end);
+  const { phase, remaining: parts } = countdownState(target, now, end);
   const rootClass = cx(styles.countdown, styles[surface], className);
 
-  if (parts.phase === "live") {
+  if (phase === "live") {
     return (
       <div className={cx(rootClass, styles.message, styles.live)} data-phase="live">
         <span aria-hidden="true">🎉</span> <strong>{liveMessage}</strong> <span aria-hidden="true">🎉</span>
@@ -87,7 +69,7 @@ export function Countdown({
     );
   }
 
-  if (parts.phase === "past") {
+  if (phase === "past") {
     return (
       <div className={cx(rootClass, styles.message, styles.past)} data-phase="past">
         <span aria-hidden="true">💛</span> <span>{pastMessage}</span>
