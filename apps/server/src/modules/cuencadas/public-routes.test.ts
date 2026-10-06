@@ -211,7 +211,7 @@ describe("GET /api/cuencadas/:year/members", () => {
       dailyMessagesFile: DEFAULT_DAILY_MESSAGES_FILE,
       links: { ...LEGACY_DEV_LINKS }
     });
-    const member = await createUser();
+    const member = await createUser({ emailVerified: true });
     // Seeded announcements publish at the DB's real now(); read after it.
     clock.set(new Date(Date.now() + 60_000).toISOString());
 
@@ -237,7 +237,7 @@ describe("GET /api/cuencadas/:year/members", () => {
     await insertItineraryItem(edition.id, { title: "Cena secreta", visibility: "members" });
     await insertLocation(edition.id, { name: "Casa privada", visibility: "members" });
     await insertAnnouncement({ cuencadaId: edition.id, title: "Aviso de miembros", visibility: "members" });
-    const member = await createUser();
+    const member = await createUser({ emailVerified: true });
 
     const response = await app.inject({ method: "GET", url: "/api/cuencadas/2026/members", ...(await loginAs(app, member)) });
 
@@ -248,9 +248,9 @@ describe("GET /api/cuencadas/:year/members", () => {
     expect(body.whatsappUrl).toBe("https://chat.whatsapp.com/SECRETO");
   });
 
-  it("answers 401 without a token, 403 before the password change, 404 for drafts and 400 for a bad year", async () => {
+  it("answers 401 without a token, 403 before the password change or with an unverified email, 404 for drafts and 400 for a bad year", async () => {
     await insertCuencada({ year: 2027, isPublished: false });
-    const member = await createUser();
+    const member = await createUser({ emailVerified: true });
     const pending = await createUser({ mustChangePassword: true });
     const auth = await loginAs(app, member);
 
@@ -258,10 +258,19 @@ describe("GET /api/cuencadas/:year/members", () => {
     const mustChange = await app.inject({ method: "GET", url: "/api/cuencadas/2027/members", ...(await loginAs(app, pending)) });
     const draft = await app.inject({ method: "GET", url: "/api/cuencadas/2027/members", ...auth });
     const invalid = await app.inject({ method: "GET", url: "/api/cuencadas/nope/members", ...auth });
+    // WP-2.3 L2 (owner decision): the WhatsApp/album links are verified-members-only.
+    const unverified = await app.inject({
+      method: "GET",
+      url: "/api/cuencadas/2026/members",
+      ...(await loginAs(app, await createUser({ emailVerified: false })))
+    });
 
     expect(anonymous.statusCode).toBe(401);
     expect(mustChange.statusCode).toBe(403);
     expect(draft.statusCode).toBe(404);
     expect(invalid.statusCode).toBe(400);
+    expect(unverified.statusCode).toBe(403);
+    expect(unverified.json<{ error: { code: string } }>().error.code).toBe("EMAIL_UNVERIFIED");
+    expect(unverified.body).not.toContain("whatsapp");
   });
 });

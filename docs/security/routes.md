@@ -85,9 +85,9 @@ Total: 99 routes (14 public, 38 user, 45 admin, 2 cookie).
 | GET | `/api/cuencadas` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
 | GET | `/api/cuencadas/:year` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
 | GET | `/api/cuencadas/:year/attendees` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/cuencadas/:year/media` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  | presigned GET URLs (1 h); unverified members allowed (see threat model) |
-| POST | `/api/cuencadas/:year/media/uploads` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/cuencadas/:year/members` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
+| GET | `/api/cuencadas/:year/media` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | presigned GET URLs (1 h); verified members only (WP-2.3 L2 owner decision) |
+| POST | `/api/cuencadas/:year/media/uploads` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
+| GET | `/api/cuencadas/:year/members` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | GET | `/api/cuencadas/:year/rsvp/me` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  | self-scoped (the caller's RSVP; no id in the path) |
 | PUT | `/api/cuencadas/:year/rsvp/me` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  | self-scoped |
 | GET | `/api/cuencadas/:year/rsvp/summary` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  | counts only, no names |
@@ -102,11 +102,11 @@ Total: 99 routes (14 public, 38 user, 45 admin, 2 cookie).
 | POST | `/api/invites/accept` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
 | POST | `/api/invites/inspect` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
 | GET | `/api/me` | user |  | yes | 401 | 2xx | 2xx | 2xx | 401 | 401 | 2xx |  |  |
-| DELETE | `/api/media/:id` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 404 | uploader or admin (404 for other members) |
-| GET | `/api/media/:id` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 404 | hidden/pending items only for the uploader and admins (404 otherwise) |
-| PATCH | `/api/media/:id` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 404 | uploader or admin (404 for other members) |
-| POST | `/api/media/:id/confirm` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 404 | uploader only (404 for others) |
-| POST | `/api/media/:id/report` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  | any member except the uploader (403 on own items) |
+| DELETE | `/api/media/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | uploader or admin (404 for other members) |
+| GET | `/api/media/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | hidden/pending items only for the uploader and admins (404 otherwise) |
+| PATCH | `/api/media/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | uploader or admin (404 for other members) |
+| POST | `/api/media/:id/confirm` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | uploader only (404 for others) |
+| POST | `/api/media/:id/report` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | any member except the uploader (403 on own items) |
 | GET | `/api/profile/me` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
 | PATCH | `/api/profile/me` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
 | DELETE | `/api/profile/me/avatar` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |

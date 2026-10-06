@@ -494,6 +494,7 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     method: "GET",
     url: "/api/cuencadas/:year/members",
     auth: "user",
+    requireVerifiedEmail: true,
     build: async (ctx) => json(`/api/cuencadas/${(await upcoming(ctx)).year}/members`)
   },
 
@@ -712,6 +713,7 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     method: "POST",
     url: "/api/cuencadas/:year/media/uploads",
     auth: "user",
+    requireVerifiedEmail: true,
     build: async (ctx) =>
       json(`/api/cuencadas/${(await upcoming(ctx)).year}/media/uploads`, {
         fileName: "foto.png",
@@ -723,6 +725,7 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     method: "POST",
     url: "/api/media/:id/confirm",
     auth: "user",
+    requireVerifiedEmail: true,
     owner: "uploader only (404 for others)",
     build: async (ctx) => json(`/api/media/${await pendingUpload(ctx, ctx.actor)}/confirm`),
     idor: {
@@ -734,13 +737,15 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     method: "GET",
     url: "/api/cuencadas/:year/media",
     auth: "user",
-    note: "presigned GET URLs (1 h); unverified members allowed (see threat model)",
+    requireVerifiedEmail: true,
+    note: "presigned GET URLs (1 h); verified members only (WP-2.3 L2 owner decision)",
     build: async (ctx) => json(`/api/cuencadas/${(await upcoming(ctx)).year}/media`)
   },
   {
     method: "GET",
     url: "/api/media/:id",
     auth: "user",
+    requireVerifiedEmail: true,
     owner: "hidden/pending items only for the uploader and admins (404 otherwise)",
     build: async (ctx) => json(`/api/media/${await readyMedia(ctx, ctx.other)}`),
     idor: {
@@ -752,6 +757,7 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     method: "PATCH",
     url: "/api/media/:id",
     auth: "user",
+    requireVerifiedEmail: true,
     owner: "uploader or admin (404 for other members)",
     build: async (ctx) => json(`/api/media/${await readyMedia(ctx, ctx.actor)}`, { caption: "Nueva" }),
     idor: {
@@ -763,6 +769,7 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     method: "DELETE",
     url: "/api/media/:id",
     auth: "user",
+    requireVerifiedEmail: true,
     owner: "uploader or admin (404 for other members)",
     build: async (ctx) => json(`/api/media/${await readyMedia(ctx, ctx.actor)}`),
     idor: {
@@ -774,6 +781,7 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     method: "POST",
     url: "/api/media/:id/report",
     auth: "user",
+    requireVerifiedEmail: true,
     owner: "any member except the uploader (403 on own items)",
     build: async (ctx) => json(`/api/media/${await readyMedia(ctx, ctx.other)}/report`, { reason: "other" })
   },
