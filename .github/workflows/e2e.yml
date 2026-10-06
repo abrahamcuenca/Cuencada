@@ -1,0 +1,99 @@
+name: E2E
+
+# Playwright journeys (iPhone 13 / Pixel 7 / desktop subset), mobile quality
+# gates (overflow, touch targets, input fonts, axe) and Lighthouse mobile
+# against the real API (built) + the e2e SPA build. See docs/coordination/WP-2.2.md.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Playwright journeys, mobile gates, Lighthouse
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cuencada
+          POSTGRES_PASSWORD: cuencada
+          POSTGRES_DB: cuencada_test
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U cuencada -d cuencada_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+
+    env:
+      # The harness drops and recreates this database on every start (loopback *_e2e only).
+      E2E_DATABASE_URL: postgresql://cuencada:cuencada@127.0.0.1:55432/cuencada_e2e
+      E2E_WORKERS: "2"
+
+    # Actions are pinned by commit SHA (tag in the trailing comment).
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        # Version comes from the "packageManager" field in package.json (pnpm 11).
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium for Playwright
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build the API and the e2e SPA
+        run: pnpm e2e:build
+
+      - name: Typecheck e2e sources
+        run: pnpm typecheck:e2e
+
+      - name: Journeys and mobile quality gates
+        run: pnpm e2e:run
+
+      - name: Lighthouse mobile (Home, year page, Fotos)
+        # Simulated throttling on shared runners can dip; the summary is uploaded either way.
+        continue-on-error: true
+        run: pnpm e2e:lighthouse
+
+      - name: Upload Lighthouse summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lighthouse-summary
+          path: test-results/e2e/**/lighthouse-summary.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload traces and screenshots
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-traces
+          path: |
+            test-results/e2e/
+            playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
