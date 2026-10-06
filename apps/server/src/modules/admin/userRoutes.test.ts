@@ -128,6 +128,20 @@ describe("GET /api/admin/users", () => {
     expect(await list("?status=disabled")).toEqual(["beto@example.test"]);
   });
 
+  it("filters by email verification with emailVerified=false|true", async () => {
+    await createUser({ email: "sin-verificar@example.test", emailVerified: false });
+    const list = async (query: string): Promise<string[]> => {
+      const response = await app.inject({ method: "GET", url: `/api/admin/users${query}`, ...admin.auth });
+      expect(response.statusCode, response.body).toBe(200);
+      return response.json<UserPage>().items.map((item) => item.email);
+    };
+
+    expect(await list("?emailVerified=false")).toEqual(["sin-verificar@example.test"]);
+    expect((await list("?emailVerified=true")).sort()).toEqual(["admin1@example.test", "ana@example.test"]);
+    const bad = await app.inject({ method: "GET", url: "/api/admin/users?emailVerified=no", ...admin.auth });
+    expect(bad.statusCode).toBe(400);
+  });
+
   it("pages with an opaque keyset cursor without gaps or duplicates", async () => {
     for (let index = 0; index < 5; index += 1) await createUser();
     const seen: string[] = [];
@@ -250,6 +264,38 @@ describe("PATCH /api/admin/users/:id", () => {
         { fields: ["role", "mustChangePassword"], role: { from: "admin", to: "member" }, adminAlertRecipients: 1, adminAlertExempt: true }
       ])
     );
+  });
+
+  it("allows at most 3 role/status changes on the same target per hour, across admins (429)", async () => {
+    const otherAdmin = await createMember({ role: "admin" });
+    const patchAs = async (actor: Member, payload: Record<string, unknown>) =>
+      app.inject({ method: "PATCH", url: `/api/admin/users/${member.user.id}`, payload, ...actor.auth });
+
+    expect((await patchAs(admin, { role: "admin" })).statusCode).toBe(200);
+    expect((await patchAs(otherAdmin, { role: "member" })).statusCode).toBe(200);
+    // A mustChangePassword-only change neither counts nor is blocked.
+    expect((await patchAs(admin, { mustChangePassword: true })).statusCode).toBe(200);
+    expect((await patchAs(admin, { status: "disabled" })).statusCode).toBe(200);
+
+    const blocked = await patchAs(otherAdmin, { status: "active" });
+    expect(blocked.statusCode).toBe(429);
+    expect(errorCode(blocked)).toBe("RATE_LIMITED");
+    expect(blocked.json<{ error: { message: string } }>().error.message).toContain("última hora");
+    const [row] = await getTestDb().select({ status: users.status }).from(users).where(eq(users.id, member.user.id));
+    expect(row?.status).toBe("disabled");
+    // Another target is unaffected.
+    const other = await createMember();
+    expect(
+      (await app.inject({ method: "PATCH", url: `/api/admin/users/${other.user.id}`, payload: { role: "admin" }, ...admin.auth }))
+        .statusCode
+    ).toBe(200);
+
+    // Once the changes are older than an hour, the target can change again.
+    await getTestDb()
+      .update(auditLogs)
+      .set({ createdAt: new Date(Date.now() - 61 * 60_000) })
+      .where(eq(auditLogs.entityId, member.user.id));
+    expect((await patchAs(otherAdmin, { status: "active" })).statusCode).toBe(200);
   });
 
   it("writes no audit row for a no-op patch", async () => {

@@ -3,7 +3,7 @@
  * API writes an audit entry via `recordAudit(tx, …)` in the same transaction.
  */
 import { z } from "zod";
-import { cursorQuerySchema, dateTimeSchema, idSchema } from "./common.js";
+import { cursorQuerySchema, dateTimeSchema, idSchema, queryBooleanSchema } from "./common.js";
 import { type UserRole, type UserStatus, userRoleSchema, userStatusSchema } from "./auth.js";
 
 /** Entity types that appear in the audit log. */
@@ -159,7 +159,9 @@ export const adminUserListItemSchema = z.object({
 export const adminUserListQuerySchema = cursorQuerySchema.extend({
   q: z.string().trim().max(100).exactOptional(),
   role: userRoleSchema.exactOptional(),
-  status: userStatusSchema.exactOptional()
+  status: userStatusSchema.exactOptional(),
+  /** `false`: only accounts whose email is not verified yet (`true`: only verified ones). */
+  emailVerified: queryBooleanSchema.exactOptional()
 });
 export type AdminUserListQuery = z.infer<typeof adminUserListQuerySchema>;
 export type AdminUserListQueryRequest = z.input<typeof adminUserListQuerySchema>;
@@ -284,7 +286,15 @@ export const auditLogEntrySchema = z.object({
   createdAt: dateTimeSchema
 }) satisfies z.ZodType<AuditLogEntry>;
 
-/** `GET /api/admin/audit-logs` query (newest first). */
+/**
+ * `GET /api/admin/audit-logs` query (newest first).
+ *
+ * The time range is **half-open**: `from` is inclusive (`created_at >= from`)
+ * and `to` is **exclusive** (`created_at < to`). For a "hasta" day filter,
+ * send the start of the following day in the portal timezone (i.e.
+ * `< hasta + 1 day`), not 23:59:59.999, so rows in the last millisecond
+ * (timestamps have microsecond precision) are not lost.
+ */
 export const auditLogQuerySchema = cursorQuerySchema
   .extend({
     actorUserId: idSchema.exactOptional(),

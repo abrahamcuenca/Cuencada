@@ -4,9 +4,9 @@
  * {@link lockAdminUserChanges}, so concurrent admin mutations serialize and
  * the "at least one active admin" rule cannot be raced.
  */
-import type { AdminUserListItem, UserRole, UserStatus } from "@cuencada/types";
-import { and, desc, eq, ilike, or, type SQL, sql } from "drizzle-orm";
-import { people, sessions, users } from "../../db/schema/index.js";
+import { type AdminUserListItem, AuditAction, AuditEntityType, type UserRole, type UserStatus } from "@cuencada/types";
+import { and, desc, eq, ilike, inArray, isNotNull, isNull, or, type SQL, sql } from "drizzle-orm";
+import { auditLogs, people, sessions, users } from "../../db/schema/index.js";
 import type { DbOrTx, Transaction } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
 import { escapeLike } from "../family/repository.js";
@@ -20,8 +20,17 @@ export const AdminUserMessages = {
   SelfChange: "No puedes cambiar tu propio rol ni desactivar tu propia cuenta.",
   LastAdmin: "Debe quedar al menos un administrador activo.",
   ActorNotAdmin: "Tu cuenta ya no tiene permisos de administración.",
-  SelfVerify: "No puedes verificar tu propio correo; usa el enlace de verificación que te enviamos."
+  SelfVerify: "No puedes verificar tu propio correo; usa el enlace de verificación que te enviamos.",
+  TargetChangeLimit:
+    "Esta cuenta ya cambió de rol o de estado varias veces en la última hora. Espera un rato antes de volver a cambiarla."
 } as const;
+
+/**
+ * Role/status changes allowed on the **same target** per rolling hour, by
+ * any admin (abuse limit: caps flip-flopping an account and the alert
+ * emails each admin-account change sends, including cap-exempt ones).
+ */
+export const TARGET_ROLE_STATUS_CHANGE_LIMIT = { max: 3, windowMinutes: 60 } as const;
 
 /** A user row plus the admin-only aggregates. */
 interface AdminUserRow {
@@ -46,6 +55,8 @@ export interface AdminUserListOptions {
   q?: string | undefined;
   role?: UserRole | undefined;
   status?: UserStatus | undefined;
+  /** `true`: only verified addresses; `false`: only unverified ones. */
+  emailVerified?: boolean | undefined;
   now: Date;
 }
 
@@ -132,6 +143,9 @@ export async function listAdminUsers(
   }
   if (options.role !== undefined) conditions.push(eq(users.role, options.role));
   if (options.status !== undefined) conditions.push(eq(users.status, options.status));
+  if (options.emailVerified !== undefined) {
+    conditions.push(options.emailVerified ? isNotNull(users.emailVerifiedAt) : isNull(users.emailVerifiedAt));
+  }
   if (options.cursor !== undefined) {
     const cursor = decodeCursor(options.cursor);
     conditions.push(
@@ -219,6 +233,33 @@ export async function lockTargetUser(tx: Transaction, actorId: string, targetId:
     .for("update");
   if (target === undefined) throw new AppError("NOT_FOUND");
   return target;
+}
+
+/**
+ * Role or status changes applied to `targetId` within the last
+ * {@link TARGET_ROLE_STATUS_CHANGE_LIMIT}`.windowMinutes`, counted from the
+ * audit log (`user.updated` / `user.disabled` / `user.enabled` rows whose
+ * `fields` include `role` or `status`; a `mustChangePassword`-only change
+ * does not count). Uses the database clock, like `audit_logs.created_at`.
+ * Call while holding {@link lockAdminUserChanges}, so the count cannot be raced.
+ *
+ * @param tx - Open transaction holding the admin-users lock.
+ * @param targetId - The account about to change.
+ */
+export async function countRecentRoleStatusChanges(tx: Transaction, targetId: string): Promise<number> {
+  const [row] = await tx
+    .select({ count: sql<number>`count(*)::int` })
+    .from(auditLogs)
+    .where(
+      and(
+        eq(auditLogs.entityType, AuditEntityType.User),
+        eq(auditLogs.entityId, targetId),
+        inArray(auditLogs.action, [AuditAction.UserUpdated, AuditAction.UserDisabled, AuditAction.UserEnabled]),
+        sql`${auditLogs.metadata} -> 'fields' ?| array['role', 'status']`,
+        sql`${auditLogs.createdAt} > now() - make_interval(mins => ${TARGET_ROLE_STATUS_CHANGE_LIMIT.windowMinutes}::int)`
+      )
+    );
+  return row?.count ?? 0;
 }
 
 /**

@@ -45,10 +45,12 @@ import { adminAlertMetadata, type AdminAlert, type AdminAlertPlan, planAdminAler
 import {
   AdminUserMessages,
   countOtherActiveAdmins,
+  countRecentRoleStatusChanges,
   getAdminUser,
   listAdminUsers,
   lockAdminUserChanges,
-  lockTargetUser
+  lockTargetUser,
+  TARGET_ROLE_STATUS_CHANGE_LIMIT
 } from "./users.js";
 
 /** Admin mutations allowed per admin (and per IP) per minute. */
@@ -147,8 +149,8 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: { querystring: adminUserListQuerySchema, response: { 200: pageSchema(adminUserListItemSchema), ...errorResponses } }
     },
     async (request): Promise<Page<AdminUserListItem>> => {
-      const { q, role, status, cursor, limit } = request.query;
-      return listAdminUsers(app.db, { q, role, status, cursor, limit, now: app.clock.now() });
+      const { q, role, status, emailVerified, cursor, limit } = request.query;
+      return listAdminUsers(app.db, { q, role, status, emailVerified, cursor, limit, now: app.clock.now() });
     }
   );
 
@@ -156,7 +158,9 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
    * `PATCH /api/admin/users/:id`: role, status and/or `mustChangePassword`.
    * Disabling revokes every session (`user_disabled`) and burns pending email
    * tokens. The caller cannot change their own role or status (403), and the
-   * last active admin cannot be demoted or disabled (409).
+   * last active admin cannot be demoted or disabled (409). At most
+   * {@link TARGET_ROLE_STATUS_CHANGE_LIMIT} role/status changes per target
+   * per hour, across all admins (429).
    */
   app.patch(
     "/admin/users/:id",
@@ -194,6 +198,12 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
           target.role === "admin" && target.status === "active" && (nextRole !== "admin" || nextStatus !== "active");
         if (losesAdmin && (await countOtherActiveAdmins(tx, target.id)) === 0) {
           throw new AppError("CONFLICT", AdminUserMessages.LastAdmin);
+        }
+        if (
+          (roleChanged || statusChanged) &&
+          (await countRecentRoleStatusChanges(tx, target.id)) >= TARGET_ROLE_STATUS_CHANGE_LIMIT.max
+        ) {
+          throw new AppError("RATE_LIMITED", AdminUserMessages.TargetChangeLimit);
         }
 
         const mustChangeChanged = input.mustChangePassword === true && !target.mustChangePassword;
@@ -309,6 +319,10 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
       const outcome = await app.db.transaction(async (tx): Promise<ForceResetOutcome> => {
         await lockAdminUserChanges(tx);
         const target = await lockTargetUser(tx, admin.id, targetId);
+        // Only the first reset (flag false → true) is a lock-out worth an
+        // always-sent alert; repeating it on an already-forced account counts
+        // against the daily alert cap like any other change (quota burn).
+        const flagFlipped = !target.mustChangePassword;
         await tx.update(users).set({ mustChangePassword: true }).where(eq(users.id, target.id));
         const revoked = await revokeSessions(tx, { userId: target.id }, "admin_revoked", now);
         const burned = await burnPendingEmailTokens(tx, target.id, now);
@@ -324,7 +338,13 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
             : null;
         const plan =
           target.role === "admin"
-            ? await planAdminAlert(app, tx, { actorId: admin.id, target, changes: ["password_reset_forced"], now })
+            ? await planAdminAlert(app, tx, {
+                actorId: admin.id,
+                target,
+                changes: ["password_reset_forced"],
+                now,
+                capExempt: flagFlipped
+              })
             : null;
         const auditId = await recordAudit(tx, {
           actorUserId: admin.id,
