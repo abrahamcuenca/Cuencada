@@ -2,7 +2,8 @@
  * Admin dashboard summary: every counter is computed in one SQL statement.
  */
 import { type AdminSummary, adminSummarySchema, apiErrorSchema } from "@cuencada/types";
-import { sql } from "drizzle-orm";
+import { type SQL, sql } from "drizzle-orm";
+import { cuencadaRsvps, cuencadas, invites, mediaItems, mediaReports, users } from "../../db/schema/index.js";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import type { DbOrTx } from "../../lib/audit.js";
@@ -40,35 +41,43 @@ const summaryRowSchema = z.object({
  */
 export async function loadAdminSummary(db: DbOrTx, now: Date): Promise<AdminSummary> {
   const at = now.toISOString();
+  // Table and column names come from the Drizzle schema, so a rename breaks the build, not production.
+  // `edition` is a CTE; its columns are referenced through the alias `e`.
+  const rsvpCount = (status: "yes" | "maybe" | "no"): SQL =>
+    sql`coalesce((select count(*) from ${cuencadaRsvps}
+      where ${cuencadaRsvps.cuencadaId} = e.id and ${cuencadaRsvps.status} = ${status}), 0)::int`;
   const result = await db.execute(sql`
     with edition as (
-      select id, year, title, starts_at from cuencadas
-      where is_published and ends_at > ${at}::timestamptz
-      order by starts_at asc, id asc
+      select ${cuencadas.id} as id, ${cuencadas.year} as year, ${cuencadas.title} as title, ${cuencadas.startsAt} as starts_at
+      from ${cuencadas}
+      where ${cuencadas.isPublished} and ${cuencadas.endsAt} > ${at}::timestamptz
+      order by ${cuencadas.startsAt} asc, ${cuencadas.id} asc
       limit 1
     )
     select
-      (select count(*) from users where status = 'active')::int as users_active,
-      (select count(*) from users where status = 'disabled')::int as users_disabled,
-      (select count(*) from users where status = 'active' and email_verified_at is null)::int as users_unverified,
-      (select count(*) from users where status = 'active' and role = 'admin')::int as active_admins,
-      (select count(*) from invites where status = 'pending' and expires_at > ${at}::timestamptz)::int as invites_pending,
-      (select count(*) from media_items
-         where deleted_at is null and upload_status <> 'pending_upload'
-           and moderation_status = 'pending_review')::int as media_pending_review,
-      (select count(*) from media_items m
-         where m.deleted_at is null and m.upload_status <> 'pending_upload'
-           and exists (select 1 from media_reports r
-                       where r.media_id = m.id
-                         and r.created_at > coalesce(m.moderated_at, '-infinity'::timestamptz)))::int as media_reported,
+      (select count(*) from ${users} where ${users.status} = 'active')::int as users_active,
+      (select count(*) from ${users} where ${users.status} = 'disabled')::int as users_disabled,
+      (select count(*) from ${users} where ${users.status} = 'active' and ${users.emailVerifiedAt} is null)::int as users_unverified,
+      (select count(*) from ${users} where ${users.status} = 'active' and ${users.role} = 'admin')::int as active_admins,
+      (select count(*) from ${invites}
+         where ${invites.status} = 'pending' and ${invites.expiresAt} > ${at}::timestamptz)::int as invites_pending,
+      (select count(*) from ${mediaItems}
+         where ${mediaItems.deletedAt} is null and ${mediaItems.uploadStatus} <> 'pending_upload'
+           and ${mediaItems.moderationStatus} = 'pending_review')::int as media_pending_review,
+      (select count(*) from ${mediaItems}
+         where ${mediaItems.deletedAt} is null and ${mediaItems.uploadStatus} <> 'pending_upload'
+           and exists (select 1 from ${mediaReports}
+                       where ${mediaReports.mediaId} = ${mediaItems.id}
+                         and ${mediaReports.createdAt} > coalesce(${mediaItems.moderatedAt}, '-infinity'::timestamptz)))::int as media_reported,
       e.id::text as edition_id,
       e.year as edition_year,
       e.title as edition_title,
       e.starts_at as edition_starts_at,
-      coalesce((select count(*) from cuencada_rsvps r where r.cuencada_id = e.id and r.status = 'yes'), 0)::int as rsvp_yes,
-      coalesce((select count(*) from cuencada_rsvps r where r.cuencada_id = e.id and r.status = 'maybe'), 0)::int as rsvp_maybe,
-      coalesce((select count(*) from cuencada_rsvps r where r.cuencada_id = e.id and r.status = 'no'), 0)::int as rsvp_no,
-      coalesce((select sum(guest_count) from cuencada_rsvps r where r.cuencada_id = e.id and r.status = 'yes'), 0)::int as rsvp_guests
+      ${rsvpCount("yes")} as rsvp_yes,
+      ${rsvpCount("maybe")} as rsvp_maybe,
+      ${rsvpCount("no")} as rsvp_no,
+      coalesce((select sum(${cuencadaRsvps.guestCount}) from ${cuencadaRsvps}
+         where ${cuencadaRsvps.cuencadaId} = e.id and ${cuencadaRsvps.status} = 'yes'), 0)::int as rsvp_guests
     from (select 1) as one
     left join edition e on true
   `);
