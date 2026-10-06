@@ -361,6 +361,82 @@ describe("renderEmail", () => {
     });
   });
 
+  describe("admin-invite-accepted", () => {
+    const reviewUrl =
+      "https://cuencada.com/admin/bitacora?accion=invite.accepted&actor=00000000-0000-4000-8000-000000000001";
+    const accepted: EmailTemplate = {
+      kind: EmailKind.AdminInviteAccepted,
+      props: {
+        recipientName: "Tía Lupita",
+        memberName: "Primo Nuevo",
+        inviteLabel: "Grupo de primos",
+        inviteShortId: "3F2A9C1B",
+        useCount: 2,
+        maxUses: 5,
+        acceptedAt: EXPIRES,
+        reviewUrl,
+      },
+    };
+
+    it("says who joined, with which link, how many uses and when, and links to the review page", async () => {
+      const email = await renderEmail(accepted);
+      expect(email.subject).toBe("Alguien se unió con un enlace de invitación");
+      expect(email.text).toContain("¡Hola, Tía Lupita!");
+      expect(email.text).toMatch(
+        /Primo Nuevo creó su cuenta en el portal de la Cuencada con el enlace «Grupo de primos» \(3f2a9c1b\) el lunes 14 de septiembre ·\s7:40/,
+      );
+      expect(email.text).toContain("El enlace lleva 2 de 5 usos.");
+      expect(email.text).toContain(`Revisar en la bitácora:\n${reviewUrl}`);
+      expect(email.text).toContain("IMPORTANTE: Si no reconoces a esta persona");
+      expect(countOccurrences(email.text, "bitacora?accion=invite.accepted")).toBe(1);
+      expect(email.text).not.toContain("@");
+    });
+
+    it("is a security notice: it never says to ignore it", async () => {
+      const email = await renderEmail(accepted);
+      expect(email.html).not.toContain("ignorarlo");
+      expect(email.text).not.toContain("ignorarlo");
+      expect(email.text.trimEnd()).toMatch(/administras el portal de la Cuencada\.$/);
+    });
+
+    it("falls back to the short id without a label, and to a neutral name", async () => {
+      const email = await renderEmail({
+        ...accepted,
+        props: { ...accepted.props, inviteLabel: null, memberName: "\u200b", useCount: 1, maxUses: 1 },
+      });
+      expect(email.text).toContain("Una persona creó su cuenta en el portal de la Cuencada con el enlace 3f2a9c1b el");
+      expect(email.text).toContain("El enlace lleva 1 de 1 uso.");
+    });
+
+    it("escapes names and labels and requires an https link", async () => {
+      const escaped = await renderEmail({
+        ...accepted,
+        props: { ...accepted.props, memberName: XSS, inviteLabel: XSS, recipientName: XSS },
+      });
+      expect(escaped.html).not.toContain("<script");
+      expect(countOccurrences(escaped.html, "&lt;script&gt;")).toBeGreaterThanOrEqual(3);
+      await expect(
+        renderEmail({ ...accepted, props: { ...accepted.props, reviewUrl: "http://cuencada.com/admin/bitacora" } }),
+      ).rejects.toMatchObject({ code: EmailRenderErrorCode.InsecureUrl });
+    });
+
+    it("rejects a malformed short id or inconsistent use counts", async () => {
+      await expect(
+        renderEmail({ ...accepted, props: { ...accepted.props, inviteShortId: "<b>x</b>" } }),
+      ).rejects.toMatchObject({ code: EmailRenderErrorCode.InvalidOption, field: "inviteShortId" });
+      for (const [useCount, maxUses] of [
+        [0, 5],
+        [6, 5],
+        [1, 51],
+        [1.5, 5],
+      ] as const) {
+        await expect(
+          renderEmail({ ...accepted, props: { ...accepted.props, useCount, maxUses } }),
+        ).rejects.toMatchObject({ code: EmailRenderErrorCode.InvalidOption, field: "useCount" });
+      }
+    });
+  });
+
   it("formats dates in America/Merida by default and honours a timeZone override", async () => {
     const merida = await renderEmail(cases[0]?.template ?? passwordChanged);
     expect(merida.text).toMatch(/lunes 14 de septiembre ·\s7:40/);

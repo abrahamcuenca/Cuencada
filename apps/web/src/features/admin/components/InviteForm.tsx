@@ -9,13 +9,16 @@ import styles from "../admin.module.css";
 import { useCreateAdminInviteMutation } from "../api";
 import {
   BOUND_INVITE_MAX_DAYS,
+  changeInviteDelivery,
   INVITE_FORM_DEFAULTS,
   type InviteDelivery,
   type InviteFormErrors,
   type InviteFormValues,
   normalizeInviteForm,
   OPEN_INVITE_MAX_DAYS,
+  OPEN_INVITE_MAX_HOURS,
   OPEN_INVITE_MAX_USES,
+  OPEN_INVITE_SECURITY_HELP,
   validateInviteForm
 } from "../lib/inviteForm";
 import { ROLE_LABEL } from "../lib/labels";
@@ -36,7 +39,8 @@ const ROLE_OPTIONS = [
 /**
  * Create-invite form. The contract schema validates before sending, so the
  * admin sees the same rules the server enforces: an admin invite needs an
- * email and goes by email; an open link allows ≤ 20 uses and ≤ 14 days.
+ * email and goes by email; an open link allows ≤ 10 uses and ≤ 72 hours
+ * (defaults 5 uses and 72 hours) and alerts the admins on every use.
  */
 export function InviteForm({ onCreated, onCancel }: InviteFormProps): ReactNode {
   const [values, setValues] = useState<InviteFormValues>(INVITE_FORM_DEFAULTS);
@@ -46,6 +50,9 @@ export function InviteForm({ onCreated, onCancel }: InviteFormProps): ReactNode 
 
   const update = (patch: Partial<InviteFormValues>): void => {
     setValues((current) => normalizeInviteForm({ ...current, ...patch }));
+  };
+  const selectDelivery = (delivery: InviteDelivery): void => {
+    setValues((current) => normalizeInviteForm(changeInviteDelivery(current, delivery)));
   };
 
   const submit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
@@ -95,7 +102,7 @@ export function InviteForm({ onCreated, onCancel }: InviteFormProps): ReactNode 
           checked={byEmail}
           title="Por correo"
           hint="Le llega un correo con su enlace personal. Solo sirve para esa dirección."
-          onSelect={(delivery) => update({ delivery })}
+          onSelect={selectDelivery}
         />
         <DeliveryOption
           name={groupId}
@@ -103,8 +110,8 @@ export function InviteForm({ onCreated, onCancel }: InviteFormProps): ReactNode 
           checked={!byEmail}
           disabled={isAdmin}
           title="Enlace para compartir"
-          hint={`Un enlace para el grupo de WhatsApp: hasta ${OPEN_INVITE_MAX_USES} personas y ${OPEN_INVITE_MAX_DAYS} días.`}
-          onSelect={(delivery) => update({ delivery })}
+          hint={`Un enlace para el grupo de WhatsApp: hasta ${OPEN_INVITE_MAX_USES} personas y ${OPEN_INVITE_MAX_HOURS} horas.`}
+          onSelect={selectDelivery}
         />
       </fieldset>
 
@@ -138,7 +145,12 @@ export function InviteForm({ onCreated, onCancel }: InviteFormProps): ReactNode 
         </Field>
       )}
 
-      <Field label="Vence en (días)" hint={`Máximo ${maxDays} días.`} error={errors.expiresInDays} required>
+      <Field
+        label="Vence en (días)"
+        hint={byEmail ? `Máximo ${maxDays} días.` : `Máximo ${maxDays} días (${OPEN_INVITE_MAX_HOURS} horas).`}
+        error={errors.expiresInDays}
+        required
+      >
         {(control) => (
           <TextInput
             {...control}
@@ -151,6 +163,12 @@ export function InviteForm({ onCreated, onCancel }: InviteFormProps): ReactNode 
           />
         )}
       </Field>
+
+      {byEmail ? null : (
+        <p className={styles.securityNote} role="note">
+          {OPEN_INVITE_SECURITY_HELP}
+        </p>
+      )}
 
       <Field label="Nota para el equipo" hint="Solo la ven los administradores." error={errors.note} showOptional>
         {(control) => (

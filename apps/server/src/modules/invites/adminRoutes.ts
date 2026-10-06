@@ -13,10 +13,13 @@ import {
   apiErrorSchema,
   type InviteStatus,
   idParamSchema,
+  OPEN_INVITE_MAX_HOURS,
+  OPEN_INVITE_MAX_LIFETIME_MS,
+  OPEN_INVITE_MAX_USES,
   type Page,
   pageSchema
 } from "@cuencada/types";
-import { and, desc, eq, gt, lte, or, type SQL, sql } from "drizzle-orm";
+import { and, desc, eq, or, type SQL, sql } from "drizzle-orm";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { invites, people, users } from "../../db/schema/index.js";
 import { recordAudit } from "../../lib/audit.js";
@@ -47,14 +50,46 @@ const errorResponses = {
 /** Invite creation time truncated to ms, so keyset comparisons match JS `Date` cursors. */
 const createdAtMs = sql<Date>`date_trunc('milliseconds', ${invites.createdAt})`;
 
+/**
+ * Effective expiry in SQL, matching `effectiveInviteExpiresAt`: open invites
+ * end at most {@link OPEN_INVITE_MAX_HOURS} after creation (WP-2.3b).
+ */
+const effectiveExpiresAt = sql`case when ${invites.email} is null
+  then least(${invites.expiresAt}, ${invites.createdAt} + make_interval(hours => ${OPEN_INVITE_MAX_HOURS}))
+  else ${invites.expiresAt} end`;
+
 function statusCondition(status: InviteStatus, now: Date): SQL | undefined {
   switch (status) {
     case "pending":
-      return and(eq(invites.status, "pending"), gt(invites.expiresAt, now));
+      return and(eq(invites.status, "pending"), sql`${effectiveExpiresAt} > ${now.toISOString()}::timestamptz`);
     case "expired":
-      return or(eq(invites.status, "expired"), and(eq(invites.status, "pending"), lte(invites.expiresAt, now)));
+      return or(
+        eq(invites.status, "expired"),
+        and(eq(invites.status, "pending"), sql`${effectiveExpiresAt} <= ${now.toISOString()}::timestamptz`)
+      );
     default:
       return eq(invites.status, status);
+  }
+}
+
+/**
+ * Server-side guard for open invites (WP-2.3b), independent of the contract
+ * schema: at most {@link OPEN_INVITE_MAX_USES} uses and
+ * {@link OPEN_INVITE_MAX_LIFETIME_MS} (72 h) of life.
+ *
+ * @throws AppError `VALIDATION` when an open invite exceeds either limit.
+ */
+function assertOpenInviteLimits(email: string | null, maxUses: number, now: Date, expiresAt: Date): void {
+  if (email !== null) return;
+  if (maxUses > OPEN_INVITE_MAX_USES) {
+    throw new AppError("VALIDATION", undefined, {
+      details: [{ path: "maxUses", message: `Un enlace abierto admite como máximo ${OPEN_INVITE_MAX_USES} usos.` }]
+    });
+  }
+  if (expiresAt.getTime() - now.getTime() > OPEN_INVITE_MAX_LIFETIME_MS) {
+    throw new AppError("VALIDATION", undefined, {
+      details: [{ path: "expiresInDays", message: `Un enlace abierto dura como máximo ${OPEN_INVITE_MAX_HOURS} horas.` }]
+    });
   }
 }
 
@@ -162,10 +197,13 @@ const adminInviteRoutes: FastifyPluginAsyncZod = async (app) => {
         if (existing !== undefined) throw new AppError("CONFLICT", "Ya existe una cuenta con ese correo.");
       }
 
+      const expiresAt = new Date(now.getTime() + input.expiresInDays * DAY_MS);
+      const maxUses = input.email === null ? input.maxUses : 1;
+      assertOpenInviteLimits(input.email, maxUses, now, expiresAt);
+
       if (input.sendEmail) await assertInviteMailAllowed(now);
 
       const token = createOpaqueToken();
-      const expiresAt = new Date(now.getTime() + input.expiresInDays * DAY_MS);
       const invite = await app.db.transaction(async (tx): Promise<InviteRow> => {
         const [row] = await tx
           .insert(invites)
@@ -174,9 +212,11 @@ const adminInviteRoutes: FastifyPluginAsyncZod = async (app) => {
             email: input.email,
             displayName: suggestedName,
             role: input.role,
-            maxUses: input.email === null ? input.maxUses : 1,
+            maxUses,
             personId: input.personId,
             note: input.note,
+            // Same clock as `expiresAt`: the 72 h open-invite cap counts from here.
+            createdAt: now,
             expiresAt,
             createdByUserId: admin.id
           })

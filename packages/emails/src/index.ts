@@ -42,6 +42,11 @@ export {
   buildAdminAlertLimitContent,
 } from "./templates/AdminAlertLimitEmail.js";
 export {
+  AdminInviteAcceptedEmail,
+  type AdminInviteAcceptedEmailProps,
+  buildAdminInviteAcceptedContent,
+} from "./templates/AdminInviteAcceptedEmail.js";
+export {
   buildInviteContent,
   InviteEmail,
   type InviteEmailProps,

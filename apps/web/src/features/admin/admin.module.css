@@ -365,6 +365,17 @@
   font-weight: var(--weight-semibold);
 }
 
+/* Why open links are short-lived (WP-2.3b). */
+.securityNote {
+  margin: 0;
+  padding: var(--space-3);
+  border-left: 4px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  background: var(--color-accent-soft);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+}
+
 .radio {
   display: flex;
   align-items: flex-start;

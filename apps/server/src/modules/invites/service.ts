@@ -3,7 +3,12 @@
  * Only token hashes are stored; the raw token exists in the emailed link (or
  * the one-time copy-link) only.
  */
-import type { AdminInviteListItem, InviteStatus } from "@cuencada/types";
+import {
+  type AdminInviteListItem,
+  type InviteStatus,
+  OPEN_INVITE_MAX_LIFETIME_MS,
+  OPEN_INVITE_MAX_USES
+} from "@cuencada/types";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { type invites, people } from "../../db/schema/index.js";
@@ -15,32 +20,63 @@ import { sendWithRetry } from "../auth/mailQueue.js";
 /** An `invites` row. */
 export type InviteRow = typeof invites.$inferSelect;
 
+/** Invite fields that decide its effective limits. */
+type InviteLimitFields = Pick<InviteRow, "email" | "createdAt" | "expiresAt" | "maxUses">;
+
 /**
- * Whether an invite can still be accepted: pending, unexpired, uses left.
+ * Expiry actually enforced (WP-2.3b): an open invite lives at most
+ * {@link OPEN_INVITE_MAX_LIFETIME_MS} (72 h) after creation, even when it was
+ * created under the old 14-day limit. Email-bound invites keep `expiresAt`.
+ *
+ * @param invite - The row.
+ */
+export function effectiveInviteExpiresAt(invite: InviteLimitFields): Date {
+  if (invite.email !== null) return invite.expiresAt;
+  const cap = new Date(invite.createdAt.getTime() + OPEN_INVITE_MAX_LIFETIME_MS);
+  return cap < invite.expiresAt ? cap : invite.expiresAt;
+}
+
+/**
+ * Uses actually allowed (WP-2.3b): an open invite allows at most
+ * {@link OPEN_INVITE_MAX_USES} (10), even when it was created under the old
+ * limit of 20. Email-bound invites keep `maxUses` (always 1).
+ *
+ * @param invite - The row.
+ */
+export function effectiveInviteMaxUses(invite: Pick<InviteRow, "email" | "maxUses">): number {
+  return invite.email === null ? Math.min(invite.maxUses, OPEN_INVITE_MAX_USES) : invite.maxUses;
+}
+
+/**
+ * Whether an invite can still be accepted: pending, unexpired, uses left,
+ * using the effective (clamped) limits for open invites.
  *
  * @param invite - The row.
  * @param now - Current time.
  */
 export function isInviteUsable(
-  invite: Pick<InviteRow, "status" | "expiresAt" | "useCount" | "maxUses">,
+  invite: InviteLimitFields & Pick<InviteRow, "status" | "useCount">,
   now: Date
 ): boolean {
-  return invite.status === "pending" && invite.expiresAt > now && invite.useCount < invite.maxUses;
+  return (
+    invite.status === "pending" && effectiveInviteExpiresAt(invite) > now && invite.useCount < effectiveInviteMaxUses(invite)
+  );
 }
 
 /**
- * Status as admins see it: a pending invite past its expiry reads `expired`.
+ * Status as admins see it: a pending invite past its effective expiry reads `expired`.
  *
  * @param invite - The row.
  * @param now - Current time.
  */
-export function effectiveInviteStatus(invite: Pick<InviteRow, "status" | "expiresAt">, now: Date): InviteStatus {
-  return invite.status === "pending" && invite.expiresAt <= now ? "expired" : invite.status;
+export function effectiveInviteStatus(invite: InviteLimitFields & Pick<InviteRow, "status">, now: Date): InviteStatus {
+  return invite.status === "pending" && effectiveInviteExpiresAt(invite) <= now ? "expired" : invite.status;
 }
 
 /**
  * Map a row (plus the creator's display name) to the admin list item.
- * Never includes the token hash.
+ * Never includes the token hash. `maxUses` and `expiresAt` are the effective
+ * (clamped) limits, so admins see what acceptance enforces.
  *
  * @param invite - The row.
  * @param createdByName - Creator's display name, if the creator still exists.
@@ -56,9 +92,9 @@ export function toAdminInviteListItem(
     email: invite.email,
     role: invite.role,
     status: effectiveInviteStatus(invite, now),
-    maxUses: invite.maxUses,
+    maxUses: effectiveInviteMaxUses(invite),
     useCount: invite.useCount,
-    expiresAt: invite.expiresAt.toISOString(),
+    expiresAt: effectiveInviteExpiresAt(invite).toISOString(),
     createdAt: invite.createdAt.toISOString(),
     createdByName,
     personId: invite.personId,

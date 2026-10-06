@@ -23,7 +23,14 @@ import { extraRateLimitHook, rateLimitByIp } from "../../lib/rateLimit.js";
 import { hashToken } from "../../lib/tokens.js";
 import { issueAuthResponse } from "../auth/currentUser.js";
 import { type IssuedRefresh, sessionOrigin, startSession } from "../auth/sessions.js";
-import { isInviteUsable, personName } from "./service.js";
+import {
+  type InviteAcceptedAlert,
+  type InviteAcceptedAlertPlan,
+  inviteAlertMetadata,
+  planInviteAcceptedAlert,
+  queueInviteAcceptedAlerts
+} from "./acceptAlerts.js";
+import { effectiveInviteMaxUses, isInviteUsable, personName } from "./service.js";
 
 const errorResponses = {
   400: apiErrorSchema,
@@ -44,7 +51,13 @@ function tokenKey(body: unknown): string {
 
 /** Outcome of the accept transaction. */
 type AcceptOutcome =
-  | { kind: "accepted"; userId: string; issued: IssuedRefresh }
+  | {
+      kind: "accepted";
+      userId: string;
+      issued: IssuedRefresh;
+      /** Open invites only: the admin alert to queue after commit. */
+      alert: { plan: InviteAcceptedAlertPlan; details: InviteAcceptedAlert } | null;
+    }
   | { kind: "invalid" }
   | { kind: "exists" };
 
@@ -96,7 +109,8 @@ const publicInviteRoutes: FastifyPluginAsyncZod = async (app) => {
   /**
    * `POST /api/invites/accept`: create the account, link the person, start a
    * session (201 + refresh cookie). The invite row is locked, so concurrent
-   * accepts of a single-use invite cannot both succeed.
+   * accepts of a single-use invite cannot both succeed. Accepting an open
+   * invite alerts every active admin after commit (WP-2.3b, `acceptAlerts.ts`).
    */
   app.post(
     "/invites/accept",
@@ -157,26 +171,56 @@ const publicInviteRoutes: FastifyPluginAsyncZod = async (app) => {
         await linkPerson(tx, invite.personId, user.id, displayName);
 
         const useCount = invite.useCount + 1;
-        const exhausted = useCount >= invite.maxUses;
+        // Effective limit: open invites created before WP-2.3b stop at 10 uses.
+        const maxUses = effectiveInviteMaxUses(invite);
+        const exhausted = useCount >= maxUses;
         await tx
           .update(invites)
           .set({ useCount, ...(exhausted ? { status: "accepted" as const, acceptedAt: now } : {}) })
           .where(eq(invites.id, invite.id));
 
         const issued = await startSession(tx, app.config, user.id, sessionOrigin(request), now);
-        await recordAudit(tx, {
+        const open = invite.email === null;
+        const plan = open ? await planInviteAcceptedAlert(app, tx, now) : null;
+        const auditId = await recordAudit(tx, {
           actorUserId: user.id,
           action: AuditAction.InviteAccepted,
           entityType: "invite",
           entityId: invite.id,
-          metadata: { userId: user.id, role: invite.role, emailVerified, useCount },
+          metadata: {
+            userId: user.id,
+            role: invite.role,
+            emailVerified,
+            open,
+            useCount,
+            maxUses,
+            ...(plan === null ? {} : inviteAlertMetadata(plan))
+          },
           ip: request.ip
         });
-        return { kind: "accepted", userId: user.id, issued };
+        const alert =
+          plan === null
+            ? null
+            : {
+                plan,
+                details: {
+                  auditId,
+                  inviteId: invite.id,
+                  inviteNote: invite.note,
+                  memberUserId: user.id,
+                  memberName: displayName,
+                  useCount,
+                  maxUses,
+                  acceptedAt: now
+                }
+              };
+        return { kind: "accepted", userId: user.id, issued, alert };
       });
 
       if (outcome.kind === "invalid") throw new AppError("INVITE_INVALID");
       if (outcome.kind === "exists") throw new AppError("CONFLICT", ACCOUNT_EXISTS_MESSAGE);
+      // Committed: queue the admin alert off the request path (a mail failure never fails the acceptance).
+      if (outcome.alert !== null) queueInviteAcceptedAlerts(app, outcome.alert.plan, outcome.alert.details);
       const body = await issueAuthResponse(app, reply, outcome.issued, outcome.userId, now);
       return reply.code(201).send(body);
     }

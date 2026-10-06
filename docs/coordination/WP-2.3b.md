@@ -1,0 +1,105 @@
+# WP-2.3b Stricter open invites + admin alert on acceptance
+Owner: Senior JS Backend Engineer (with the matching FE change) · Reviewers: Security, TL · Branch: wp/2.3b-open-invites · PR: # (not opened)
+
+Based on `origin/main` (28c55aa). Comes from the owner's decision on the WP-2.3 security audit.
+
+## Why
+Verifying an email proves that someone controls a mailbox, not that they belong to the family. If an open (not email-bound) invite link leaks, a stranger can join with it. So open links have to be short-lived and small, and admins must see every use.
+
+## Scope
+- **Contract** (`packages/types/src/auth.ts`): new constants `OPEN_INVITE_MAX_USES = 10`, `OPEN_INVITE_DEFAULT_USES = 5`, `OPEN_INVITE_MAX_HOURS = 72`, `OPEN_INVITE_MAX_LIFETIME_MS`, `OPEN_INVITE_MAX_DAYS = 3`, `OPEN_INVITE_DEFAULT_DAYS = 3`, `BOUND_INVITE_DEFAULT_DAYS = 7` and `BOUND_INVITE_MAX_DAYS = 30`.
+  - `adminInviteCreateInputSchema`: `maxUses` and `expiresInDays` are now optional inputs. A transform fills in defaults by kind (open: 5 uses and 3 days; bound: 1 use and 7 days), and refines enforce the open-invite caps.
+  - The output type is unchanged.
+- **Server** (`apps/server/src/modules/invites/`):
+  - `service.ts`: adds `effectiveInviteExpiresAt` and `effectiveInviteMaxUses` (the clamp for older rows). `isInviteUsable`, `effectiveInviteStatus` and `toAdminInviteListItem` now use them.
+  - `adminRoutes.ts`:
+    - `assertOpenInviteLimits`, a server-side guard that doesn't rely on the schema (400 `VALIDATION`).
+    - `createdAt` is set from `app.clock`, so the 72 h cap and `expiresAt` use the same clock.
+    - The list's status filter uses the effective (clamped) expiry in SQL.
+  - `acceptAlerts.ts` (new): plans, records in the audit row and queues the admin alert.
+  - `publicRoutes.ts`: accept uses the effective max uses, records `open` and `maxUses` in the audit row, plans the alert inside the transaction and queues it after commit.
+- **Email** (`packages/emails`): new `admin-invite-accepted` template (`AdminInviteAcceptedEmail.tsx`), registered in `EmailKind` and `render.tsx` and exported.
+- **Frontend** (`apps/web/src/features/admin/`):
+  - `lib/inviteForm.ts`:
+    - Picking "Enlace para compartir" resets the fields to 5 uses and 3 days; going back to "Por correo" sets 7 days (`changeInviteDelivery`). Choosing the admin role forces email and applies the same reset.
+    - The caps come from the contract.
+    - The error messages for open links state the range in days and hours.
+  - `components/InviteForm.tsx`:
+    - Help text: "Por seguridad, los enlaces abiertos caducan en 72 horas y avisan a los administradores cada vez que alguien se une."
+    - The option hint and the expiry hint mention 72 horas.
+  - `admin.module.css`: `.securityNote`.
+- **Screenshots:** `docs/ux/screenshots/t8/invitaciones-enlace-375.webp` and `-1280.webp`.
+  - Taken with headless Chromium against `vite preview`, with `/api/**` stubbed with fictional data.
+  - Horizontal overflow is 0 px at both widths.
+- **Docs:** ADR 0001 (owner decision, plus the updated invite rule) and a note in `WP-T8-FE.md`.
+- **Not touched:**
+  - `apps/server/src/__tests__/security/**`.
+  - Routes and guards: no auth config changes, no new routes.
+  - DB schema and migrations.
+
+## Decisions
+1. **Lifetime is still expressed in whole days.** The contract keeps `expiresInDays`, so the open maximum is 3 days (= 72 h) and the default is that maximum. Fractional days are rejected (`int()`), so the API can never create an open invite that lasts 72 h + 1 s. The 72 h + 1 s boundary is tested at accept time, against a test clock.
+2. **Existing open invites are clamped at accept time, with no migration.**
+   - Rows created under the old limits (20 uses, 14 days) stop being usable at the earlier of `expires_at` and `created_at + 72 h`, and after 10 uses.
+   - They fail with the same generic `INVITE_INVALID` on inspect and accept (no enumeration).
+   - On the 10th use of such a row, the status becomes `accepted`.
+   - The admin list shows the clamped `expiresAt`, `maxUses` and status, and `?status=pending|expired` filters on the same SQL expression, so admins see what is actually enforced.
+   - The DB check `invites_open_max_uses_check` (`max_uses <= 20`) stays as it is. Tightening it to 10 would be a contract (not expand-only) migration, and older rows could violate it. The app enforces 10 in three places: the schema, the route guard and accept. **Follow-up for the schema owner (optional):** tighten the check in a later contract migration after the existing open invites have expired.
+3. **No email address in the alert.** The existing admin alerts (`admin-account-changed`, `admin-alert-limit`) contain names only, never addresses (`adminAlerts.ts`: "Names only, never addresses or secrets"). The new alert follows that precedent. It includes:
+   - the member's display name;
+   - the invite's admin-only note as its label (cleaned like a name, at most 80 characters);
+   - the first 8 hex characters of the invite id;
+   - uses so far / allowed;
+   - the date.
+
+   Admins can see the address in the admin users page.
+4. **Link target.** The admin users page has no per-user URL filter, and the invites page has no per-invite one. Adding either would mean changing the contract or the frontend outside this scope, or putting a name in the URL. The CTA instead opens the bitácora filtered by the existing params: `/admin/bitacora?accion=invite.accepted&actor=<newUserId>`. That shows exactly this acceptance (the entity is the invite id) and carries ids only. From there the admin can find the account in Usuarios.
+5. **Budget and cap.** Like T8-BE's admin alerts, these notices skip T1's per-recipient budget and are not counted by the global daily mail cap (`dailyMailCount`).
+   - They have their **own** daily cap, `INVITE_ALERT_DAILY_CAP = 100`. It is counted from the `invite.accepted` audit rows' `inviteAlertRecipients`, under a transaction advisory lock (`invite-accepted-alerts`).
+   - The counter is separate from `adminAlertRecipients` on purpose: anyone holding a link can trigger an acceptance. If acceptances shared the admin-account alert cap, they could use up the quota that protects non-exempt admin-change alerts, such as a promotion to admin.
+   - Past the cap, the alert is skipped. The audit row gets `inviteAlertRecipients: 0, inviteAlertSkipped: true`, and `mail.invite_alert_cap_reached` is logged.
+   - There is no separate "limit reached" email: the existing limit template's copy is about admin-account changes, and by then admins have already had 100 alerts that day.
+   - Volume is also bounded by 10 uses per link, 72 h, and the per-IP and per-token accept rate limits.
+6. **Email-bound invites don't alert.** An admin chose the mailbox, the invite is single-use, and accepting it requires typing the bound address. An alert would add noise without adding any signal.
+7. **Fire-and-forget, after commit.** The alert is planned inside the accept transaction (recipients, cap, audit metadata) and queued with `sendInBackground` only after the transaction commits. So a rolled-back acceptance sends nothing, and a mail failure (logged by the queue) never fails the acceptance. Idempotency key: `admin-invite-accepted:<auditId>:<recipientId>`.
+8. **Audit.** `invite.accepted` was already recorded. Its metadata now also carries `open`, `maxUses` (effective) and the alert counters. Ids and counts only; no addresses.
+
+## Tests
+- `packages/types/src/auth.test.ts`:
+  - open defaults (5 uses, 3 days = 72 h);
+  - uses 0/1/10/11;
+  - days 0/1/3/4;
+  - fractional days rejected (no 72 h + 1 s);
+  - bound rules unchanged (1 use, 7/30 days).
+- `apps/server/src/modules/invites/openInvites.test.ts` (real Postgres, `inject()`):
+  - default open invite (5 uses, `expiresAt - createdAt = 72 h`);
+  - over-limit creation is 400 (0 and 11 uses, 0 and 4 days, the old 20/14), and the boundaries are 201;
+  - accepts at 72 h − 1 s, and at 72 h + 1 s gives the same `INVITE_INVALID` body as an unknown token;
+  - older row past 72 h after creation: accept and inspect fail generically, and the admin list shows it `expired` with the clamped `expiresAt` and `maxUses: 10`;
+  - older row with 20 allowed uses stops at 10 and becomes `accepted`;
+  - one alert per active admin per acceptance (none to a disabled admin or a member). The alert has the right copy, uses and bitácora link, and no member address in the text, the HTML or the audit row. A second acceptance sends a second alert with "2 de 5";
+  - no alert for bound invites, whether emailed or copy-link;
+  - no alert, no user and no use when the acceptance rolls back (a DB trigger forces a failure on the `invite.accepted` audit insert);
+  - acceptance still succeeds when the alert email fails;
+  - the cap skips the alert and records it.
+- `apps/server/src/modules/invites/invites.test.ts`: caps updated to the new limits (10/3; boundary 400s at 11/4).
+- `packages/emails/src/render.test.tsx` (`admin-invite-accepted`):
+  - copy, link and uses;
+  - never says to ignore the email;
+  - fallbacks with no label and an invisible-only name;
+  - escaping and https-only links;
+  - rejects a malformed short id or inconsistent counts.
+- `apps/web/src/features/admin/lib/lib.test.ts`:
+  - delivery defaults (5/3, back to 7, admin forces email);
+  - open caps and messages;
+  - the 0-day range message.
+- `apps/web/src/features/admin/AdminInvites.test.tsx`:
+  - the open link shows 5 / 3 with max 10 / 3 and the security note;
+  - validation of 11 / 4;
+  - the created body uses 5 / 3.
+
+## Verification
+`pnpm lint`, `pnpm turbo run typecheck --force`, `pnpm test` and `pnpm build` all pass, and the web bundle is within budget (174 kB of 190 kB gzip).
+
+## Review log
+- (pending)
