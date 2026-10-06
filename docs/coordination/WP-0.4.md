@@ -115,11 +115,33 @@ Cover at least: happy path, 400 `VALIDATION`, 401 without a token, 403 for the w
 - **`trustProxy`** defaults to `loopback` in production instead of `true`, so a client that reaches the port directly cannot spoof `X-Forwarded-For`.
 - `buildApp` closes only what it created (DB pool, S3 client); injected deps belong to the caller.
 - `AppError` lives in `src/lib/errors.ts`; default Spanish messages per `ErrorCode` are there.
+- **`DevMailer` logs `to` (an email address, i.e. PII) in development/test only.** It refuses to construct in production, and production always uses Resend (config requires `RESEND_API_KEY`/`MAIL_FROM`). Bodies are never logged.
+
+## Production seed (one-off, operator machine only)
+The API service env in `infra/project.yml` carries **no `SEED_*` variables**: the temporary admin password must never live on the VPS. The vault ref `vault_cuencada_seed_admin_temp_password` is now used only by the operator for this manual step, not by the deploy.
+
+Run it once per environment, after the first deploy's migrations, from a checkout with `pnpm build` done and the DB tunnel open:
+```sh
+# all variables set in the local shell only; never written to a file in the repo
+NODE_ENV=production \
+DATABASE_URL='<tunnel URL to the production DB>' \
+SEED_ADMIN_EMAIL=admin@cuencada.com \
+SEED_ADMIN_TEMP_PASSWORD='<vault_cuencada_seed_admin_temp_password>' \
+SEED_WHATSAPP_URL='<rotated invite link>' \
+SEED_EXTERNAL_ALBUM_URL='<regenerated album link>' \
+SEED_LYRICS_URL='<…>' \
+SEED_PROGRAM_URL='<…>' \
+node apps/server/dist/seed.js
+```
+- The seed reads `DATABASE_URL` (the migrator uses `MIGRATE_DATABASE_URL || DATABASE_URL`; point both at the same tunnel URL).
+- **Set every `SEED_*_URL` on the FIRST run.** The seed is insert-only: outside development/test an unset link is simply not seeded, and a later re-run never fills or overwrites existing rows, so a missing link must then be added through the admin UI.
+- With `NODE_ENV=production` the seed refuses a missing, weak (< 16 chars) or placeholder password. The admin is created with `must_change_password = true`.
+- Clear the shell history / variables afterwards.
 
 ## Open questions (→ orchestrator)
 - **Linode PUT enforcement:** the presigned PUT signs `content-length` (unit-tested offline). Verifying on the real bucket that a mismatched body is rejected needs credentials, so it is T4's job at integration; the `head()` size check stays the backstop.
 - **`@fastify/swagger` peer:** pulled in by `fastify-type-provider-zod@7`. Unused; fine unless we want OpenAPI docs later.
-- `infra/project.yml` still passes `SEED_ADMIN_*` to the API service, which no longer reads them. Removing them from the service env (the seed runs from a checkout) would keep the temp password off the VPS; left for WP-2.4/acleron owners.
+- Resolved: `SEED_*` removed from the API service env (see "Production seed").
 
 ## Review log
 - (pending TL and Security review)

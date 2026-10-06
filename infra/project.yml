@@ -59,8 +59,6 @@ server:
     MAIL_FROM: "Cuencada <no-reply@cuencada.com>"
     SUPPORT_EMAIL: admin@cuencada.com
     MEDIA_REQUIRE_APPROVAL: "false"
-    SEED_ADMIN_EMAIL: admin@cuencada.com
-    SEED_ADMIN_TEMP_PASSWORD: "{{ vault_cuencada_seed_admin_temp_password }}"
     S3_ENDPOINT: "{{ vault_cuencada_s3_endpoint }}"
     S3_REGION: "{{ vault_cuencada_s3_region | default('us-southeast-1') }}"
     S3_BUCKET: "{{ vault_cuencada_s3_bucket }}"
