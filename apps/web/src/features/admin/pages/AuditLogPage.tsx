@@ -1,6 +1,7 @@
 import type { AuditLogEntry } from "@cuencada/types";
 import { type ReactNode, useId, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
+import { Badge } from "../../../shared/ui/Badge";
 import { Button } from "../../../shared/ui/Button";
 import { Card } from "../../../shared/ui/Card";
 import { IconButton } from "../../../shared/ui/IconButton";
@@ -13,7 +14,7 @@ import { ListFooter, Notice } from "../components/common";
 import { type AuditFilterValues, readAuditFilters, toAuditQuery, writeAuditFilters } from "../lib/auditFilters";
 import { formatInstant } from "../lib/format";
 import { AUDIT_ACTION_OPTIONS, AUDIT_ENTITY_OPTIONS, auditActionLabel, auditEntityLabel } from "../lib/labels";
-import { metadataRows } from "../lib/metadata";
+import { alertFlags, metadataRows, shortId } from "../lib/metadata";
 
 /** `/admin/bitacora`: the read-only audit log, newest first, filtered through the URL. */
 export function AuditLogPage(): ReactNode {
@@ -113,6 +114,7 @@ function actorLabel(entry: AuditLogEntry): string {
 
 function AuditEntryCard({ entry, onActor }: { entry: AuditLogEntry; onActor: (actorUserId: string) => void }): ReactNode {
   const rows = metadataRows(entry.metadata);
+  const flags = alertFlags(entry.metadata);
   const actorId = entry.actorUserId;
   return (
     <Card as="article" padding="sm" className={styles.item}>
@@ -135,11 +137,28 @@ function AuditEntryCard({ entry, onActor }: { entry: AuditLogEntry; onActor: (ac
         <time dateTime={entry.createdAt}>{formatInstant(entry.createdAt)}</time>
         <span>
           {auditEntityLabel(entry.entityType)}
-          {entry.entityId === null ? null : <span className={styles.mono}> {entry.entityId}</span>}
+          {entry.entityId === null ? null : (
+            <span className={styles.mono} title={entry.entityId}>
+              {" "}
+              <span className={styles.idShort} aria-hidden="true">
+                {shortId(entry.entityId)}
+              </span>
+              <span className={styles.idFull}>{entry.entityId}</span>
+            </span>
+          )}
         </span>
         <span className={styles.mono}>{entry.action}</span>
         {entry.ip === null ? null : <span>IP {entry.ip}</span>}
       </p>
+      {flags.length === 0 ? null : (
+        <p className={styles.badges} aria-label="Avisos a administradores">
+          {flags.map((flag) => (
+            <Badge key={flag.key} tone={flag.tone}>
+              {flag.label}
+            </Badge>
+          ))}
+        </p>
+      )}
       {rows.length === 0 ? null : (
         <dl className={styles.metadata} aria-label="Detalles">
           {rows.map((row) => (

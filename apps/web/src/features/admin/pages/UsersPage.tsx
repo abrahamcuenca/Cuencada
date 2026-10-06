@@ -20,6 +20,22 @@ const ROLE_OPTIONS = [
   { value: "admin", label: "Administradores" }
 ];
 
+/** `?correo=` values of the email filter. */
+export const EMAIL_FILTER = { Unverified: "sin-verificar", Verified: "verificado" } as const;
+
+const EMAIL_OPTIONS = [
+  { value: "", label: "Todos" },
+  { value: EMAIL_FILTER.Unverified, label: "Sin verificar" },
+  { value: EMAIL_FILTER.Verified, label: "Verificado" }
+];
+
+/** `?correo=` → the API's `emailVerified`, or `undefined` for any other value. */
+function emailVerifiedFrom(value: string | null): boolean | undefined {
+  if (value === EMAIL_FILTER.Unverified) return false;
+  if (value === EMAIL_FILTER.Verified) return true;
+  return undefined;
+}
+
 const STATUS_OPTIONS = [
   { value: "", label: "Todas" },
   { value: "active", label: "Activas" },
@@ -31,17 +47,19 @@ export function UsersPage(): ReactNode {
   const [params, setParams] = useSearchParams();
   const role = userRoleSchema.safeParse(params.get("rol"));
   const status = userStatusSchema.safeParse(params.get("estado"));
+  const emailVerified = emailVerifiedFrom(params.get("correo"));
   const [text, setText] = useState("");
   const q = useDebouncedValue(text.trim());
   const filter = useMemo<UserListFilter>(
     () => ({
       ...(q === "" ? {} : { q }),
       ...(role.success ? { role: role.data } : {}),
-      ...(status.success ? { status: status.data } : {})
+      ...(status.success ? { status: status.data } : {}),
+      ...(emailVerified === undefined ? {} : { emailVerified })
     }),
-    [q, role.success, role.data, status.success, status.data]
+    [q, role.success, role.data, status.success, status.data, emailVerified]
   );
-  const ids = { search: useId(), role: useId(), status: useId() };
+  const ids = { search: useId(), role: useId(), status: useId(), email: useId() };
 
   const setParam = (name: string, value: string): void => {
     const next = new URLSearchParams(params);
@@ -88,6 +106,17 @@ export function UsersPage(): ReactNode {
                 onChange={(event) => setParam("estado", event.target.value)}
               />
             </div>
+            <div className={styles.panel}>
+              <label htmlFor={ids.email} className={styles.navLabel}>
+                Correo
+              </label>
+              <Select
+                id={ids.email}
+                value={emailVerified === undefined ? "" : emailVerified ? EMAIL_FILTER.Verified : EMAIL_FILTER.Unverified}
+                options={EMAIL_OPTIONS}
+                onChange={(event) => setParam("correo", event.target.value)}
+              />
+            </div>
           </div>
         </div>
         <UserList filter={filter} />
@@ -98,6 +127,7 @@ export function UsersPage(): ReactNode {
 
 function UserList({ filter }: { filter: UserListFilter }): ReactNode {
   const list = useListAdminUsersInfiniteQuery(filter);
+  // `emailVerified` is filtered by the server (WP-0.8b), so every page and its cursor already match.
   const items = useMemo(() => list.data?.pages.flatMap((page) => page.items) ?? [], [list.data]);
   const me = useAppSelector(selectCurrentUser);
   const [selected, setSelected] = useState<AdminUserListItem | null>(null);

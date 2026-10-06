@@ -1,23 +1,48 @@
 import { describe, expect, it } from "vitest";
 import { buildView, IDS, makeFamilyDb } from "../testing/fixtures";
 import { issuesToFieldErrors, toNullableText, toNullableYear } from "./forms";
-import { displayName, extendedGenerations, lifeYears, nextTrail, readTrail, TRAIL_MAX } from "./tree";
+import { collectPersonNames, displayName, extendedGenerations, lifeYears, nextTrail, readTrail, resolveTrail, TRAIL_MAX } from "./tree";
 
-const a = { id: "a", name: "Ana" };
-const b = { id: "b", name: "Beto" };
-const c = { id: "c", name: "Ceci" };
+const a = "a";
+const b = "b";
+const c = "c";
 
 describe("readTrail", () => {
   it("returns an empty trail for missing or malformed history state", () => {
     expect(readTrail(undefined)).toEqual([]);
     expect(readTrail(null)).toEqual([]);
     expect(readTrail({ trail: "x" })).toEqual([]);
-    expect(readTrail({ trail: [{ id: 1, name: "x" }, a] })).toEqual([a]);
+    expect(readTrail({ trail: [1, "", "x".repeat(65), a] })).toEqual([a]);
+  });
+
+  it("reads legacy { id, name } entries as ids only, dropping the names", () => {
+    expect(readTrail({ trail: [{ id: "a", name: "Ana" }, { id: 1, name: "x" }] })).toEqual(["a"]);
   });
 
   it("keeps at most TRAIL_MAX entries", () => {
-    const long = Array.from({ length: 9 }, (_, index) => ({ id: String(index), name: `P${index}` }));
+    const long = Array.from({ length: 9 }, (_, index) => String(index));
     expect(readTrail({ trail: long })).toHaveLength(TRAIL_MAX);
+  });
+});
+
+describe("resolveTrail", () => {
+  it("names ids from memory and skips the ones it no longer knows", () => {
+    expect(resolveTrail(["a", "x", "b"], new Map([["a", "Ana"], ["b", "Beto"]]))).toEqual([
+      { id: "a", name: "Ana" },
+      { id: "b", name: "Beto" }
+    ]);
+  });
+});
+
+describe("collectPersonNames", () => {
+  it("collects names from a tree view and from a people page", () => {
+    const db = makeFamilyDb();
+    const names = new Map<string, string>();
+    collectPersonNames(buildView(db, IDS.jose, 2), names);
+    collectPersonNames({ items: [{ id: "p1", fullName: "Persona Uno" }], nextCursor: null }, names);
+    expect(names.get(IDS.jose)).toBe("José Herrera Navarro");
+    expect(names.get(IDS.luis)).toBe("Luis Herrera Soto");
+    expect(names.get("p1")).toBe("Persona Uno");
   });
 });
 
@@ -33,7 +58,7 @@ describe("nextTrail", () => {
 
   it("works without a current focus and caps the length", () => {
     expect(nextTrail([a], null, "z")).toEqual([a]);
-    const long = Array.from({ length: TRAIL_MAX }, (_, index) => ({ id: String(index), name: `P${index}` }));
+    const long = Array.from({ length: TRAIL_MAX }, (_, index) => String(index));
     expect(nextTrail(long, c, "z")).toHaveLength(TRAIL_MAX);
   });
 });

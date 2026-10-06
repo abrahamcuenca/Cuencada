@@ -99,14 +99,14 @@ describe("VerifyEmailPage", () => {
   });
 
   it("names the logged-in account and keeps the session when verifying", async () => {
-    const user = makeUser({ displayName: "Rosa Cuenca", emailVerified: false });
+    const user = makeUser({ displayName: "Rosa Ejemplo", emailVerified: false });
     server.use(
       contractRoute("post", "/auth/email/verify", emailVerifyConfirmInputSchema, () => noContent()),
       contractRoute("get", "/me", null, () => Response.json({ ...user, emailVerified: true }))
     );
     const { store } = openVerify(authenticatedState(user, "token-A"));
 
-    expect(await screen.findByText(/Tienes la sesión abierta como/)).toHaveTextContent("Rosa Cuenca");
+    expect(await screen.findByText(/Tienes la sesión abierta como/)).toHaveTextContent("Rosa Ejemplo");
     expect(screen.getByText(/no cambia tu sesión/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Confirmar mi correo" }));
 

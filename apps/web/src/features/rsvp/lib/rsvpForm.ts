@@ -3,6 +3,7 @@
  * date window and Spanish validation on top of the contract schema.
  */
 import {
+  type LocationItem,
   type MyRsvp,
   RSVP_MAX_GUESTS,
   RSVP_DATE_WINDOW_DAYS,
@@ -85,8 +86,46 @@ function zonedDate(instant: string, timeZone: string): string {
  * @returns Whether today, in that timezone, is after the deadline's day.
  */
 export function isPastDeadline(deadline: string | null, now: Date, timeZone: string): boolean {
+  return isDeadlineDayOver(deadline, zonedDate(now.toISOString(), timeZone), timeZone);
+}
+
+/**
+ * {@link isPastDeadline} for a known local date (e.g. from `useZonedToday`,
+ * which re-renders at local midnight so the card locks without a reload).
+ *
+ * @param deadline - RSVP deadline (ISO instant), or `null` for none.
+ * @param today - Today's date (`YYYY-MM-DD`) in `timeZone`.
+ * @param timeZone - The edition's IANA timezone.
+ * @returns Whether `today` is after the deadline's day.
+ */
+export function isDeadlineDayOver(deadline: string | null, today: string, timeZone: string): boolean {
   if (deadline === null) return false;
-  return zonedDate(now.toISOString(), timeZone) > zonedDate(deadline, timeZone);
+  return today > zonedDate(deadline, timeZone);
+}
+
+/** A hotel the RSVP form can offer. */
+export type HotelChoice = Pick<LocationItem, "id" | "name">;
+
+/** Label of the saved hotel while the hotel list can't be loaded. */
+export const SAVED_HOTEL_LABEL = "El hotel que ya elegiste";
+
+/**
+ * The hotels to offer. While the edition's hotel list is loading or failed,
+ * the saved answer's hotel stays an option (and valid), so re-saving an RSVP
+ * never fails with "Elige uno de los hoteles de la lista." just because the
+ * list isn't here. Once the list is loaded it is the only source of truth.
+ *
+ * @param hotels - The edition's `hotel` locations (empty while unknown).
+ * @param savedHotelId - `hotelLocationId` of the saved RSVP, or `null`.
+ * @param listLoaded - Whether the hotel list (members details) has loaded.
+ * @returns The options, the saved hotel last.
+ */
+export function hotelChoices(hotels: readonly LocationItem[], savedHotelId: string | null, listLoaded: boolean): HotelChoice[] {
+  const choices: HotelChoice[] = hotels.filter((location) => location.kind === "hotel").map(({ id, name }) => ({ id, name }));
+  if (!listLoaded && savedHotelId !== null && !choices.some((choice) => choice.id === savedHotelId)) {
+    choices.push({ id: savedHotelId, name: SAVED_HOTEL_LABEL });
+  }
+  return choices;
 }
 
 /** Adds whole days to a calendar date (no timezone involved). */

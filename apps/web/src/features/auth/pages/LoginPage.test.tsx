@@ -161,6 +161,7 @@ describe("LoginPage", () => {
 
     expect(await screen.findByRole("heading", { name: "Revisa tu correo" })).toBeInTheDocument();
     expect(screen.getByText(/Si tia@example.com tiene una cuenta/)).toBeInTheDocument();
+    expect(screen.getByText("Si no llega en unos minutos, revisa la carpeta de spam o vuelve a pedirlo.")).toBeInTheDocument();
     expect(requested).toHaveBeenCalledWith("tia@example.com");
 
     await userEvent.click(screen.getByRole("button", { name: "Usar otro correo" }));

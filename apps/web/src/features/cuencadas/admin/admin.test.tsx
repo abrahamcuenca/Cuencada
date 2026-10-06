@@ -106,6 +106,66 @@ describe("AdminCuencadasPage", () => {
   });
 });
 
+describe("AdminCuencadaEditPage header and data form", () => {
+  it("links to the edition's attendance screen", async () => {
+    renderApp(`/admin/cuencadas/${CUENCADA_2026_ID}`, admin());
+
+    expect(await screen.findByRole("link", { name: /Asistencia y confirmaciones/ })).toHaveAttribute(
+      "href",
+      `/admin/cuencadas/${CUENCADA_2026_ID}/asistencia`
+    );
+  });
+
+  it("explains the forecast7.com URL format and rejects a www. address before sending", async () => {
+    const user = userEvent.setup();
+    renderApp(`/admin/cuencadas/${CUENCADA_2026_ID}`, admin());
+
+    const field = await screen.findByLabelText(/Pronóstico del clima/);
+    expect(field).toHaveAccessibleDescription(/https:\/\/forecast7\.com\/es\/.*sin «www\.»/);
+    await user.clear(field);
+    await user.type(field, "https://www.forecast7.com/es/20d97n89d59/merida/");
+    await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+    expect(await screen.findByText("Usa una dirección que empiece con https://forecast7.com/ (sin «www.»).")).toBeInTheDocument();
+    expect(requests).toHaveLength(0);
+  });
+});
+
+describe("AdminCuencadaEditPage itinerary tags", () => {
+  it("adds tags as chips (Enter or Agregar), removes one, caps them at 6 and sends them", async () => {
+    server.use(
+      http.post(apiUrl(`/admin/cuencadas/${CUENCADA_2026_ID}/itinerary`), async ({ request }) => {
+        await record(request);
+        return HttpResponse.json(makeAdminDetail().itinerary[0]);
+      })
+    );
+    const user = userEvent.setup();
+    renderApp(`/admin/cuencadas/${CUENCADA_2026_ID}`, admin());
+    await user.click(await screen.findByRole("tab", { name: /Programa/ }));
+    await user.click(screen.getByRole("button", { name: /Agregar actividad/ }));
+    const form = screen.getByRole("form", { name: "Nueva actividad" });
+    await user.type(within(form).getByLabelText("Título"), "Cenote");
+
+    const input = within(form).getByLabelText(/^Etiquetas/);
+    expect(input).toHaveAttribute("maxLength", "24");
+    await user.type(input, "Incluye comida{Enter}");
+    await user.type(input, "incluye COMIDA{Enter}");
+    for (const tag of ["Traje de baño", "Niños", "Transporte", "Gratis"]) await user.type(input, `${tag}{Enter}`);
+    await user.type(input, "Sombrero");
+    await user.click(within(form).getByRole("button", { name: "Agregar" }));
+
+    const chips = within(form).getByRole("list", { name: /Etiquetas/ });
+    expect(within(chips).getAllByRole("listitem")).toHaveLength(6);
+    expect(input).toBeDisabled();
+    await user.click(within(form).getByRole("button", { name: "Quitar la etiqueta Gratis" }));
+    expect(within(chips).getAllByRole("listitem")).toHaveLength(5);
+
+    await user.click(within(form).getByRole("button", { name: "Agregar actividad" }));
+    expect(await screen.findByText("Actividad agregada.")).toBeInTheDocument();
+    expect(requests[0]?.body).toMatchObject({ title: "Cenote", tags: ["Incluye comida", "Traje de baño", "Niños", "Transporte", "Sombrero"] });
+  });
+});
+
 describe("AdminCuencadaEditPage reorder", () => {
   it("moves a location up with the ↑ button and sends the full new order", async () => {
     server.use(
@@ -136,6 +196,15 @@ describe("AdminCuencadaEditPage daily messages import", () => {
     await user.click(await screen.findByRole("tab", { name: /Mensajes/ }));
     return screen.getByRole("form", { name: "Importar mensajes del día" });
   }
+
+  it("keeps the import mode labels short enough for a 375px select", async () => {
+    const form = await openMessagesTab();
+    const select = within(form).getByLabelText(/Al importar/);
+    const labels = within(select).getAllByRole("option").map((option) => option.textContent ?? "");
+    expect(labels).toEqual(["Agregar o actualizar", "Reemplazar todo"]);
+    for (const label of labels) expect(label.length).toBeLessThanOrEqual(24);
+    expect(select).toHaveAccessibleDescription(/conserva los demás/);
+  });
 
   it("lists every invalid line with its number and sends nothing", async () => {
     const form = await openMessagesTab();

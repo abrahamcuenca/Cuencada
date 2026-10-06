@@ -11,11 +11,11 @@ import { Dialog } from "../../../shared/ui/Dialog";
 import { EmptyState } from "../../../shared/ui/EmptyState";
 import { Skeleton } from "../../../shared/ui/Skeleton";
 import { useToast } from "../../../shared/ui/Toast";
-import { useListSessionsQuery, useRevokeOtherSessionsMutation, useRevokeSessionMutation } from "../api";
+import { authApi, useListSessionsQuery, useRevokeOtherSessionsMutation, useRevokeSessionMutation } from "../api";
 import styles from "../auth.module.css";
 import { describeAuthError } from "../forms";
 import { LOGIN_PATH } from "../guards";
-import { logout } from "../session";
+import { finishLogoutEverywhere } from "../session";
 import { formatRelativeTime, PORTAL_TIME_ZONE, summarizeUserAgent } from "../sessionDisplay";
 
 type Confirming = "others" | "everywhere" | null;
@@ -54,8 +54,8 @@ function SessionRow({ session, onRevoke, revoking }: { session: SessionListItem;
 
 /**
  * `/perfil/sesiones`: the caller's own sessions. Revoke one, close every
- * other session, or log out on every device (revoke the others, then the
- * regular `logout()` for this one).
+ * other session, or log out on every device (`POST /auth/logout-all`, one
+ * atomic request that also ends this session, then local cleanup).
  */
 export function SessionsPage(): ReactNode {
   const dispatch = useAppDispatch();
@@ -99,10 +99,10 @@ export function SessionsPage(): ReactNode {
   const onLogoutEverywhere = (): void => {
     if (loggingOut) return;
     setLoggingOut(true);
-    revokeOthers()
+    dispatch(authApi.endpoints.logoutAll.initiate(undefined, { track: false }))
       .unwrap()
-      .then(async () => {
-        await dispatch(logout());
+      .then(() => {
+        dispatch(finishLogoutEverywhere());
         void navigate(LOGIN_PATH, { replace: true });
       })
       .catch((cause: unknown) => {

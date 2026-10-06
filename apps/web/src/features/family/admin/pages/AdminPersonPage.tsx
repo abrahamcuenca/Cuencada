@@ -1,19 +1,25 @@
 import { type Person, idSchema } from "@cuencada/types";
 import { type ReactNode, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { getApiErrorCode, isAbortError } from "../../../../shared/api/errors";
+import { getApiErrorCode, getApiErrorMessage, isAbortError } from "../../../../shared/api/errors";
 import { Button } from "../../../../shared/ui/Button";
 import { EmptyState } from "../../../../shared/ui/EmptyState";
 import { Skeleton } from "../../../../shared/ui/Skeleton";
 import { useToast } from "../../../../shared/ui/Toast";
 import { cx } from "../../../../shared/ui/cx";
+import { useAccessDenial } from "../../../auth/accessDenied";
+import { AccessDeniedState } from "../../../auth/components/AccessDeniedState";
 import { useGetPersonQuery } from "../../api";
 import { type FieldErrors, serverErrorToFieldErrors } from "../../lib/forms";
 import styles from "../admin.module.css";
 import { useDeletePersonMutation, useUpdatePersonMutation } from "../api";
+import { ADMIN_VERIFY_TITLE } from "./AdminFamilyPage";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PERSON_FORM_FIELDS, PersonForm, type PersonFormSubmit } from "../components/PersonForm";
 import { RelationshipManager } from "../components/RelationshipManager";
+
+/** Why "Quitar" is disabled for a person linked to an account (the server answers 409 otherwise). */
+export const LINKED_DELETE_HINT = "Está vinculada a una cuenta. Para quitarla del árbol, primero desvincula la cuenta en «Datos» y guarda.";
 
 /**
  * `/admin/familia/:personId`: edit one person (data + linked account), manage
@@ -23,10 +29,13 @@ export function AdminPersonPage(): ReactNode {
   const { personId = "" } = useParams();
   const validId = idSchema.safeParse(personId).success;
   const person = useGetPersonQuery(personId, { skip: !validId });
+  const denial = useAccessDenial(person.error);
 
   let body: ReactNode;
   if (!validId || getApiErrorCode(person.error) === "NOT_FOUND") {
     body = <EmptyState icon="🔎" title="No encontramos a esa persona" action={<Button to="/admin/familia">Volver a la lista</Button>} />;
+  } else if (person.currentData === undefined && denial !== null) {
+    body = <AccessDeniedState denial={denial} verifyTitle={ADMIN_VERIFY_TITLE} forbiddenTitle="No tienes acceso a esta persona" />;
   } else if (person.currentData === undefined) {
     body = person.isError ? (
       <EmptyState icon="⚠️" title="No pudimos cargar a la persona" action={<Button onClick={() => void person.refetch()}>Reintentar</Button>} />
@@ -77,11 +86,10 @@ function PersonEditor({ person }: { person: Person }): ReactNode {
       navigate("/admin/familia");
     } catch (error) {
       setConfirmDelete(false);
-      if (!isAbortError(error))
-        toast.show({
-          message: "No pudimos quitar a la persona. Inténtalo otra vez.",
-          tone: "danger"
-        });
+      if (isAbortError(error)) return;
+      // 409: linked to an account (e.g. linked from another tab meanwhile): show the server's reason.
+      const message = getApiErrorCode(error) === "CONFLICT" ? getApiErrorMessage(error) : "No pudimos quitar a la persona. Inténtalo otra vez.";
+      toast.show({ message, tone: "danger" });
     }
   };
 
@@ -113,7 +121,17 @@ function PersonEditor({ person }: { person: Person }): ReactNode {
           Quitar del árbol
         </h2>
         <p className={styles.muted}>Se borran también todas sus relaciones. Su cuenta, si tiene, no se borra.</p>
-        <Button variant="danger" onClick={() => setConfirmDelete(true)}>
+        {person.userId !== null ? (
+          <p id="quitar-persona-vinculada" className={styles.muted}>
+            {LINKED_DELETE_HINT}
+          </p>
+        ) : null}
+        <Button
+          variant="danger"
+          disabled={person.userId !== null}
+          aria-describedby={person.userId !== null ? "quitar-persona-vinculada" : undefined}
+          onClick={() => setConfirmDelete(true)}
+        >
           Quitar a {person.fullName}
         </Button>
       </section>

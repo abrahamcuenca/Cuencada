@@ -37,6 +37,25 @@ describe("AdminMediaPage", () => {
     expect(await screen.findByText("No hay fotos esperando revisión.")).toBeInTheDocument();
   });
 
+  it("opens the queue named in ?cola= and keeps the URL in sync with the tabs", async () => {
+    db.admin = [makeAdminMedia(3, { reportCount: 1, caption: "Reportada" })];
+    const user = userEvent.setup();
+    const { router } = renderApp("/admin/media?cola=reported", admin());
+
+    expect(await screen.findByRole("tab", { name: "Reportadas" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByText("Reportada")).toBeInTheDocument();
+    expect(db.log).toContain("GET /admin/media?reported=true&limit=20");
+
+    await user.click(screen.getByRole("tab", { name: "Ocultas" }));
+    expect(router.state.location.search).toBe("?cola=hidden");
+  });
+
+  it("falls back to the pending queue for an unknown ?cola=", async () => {
+    renderApp("/admin/media?cola=<script>", admin());
+
+    expect(await screen.findByRole("tab", { name: "Por revisar" })).toHaveAttribute("aria-selected", "true");
+  });
+
   it("shows reported items with their reports and hides one", async () => {
     db.admin = [makeAdminMedia(3, { reportCount: 2, caption: "Reportada" })];
     db.reports[uuid(3)] = [

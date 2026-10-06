@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { makeItinerary } from "../testing/fixtures";
+import { msUntilNextMidnight, zonedDayStart } from "../hooks/useZonedToday";
 import {
+  countdownInstants,
   formatDateRange,
   formatKicker,
   formatTimeRange,
   groupItineraryByDay,
+  idFromHash,
   messageForToday,
   safeAssetUrl,
   safeHttpsUrl,
@@ -107,5 +110,59 @@ describe("safeHttpsUrl / safeAssetUrl", () => {
     expect(safeAssetUrl("/images/../secret")).toBeNull();
     expect(safeAssetUrl("//evil.example/x.mp3")).toBeNull();
     expect(safeAssetUrl("/api/me")).toBeNull();
+  });
+});
+
+describe("idFromHash", () => {
+  it("decodes a fragment into an element id", () => {
+    expect(idFromHash("#programa")).toBe("programa");
+    expect(idFromHash("#d%C3%ADa")).toBe("día");
+  });
+
+  it("returns null for an empty or malformed fragment instead of throwing", () => {
+    expect(idFromHash("")).toBeNull();
+    expect(idFromHash("#")).toBeNull();
+    expect(idFromHash("#%E0%A4%A")).toBeNull();
+    expect(idFromHash("#%")).toBeNull();
+  });
+});
+
+describe("msUntilNextMidnight", () => {
+  it("counts to the next local midnight in the edition's timezone, not the device's", () => {
+    // 23:59:58 on Sep 9 in Mérida (UTC-6).
+    expect(msUntilNextMidnight(new Date("2026-09-10T05:59:58Z"), MERIDA)).toBe(2_000);
+    // Already Sep 10 in UTC, still Sep 9 in Mérida.
+    expect(msUntilNextMidnight(new Date("2026-09-10T03:00:00Z"), MERIDA)).toBe(3 * 3_600_000);
+  });
+
+  it("handles a DST change (23-hour day in Madrid)", () => {
+    // 2026-03-29: clocks jump from 02:00 to 03:00 in Europe/Madrid.
+    expect(zonedDayStart("2026-03-30", "Europe/Madrid")).toBe(Date.parse("2026-03-29T22:00:00Z"));
+    expect(msUntilNextMidnight(new Date("2026-03-28T23:00:00Z"), "Europe/Madrid")).toBe(23 * 3_600_000);
+  });
+});
+
+describe("countdownInstants", () => {
+  const startsAt = "2026-09-13T06:00:00Z";
+  const endsAt = "2026-09-19T05:59:59Z";
+
+  it("runs on the clock for an upcoming edition", () => {
+    const now = new Date("2026-09-10T00:00:00Z");
+    expect(countdownInstants("upcoming", startsAt, endsAt, now)).toEqual({ target: Date.parse(startsAt), end: Date.parse(endsAt), now: now.getTime() });
+  });
+
+  it("is live whenever the server says active, even before startsAt or after endsAt on this clock", () => {
+    for (const now of [new Date("2026-09-13T05:00:00Z"), new Date("2026-09-20T00:00:00Z")]) {
+      const { target, end, now: at } = countdownInstants("active", startsAt, endsAt, now);
+      expect(target).toBeLessThanOrEqual(at);
+      expect(end).toBeGreaterThan(at);
+    }
+  });
+
+  it("is over whenever the server says past", () => {
+    const now = new Date("2026-09-15T00:00:00Z");
+    const { target, end, now: at } = countdownInstants("past", startsAt, endsAt, now);
+    expect(target).toBeLessThan(at);
+    expect(end).toBeLessThanOrEqual(at);
   });
 });

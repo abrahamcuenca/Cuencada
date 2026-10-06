@@ -2,7 +2,7 @@ import { screen, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { apiUrl, statusState } from "../../../../test/auth";
+import { apiUrl, authenticatedState, makeUser, statusState } from "../../../../test/auth";
 import { renderApp } from "../../../../test/renderApp";
 import {
   makeDailyMessage,
@@ -69,6 +69,78 @@ describe("HomePage", () => {
 
     await screen.findByRole("timer");
     expect(screen.queryByRole("complementary", { name: "Mensaje del día" })).not.toBeInTheDocument();
+  });
+
+  it("refetches Home after local midnight in the edition's timezone and shows the new day's message", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    // 23:59:58 on Sep 9 in Mérida (UTC-6).
+    vi.setSystemTime(new Date("2026-09-10T05:59:58Z"));
+    let requests = 0;
+    server.use(
+      http.get(apiUrl("/cuencadas/home"), () => {
+        requests += 1;
+        const message =
+          requests === 1 ? makeDailyMessage({ date: "2026-09-09", message: "Mensaje del 9" }) : makeDailyMessage({ date: "2026-09-10", message: "Mensaje del 10" });
+        const featured = makePublicCuencada({ status: "upcoming", todayMessage: message });
+        return HttpResponse.json({ mode: "upcoming", featured, latestPast: null, announcements: [] });
+      })
+    );
+    renderApp("/", statusState("anonymous"));
+
+    expect(await screen.findByText("Mensaje del 9")).toBeInTheDocument();
+    await vi.advanceTimersByTimeAsync(4_000);
+
+    expect(await screen.findByText("Mensaje del 10")).toBeInTheDocument();
+    expect(screen.queryByText("Mensaje del 9")).not.toBeInTheDocument();
+    expect(requests).toBe(2);
+  });
+
+  it("shows ¡YA LLEGÓ! when the server says the edition is active, even before startsAt on this device's clock", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-10T03:00:00Z"));
+    const featured = makePublicCuencada({ status: "active", todayMessage: null });
+    server.use(http.get(apiUrl("/cuencadas/home"), () => HttpResponse.json({ mode: "active", featured, latestPast: null, announcements: [] })));
+    renderApp("/", statusState("anonymous"));
+
+    expect(await screen.findByText("¡YA LLEGÓ LA CUENCADA!")).toBeInTheDocument();
+    expect(screen.queryByRole("timer")).not.toBeInTheDocument();
+  });
+
+  it("shows visitors no family photos, only the brand art and a login teaser", async () => {
+    renderApp("/", statusState("anonymous"));
+
+    const memories = await screen.findByRole("region", { name: /Últimos momentos/ });
+    expect(within(memories).getByText("Inicia sesión para ver las fotos de la familia")).toBeInTheDocument();
+    expect(within(memories).getByRole("link", { name: "Iniciar sesión" })).toHaveAttribute("href", "/entrar");
+    const sources = Array.from(document.querySelectorAll("img")).map((img) => img.getAttribute("src") ?? "");
+    expect(sources.some((src) => /\/fotos\//.test(src) || src.includes("bucket"))).toBe(false);
+  });
+
+  it("asks members with an unverified email to verify before showing photos", async () => {
+    server.use(http.get(apiUrl("/announcements"), () => HttpResponse.json({ items: [], nextCursor: null })));
+    renderApp("/", authenticatedState(makeUser({ emailVerified: false })));
+
+    const memories = await screen.findByRole("region", { name: /Últimos momentos/ });
+    expect(within(memories).getByText("Verifica tu correo para ver las fotos de la familia")).toBeInTheDocument();
+    expect(within(memories).getByText(/pide otro desde el aviso de arriba/)).toBeInTheDocument();
+  });
+
+  it("shows verified members the latest past edition's photos through the gallery preview", async () => {
+    let mediaRequests = 0;
+    server.use(
+      http.get(apiUrl("/announcements"), () => HttpResponse.json({ items: [], nextCursor: null })),
+      http.get(apiUrl("/cuencadas/2026/media"), () => {
+        mediaRequests += 1;
+        return HttpResponse.json({ items: [], nextCursor: null });
+      })
+    );
+    renderApp("/", authenticatedState(makeUser()));
+
+    const memories = await screen.findByRole("region", { name: /Últimos momentos/ });
+    expect(await within(memories).findByRole("heading", { name: /Álbum vivo/ })).toBeInTheDocument();
+    expect(within(memories).getByRole("link", { name: /Subir fotos|Ver álbum/ })).toHaveAttribute("href", "/galeria/2026");
+    expect(mediaRequests).toBe(1);
+    expect(within(memories).queryByText(/Inicia sesión para ver/)).not.toBeInTheDocument();
   });
 
   it("shows a coming-soon hero when there is no edition at all", async () => {

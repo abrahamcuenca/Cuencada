@@ -115,6 +115,9 @@ function Editor({ detail }: { detail: AdminCuencadaDetail }): ReactNode {
           disabled={updateState.isLoading}
           onChange={(event) => togglePublished(event.target.checked)}
         />
+        <Button to={`/admin/cuencadas/${encodeURIComponent(cuencada.id)}/asistencia`} variant="secondary" size="sm" icon="✅">
+          Asistencia y confirmaciones
+        </Button>
         {cuencada.isPublished ? (
           <Button to={`/cuencada/${cuencada.year}`} variant="secondary" size="sm" iconEnd="↗">
             Ver página

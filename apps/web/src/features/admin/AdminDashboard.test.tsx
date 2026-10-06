@@ -24,10 +24,10 @@ describe("DashboardPage", { timeout: 15_000 }, () => {
     const cards = await screen.findByRole("link", { name: /42\s*Usuarios activos/ });
     expect(cards).toHaveAttribute("href", "/admin/usuarios?estado=active");
     expect(screen.getByRole("link", { name: /3\s*Usuarios deshabilitados/ })).toHaveAttribute("href", "/admin/usuarios?estado=disabled");
-    expect(screen.getByRole("link", { name: /5\s*Sin verificar correo/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /5\s*Sin verificar correo/ })).toHaveAttribute("href", "/admin/usuarios?estado=active&correo=sin-verificar");
     expect(screen.getByRole("link", { name: /7\s*Invitaciones pendientes/ })).toHaveAttribute("href", "/admin/invitaciones?estado=pending");
-    expect(screen.getByRole("link", { name: /4\s*Fotos por revisar/ })).toHaveAttribute("href", "/admin/media");
-    expect(screen.getByRole("link", { name: /1\s*Fotos reportadas/ })).toHaveAttribute("href", "/admin/media");
+    expect(screen.getByRole("link", { name: /4\s*Fotos por revisar/ })).toHaveAttribute("href", "/admin/media?cola=pending");
+    expect(screen.getByRole("link", { name: /1\s*Fotos reportadas/ })).toHaveAttribute("href", "/admin/media?cola=reported");
 
     const rsvp = screen.getByRole("link", { name: /RSVPs de la próxima Cuencada: Cuencada 2027/ });
     expect(rsvp).toHaveAttribute("href", `/admin/cuencadas/${IDS.edition}/asistencia`);
