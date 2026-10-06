@@ -8,10 +8,12 @@
  */
 import type { ReactNode } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
-import { useAppSelector } from "../../app/hooks";
+import { useAppDispatch, useAppSelector } from "../../app/hooks";
+import { Button } from "../../shared/ui/Button";
 import { Spinner } from "../../shared/ui/Spinner";
-import { selectAuthStatus, selectCurrentUser, selectPasswordChangeRequired } from "./authSlice";
+import { selectAuthStatus, selectCurrentUser, selectIsOffline, selectPasswordChangeRequired } from "./authSlice";
 import type { LoginRedirectState } from "./redirect";
+import { restoreSession } from "./session";
 
 /** Path of the login page. */
 export const LOGIN_PATH = "/entrar";
@@ -28,18 +30,43 @@ export function SessionPending(): ReactNode {
 }
 
 /**
+ * Shown instead of redirecting when the boot refresh could not reach the
+ * server. The refresh retries by itself on the `online` event; the button
+ * retries now.
+ */
+export function SessionOffline(): ReactNode {
+  const dispatch = useAppDispatch();
+  return (
+    <section className="shell" role="alert">
+      <h1>Sin conexión</h1>
+      <p>No pudimos comprobar tu sesión. Lo intentaremos de nuevo en cuanto vuelva la conexión.</p>
+      <Button
+        onClick={() => {
+          dispatch(restoreSession()).catch((error: unknown) => {
+            globalThis.reportError(error);
+          });
+        }}
+      >
+        Reintentar
+      </Button>
+    </section>
+  );
+}
+
+/**
  * Renders child routes only with a session. Anonymous users go to `/entrar`
  * with `state.from` set to the requested path + query (never the hash, which
  * may carry tokens). While the boot refresh runs, shows a spinner instead of
- * redirecting.
+ * redirecting; if it could not reach the server, shows an offline notice.
  *
  * UX only: the server enforces authentication.
  */
 export function RequireAuth(): ReactNode {
   const status = useAppSelector(selectAuthStatus);
+  const isOffline = useAppSelector(selectIsOffline);
   const location = useLocation();
 
-  if (status === "idle" || status === "restoring") return <SessionPending />;
+  if (status === "idle" || status === "restoring") return isOffline ? <SessionOffline /> : <SessionPending />;
   if (status !== "authenticated") {
     const state: LoginRedirectState = { from: `${location.pathname}${location.search}` };
     return <Navigate to={LOGIN_PATH} replace state={state} />;

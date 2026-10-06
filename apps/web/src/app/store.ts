@@ -6,6 +6,7 @@
 import { combineReducers, configureStore, createListenerMiddleware } from "@reduxjs/toolkit";
 import { authReducer, loggedOut } from "../features/auth/authSlice";
 import { baseApi } from "../shared/api/baseApi";
+import { cancelOnlineRefreshRetry } from "../shared/api/reauth";
 
 const rootReducer = combineReducers({
   auth: authReducer,
@@ -21,6 +22,8 @@ function buildStore(preloadedState: Partial<RootState> | undefined) {
   listener.startListening({
     actionCreator: loggedOut,
     effect: (_action, listenerApi) => {
+      // A logout while offline must not be undone by the pending "refresh when back online".
+      cancelOnlineRefreshRetry();
       listenerApi.dispatch(baseApi.util.resetApiState());
     }
   });

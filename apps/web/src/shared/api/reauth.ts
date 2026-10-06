@@ -22,6 +22,7 @@ import {
 import {
   loggedOut,
   passwordChangeRequired,
+  refreshDeferredOffline,
   selectAccessToken,
   tokenRefreshed,
   type WithAuthState
@@ -137,13 +138,52 @@ async function refreshOnce(api: BaseQueryApi): Promise<boolean> {
   if (result.error === undefined) {
     const parsed = refreshResponseSchema.safeParse(result.data);
     if (parsed.success) {
+      cancelOnlineRefreshRetry();
       api.dispatch(tokenRefreshed({ accessToken: parsed.data.accessToken, user: parsed.data.user }));
       return true;
     }
+  } else if (isUnreachable(result.error)) {
+    // No usable answer from the server: keep the session and try again when back online.
+    api.dispatch(refreshDeferredOffline());
+    scheduleOnlineRefreshRetry(api);
+    return false;
   }
 
+  // The server answered and refused (401, 403 CSRF_FAILED, 409 after the retry) or sent a malformed body.
+  cancelOnlineRefreshRetry();
   api.dispatch(loggedOut());
   return false;
+}
+
+/**
+ * True when the refresh got no HTTP answer (offline, DNS, timeout) or the
+ * server/proxy is down (5xx). Those never log the user out.
+ */
+function isUnreachable(error: FetchBaseQueryError): boolean {
+  if (error.status === "FETCH_ERROR" || error.status === "TIMEOUT_ERROR") return true;
+  const httpStatus = typeof error.status === "number" ? error.status : "originalStatus" in error ? error.originalStatus : 0;
+  return httpStatus >= 500;
+}
+
+let onlineRetry: (() => void) | null = null;
+
+function scheduleOnlineRefreshRetry(api: Pick<BaseQueryApi, "dispatch" | "getState">): void {
+  if (onlineRetry !== null || typeof window === "undefined") return;
+  const retry = (): void => {
+    onlineRetry = null;
+    refreshAccessToken(api).catch((error: unknown) => {
+      globalThis.reportError(error);
+    });
+  };
+  onlineRetry = retry;
+  window.addEventListener("online", retry, { once: true });
+}
+
+/** Cancels a pending "retry the refresh when back online" (after success, logout, and between tests). */
+export function cancelOnlineRefreshRetry(): void {
+  if (onlineRetry === null) return;
+  window.removeEventListener("online", onlineRetry);
+  onlineRetry = null;
 }
 
 let refreshInFlight: Promise<boolean> | null = null;
@@ -153,9 +193,10 @@ let refreshInFlight: Promise<boolean> | null = null;
  *
  * Single-flight: concurrent callers in this tab share one request. Across
  * tabs the request runs under {@link withRefreshLock}. On 409 `REFRESH_RACE`
- * it retries once. Success dispatches `tokenRefreshed`; any other outcome
- * (401, 403 `CSRF_FAILED`, network error, malformed body) dispatches
- * `loggedOut`.
+ * it retries once. Success dispatches `tokenRefreshed`. A network error or
+ * 5xx keeps the session, dispatches `refreshDeferredOffline` and retries on
+ * the next `online` event. Any other answer (401, 403 `CSRF_FAILED`, 409
+ * after the retry, malformed body) dispatches `loggedOut`.
  *
  * @param api - Supplies `dispatch`/`getState`; its abort signal is not used.
  * @returns `true` when a new token is in the store.

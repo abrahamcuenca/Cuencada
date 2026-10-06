@@ -4,8 +4,9 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { apiUrl, authenticatedState, errorBody, makeUser, tokenBody } from "../../../test/auth";
 import { type AppStore, makeStore } from "../../app/store";
+import { loggedOut } from "../../features/auth/authSlice";
 import { baseApi } from "./baseApi";
-import { REFRESH_LOCK_NAME } from "./reauth";
+import { cancelOnlineRefreshRetry, REFRESH_LOCK_NAME } from "./reauth";
 
 interface PingResponse {
   ok: boolean;
@@ -66,6 +67,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   server.resetHandlers();
+  cancelOnlineRefreshRetry();
   Reflect.deleteProperty(navigator, "locks");
 });
 
@@ -127,6 +129,54 @@ describe("baseQueryWithReauth", () => {
     expect(result).not.toHaveProperty("data");
     expect(fake.pingCalls).toBe(1);
     expect(store.getState().auth).toMatchObject({ accessToken: null, user: null, status: "anonymous" });
+  });
+
+  it("keeps the session and flags offline when the refresh gets no response, then refreshes on the online event", async () => {
+    server.use(http.post(apiUrl("/auth/refresh"), () => HttpResponse.error()));
+    const user = store.getState().auth.user;
+
+    const result = await store.dispatch(testApi.endpoints.ping.initiate(1));
+
+    expect(result).toHaveProperty("error.status", 401);
+    expect(store.getState().auth).toMatchObject({ status: "authenticated", user, isOffline: true });
+
+    server.resetHandlers();
+    window.dispatchEvent(new Event("online"));
+
+    await vi.waitFor(() => expect(store.getState().auth).toMatchObject({ accessToken: "token-2", isOffline: false }));
+    expect(fake.refreshCalls).toBe(1);
+  });
+
+  it("keeps the session when the refresh answers 5xx", async () => {
+    fake.refreshPlan = [{ status: 503, code: "SERVICE_UNAVAILABLE" }];
+
+    await store.dispatch(testApi.endpoints.ping.initiate(1));
+
+    expect(store.getState().auth).toMatchObject({ status: "authenticated", accessToken: "token-1-expired", isOffline: true });
+  });
+
+  it("logs out when the retry on the online event is rejected with 401", async () => {
+    server.use(http.post(apiUrl("/auth/refresh"), () => HttpResponse.error()));
+    await store.dispatch(testApi.endpoints.ping.initiate(1));
+    server.resetHandlers();
+    fake.refreshPlan = [{ status: 401, code: "UNAUTHENTICATED" }];
+
+    window.dispatchEvent(new Event("online"));
+
+    await vi.waitFor(() => expect(store.getState().auth.status).toBe("anonymous"));
+  });
+
+  it("does not refresh on the online event after the user logged out while offline", async () => {
+    server.use(http.post(apiUrl("/auth/refresh"), () => HttpResponse.error()));
+    await store.dispatch(testApi.endpoints.ping.initiate(1));
+    server.resetHandlers();
+
+    store.dispatch(loggedOut());
+    window.dispatchEvent(new Event("online"));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(fake.refreshCalls).toBe(0);
+    expect(store.getState().auth.status).toBe("anonymous");
   });
 
   it("logs out when the refresh response does not match the contract", async () => {

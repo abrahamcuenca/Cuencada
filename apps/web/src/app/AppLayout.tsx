@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
-import { selectCurrentUser, selectIsAdmin } from "../features/auth/authSlice";
+import { selectCurrentUser, selectIsAdmin, selectIsOffline } from "../features/auth/authSlice";
 import { logout } from "../features/auth/session";
 // Direct imports (not the shared/ui barrel) keep unused primitives' CSS out of the initial chunk.
 import { BottomNav } from "../shared/ui/BottomNav";
@@ -77,11 +77,13 @@ function SessionAction(): ReactNode {
 export function AppLayout(): ReactNode {
   const { pathname } = useLocation();
   const isAdmin = useAppSelector(selectIsAdmin);
+  const isOffline = useAppSelector(selectIsOffline);
   const topItems = isAdmin ? [...TOP_NAV_ITEMS, ADMIN_NAV_ITEM] : TOP_NAV_ITEMS;
 
   return (
     <PageShell
       layout="bleed"
+      banner={isOffline ? <output>Sin conexión. Reintentaremos al volver la conexión.</output> : undefined}
       header={
         <TopNav
           items={topItems}

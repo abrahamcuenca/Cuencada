@@ -7,6 +7,7 @@ import {
   initialAuthState,
   loggedOut,
   passwordChangeRequired,
+  refreshDeferredOffline,
   selectIsAdmin,
   sessionRestoreStarted,
   tokenRefreshed
@@ -16,7 +17,8 @@ const authenticated: AuthState = {
   accessToken: "token-1",
   user: makeUser(),
   status: "authenticated",
-  passwordChangeRequired: false
+  passwordChangeRequired: false,
+  isOffline: false
 };
 
 describe("authReducer", () => {
@@ -38,7 +40,8 @@ describe("authReducer", () => {
         accessToken: "t2",
         user,
         status: "authenticated",
-        passwordChangeRequired: false
+        passwordChangeRequired: false,
+        isOffline: false
       });
     }
   });
@@ -54,6 +57,20 @@ describe("authReducer", () => {
     expect(next.passwordChangeRequired).toBe(false);
   });
 
+  it("keeps the session and only sets isOffline on refreshDeferredOffline", () => {
+    expect(authReducer(authenticated, refreshDeferredOffline())).toEqual({ ...authenticated, isOffline: true });
+    expect(authReducer({ ...initialAuthState, status: "restoring" }, refreshDeferredOffline())).toMatchObject({
+      status: "restoring",
+      isOffline: true
+    });
+  });
+
+  it("clears isOffline when a refresh succeeds or the user logs out", () => {
+    const offline = { ...authenticated, isOffline: true };
+    expect(authReducer(offline, tokenRefreshed({ accessToken: "t9", user: makeUser() })).isOffline).toBe(false);
+    expect(authReducer(offline, loggedOut()).isOffline).toBe(false);
+  });
+
   it("flags passwordChangeRequired on passwordChangeRequired", () => {
     expect(authReducer(authenticated, passwordChangeRequired()).passwordChangeRequired).toBe(true);
   });
@@ -63,7 +80,8 @@ describe("authReducer", () => {
       accessToken: null,
       user: null,
       status: "anonymous",
-      passwordChangeRequired: false
+      passwordChangeRequired: false,
+      isOffline: false
     });
   });
 });

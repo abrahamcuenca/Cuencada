@@ -3,6 +3,7 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { apiUrl, errorBody, makeUser, tokenBody } from "../../test/auth";
 import { LEGACY_DEMO_USER_KEY, removeLegacyDemoSession } from "../features/auth/legacy";
+import { cancelOnlineRefreshRetry } from "../shared/api/reauth";
 import { bootstrapApp } from "./bootstrap";
 import { makeStore } from "./store";
 
@@ -13,6 +14,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
 afterEach(() => {
   server.resetHandlers();
+  cancelOnlineRefreshRetry();
   for (const stop of stops.splice(0)) stop();
 });
 
@@ -57,6 +59,22 @@ describe("bootstrapApp", () => {
     stops.push(bootstrapApp(store));
 
     await vi.waitFor(() => expect(store.getState().auth.status).toBe("anonymous"));
+  });
+
+  it("stays restoring and flags offline when the server is unreachable, then restores on the online event", async () => {
+    server.use(http.post(apiUrl("/auth/refresh"), () => HttpResponse.error()));
+    const store = makeStore();
+
+    stops.push(bootstrapApp(store));
+
+    await vi.waitFor(() => expect(store.getState().auth).toMatchObject({ status: "restoring", isOffline: true }));
+
+    server.use(http.post(apiUrl("/auth/refresh"), () => HttpResponse.json(tokenBody("back-online"))));
+    window.dispatchEvent(new Event("online"));
+
+    await vi.waitFor(() =>
+      expect(store.getState().auth).toMatchObject({ status: "authenticated", accessToken: "back-online", isOffline: false })
+    );
   });
 
   it("never writes the token or user to web storage", async () => {

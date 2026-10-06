@@ -12,6 +12,14 @@ describe("RequireAuth", () => {
     expect(router.state.location.pathname).toBe("/directorio");
   });
 
+  it("shows an offline notice instead of redirecting when the boot refresh could not reach the server", async () => {
+    const { router } = renderApp("/directorio", { auth: { ...statusState("restoring").auth, isOffline: true } });
+
+    expect(await screen.findByRole("heading", { name: "Sin conexión" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reintentar" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/directorio");
+  });
+
   it("renders the member page once the boot refresh restores the session", async () => {
     const { store } = renderApp("/directorio", statusState("restoring"));
     await screen.findByText("Cargando tu sesión…");
