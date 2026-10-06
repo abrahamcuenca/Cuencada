@@ -29,6 +29,12 @@ export const AdminUserMessages = {
  * Role/status changes allowed on the **same target** per rolling hour, by
  * any admin (abuse limit: caps flip-flopping an account and the alert
  * emails each admin-account change sends, including cap-exempt ones).
+ *
+ * **Protective changes are never refused** (Security L2, PR #30): disabling
+ * an account, and re-promoting an account whose latest role change in the
+ * window was a demotion (restoring an admin a compromised admin removed).
+ * They are still counted and audited. Force-reset is a separate route and
+ * not subject to this limit at all.
  */
 export const TARGET_ROLE_STATUS_CHANGE_LIMIT = { max: 3, windowMinutes: 60 } as const;
 
@@ -260,6 +266,59 @@ export async function countRecentRoleStatusChanges(tx: Transaction, targetId: st
       )
     );
   return row?.count ?? 0;
+}
+
+/**
+ * The role the target was last changed **to** within the limit window
+ * (from the audit log's `role.to`), or `null` when its role did not change
+ * in the window. Same window and clock as {@link countRecentRoleStatusChanges}.
+ *
+ * @param tx - Open transaction holding the admin-users lock.
+ * @param targetId - The account.
+ */
+export async function lastRecentRoleChange(tx: Transaction, targetId: string): Promise<UserRole | null> {
+  const [row] = await tx
+    .select({ to: sql<string | null>`${auditLogs.metadata} -> 'role' ->> 'to'` })
+    .from(auditLogs)
+    .where(
+      and(
+        eq(auditLogs.entityType, AuditEntityType.User),
+        eq(auditLogs.entityId, targetId),
+        inArray(auditLogs.action, [AuditAction.UserUpdated, AuditAction.UserDisabled, AuditAction.UserEnabled]),
+        sql`${auditLogs.metadata} ? 'role'`,
+        sql`${auditLogs.createdAt} > now() - make_interval(mins => ${TARGET_ROLE_STATUS_CHANGE_LIMIT.windowMinutes}::int)`
+      )
+    )
+    .orderBy(desc(auditLogs.createdAt), desc(auditLogs.id))
+    .limit(1);
+  const to = row?.to;
+  return to === "admin" || to === "member" ? to : null;
+}
+
+/** What a PATCH changes, for {@link isProtectiveChange}. */
+export interface RoleStatusChange {
+  roleChanged: boolean;
+  nextRole: UserRole;
+  statusChanged: boolean;
+  nextStatus: UserStatus;
+  /** {@link lastRecentRoleChange} for the target. */
+  lastRecentRole: UserRole | null;
+}
+
+/**
+ * True when **every** role/status part of the change is protective, so the
+ * per-target limit must not refuse it: a status change only to `disabled`,
+ * and a role change only to `admin` right after a demotion in the window.
+ * Anything else (promoting a never-demoted account, demoting, re-enabling)
+ * is subject to the limit.
+ *
+ * @param change - The PATCH's role/status facts.
+ */
+export function isProtectiveChange(change: RoleStatusChange): boolean {
+  if (!change.roleChanged && !change.statusChanged) return false;
+  const roleOk = !change.roleChanged || (change.nextRole === "admin" && change.lastRecentRole === "member");
+  const statusOk = !change.statusChanged || change.nextStatus === "disabled";
+  return roleOk && statusOk;
 }
 
 /**

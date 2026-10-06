@@ -46,6 +46,8 @@ import {
   AdminUserMessages,
   countOtherActiveAdmins,
   countRecentRoleStatusChanges,
+  isProtectiveChange,
+  lastRecentRoleChange,
   getAdminUser,
   listAdminUsers,
   lockAdminUserChanges,
@@ -160,7 +162,8 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
    * tokens. The caller cannot change their own role or status (403), and the
    * last active admin cannot be demoted or disabled (409). At most
    * {@link TARGET_ROLE_STATUS_CHANGE_LIMIT} role/status changes per target
-   * per hour, across all admins (429).
+   * per hour, across all admins (429), except protective changes (disable,
+   * re-promote after a recent demotion), which always go through.
    */
   app.patch(
     "/admin/users/:id",
@@ -203,7 +206,11 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
           (roleChanged || statusChanged) &&
           (await countRecentRoleStatusChanges(tx, target.id)) >= TARGET_ROLE_STATUS_CHANGE_LIMIT.max
         ) {
-          throw new AppError("RATE_LIMITED", AdminUserMessages.TargetChangeLimit);
+          // Over the limit: only protective changes (disable, restore a demoted admin) go through.
+          const lastRecentRole = roleChanged ? await lastRecentRoleChange(tx, target.id) : null;
+          if (!isProtectiveChange({ roleChanged, nextRole, statusChanged, nextStatus, lastRecentRole })) {
+            throw new AppError("RATE_LIMITED", AdminUserMessages.TargetChangeLimit);
+          }
         }
 
         const mustChangeChanged = input.mustChangePassword === true && !target.mustChangePassword;

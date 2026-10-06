@@ -298,6 +298,46 @@ describe("PATCH /api/admin/users/:id", () => {
     expect((await patchAs(otherAdmin, { status: "active" })).statusCode).toBe(200);
   });
 
+  it("never refuses restoring an admin that was demoted within the hour, even past the limit (Security L2)", async () => {
+    const honest = await createMember({ role: "admin" });
+    const attacker = await createMember({ role: "admin" });
+    const patchAs = async (actor: Member, payload: Record<string, unknown>) =>
+      app.inject({ method: "PATCH", url: `/api/admin/users/${honest.user.id}`, payload, ...actor.auth });
+
+    expect((await patchAs(attacker, { role: "member" })).statusCode).toBe(200);
+    expect((await patchAs(admin, { role: "admin" })).statusCode).toBe(200);
+    expect((await patchAs(attacker, { role: "member" })).statusCode).toBe(200);
+    // The target's budget is spent; the restore still goes through, and is audited.
+    const restored = await patchAs(admin, { role: "admin" });
+    expect(restored.statusCode, restored.body).toBe(200);
+    expect(restored.json<UserItem>().role).toBe("admin");
+    // A further demotion is not protective: refused.
+    expect((await patchAs(attacker, { role: "member" })).statusCode).toBe(429);
+    const roleRows = (await auditsFor(honest.user.id)).filter((row) => row.metadata.role !== undefined);
+    expect(roleRows).toHaveLength(4);
+  });
+
+  it("never refuses a disable past the limit, but still refuses promoting a never-demoted account (Security L2)", async () => {
+    const patch = async (payload: Record<string, unknown>) =>
+      app.inject({ method: "PATCH", url: `/api/admin/users/${member.user.id}`, payload, ...admin.auth });
+
+    expect((await patch({ status: "disabled" })).statusCode).toBe(200);
+    expect((await patch({ status: "active" })).statusCode).toBe(200);
+    expect((await patch({ status: "disabled" })).statusCode).toBe(200);
+    expect((await patch({ status: "active" })).statusCode).toBe(429);
+    // Re-enable then disable again to show a disable on a spent budget.
+    await getTestDb().update(users).set({ status: "active" }).where(eq(users.id, member.user.id));
+    const disabled = await patch({ status: "disabled" });
+    expect(disabled.statusCode, disabled.body).toBe(200);
+    expect(disabled.json<UserItem>().status).toBe("disabled");
+    expect((await auditsFor(member.user.id)).filter((row) => row.action === "user.disabled")).toHaveLength(3);
+
+    // Promoting an account whose role never changed in the window is not protective.
+    expect((await patch({ role: "admin" })).statusCode).toBe(429);
+    // Nor is a restore bundled with a re-enable.
+    expect((await patch({ role: "admin", status: "active" })).statusCode).toBe(429);
+  });
+
   it("writes no audit row for a no-op patch", async () => {
     const response = await app.inject({
       method: "PATCH",
