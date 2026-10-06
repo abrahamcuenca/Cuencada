@@ -40,23 +40,36 @@ const NAV_ITEMS: NavItem[] = [
   { key: "mas", label: "Más", href: "/_ui", icon: "☰" }
 ];
 
+/**
+ * Abstract placeholder "photo" (an inline SVG landscape). The style guide
+ * never shows real family photos: the repository is public.
+ */
+function placeholderPhoto(hue: number): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="hsl(${hue} 70% 78%)"/><stop offset="1" stop-color="hsl(${hue} 45% 42%)"/></linearGradient></defs><rect width="1200" height="800" fill="url(#g)"/><circle cx="900" cy="220" r="110" fill="hsl(${(hue + 40) % 360} 90% 85%)"/><path d="M0 620 L320 380 L560 600 L820 420 L1200 660 V800 H0 Z" fill="hsl(${hue} 35% 30%)"/></svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
+const PHOTO_A = placeholderPhoto(150);
+const PHOTO_B = placeholderPhoto(35);
+const PHOTO_C = placeholderPhoto(320);
+
 const FAMILY = [
-  "Jorge Cuenca Fafutis",
-  "María de la Luz Cuenca",
-  "Rosa Elena Cuenca",
-  "Tomás Cuenca",
-  "Ana Sofía Pérez Cuenca",
-  "Luis Fernando Cuenca",
-  "Carmen Cuenca",
-  "Diego Cuenca Ruiz",
-  "Valeria Cuenca",
-  "Pedro Cuenca"
-].map((name, i) => ({ id: String(i), name, src: i === 1 ? "/images/fotos/foto02.jpg" : undefined }));
+  "Ana Morales Vega",
+  "María de la Luz Vega",
+  "Rosa Elena Ibarra",
+  "Tomás Ibarra",
+  "Ana Sofía Pérez Morales",
+  "Luis Fernando Morales",
+  "Carmen Morales",
+  "Diego Morales Ruiz",
+  "Valeria Morales",
+  "Pedro Morales"
+].map((name, i) => ({ id: String(i), name, src: i === 1 ? PHOTO_A : undefined }));
 
 const PHOTOS: LightboxItem[] = [
-  { id: "f2", type: "image", src: "/images/fotos/foto02.jpg", alt: "Familia Cuenca en Mérida", caption: "Subida por Rosa · 14 sep" },
-  { id: "f3", type: "image", src: "/images/fotos/foto03.jpg", alt: "Recorrido de la Cuencada 2026", caption: "Subida por Tomás · 15 sep" },
-  { id: "f4", type: "image", src: "/images/fotos/foto04.jpg", alt: "Celebración familiar", caption: "Subida por Carmen · 16 sep" }
+  { id: "f2", type: "image", src: PHOTO_A, alt: "Paisaje de ejemplo en verdes", caption: "Subida por Rosa · 14 sep" },
+  { id: "f3", type: "image", src: PHOTO_B, alt: "Paisaje de ejemplo en ocres", caption: "Subida por Tomás · 15 sep" },
+  { id: "f4", type: "image", src: PHOTO_C, alt: "Paisaje de ejemplo en rosas", caption: "Subida por Carmen · 16 sep" }
 ];
 
 const START = new Date("2027-09-12T00:00:00-06:00");
@@ -298,7 +311,7 @@ function StyleGuideContent(): React.ReactNode {
                   {...p}
                   placeholder="Elige una rama"
                   options={[
-                    { value: "jorge", label: "Familia de Jorge" },
+                    { value: "norte", label: "Rama Norte" },
                     { value: "rosa", label: "Familia de Rosa" },
                     { value: "tomas", label: "Familia de Tomás" }
                   ]}
@@ -324,10 +337,10 @@ function StyleGuideContent(): React.ReactNode {
         <Section id="avatares" title="Avatares y círculos de asistentes">
           <div className={styles.stack}>
             <div className={styles.row}>
-              <AvatarCircle name="Jorge Cuenca Fafutis" size="sm" />
-              <AvatarCircle name="María de la Luz Cuenca" size="md" src="/images/fotos/foto02.jpg" />
-              <AvatarCircle name="Rosa Elena Cuenca" size="lg" highlight />
-              <AvatarCircle name="Tomás Cuenca" size="xl" />
+              <AvatarCircle name="Ana Morales Vega" size="sm" />
+              <AvatarCircle name="María de la Luz Vega" size="md" src={PHOTO_A} />
+              <AvatarCircle name="Rosa Elena Ibarra" size="lg" highlight />
+              <AvatarCircle name="Tomás Ibarra" size="xl" />
               <AvatarCircle name="Foto rota" size="lg" src="/no-existe.jpg" />
             </div>
             <AvatarStack people={FAMILY} max={5} total={48} />

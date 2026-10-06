@@ -57,7 +57,7 @@ describe("changePasswordInputSchema", () => {
 
 describe("emailSchema", () => {
   it("trims and lowercases before validating", () => {
-    expect(emailSchema.parse("  Ana.Cuenca@Example.COM ")).toBe("ana.cuenca@example.com");
+    expect(emailSchema.parse("  Ana.Morales@Example.COM ")).toBe("ana.morales@example.com");
   });
 
   it("rejects malformed addresses", () => {
@@ -157,7 +157,7 @@ describe("displayNameSchema invisible-only names", () => {
   });
 
   it("accepts normal names, including accents and a soft hyphen inside a word", () => {
-    expect(displayNameSchema.parse("José Cuenca")).toBe("José Cuenca");
+    expect(displayNameSchema.parse("José Morales")).toBe("José Morales");
     expect(displayNameSchema.safeParse("Ana\u00ADMaría").success).toBe(true);
   });
 

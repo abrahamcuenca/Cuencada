@@ -88,7 +88,7 @@ describe("GET /api/admin/users", () => {
     await createSession(member.user.id);
     await createSession(member.user.id, { revoked: true });
     await createSession(member.user.id, { idleExpiresAt: new Date(Date.now() - 1000), absoluteExpiresAt: new Date(Date.now() - 1000), now: new Date(Date.now() - 2000) });
-    const [person] = await db.insert(people).values({ fullName: "Ana Cuenca", userId: member.user.id }).returning();
+    const [person] = await db.insert(people).values({ fullName: "Ana Morales", userId: member.user.id }).returning();
     const lastLogin = new Date("2026-09-01T10:00:00Z");
     await db.update(users).set({ lastLoginAt: lastLogin }).where(eq(users.id, member.user.id));
 
@@ -111,7 +111,7 @@ describe("GET /api/admin/users", () => {
   });
 
   it("searches name and email literally and filters by role and status", async () => {
-    await createUser({ displayName: "100% Cuenca", email: "pct@example.test" });
+    await createUser({ displayName: "100% Morales", email: "pct@example.test" });
     await createUser({ displayName: "Tío_Beto", email: "beto@example.test", status: "disabled" });
 
     const list = async (query: string): Promise<string[]> => {

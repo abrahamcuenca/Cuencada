@@ -95,7 +95,7 @@ describe("GET /api/admin/cuencadas/:id/rsvps", () => {
       name: "Hotel Uno"
     });
     const ana = await createUser({ displayName: "Ana" });
-    const personId = await insertPerson("Ana Cuenca", ana.id);
+    const personId = await insertPerson("Ana Morales", ana.id);
     await getTestDb().insert(cuencadaRsvps).values({
       cuencadaId: edition.id,
       userId: ana.id,
@@ -184,7 +184,7 @@ describe("admin RSVP views and unlisted members", () => {
   it("shows unlisted members complete to admins in the table and the CSV", async () => {
     const edition = await insertCuencada();
     const hidden = await createUser({ displayName: "Herminia Oculta", profile: { listedInDirectory: false } });
-    const personId = await insertPerson("Herminia Cuenca", hidden.id);
+    const personId = await insertPerson("Herminia Morales", hidden.id);
     await getTestDb().insert(cuencadaRsvps).values({ cuencadaId: edition.id, userId: hidden.id, status: "yes" });
 
     const table = await app.inject({ method: "GET", url: `/api/admin/cuencadas/${edition.id}/rsvps`, ...adminAuth });

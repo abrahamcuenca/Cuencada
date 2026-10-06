@@ -18,7 +18,7 @@ beforeEach(async () => {
   app = await createTestApp({ clock });
   member = await createUser({
     emailVerified: true,
-    displayName: "Beto Cuenca"
+    displayName: "Beto Morales"
   });
   memberAuth = await loginAs(app, member);
 });
@@ -399,7 +399,7 @@ describe("GET /api/cuencadas/:year/rsvp/summary", () => {
 describe("GET /api/cuencadas/:year/attendees", () => {
   it("unions yes RSVPs with attendance, dedupes by person and exposes no contact fields", async () => {
     const edition = await insertCuencada();
-    const memberPerson = await insertPerson("Alberto Cuenca", member.id);
+    const memberPerson = await insertPerson("Alberto Morales", member.id);
     await getTestDb()
       .update(profiles)
       .set({
@@ -440,7 +440,7 @@ describe("GET /api/cuencadas/:year/attendees", () => {
     const body = res.json<Attendee[]>();
     expect(body.map((row) => [row.displayName, row.source, row.rsvpStatus, row.isMe])).toEqual([
       ["Abuela Rosa", "attendance", null, false],
-      ["Beto Cuenca", "rsvp", "yes", true],
+      ["Beto Morales", "rsvp", "yes", true],
       ["Zoe", "rsvp", "yes", false]
     ]);
     const me = body.find((row) => row.isMe);
@@ -473,9 +473,9 @@ describe("GET /api/cuencadas/:year/attendees", () => {
       displayName: "Herminia Oculta",
       profile: { listedInDirectory: false, avatarKey: "avatars/herminia.webp" }
     });
-    const hiddenPerson = await insertPerson("Herminia Cuenca Oculta", hidden.id);
+    const hiddenPerson = await insertPerson("Herminia Morales Oculta", hidden.id);
     const historicHidden = await createUser({ displayName: "Tío Escondido", profile: { listedInDirectory: false } });
-    const historicHiddenPerson = await insertPerson("Tío Escondido Cuenca", historicHidden.id);
+    const historicHiddenPerson = await insertPerson("Tío Escondido Morales", historicHidden.id);
     const unlinked = await insertPerson("Abuela Rosa");
     await getTestDb()
       .insert(cuencadaRsvps)

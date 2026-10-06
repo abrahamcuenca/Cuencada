@@ -17,7 +17,7 @@ export function makeUser(overrides: Partial<CurrentUser> = {}): CurrentUser {
   return {
     id: "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
     email: "prima@example.com",
-    displayName: "Prima Cuenca",
+    displayName: "Prima Morales",
     role: "member",
     status: "active",
     mustChangePassword: false,

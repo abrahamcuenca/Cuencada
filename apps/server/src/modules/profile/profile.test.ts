@@ -48,14 +48,14 @@ describe("GET /api/profile/me", () => {
     const { user, auth } = await member({
       displayName: "Ana",
       profile: {
-        fullName: "Ana Cuenca",
-        phone: "+52 999 123 4567",
+        fullName: "Ana Morales",
+        phone: "+52 555 012 4567",
         city: "Mérida",
         bio: "Hola",
         showPhone: false
       }
     });
-    const [person] = await getTestDb().insert(people).values({ fullName: "Ana Cuenca", userId: user.id }).returning();
+    const [person] = await getTestDb().insert(people).values({ fullName: "Ana Morales", userId: user.id }).returning();
 
     const response = await app.inject({
       method: "GET",
@@ -70,10 +70,10 @@ describe("GET /api/profile/me", () => {
       personId: person?.id,
       email: user.email,
       displayName: "Ana",
-      fullName: "Ana Cuenca",
+      fullName: "Ana Morales",
       familyBranch: null,
       city: "Mérida",
-      phone: "+52 999 123 4567",
+      phone: "+52 555 012 4567",
       bio: "Hola",
       avatarUrl: null,
       visibility: { showEmail: false, showPhone: false, showCity: false, listedInDirectory: true },
@@ -133,7 +133,7 @@ describe("PATCH /api/profile/me", () => {
       ...auth,
       payload: {
         displayName: "Tía Lupe",
-        fullName: "Guadalupe Cuenca",
+        fullName: "Guadalupe Morales",
         phone: "+52 (999) 555-0101",
         city: "Mérida",
         bio: "Me encanta la cochinita.",
@@ -147,7 +147,7 @@ describe("PATCH /api/profile/me", () => {
     const body = response.json<OwnProfile>();
     expect(body).toMatchObject({
       displayName: "Tía Lupe",
-      fullName: "Guadalupe Cuenca",
+      fullName: "Guadalupe Morales",
       phone: "+52 (999) 555-0101",
       city: "Mérida",
       familyBranch: "Rama Norte",
@@ -176,7 +176,7 @@ describe("PATCH /api/profile/me", () => {
       profile: {
         fullName: "Ana",
         city: "Mérida",
-        phone: "+52 999 123 4567",
+        phone: "+52 555 012 4567",
         bio: "Hola"
       }
     });
@@ -272,7 +272,7 @@ describe("PATCH /api/profile/me", () => {
       url: "/api/profile/me",
       ...auth,
       payload: {
-        phone: "+52 999 777 8888",
+        phone: "+52 555 077 8888",
         bio: "Secreto de familia",
         city: "Progreso"
       }
@@ -281,7 +281,7 @@ describe("PATCH /api/profile/me", () => {
       method: "PATCH",
       url: "/api/profile/me",
       ...auth,
-      payload: { phone: "+52 999 777 8888", role: "admin" }
+      payload: { phone: "+52 555 077 8888", role: "admin" }
     });
     await app.inject({ method: "GET", url: "/api/profile/me", ...auth });
 

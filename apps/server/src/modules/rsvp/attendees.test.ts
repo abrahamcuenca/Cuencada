@@ -27,7 +27,7 @@ const VIEWER = "55555555-5555-4555-8555-555555555555";
 describe("mergeAttendees", () => {
   it("keeps one row per person, preferring the RSVP, and sorts accent-insensitively", () => {
     const merged = mergeAttendees(
-      [candidate({ personId: P1, userId: U1, accountName: "Ángel", fullName: "Ángel Cuenca" })],
+      [candidate({ personId: P1, userId: U1, accountName: "Ángel", fullName: "Ángel Morales" })],
       [
         candidate({ personId: P1, userId: U1, accountName: "Ángel" }),
         candidate({ personId: "p2", fullName: "Beatriz" })
