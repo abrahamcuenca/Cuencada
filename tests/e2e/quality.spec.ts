@@ -23,12 +23,14 @@ interface RouteCheck {
   name: string;
   /** Path, or a function that navigates there (for routes with generated ids). */
   open: string | ((page: Page) => Promise<void>);
+  /** Heading that proves the page rendered its content (not an error state) before measuring. */
+  ready?: string;
 }
 
 const PUBLIC_ROUTES: RouteCheck[] = [
   { name: "home", open: "/" },
-  { name: `year-${FUTURE_YEAR}`, open: `/cuencada/${FUTURE_YEAR}` },
-  { name: `year-${SEEDED_YEAR}`, open: `/cuencada/${SEEDED_YEAR}` },
+  { name: `year-${FUTURE_YEAR}`, open: `/cuencada/${FUTURE_YEAR}`, ready: `Programa Cuencada ${FUTURE_YEAR}` },
+  { name: `year-${SEEDED_YEAR}`, open: `/cuencada/${SEEDED_YEAR}`, ready: `Programa Cuencada ${SEEDED_YEAR}` },
   { name: "entrar", open: "/entrar" },
   { name: "recuperar", open: "/recuperar" },
   { name: "invitacion-sin-token", open: "/invitacion" }
@@ -36,10 +38,10 @@ const PUBLIC_ROUTES: RouteCheck[] = [
 
 const MEMBER_ROUTES: RouteCheck[] = [
   { name: "home-member", open: "/" },
-  { name: `year-${FUTURE_YEAR}-member`, open: `/cuencada/${FUTURE_YEAR}` },
-  { name: "galeria", open: `/galeria/${FUTURE_YEAR}` },
-  { name: "directorio", open: "/directorio" },
-  { name: "arbol", open: "/arbol" },
+  { name: `year-${FUTURE_YEAR}-member`, open: `/cuencada/${FUTURE_YEAR}`, ready: `Programa Cuencada ${FUTURE_YEAR}` },
+  { name: "galeria", open: `/galeria/${FUTURE_YEAR}`, ready: `Álbum vivo ${FUTURE_YEAR}` },
+  { name: "directorio", open: "/directorio", ready: "Directorio familiar" },
+  { name: "arbol", open: "/arbol", ready: "Árbol familiar" },
   { name: "chat", open: "/chat" },
   {
     name: "chat-sala",
@@ -78,6 +80,7 @@ async function open(page: Page, route: RouteCheck): Promise<void> {
   await page.waitForLoadState("networkidle");
   // Let lazy routes, skeletons and fonts settle.
   await expect(page.locator("main")).toBeVisible();
+  if (route.ready !== undefined) await expect(page.getByRole("heading", { name: route.ready })).toBeVisible();
   await page.waitForTimeout(400);
 }
 

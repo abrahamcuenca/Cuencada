@@ -85,6 +85,13 @@ async function seedFutureEdition(sql: Sql): Promise<string> {
     insert into cuencada_itinerary_items (cuencada_id, date, title, description, location_id, sort_order)
     values (${edition.id}, '2027-07-10', 'Bienvenida', 'Llegada y registro en el hotel.', ${hotel?.id ?? null}, 0),
            (${edition.id}, '2027-07-11', 'Comida familiar', 'Comida en el jardín.', null, 1)`;
+  // Long unbreakable tokens (a URL, a long place name, a long tag): the 320 px overflow gate
+  // keeps the programa cards from being pushed wider by content like this (WP-2.2).
+  await sql`
+    insert into cuencada_itinerary_items (cuencada_id, date, title, description, location_name, tags, sort_order)
+    values (${edition.id}, '2027-07-12', 'Recorrido-por-Pueblo-Ejemplo-de-los-Cenotes',
+            'Reservas en https://reservas.example.test/cuencada-2027/recorrido-pueblo-ejemplo-cenotes-familia',
+            'Embarcadero-Principal-del-Cenote-Ejemplo', ${["bloqueador-biodegradable"]}, 2)`;
   await sql`insert into chat_rooms (kind, cuencada_id, title) values ('cuencada', ${edition.id}, ${`Cuencada ${FUTURE_YEAR}`})`;
   return edition.id;
 }
