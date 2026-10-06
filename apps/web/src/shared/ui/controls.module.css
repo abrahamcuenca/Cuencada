@@ -1,0 +1,64 @@
+/* Shared look for TextInput, TextArea and Select. */
+.control {
+  display: block;
+  width: 100%;
+  min-height: var(--control-height);
+  padding: var(--space-3) var(--space-4);
+  border: 1.5px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: max(16px, var(--text-md));
+  line-height: var(--leading-snug);
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.control::placeholder {
+  color: var(--color-text-muted);
+  opacity: 1;
+}
+
+.control:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+  border-color: var(--color-primary);
+}
+
+.control[aria-invalid="true"] {
+  border-color: var(--color-danger);
+  background: #fffafa;
+}
+
+.control:disabled {
+  background: var(--color-surface-sunken);
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
+.textarea {
+  min-height: 7.5rem;
+  resize: vertical;
+}
+
+.selectWrap {
+  position: relative;
+}
+
+.select {
+  appearance: none;
+  padding-right: var(--space-10);
+  cursor: pointer;
+}
+
+.chevron {
+  position: absolute;
+  right: var(--space-4);
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--color-primary);
+  font-size: 0.75rem;
+}
