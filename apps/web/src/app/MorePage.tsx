@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { selectIsAdmin } from "../features/auth/authSlice";
 import { logout } from "../features/auth/session";
+import { InstallAppCard } from "../features/pwa";
 import { reportUnexpected } from "../shared/lib/reportUnexpected";
 import { Button } from "../shared/ui/Button";
 import { useAppDispatch, useAppSelector } from "./hooks";
@@ -96,6 +97,7 @@ export function MorePage(): ReactNode {
           </Button>
         </li>
       </ul>
+      <InstallAppCard />
     </section>
   );
 }

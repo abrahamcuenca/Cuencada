@@ -72,5 +72,8 @@ jobs:
       - name: Check initial bundle size (190 KB gzip)
         run: pnpm --filter @cuencada/web size
 
+      - name: Check service worker caching rules (T9)
+        run: pnpm --filter @cuencada/web check:sw
+
       - name: Audit production dependencies
         run: pnpm audit --prod --audit-level=high

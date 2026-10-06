@@ -1,0 +1,101 @@
+/* PWA banners: fixed above the bottom nav (mobile) and the home indicator; never cover the page header. */
+.stack {
+  position: fixed;
+  z-index: var(--z-banner);
+  left: max(var(--space-3), var(--safe-left));
+  right: max(var(--space-3), var(--safe-right));
+  bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + var(--space-3));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  pointer-events: none;
+}
+
+@media (min-width: 900px) {
+  .stack {
+    /* No BottomNav at ≥900px. */
+    bottom: calc(var(--safe-bottom) + var(--space-4));
+    left: auto;
+    width: min(28rem, calc(100vw - 2 * var(--space-4)));
+  }
+}
+
+.bar,
+.notice {
+  pointer-events: auto;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+}
+
+.text {
+  display: block;
+  margin: 0;
+  flex: 1 1 12rem;
+  font-size: var(--text-md);
+  line-height: var(--leading-snug);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.ghost {
+  white-space: nowrap;
+}
+
+.notice {
+  display: block;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-warning-soft);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+}
+
+/* "Instalar app" card on the "Más" page. */
+.install {
+  position: relative;
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-6);
+  padding: var(--space-4);
+  padding-right: calc(var(--tap-min) + var(--space-2));
+  border-radius: var(--radius-md);
+  background: var(--color-primary-soft);
+  color: var(--color-text);
+}
+
+.installTitle {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.installText {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+}
+
+.installClose {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+}
+
+.installAction {
+  justify-self: start;
+}
