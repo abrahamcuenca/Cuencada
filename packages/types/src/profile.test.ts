@@ -91,6 +91,29 @@ describe("updateProfileInputSchema", () => {
     expect(updateProfileInputSchema.safeParse({}).success).toBe(false);
     expect(updateProfileInputSchema.safeParse({ phone: "llámame" }).success).toBe(false);
   });
+
+  it("rejects keys outside the contract (mass assignment)", () => {
+    for (const key of ["role", "status", "userId", "email", "avatarKey", "emailVerifiedAt"]) {
+      expect(updateProfileInputSchema.safeParse({ bio: "Hola", [key]: "x" }).success).toBe(false);
+    }
+  });
+
+  it("bounds the phone to 7–15 digits", () => {
+    expect(updateProfileInputSchema.safeParse({ phone: "+52 (999) 123-4567" }).success).toBe(true);
+    expect(updateProfileInputSchema.safeParse({ phone: "123 456" }).success).toBe(false);
+    expect(updateProfileInputSchema.safeParse({ phone: "+1234567890123456" }).success).toBe(false);
+    expect(updateProfileInputSchema.safeParse({ phone: "---------" }).success).toBe(false);
+  });
+
+  it("rejects bidi controls in the family branch and city", () => {
+    expect(updateProfileInputSchema.safeParse({ city: "M\u202Eérida" }).success).toBe(false);
+    expect(updateProfileInputSchema.safeParse({ familyBranch: "Rama\u200B" }).success).toBe(false);
+  });
+
+  it("caps the bio at 500 characters", () => {
+    expect(updateProfileInputSchema.safeParse({ bio: "a".repeat(500) }).success).toBe(true);
+    expect(updateProfileInputSchema.safeParse({ bio: "a".repeat(501) }).success).toBe(false);
+  });
 });
 
 describe("upsertRsvpInputSchema", () => {
