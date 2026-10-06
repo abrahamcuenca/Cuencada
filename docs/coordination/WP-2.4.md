@@ -412,3 +412,43 @@ The `acleron-platform` repo was checked out at
     - **Acleron:** `tests/run-tests.sh` passes 54/54.
   - **Still not run:** anything against `server_1`, the production DB or a
     bucket.
+- 2026-10-06 PR #38 (head `d95bb05`): **Security APPROVED, and TL
+  APPROVED**, with follow-ups.
+  - **Done in Cuencada:**
+    - **Runbook § 3:** the DB test uses `read -rsp` and a temporary 0600
+      `.pgpass` (`PGPASSFILE`, removed by an EXIT trap) instead of an inline
+      `PGPASSWORD`.
+    - **`sslmode=verify-full` is now the default.** It needs a VPC host
+      name, a certificate SAN with that name and `NODE_EXTRA_CA_CERTS`.
+      postgres.js only sends a TLS server name for host names, so a bare IP
+      isn't verified by name. `require` is the fallback.
+    - **Pre-flight:** `systemctl --version` must be ≥ 247.
+  - **Done in Acleron**, on branch `cuencada-nginx-credentials`:
+    - `1023ab9`:
+      - **P-L1:** project sites are installed with `copy`, never rendered.
+      - **P-L2:** the new `site_install.yml` backs up, installs, enables
+        and runs `nginx -t`. On failure it restores the previous file (or
+        removes the new one and its link), re-tests and fails the deploy.
+        This covers the stock path too.
+      - **P-L3:** dropping `server.credentials` removes the whole store.
+    - `46d71eb`: asserts systemd ≥ 247 whenever `server.credentials` is
+      declared.
+    - Tests: 66/66. They cover a verbatim copy of a file with Jinja
+      markers, restore and cleanup after a rejected site, the 0600/0700
+      store, stale-key and dropped-store removal, no secret values in play
+      output, and systemd 245 refused while 249 is accepted.
+    - Fetched into the owner's checkout as a branch ref only (their `main`
+      and working tree are untouched).
+  - **Merged `origin/main` `c116b13` (#37, e2e).** The `pnpm-lock.yaml`
+    conflict was resolved by taking main's lockfile and re-running
+    `pnpm install`, which only re-adds `yaml` 2.9.1. The `backlog.md`
+    conflict kept both sides' Done rows.
+  - **Verification after the merge:**
+    - `pnpm lint` (657 files): clean.
+    - `pnpm turbo run typecheck --force`: 6/6.
+    - `pnpm test`: 157 files, 1963 tests, all pass.
+    - `pnpm build`: 4/4.
+    - `verify-roles.sh`: OK.
+    - `deploy-preflight` against the branch: only the 2 `<bucket>`
+      failures. Against the owner's `main` checkout it also fails on the
+      missing `site_template` and `LoadCredential=` support, as designed.
