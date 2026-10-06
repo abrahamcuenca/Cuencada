@@ -7,7 +7,14 @@
  * responses through `directoryEntrySchema`, which strips anything else.
  */
 import { z } from "zod";
-import { cursorQuerySchema, dateTimeSchema, displayTextSchema, idSchema, nullableTextSchema } from "./common.js";
+import {
+  cursorQuerySchema,
+  dateTimeSchema,
+  displayTextSchema,
+  idSchema,
+  nullableDisplayTextSchema,
+  nullableTextSchema
+} from "./common.js";
 import { displayNameSchema } from "./auth.js";
 import { AVATAR_MAX_BYTES, MediaMimeType } from "./media.js";
 
@@ -116,20 +123,38 @@ export function toDirectoryEntry(source: DirectoryEntrySource): DirectoryEntry {
   return entry;
 }
 
-/** Phone as typed by family members: digits, spaces, `+ ( ) -`. */
+/** E.164 allows at most 15 digits; fewer than 7 is not a reachable phone number. */
+export const PHONE_MIN_DIGITS = 7;
+export const PHONE_MAX_DIGITS = 15;
+
+/**
+ * Phone as typed by family members: an optional leading `+`, then digits,
+ * spaces and `( ) -`, with 7–15 digits in total (E.164-ish, length-bounded).
+ */
 export const phoneSchema = z
   .string()
   .trim()
   .max(30)
-  .regex(/^\+?[0-9 ()-]{7,29}$/, { error: "Teléfono inválido." });
+  .regex(/^\+?[0-9 ()-]{7,29}$/, { error: "Teléfono inválido." })
+  .refine(
+    (value) => {
+      const digits = value.replace(/\D/g, "").length;
+      return digits >= PHONE_MIN_DIGITS && digits <= PHONE_MAX_DIGITS;
+    },
+    { error: "El teléfono debe tener entre 7 y 15 dígitos." }
+  );
 
-/** `PATCH /api/profile/me`. Send only the fields that change; `null` clears. */
+/**
+ * `PATCH /api/profile/me`. Send only the fields that change; `null` clears.
+ * Strict: any other key (`role`, `status`, `userId`, `email`, …) is a 400
+ * `VALIDATION`, so mass assignment fails loudly instead of being ignored.
+ */
 export const updateProfileInputSchema = z
-  .object({
+  .strictObject({
     displayName: displayNameSchema,
     fullName: displayTextSchema(200),
-    familyBranch: nullableTextSchema(120),
-    city: nullableTextSchema(120),
+    familyBranch: nullableDisplayTextSchema(120),
+    city: nullableDisplayTextSchema(120),
     phone: phoneSchema.nullable(),
     bio: nullableTextSchema(500),
     showEmail: z.boolean(),
@@ -143,13 +168,16 @@ export type UpdateProfileRequest = z.input<typeof updateProfileInputSchema>;
 
 /**
  * `GET /api/directory` query. The server must match `q` only against fields
- * the target member has made visible (displayName, fullName, familyBranch;
- * city/email/phone only when their `show*` flag is on), otherwise search
- * becomes an oracle for hidden contact data.
+ * the target member has made visible, otherwise search becomes an oracle for
+ * hidden contact data. The server matches displayName, fullName, the linked
+ * person's nickname and familyBranch always, city only when `showCity` is on,
+ * and **never** email or phone (even when shown). Blank `q` means no filter.
  */
 export const directoryQuerySchema = cursorQuerySchema.extend({
-  q: z.string().trim().max(100).exactOptional(),
-  familyBranch: z.string().trim().max(120).exactOptional()
+  q: z.string().normalize("NFC").trim().max(100).exactOptional(),
+  familyBranch: z.string().normalize("NFC").trim().max(120).exactOptional(),
+  /** Exact (case-insensitive) city; only matches members with `showCity` on. */
+  city: z.string().normalize("NFC").trim().max(120).exactOptional()
 });
 export type DirectoryQuery = z.infer<typeof directoryQuerySchema>;
 export type DirectoryQueryRequest = z.input<typeof directoryQuerySchema>;
