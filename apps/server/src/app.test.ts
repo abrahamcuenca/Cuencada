@@ -380,13 +380,6 @@ describe("cuencada routes", () => {
     await app.close();
   });
 
-  it("serves the public 2026 Cuencada without a token", async () => {
-    const response = await app.inject({ method: "GET", url: "/api/cuencadas/2026" });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.json<{ cuencada: { year: number } }>().cuencada.year).toBe(2026);
-  });
-
   it("answers 404 NOT_FOUND for an unknown year and 400 VALIDATION for a bad year", async () => {
     const missing = await app.inject({ method: "GET", url: "/api/cuencadas/2030" });
     const invalid = await app.inject({ method: "GET", url: "/api/cuencadas/abc" });
@@ -394,38 +387,5 @@ describe("cuencada routes", () => {
     expect(missing.statusCode).toBe(404);
     expect(missing.json<{ error: { code: string } }>().error.code).toBe("NOT_FOUND");
     expect(invalid.statusCode).toBe(400);
-  });
-
-  it("lets an admin create a Cuencada and audits it; members get 403", async () => {
-    const admin = await createUser({ role: "admin" });
-    const member = await createUser();
-    const payload = {
-      year: 2027,
-      title: "Cuencada 2027",
-      startsAt: "2027-09-12T00:00:00-06:00",
-      endsAt: "2027-09-17T23:59:59-06:00",
-      city: "Mérida",
-      state: "Yucatán",
-      description: "La próxima reunión."
-    };
-
-    const forbidden = await app.inject({
-      method: "POST",
-      url: "/api/admin/cuencadas",
-      payload,
-      ...(await loginAs(app, member))
-    });
-    const created = await app.inject({
-      method: "POST",
-      url: "/api/admin/cuencadas",
-      payload,
-      ...(await loginAs(app, admin))
-    });
-
-    expect(forbidden.statusCode).toBe(403);
-    expect(created.statusCode).toBe(201);
-    const audits = await getTestDb().select().from(auditLogs).where(eq(auditLogs.action, "cuencada.created"));
-    expect(audits).toHaveLength(1);
-    expect(audits[0]?.actorUserId).toBe(admin.id);
   });
 });

@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { API_ERROR_DETAILS_MAX, apiErrorSchema } from "./common.js";
 import {
+  adminAnnouncementQuerySchema,
+  createAnnouncementInputSchema,
   createCuencadaInputSchema,
   createItineraryItemInputSchema,
   createLocationInputSchema,
   dailyMessageLineSchema,
+  dailyMessagesImportInputSchema,
   parseDailyMessagesText,
   reorderInputSchema,
+  updateAnnouncementInputSchema,
   updateCuencadaInputSchema,
   updateLocationInputSchema
 } from "./cuencadas.js";
@@ -181,5 +185,33 @@ describe("reorderInputSchema", () => {
   it("rejects duplicate ids", () => {
     const id = "6f1b2a3c-4d5e-4f60-8a7b-9c0d1e2f3a4b";
     expect(reorderInputSchema.safeParse({ ids: [id, id] }).success).toBe(false);
+  });
+});
+
+describe("T2-BE amendments", () => {
+  const id = "6f1b2a3c-4d5e-4f60-8a7b-9c0d1e2f3a4b";
+
+  it("accepts an import with text, entries or both, but not neither", () => {
+    expect(dailyMessagesImportInputSchema.safeParse({ text: "2026-09-13|Hola" }).success).toBe(true);
+    expect(dailyMessagesImportInputSchema.safeParse({ entries: [{ date: "2026-09-13", message: "Hola" }] }).success).toBe(true);
+    expect(dailyMessagesImportInputSchema.safeParse({}).success).toBe(false);
+    expect(dailyMessagesImportInputSchema.safeParse({ entries: [] }).success).toBe(false);
+  });
+
+  it("defaults the announcement window and checks it on update", () => {
+    const created = createAnnouncementInputSchema.parse({ cuencadaId: null, title: "Aviso", body: "Texto" });
+    expect(created.expiresAt).toBeNull();
+    expect(created).not.toHaveProperty("publishedAt");
+    expect(
+      updateAnnouncementInputSchema.safeParse({ publishedAt: "2026-09-10T00:00:00Z", expiresAt: "2026-09-09T00:00:00Z" }).success
+    ).toBe(false);
+    expect(updateAnnouncementInputSchema.safeParse({ expiresAt: null }).success).toBe(true);
+  });
+
+  it("filters admin announcements by scope and rejects a portal scope with a cuencadaId", () => {
+    expect(adminAnnouncementQuerySchema.parse({ scope: "portal" })).toEqual({ scope: "portal" });
+    expect(adminAnnouncementQuerySchema.safeParse({ scope: "cuencada", cuencadaId: id }).success).toBe(true);
+    expect(adminAnnouncementQuerySchema.safeParse({ scope: "portal", cuencadaId: id }).success).toBe(false);
+    expect(adminAnnouncementQuerySchema.safeParse({ scope: "otra" }).success).toBe(false);
   });
 });
