@@ -51,8 +51,11 @@ describe("RsvpCard", () => {
     await user.click(screen.getByRole("button", { name: "Guardar respuesta" }));
 
     expect(await screen.findByText("¡Listo! Confirmaste tu asistencia.")).toBeInTheDocument();
-    expect(screen.getByText("Tú + 2 acompañantes")).toBeInTheDocument();
+    // The toast lives in its own provider and can commit a render before the card does
+    // (seen under load): wait for the summary itself rather than assuming the same commit.
+    expect(await screen.findByText("Tú + 2 acompañantes")).toBeInTheDocument();
     expect(screen.getByText("Hotel Casa Lucía")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cambiar respuesta" })).toBeEnabled();
     expect(db.putBodies).toEqual([
       { status: "yes", guestCount: 2, arrivalDate: "2027-07-09", departureDate: "2027-07-15", hotelLocationId: HOTEL_B, notes: "Sin gluten" }
     ]);

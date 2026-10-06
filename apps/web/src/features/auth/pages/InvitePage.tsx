@@ -203,7 +203,10 @@ export function InvitePage(): ReactNode {
   const tokenRef = useRef(token);
 
   useEffect(() => {
-    if (token === null || started.current) return;
+    // Wait for the boot session check: when it ends anonymous (`loggedOut`), the
+    // RTK Query reset aborts in-flight requests, which would leave an inspect
+    // started earlier stuck on "Revisando tu invitación…" (WP-2.2 e2e).
+    if (token === null || started.current || gate === "waiting") return;
     started.current = true;
 
     const inspect = async (): Promise<void> => {
@@ -221,7 +224,7 @@ export function InvitePage(): ReactNode {
       }
     };
     void inspect();
-  }, [token, discard, dispatch]);
+  }, [token, gate, discard, dispatch]);
 
   const end = (next: InspectState): void => {
     tokenRef.current = null;

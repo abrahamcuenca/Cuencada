@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "vite": ["../../apps/web/node_modules/vite"]
+    }
+  },
+  "include": ["./**/*.ts", "../../playwright.config.ts"],
+  // It imports apps/web/vite.config.ts, which the web package typechecks under its own settings.
+  "exclude": ["./vite.e2e.config.ts"]
+}

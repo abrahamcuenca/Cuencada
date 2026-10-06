@@ -29,7 +29,7 @@ import {
 } from "./db/schema/index.js";
 import {
   cuencada2026,
-  LEGACY_DEV_LINKS,
+  DEV_PLACEHOLDER_LINKS,
   type SeedCuencada,
   type SeedLinks,
   type SeedLocationKey
@@ -87,26 +87,53 @@ export class SeedConfigError extends Error {
   override name = "SeedConfigError";
 }
 
-/**
- * Read one optional link env var. Values come from vault at cutover and are
- * never committed; dev/test fall back to the (already public) legacy link.
- */
-function readLink(env: NodeJS.ProcessEnv, name: string, devOrTest: boolean, legacy: string): string | null {
+/** The four member-only link variables, in the order they are reported. */
+export const SEED_LINK_ENV = {
+  whatsappUrl: "SEED_WHATSAPP_URL",
+  externalAlbumUrl: "SEED_EXTERNAL_ALBUM_URL",
+  lyricsUrl: "SEED_LYRICS_URL",
+  programUrl: "SEED_PROGRAM_URL"
+} as const satisfies Record<keyof SeedLinks, string>;
+
+/** Read one link env var: unset is `null`, anything but an https URL throws. */
+function readLink(env: NodeJS.ProcessEnv, name: string): string | null {
   const raw = env[name];
-  if (!raw) return devOrTest ? legacy : null;
+  if (!raw) return null;
   const parsed = httpsUrlSchema.safeParse(raw);
   if (!parsed.success) throw new SeedConfigError(`${name} must be an https:// URL.`);
   return parsed.data;
 }
 
-/** Resolve the member-only links of the 2026 edition from `SEED_*_URL` env vars. */
+/**
+ * Resolve the member-only links of the 2026 edition from `SEED_*_URL`.
+ *
+ * Development and test fall back to {@link DEV_PLACEHOLDER_LINKS}. Anywhere
+ * else every link is required: the seed only reaches the edition row on its
+ * first insert, so a link forgotten on the production seed would never be
+ * seeded (WP-2.4 cutover). `SEED_ALLOW_MISSING_LINKS=true` opts out, for a
+ * deliberate re-run after the edition exists.
+ *
+ * @throws SeedConfigError naming the missing variables (never their values).
+ */
 function resolveLinks(env: NodeJS.ProcessEnv, devOrTest: boolean): SeedLinks {
-  return {
-    whatsappUrl: readLink(env, "SEED_WHATSAPP_URL", devOrTest, LEGACY_DEV_LINKS.whatsappUrl),
-    externalAlbumUrl: readLink(env, "SEED_EXTERNAL_ALBUM_URL", devOrTest, LEGACY_DEV_LINKS.externalAlbumUrl),
-    lyricsUrl: readLink(env, "SEED_LYRICS_URL", devOrTest, LEGACY_DEV_LINKS.lyricsUrl),
-    programUrl: readLink(env, "SEED_PROGRAM_URL", devOrTest, LEGACY_DEV_LINKS.programUrl)
+  const links: SeedLinks = {
+    whatsappUrl: readLink(env, SEED_LINK_ENV.whatsappUrl),
+    externalAlbumUrl: readLink(env, SEED_LINK_ENV.externalAlbumUrl),
+    lyricsUrl: readLink(env, SEED_LINK_ENV.lyricsUrl),
+    programUrl: readLink(env, SEED_LINK_ENV.programUrl)
   };
+  const keys = Object.keys(SEED_LINK_ENV) as (keyof SeedLinks)[];
+  if (devOrTest) {
+    for (const key of keys) links[key] ??= DEV_PLACEHOLDER_LINKS[key];
+    return links;
+  }
+  const missing = keys.filter((key) => links[key] === null).map((key) => SEED_LINK_ENV[key]);
+  if (missing.length > 0 && env.SEED_ALLOW_MISSING_LINKS !== "true") {
+    throw new SeedConfigError(
+      `Set ${missing.join(", ")} (rotated links from the vault). Links are seeded only on the first run; SEED_ALLOW_MISSING_LINKS=true skips them deliberately.`
+    );
+  }
+  return links;
 }
 
 /**

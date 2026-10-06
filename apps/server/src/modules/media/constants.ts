@@ -9,7 +9,7 @@ export const UPLOAD_URL_SECONDS = 5 * 60;
 /**
  * Grace period after `upload_expires_at` before a `pending_upload` row is
  * considered abandoned. A PUT that started before the URL expired may still
- * be streaming a 300 MB video over a slow phone connection.
+ * be streaming a 150 MB video over a slow phone connection.
  */
 export const UPLOAD_CLEANUP_GRACE_MS = 6 * 60 * 60 * 1000;
 

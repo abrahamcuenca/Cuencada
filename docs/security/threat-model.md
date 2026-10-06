@@ -1,13 +1,14 @@
 # Threat model
 
-WP-2.3 · Security Engineer · 2026-10-06 · baseline `main` @ `28c55aa`, updated after the PR #35 review (merged with `main` @ `e75e718`)
+WP-2.3 · Security Engineer · 2026-10-06 · baseline `main` @ `28c55aa`, updated after the PR #35 review (merged with `main` @ `e75e718`); updated by WP-2.4 (deploy prep, #36 invites)
 
 Cuencada is a private family portal:
 
 - **SPA:** React/Vite PWA, served by nginx.
 - **API:** Fastify 5, on `server_1` behind nginx. TLS ends on the VPS; there is
   no Cloudflare.
-- **Database:** PostgreSQL through Drizzle.
+- **Database:** PostgreSQL 18 through Drizzle, on a separate DB server reached
+  from `server_1` over the private VPC.
 - **Media:** a private Linode Object Storage bucket (presigned URLs).
 - **Email:** Resend.
 - **Chat:** WebSockets.
@@ -40,7 +41,7 @@ Related documents: [route inventory](routes.md), [CSP](csp.md),
 | Actor | Capabilities / intent |
 |---|---|
 | Anonymous Internet user | Public edition pages and auth endpoints. Scraping, credential stuffing, enumeration, DoS. |
-| Holder of a leaked invite link | An open member invite shared on WhatsApp: up to 20 uses, 14 days. Can create a member account. |
+| Holder of a leaked invite link | An open member invite shared on WhatsApp: 5 uses by default (10 max), 72 h at most (#36). Can create a member account; every acceptance alerts the admins. |
 | Unverified member | Copy-link or open-invite account whose email isn't verified yet. |
 | Verified member | Normal family member. May be curious about others' hidden data (horizontal escalation, IDOR). |
 | Disabled or removed member | Holds old tokens, cookies or tickets. |
@@ -67,8 +68,14 @@ flowchart LR
 
 - **TB1, Internet → nginx → API.** Every request is untrusted. The API trusts
   `X-Forwarded-For` only from loopback (`TRUST_PROXY=loopback`).
-- **TB2, API → database.** The runtime role should be least-privilege; that's
-  the cutover checklist's "separate DB roles" item.
+- **TB2, API → database (VPC).** The API connects as a DML-only runtime role
+  (`infra/db/roles.sql`), accepted by `pg_hba` only from `server_1`'s VPC
+  address over TLS (`hostssl`, scram-sha-256). The owner (DDL) role is used
+  only through the operator's tunnel and is never on the VPS (WP-2.4).
+- **TB2b, secrets on server_1.** Secrets are root-only files loaded with
+  systemd `LoadCredential=`, readable by the service through
+  `$CREDENTIALS_DIRECTORY`. They are not `Environment=` lines, which any local
+  user could read with `systemctl show` (WP-2.4 M1).
 - **TB3, browser ↔ bucket.** The browser talks to the bucket directly using
   URLs the API signed: a PUT bound to type and size, and a GET that lasts 1 h.
   The API re-checks the size, content type and magic bytes, then re-encodes
@@ -119,7 +126,7 @@ Each row lists the main mitigation and where it's enforced or tested.
 | Threat | Mitigation | Evidence |
 |---|---|---|
 | **S**: invitee claims someone else's identity | Bound invites compare the typed email with the bound one. Admin invites must be email-bound, single-use and sent by email. `emailVerified` is granted only for email-delivered bound invites. | ADR 0001 §3, `invites.test.ts` |
-| **E**: open invite leaks beyond the family | Max 20 uses and 14 days. An admin can revoke it. New accounts start unverified: they read only public pages, announcements, the RSVP summary and their own data until they verify. **Verification is not a membership check:** a stranger holding a leaked link can verify their **own** mailbox, and from then on read every member-only area (directory, family tree, attendees, chat, gallery, member links). **Planned (separate WP):** stricter open invites, with a default of about 5 uses, a 72 h lifetime and an admin alert on each acceptance, so a leak is short-lived and noticed. | accepted risk A2 |
+| **E**: open invite leaks beyond the family | 5 uses by default, 10 max, 72 h at most; older rows are clamped at accept time. Every acceptance sends an admin alert (own daily cap of 100). An admin can revoke it. New accounts start unverified: they read only public pages, announcements, the RSVP summary and their own data until they verify. **Verification is not a membership check:** a stranger holding a leaked link can verify their **own** mailbox, and from then on read every member-only area (directory, family tree, attendees, chat, gallery, member links). A leak is now short-lived and noticed (WP-2.3b, #36). | accepted risk A2; `invites` tests |
 | **T**: double use of a single-use invite | Row lock (`FOR UPDATE`) on accept. | `invites/publicRoutes.ts` |
 
 ### 4.3 Directory, profile and family (`modules/directory`, `profile`, `family`)
@@ -135,7 +142,7 @@ Each row lists the main mitigation and where it's enforced or tested.
 
 | Threat | Mitigation | Evidence |
 |---|---|---|
-| **I**: photos reachable without login | Private bucket. Short-lived presigned GETs (1 h) are issued only to **verified** members. There are no public URLs. Stored objects carry `Cache-Control: private, max-age=3600` (WP-2.3 N1; it was a year, `immutable`), so a photo stays in a shared browser's disk cache for at most about an hour after logout. | `media/list.test.ts`, `pii-leak.test.ts`, `verified-gating.test.ts`, `cache-lifetimes.test.ts` |
+| **I**: photos reachable without login | Private bucket. Short-lived presigned GETs (1 h) are issued only to **verified** members. There are no public URLs. Stored objects carry `Cache-Control: private, max-age=3600` (WP-2.3 N1; it was a year, `immutable`), so the browser treats a cached copy as fresh for at most an hour. `max-age` bounds freshness, not how long bytes stay on disk; the real bound on re-use is the presigned URL, which expires after 1 h. | `media/list.test.ts`, `pii-leak.test.ts`, `verified-gating.test.ts`, `cache-lifetimes.test.ts` |
 | **I**: location metadata in uploads | EXIF/GPS stripped by re-encoding. MP4/QuickTime location atoms are neutralized. | `files.test.ts`; open item: non-A/V tracks (backlog) |
 | **T**: malicious file (polyglot, decompression bomb, wrong type) | MIME allowlist (no SVG or HEIC), per-kind size limits, magic-byte check, 50 MP guard, server-side derivatives. Stored on the bucket's own origin, which has no cookies. | `upload.test.ts`; backlog: `nosniff` metadata on stored QuickTime |
 | **E**: editing or deleting others' media; confirming others' uploads | Uploader-or-admin checks answer 404. Hidden, pending-review, pending-upload, processing and failed items are visible only to the uploader and admins. A member can't report their own item (403). | matrix probes on `/api/media/:id*`, which re-read the row and assert it is unchanged |
@@ -148,7 +155,7 @@ Each row lists the main mitigation and where it's enforced or tested.
 | **S**: cross-site WebSocket hijacking | 30 s single-use ticket from `POST /api/chat/ticket` (bearer-authenticated, verified members only), bound to the session. Exact `Origin` check. Failures close with 1008 and a generic reason. | matrix "chat WebSocket upgrade"; `socket.test.ts` |
 | **E**: revoked or disabled user keeps the socket | The ticket re-checks the session. Sockets close on revoke or disable, and a 5-minute session re-check runs. | `socket.test.ts`, `chatSockets.test.ts` |
 | **T**: XSS through message bodies | Bodies are stored and rendered as text nodes only. Bidi and invisible characters are stripped. No markdown. | ADR 0001 §1, T7-FE |
-| **I**: ticket in logs | Query `ticket` is redacted in app logs. nginx must strip it from access logs (cutover checklist). | `logging.test.ts` |
+| **I**: ticket in logs | Query `ticket` is redacted in app logs. nginx logs paths without query strings and cuts the Referer at `?` (WP-2.4). The ticket is single-use and lives 30 s. | `logging.test.ts`; `apps/server/deploy/preflight.test.ts` (log format); WP-2.4 local nginx run |
 | **D**: flooding | 20 sends and 60 frames per 10 s per user, a frame-size cap, queue backpressure, a connection cap. | `socket.test.ts`, `capacity.test.ts` |
 
 ### 4.6 Admin console (`modules/admin`, admin routes of every module)
@@ -184,15 +191,15 @@ Each row lists the main mitigation and where it's enforced or tested.
 
 | # | Risk | Decision | Owner |
 |---|---|---|---|
-| A1 | The **legacy public site** (`index.html`, `cuencada2026.html`, root `images/`) stays public until cutover. It carries the old WhatsApp and OneDrive links, and git history keeps them. | Retire at cutover. Rotate the WhatsApp and OneDrive links. "Sweep forward, no history rewrite" (cutover checklist). | Repo owner |
-| A2 | **Open invites shared through WhatsApp:** anyone the link reaches can create an account, verify their own mailbox, and then read every member-only area. Email verification does not limit this. | Accepted for now, with these mitigations: limits of 20 uses and 14 days, admin revoke, accounts that start unverified (no PII until they verify), the admin audit log, and admins can disable a stranger's account. **Planned mitigation (separate WP):** default about 5 uses, 72 h lifetime, an admin alert on each acceptance. | Owner / orchestrator (ADR 0001) |
+| A1 | The **legacy static files** (`index.html`, `cuencada2026.html`, root `images/`) carry the old WhatsApp and OneDrive links, and git history keeps them. They are not served on cuencada.com (no vhost before cutover; WP-2.4 checked), but the repo is public. | Rotate the WhatsApp and OneDrive links before the production seed; the seed now refuses to run without the new `SEED_*_URL` and no longer contains the legacy links (WP-2.4). `git rm` the files after cutover. "Sweep forward, no history rewrite". | Repo owner |
+| A2 | **Open invites shared through WhatsApp:** anyone the link reaches can create an account, verify their own mailbox, and then read every member-only area. Email verification does not limit this. | Accepted, with these mitigations: 5 uses by default (10 max) and 72 h at most (#36), an admin alert on each acceptance (#36), admin revoke, accounts that start unverified (no PII until they verify), the admin audit log, and admins can disable a stranger's account. | Owner / orchestrator (ADR 0001) |
 | A3 | **Chat author visibility:** a member unlisted from the directory still shows their name and avatar in chat. | Accepted. Help text tells members (backlog 0.8c T5-FE). | Orchestrator (T7) |
 | A4 | **Unverified members** can still read announcements and the RSVP summary (counts only, no names). | **Decided** (owner, WP-2.3 L2, now fixed): the gallery, every media route and the member edition details are gated with `requireVerifiedEmail` (ADR 0001). Announcements and the summary stay open by decision. | Owner |
 | A5 | **Refresh race window:** a token stolen and replayed within 10 s of the victim's own refresh gets 409, not a revocation. | Accepted (ADR 0001, T1). | Orchestrator |
 | A6 | **HS256 shared secret** for access tokens (a single service). | Accepted. A secret of ≥ 32 chars from vault; rotating it logs everyone out. | Tech Lead |
 | A7 | **No CAPTCHA** on public auth endpoints. | Accepted. IP and email rate limits plus mail budgets. Revisit if abuse shows up. | Tech Lead |
 | A8 | sharp's prebuilt **libvips is LGPL-3.0-or-later**. | Accepted. Dynamically linked, unmodified and used server-side only, so no distribution obligation applies. | Tech Lead |
-| A9 | **Media in the browser cache:** after a logout, photos and avatars fetched through presigned URLs can stay in the browser's HTTP cache. | Bounded (WP-2.3 N1, fixed): stored objects carry `private, max-age=3600`, no longer than the presigned GET, instead of a year with `immutable`. The residual hour is accepted. Objects stored before the change keep their old metadata (there is no production bucket yet). | Tech Lead |
+| A9 | **Media in the browser cache:** after a logout, photos and avatars fetched through presigned URLs can stay in the browser's HTTP cache. | Bounded (WP-2.3 N1, fixed): stored objects carry `private, max-age=3600`, no longer than the presigned GET, instead of a year with `immutable`. The residual hour is accepted. Objects stored before the change keep their old metadata (there is no production bucket yet). `max-age` limits freshness, not disk retention; the 1 h presigned URL is the real bound. | Tech Lead |
 
 ## 6. Open items
 
@@ -200,14 +207,38 @@ These come from [`backlog.md`](../coordination/backlog.md), plus the WP-2.3 find
 
 **Cutover (WP-2.4/2.5):**
 
-- nginx CSP and headers ([csp.md](csp.md)).
-- `X-Forwarded-For $remote_addr`, and ignore `CF-Connecting-IP`.
-- Redact `?ticket=`, `?q=` and `?search=` from access logs.
-- Restrict `/health*` to localhost or monitoring.
-- Separate DB roles.
-- Rotate the WhatsApp and OneDrive links.
-- Real-bucket PUT enforcement check and bucket CORS.
-- Memory limits for the 300 MB video path.
+WP-2.4 prepared all of these; the owner applies them at cutover
+([runbook](../deploy/runbook.md)):
+
+- nginx CSP and headers, verbatim from [csp.md](csp.md):
+  `infra/nginx/cuencada.conf`, drift-checked by `mise run deploy-preflight`.
+  **Needs the Acleron platform branch `cuencada-nginx-credentials`**
+  ([nginx.md](../deploy/nginx.md)): the stock template has no CSP and breaks
+  chat.
+- Secrets out of `Environment=` (Security M1): `server.credentials` writes
+  root:root 0600 files, loaded with `LoadCredential=`; `config.ts` reads
+  `$CREDENTIALS_DIRECTORY`. The same platform branch carries it. Runbook § 4
+  has the check that an unprivileged `systemctl show` shows no secret.
+- `X-Forwarded-For $remote_addr` (overwrite); `CF-Connecting-IP`, `Forwarded`,
+  `X-Forwarded-Host` and `True-Client-IP` dropped. Done in the site file.
+- Access logs without query strings (`?ticket=`, `?q=`, `?search=`, …) and a
+  cut Referer. Done in the site file.
+- `/health*`: only the shallow `/healthz` (liveness) is public; `/health/ready`
+  is loopback-only. Done in the site file.
+- Separate DB roles: `infra/db/roles.sql` (owner for migrations, DML-only
+  runtime; passwords only through `\password` or SCRAM verifiers), with
+  `pg_hba` limited to `server_1`'s VPC IP (runtime, `hostssl`) and the DB
+  server's loopback (owner, tunnel). Proven by `infra/db/verify-roles.sh`. The
+  owner runs it.
+- Rotate the WhatsApp and OneDrive links: owner, before the seed (the seed
+  enforces new links).
+- Real-bucket PUT enforcement and CORS: `infra/bucket/` (CORS, lifecycle,
+  `check-presigned-put.mjs`). The owner runs it.
+- Memory: video cap lowered to 150 MB; `server_1` goes from 961 MB to 2 GB
+  before launch (owner); systemd `MemoryHigh=700M`/`MemoryMax=900M` drop-in;
+  restart and OOM alerts.
+- nginx logs: 0640 `adm`, 14-day retention; the error log can hold query
+  strings (runbook § 10).
 
 **Backend:**
 
@@ -225,7 +256,7 @@ These come from [`backlog.md`](../coordination/backlog.md), plus the WP-2.3 find
 
 **Before launch:**
 
-- ~~Breached-password check (WP-2.3 L5).~~ Done in WP-2.3c; needs egress HTTPS to `api.pwnedpasswords.com` from `server_1` (cutover checklist).
+- ~~Breached-password check (WP-2.3 L5).~~ Done in WP-2.3c; needs egress HTTPS to `api.pwnedpasswords.com` from `server_1` (runbook § 1 step 10; alert in § 10).
 - Stricter open invites: about 5 uses, 72 h lifetime, an admin alert on each acceptance (separate WP; accepted risk A2).
 
 **Process:**

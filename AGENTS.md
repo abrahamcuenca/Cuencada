@@ -19,8 +19,10 @@
 ## Acleron
 
 - `infra/project.yml` targets `cuencada.com` on `server_1` with bundled deploy mode and backend port `3104`; verify the port with `mise run ports -- server_1` before deploying.
-- Acleron deployment tasks are in `mise.toml`; mutating deploys still require explicit approval.
-- Required vault refs include `vault_cuencada_database_url`, `vault_cuencada_jwt_secret`, `vault_cuencada_resend_api_key`, and Linode Object Storage `vault_cuencada_s3_*` values. `vault_cuencada_seed_admin_temp_password` is operator-only: it is passed to the one-off prod seed by hand, never to the running API (WP-0.4).
+- Acleron deployment tasks are in `mise.toml`; mutating deploys still require explicit approval. The cutover and every later release follow `docs/deploy/runbook.md`.
+- `mise run deploy-preflight` (no secrets, no SSH) checks `infra/project.yml` against `apps/server/src/config.ts` and `infra/nginx/cuencada.conf` against `docs/security/csp.md`. A new config key must be mapped in `infra/project.yml` or the preflight fails. `mise run deploy-check` = preflight + production build + `check:sw` + bundle size. `mise run deploy-dryrun` is the Ansible `--check` (vault + SSH); never add `--diff` to it, because the systemd unit diff prints secrets.
+- Secrets on the VPS go under `server.credentials` in `infra/project.yml`, never `server.env`. Acleron writes them to root-only files loaded with `LoadCredential=`, and `config.ts` reads them from `$CREDENTIALS_DIRECTORY`; `Environment=` lines are readable by any local user. They are: `vault_cuencada_database_url` (least-privilege runtime role over the VPC to the separate PG18 server, `infra/db/roles.sql`), `vault_cuencada_jwt_secret`, `vault_cuencada_resend_api_key`, `vault_cuencada_s3_access_key_id` and `vault_cuencada_s3_secret_access_key`. The bucket name, endpoint and region are literals (not secrets). Operator-only, never on the VPS: `vault_cuencada_migrate_database_url` (owner role, tunnel), `vault_cuencada_seed_admin_temp_password` and the rotated `vault_cuencada_seed_*_url` links (WP-0.4, WP-2.4).
+- nginx for the site is `infra/nginx/cuencada.conf`, not Acleron's stock template, which breaks the chat WebSocket and has no CSP; see `docs/deploy/nginx.md`. Keep the CSP lines byte-identical to `docs/security/csp.md`. The deploy needs the Acleron platform branch `cuencada-nginx-credentials` (`nginx.site_template` + `server.credentials`) until it is merged.
 - Do not commit vault files, deploy keys, object storage credentials, or generated secrets.
 
 ## Privacy And Access

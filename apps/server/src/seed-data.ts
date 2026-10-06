@@ -36,7 +36,8 @@ export type SeedAnnouncement = Omit<CreateAnnouncementInput, "cuencadaId" | "pub
 /**
  * Member-only links of the 2026 edition. They are credentials-like (group
  * invite, shared OneDrive items), so outside dev/test they come only from
- * `SEED_*_URL` env vars (vault) and are rotated at cutover; `null` = not seeded.
+ * `SEED_*_URL` env vars (vault) and are rotated at cutover. `null` = not seeded
+ * (only possible with `SEED_ALLOW_MISSING_LINKS=true`).
  */
 export interface SeedLinks {
   whatsappUrl: string | null;
@@ -48,23 +49,18 @@ export interface SeedLinks {
 }
 
 /**
- * Legacy links from the old public `index.html`, used only when `NODE_ENV` is
- * `development` or `test` and the env var is unset. Production values are
- * rotated at cutover and must never be committed here.
- *
- * TODO(WP-2.4 cutover): these are the legacy production links, already public
- * in the old `index.html` and git history. They are reset (new WhatsApp
- * invite, new OneDrive shares) at cutover and production gets the new values
- * only through the vault-backed `SEED_*_URL` variables or the admin UI; see
- * docs/coordination/backlog.md. Do not copy these URLs anywhere else
- * (fixtures, tests, docs): reference this constant instead.
+ * Placeholder links for development and test only (`NODE_ENV` development or
+ * test with the env var unset), so the member links and the pinned link
+ * announcements render locally. They point at example.com on purpose: the
+ * legacy production links were public in the old `index.html` and are rotated
+ * at cutover (WP-2.4), so no real link lives in source any more. Production
+ * must set every `SEED_*_URL` (see `resolveSeedOptions`).
  */
-export const LEGACY_DEV_LINKS = {
-  whatsappUrl: "https://chat.whatsapp.com/IvI6oayIIoEJ8Wn7EWQxO0?s=cl&p=i&mlu=0",
-  externalAlbumUrl: "https://1drv.ms/f/c/b0c7d5955d4a8581/IgAC5vDMrmIvTJwWwOjkJJM7AT3DxtBo9OFj8FSXJI_GQY0?e=ASBPLY",
-  lyricsUrl:
-    "https://onedrive.live.com/?redeem=aHR0cHM6Ly8xZHJ2Lm1zL2IvYy9iMGM3ZDU5NTVkNGE4NTgxL0lRQ2NwY0UtdWNFblI2djlNNVFIVlBoRkFaOWNUQlVEY0JDYVh0ZlFERFJQcG9n&cid=B0C7D5955D4A8581&id=B0C7D5955D4A8581%21s3ec1a59cc1b94727abfd33940754f845&parId=B0C7D5955D4A8581%21s77e6d760e3954e818d2a0ba22da1c9e7&o=OneUp",
-  programUrl: "https://1drv.ms/i/c/b0c7d5955d4a8581/IQBP_0Olz3lRQ67Vc187M744AXk6A96moN_SdRcg6Lw8y50?e=nGbr9g"
+export const DEV_PLACEHOLDER_LINKS = {
+  whatsappUrl: "https://example.com/cuencada-dev/whatsapp",
+  externalAlbumUrl: "https://example.com/cuencada-dev/album",
+  lyricsUrl: "https://example.com/cuencada-dev/letra",
+  programUrl: "https://example.com/cuencada-dev/programa"
 } as const satisfies Record<keyof SeedLinks, string>;
 
 /** The full 2026 edition. */

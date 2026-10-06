@@ -269,14 +269,14 @@ describe("GalleryPage uploads", () => {
       fileOf("notas.pdf", "application/pdf"),
       fileOf("IMG_1.HEIC", "image/heic"),
       fileOf("enorme.jpg", "image/jpeg", 26 * MB),
-      fileOf("largo.mp4", "video/mp4", 301 * MB)
+      fileOf("largo.mp4", "video/mp4", 151 * MB)
     ]);
 
     const sheet = await screen.findByRole("dialog", { name: "No se puede subir" });
     expect(within(sheet).getByText("Solo se pueden subir fotos (JPG, PNG o WebP) y videos (MP4 o MOV).")).toBeInTheDocument();
     expect(within(sheet).getByText(/iPhone convierte automáticamente a JPG al subir desde el navegador/)).toBeInTheDocument();
     expect(within(sheet).getByText("Esta foto pesa más de 25 MB.")).toBeInTheDocument();
-    expect(within(sheet).getByText(/Este video pesa más de 300 MB/)).toBeInTheDocument();
+    expect(within(sheet).getByText(/Este video pesa más de 150 MB/)).toBeInTheDocument();
     await user.click(within(sheet).getByRole("button", { name: "Entendido" }));
     expect(db.log.some((line) => line.includes("/media/uploads"))).toBe(false);
     expect(FakeXhr.instances).toHaveLength(0);

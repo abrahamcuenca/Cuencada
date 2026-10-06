@@ -14,7 +14,7 @@ import {
 import { getTestDb } from "../../../test/helpers/db.js";
 import { createUser, loginAs } from "../../../test/helpers/factories.js";
 import type { App } from "../../app.js";
-import { LEGACY_DEV_LINKS } from "../../seed-data.js";
+import { DEV_PLACEHOLDER_LINKS } from "../../seed-data.js";
 import { countVisibleMediaByCuencada } from "../media/service.js";
 import { DEFAULT_DAILY_MESSAGES_FILE, runSeed } from "../../seed.js";
 
@@ -209,7 +209,7 @@ describe("GET /api/cuencadas/:year/members", () => {
       adminEmail: "admin@cuencada.com",
       adminTempPassword: "temporal-segura-para-pruebas",
       dailyMessagesFile: DEFAULT_DAILY_MESSAGES_FILE,
-      links: { ...LEGACY_DEV_LINKS }
+      links: { ...DEV_PLACEHOLDER_LINKS }
     });
     const member = await createUser({ emailVerified: true });
     // Seeded announcements publish at the DB's real now(); read after it.
@@ -221,15 +221,15 @@ describe("GET /api/cuencadas/:year/members", () => {
     expect(response.statusCode).toBe(200);
     const body = response.json<MemberCuencadaDetails>();
     expect(body.year).toBe(2026);
-    expect(body.whatsappUrl).toBe(LEGACY_DEV_LINKS.whatsappUrl);
-    expect(body.externalAlbumUrl).toBe(LEGACY_DEV_LINKS.externalAlbumUrl);
+    expect(body.whatsappUrl).toBe(DEV_PLACEHOLDER_LINKS.whatsappUrl);
+    expect(body.externalAlbumUrl).toBe(DEV_PLACEHOLDER_LINKS.externalAlbumUrl);
     expect(body.itinerary).toHaveLength(6);
     expect(body.locations).toHaveLength(6);
     const pinned = body.announcements.filter((a) => a.pinned && a.visibility === "members");
     expect(pinned).toHaveLength(2);
     // The same announcements never reach the anonymous view.
     expect(publicView.json<PublicCuencada>().publicAnnouncements).toEqual([]);
-    expect(publicView.body).not.toContain(String(LEGACY_DEV_LINKS.whatsappUrl));
+    expect(publicView.body).not.toContain(String(DEV_PLACEHOLDER_LINKS.whatsappUrl));
   });
 
   it("includes members-only items and announcements", async () => {

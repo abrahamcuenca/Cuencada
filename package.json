@@ -2,6 +2,7 @@
   "name": "cuencada",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "packageManager": "pnpm@11.0.0",
   "scripts": {
     "build": "turbo build",
@@ -9,11 +10,21 @@
     "lint": "biome lint .",
     "format": "biome format --write .",
     "test": "vitest run",
-    "typecheck": "turbo typecheck"
+    "typecheck": "turbo typecheck",
+    "e2e:build": "turbo run build --filter=@cuencada/server && pnpm --filter @cuencada/web exec vite build --config ../../tests/e2e/vite.e2e.config.ts",
+    "e2e:run": "playwright test --project=iphone-13 --project=pixel-7 --project=desktop-1280 --project=mobile-gates",
+    "e2e": "pnpm e2e:build && pnpm e2e:run && pnpm e2e:lighthouse",
+    "typecheck:e2e": "tsc -p tests/e2e/tsconfig.json",
+    "e2e:lighthouse": "E2E_LIGHTHOUSE=1 playwright test --project=lighthouse"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@biomejs/biome": "^1.9.4",
     "@playwright/test": "^1.63.0",
+    "@types/node": "^24.19.0",
+    "lighthouse": "^13.5.0",
+    "postgres": "^3.4.9",
+    "tsx": "^4.23.15",
     "turbo": "^2.5.6",
     "typescript": "^5.9.3",
     "vitest": "^4.1.11"

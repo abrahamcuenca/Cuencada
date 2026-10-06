@@ -158,7 +158,10 @@ export function MessageList({
         aria-relevant="additions"
         aria-busy={busy || loadingOlder ? true : undefined}
         aria-label={label}
-        tabIndex={-1}
+        // In the tab order: a scrollable region whose messages are all from others has no
+        // focusable child, so keyboard users could not scroll it (axe scrollable-region-focusable, WP-2.2).
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: a focusable scroll region is the WCAG 2.1.1 technique for keyboard scrolling.
+        tabIndex={0}
         onScroll={onScroll}
       >
         {canLoadOlder ? (

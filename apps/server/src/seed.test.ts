@@ -14,7 +14,7 @@ import {
   profiles,
   users
 } from "./db/schema/index.js";
-import { LEGACY_DEV_LINKS } from "./seed-data.js";
+import { DEV_PLACEHOLDER_LINKS } from "./seed-data.js";
 import {
   assertSeedPasswordNotBreached,
   DEFAULT_DAILY_MESSAGES_FILE,
@@ -29,10 +29,18 @@ const options: SeedOptions = {
   adminEmail: "admin@cuencada.com",
   adminTempPassword: "temporal-segura-para-pruebas",
   dailyMessagesFile: DEFAULT_DAILY_MESSAGES_FILE,
-  links: { ...LEGACY_DEV_LINKS }
+  links: { ...DEV_PLACEHOLDER_LINKS }
 };
 
 const STRONG = "una-frase-temporal-larga-y-segura";
+
+/** Every member-only link, as production must pass them (fictional values). */
+const ALL_LINKS = {
+  SEED_WHATSAPP_URL: "https://chat.example.com/grupo-nuevo",
+  SEED_EXTERNAL_ALBUM_URL: "https://album.example.com/nuevo",
+  SEED_LYRICS_URL: "https://docs.example.com/letra",
+  SEED_PROGRAM_URL: "https://docs.example.com/programa"
+};
 
 async function counts(): Promise<Record<string, number>> {
   const db = getTestDb();
@@ -123,9 +131,9 @@ describe("runSeed", () => {
       timezone: "America/Merida",
       songUrl: "/canciones/Cancion_Oficial.mp3",
       heroImageUrl: "/images/Logo_Cuencada2026.jpg",
-      whatsappUrl: LEGACY_DEV_LINKS.whatsappUrl,
+      whatsappUrl: DEV_PLACEHOLDER_LINKS.whatsappUrl,
       weatherWidgetUrl: "https://forecast7.com/es/20d97n89d59/merida/",
-      externalAlbumUrl: LEGACY_DEV_LINKS.externalAlbumUrl,
+      externalAlbumUrl: DEV_PLACEHOLDER_LINKS.externalAlbumUrl,
       isPublished: true
     });
     expect(edition?.firstPublishedAt).toBeInstanceOf(Date);
@@ -163,8 +171,8 @@ describe("runSeed", () => {
       ["Letra oficial de la canción", "members", true, edition?.id],
       ["Programa completo", "members", true, edition?.id]
     ]);
-    expect(links[0]?.body).toContain(LEGACY_DEV_LINKS.lyricsUrl);
-    expect(links[1]?.body).toContain(LEGACY_DEV_LINKS.programUrl);
+    expect(links[0]?.body).toContain(DEV_PLACEHOLDER_LINKS.lyricsUrl);
+    expect(links[1]?.body).toContain(DEV_PLACEHOLDER_LINKS.programUrl);
 
     const rooms = await db.select().from(chatRooms).orderBy(chatRooms.kind);
     expect(rooms.map((room) => [room.kind, room.cuencadaId])).toEqual([
@@ -210,37 +218,55 @@ describe("resolveSeedOptions", () => {
     expect(() => resolveSeedOptions({ NODE_ENV: "staging", SEED_ADMIN_TEMP_PASSWORD: "frase-de-15-car" })).toThrow(
       SeedConfigError
     );
-    expect(resolveSeedOptions({ NODE_ENV: "staging", SEED_ADMIN_TEMP_PASSWORD: "frase-de-16-cars" }).adminTempPassword).toBe(
-      "frase-de-16-cars"
-    );
+    expect(
+      resolveSeedOptions({ NODE_ENV: "staging", SEED_ADMIN_TEMP_PASSWORD: "frase-de-16-cars", ...ALL_LINKS }).adminTempPassword
+    ).toBe("frase-de-16-cars");
   });
 
-  it("accepts a strong password in production, normalizes the email and seeds no links by default", () => {
+  it("accepts a strong password in production, normalizes the email and reads every link", () => {
     const resolved = resolveSeedOptions({
       NODE_ENV: "production",
       SEED_ADMIN_EMAIL: " Admin@Cuencada.com ",
-      SEED_ADMIN_TEMP_PASSWORD: STRONG
+      SEED_ADMIN_TEMP_PASSWORD: STRONG,
+      ...ALL_LINKS
     });
     expect(resolved.adminEmail).toBe("admin@cuencada.com");
     expect(resolved.adminTempPassword).toBe(STRONG);
-    expect(resolved.links).toEqual({ whatsappUrl: null, externalAlbumUrl: null, lyricsUrl: null, programUrl: null });
+    expect(resolved.links).toEqual({
+      whatsappUrl: ALL_LINKS.SEED_WHATSAPP_URL,
+      externalAlbumUrl: ALL_LINKS.SEED_EXTERNAL_ALBUM_URL,
+      lyricsUrl: ALL_LINKS.SEED_LYRICS_URL,
+      programUrl: ALL_LINKS.SEED_PROGRAM_URL
+    });
   });
 
-  it("reads links from SEED_*_URL and rejects non-https values", () => {
+  it("refuses in production when any SEED_*_URL is missing, naming only the missing variables", () => {
+    const { SEED_LYRICS_URL: _lyrics, SEED_PROGRAM_URL: _program, ...twoLinks } = ALL_LINKS;
+    const attempt = () => resolveSeedOptions({ NODE_ENV: "production", SEED_ADMIN_TEMP_PASSWORD: STRONG, ...twoLinks });
+    expect(attempt).toThrow(SeedConfigError);
+    expect(attempt).toThrow(/SEED_LYRICS_URL, SEED_PROGRAM_URL/);
+    expect(attempt).not.toThrow(/SEED_WHATSAPP_URL/);
+    expect(attempt).not.toThrow(/example\.com/);
+    expect(() => resolveSeedOptions({ NODE_ENV: "production", SEED_ADMIN_TEMP_PASSWORD: STRONG })).toThrow(
+      /SEED_WHATSAPP_URL, SEED_EXTERNAL_ALBUM_URL, SEED_LYRICS_URL, SEED_PROGRAM_URL/
+    );
+  });
+
+  it("seeds only the given links when SEED_ALLOW_MISSING_LINKS=true", () => {
     const resolved = resolveSeedOptions({
       NODE_ENV: "production",
       SEED_ADMIN_TEMP_PASSWORD: STRONG,
-      SEED_WHATSAPP_URL: "https://chat.whatsapp.com/nuevo",
-      SEED_PROGRAM_URL: "https://example.com/programa"
+      SEED_ALLOW_MISSING_LINKS: "true",
+      SEED_PROGRAM_URL: ALL_LINKS.SEED_PROGRAM_URL
     });
     expect(resolved.links).toEqual({
-      whatsappUrl: "https://chat.whatsapp.com/nuevo",
+      whatsappUrl: null,
       externalAlbumUrl: null,
       lyricsUrl: null,
-      programUrl: "https://example.com/programa"
+      programUrl: ALL_LINKS.SEED_PROGRAM_URL
     });
     expect(() =>
-      resolveSeedOptions({ NODE_ENV: "production", SEED_ADMIN_TEMP_PASSWORD: STRONG, SEED_LYRICS_URL: "http://x.example.com" })
+      resolveSeedOptions({ NODE_ENV: "production", SEED_ADMIN_TEMP_PASSWORD: STRONG, SEED_ALLOW_MISSING_LINKS: "1" })
     ).toThrow(SeedConfigError);
   });
 
@@ -277,10 +303,27 @@ describe("resolveSeedOptions", () => {
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(STRONG);
   });
 
-  it("falls back to the development password and legacy links only in development and test", () => {
+  it("rejects non-https links", () => {
+    expect(() =>
+      resolveSeedOptions({
+        NODE_ENV: "production",
+        SEED_ADMIN_TEMP_PASSWORD: STRONG,
+        ...ALL_LINKS,
+        SEED_LYRICS_URL: "http://x.example.com"
+      })
+    ).toThrow(/SEED_LYRICS_URL must be an https/);
+    expect(() => resolveSeedOptions({ NODE_ENV: "development", SEED_WHATSAPP_URL: "javascript:alert(1)" })).toThrow(
+      SeedConfigError
+    );
+  });
+
+  it("falls back to the development password and placeholder links only in development and test", () => {
     const dev = resolveSeedOptions({ NODE_ENV: "development" });
     expect(dev.adminTempPassword).toBe("Password123!");
-    expect(dev.links).toEqual(LEGACY_DEV_LINKS);
+    expect(dev.links).toEqual(DEV_PLACEHOLDER_LINKS);
+    expect(Object.values(DEV_PLACEHOLDER_LINKS).every((url) => url.startsWith("https://example.com/"))).toBe(true);
+    const partial = resolveSeedOptions({ NODE_ENV: "test", SEED_WHATSAPP_URL: ALL_LINKS.SEED_WHATSAPP_URL });
+    expect(partial.links).toEqual({ ...DEV_PLACEHOLDER_LINKS, whatsappUrl: ALL_LINKS.SEED_WHATSAPP_URL });
     expect(resolveSeedOptions({ NODE_ENV: "test" }).adminTempPassword).toBe("Password123!");
   });
 });

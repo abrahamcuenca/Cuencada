@@ -1,3 +1,4 @@
+import { MEDIA_SIZE_LIMITS } from "@cuencada/types";
 import { and, eq } from "drizzle-orm";
 import sharp from "sharp";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -123,7 +124,7 @@ describe("POST /api/cuencadas/:year/media/uploads", () => {
   it.each([
     ["a disallowed MIME type", { fileName: "a.heic", mimeType: "image/heic", byteSize: 10 }],
     ["an image over 25 MB", { fileName: "a.jpg", mimeType: "image/jpeg", byteSize: 25 * MB + 1 }],
-    ["a video over 300 MB", { fileName: "a.mp4", mimeType: "video/mp4", byteSize: 300 * MB + 1 }],
+    ["a video over 150 MB", { fileName: "a.mp4", mimeType: "video/mp4", byteSize: MEDIA_SIZE_LIMITS.video + 1 }],
     ["an empty file", { fileName: "a.jpg", mimeType: "image/jpeg", byteSize: 0 }],
     ["a file name with a path", { fileName: "../a.jpg", mimeType: "image/jpeg", byteSize: 10 }],
     ["a file name with a bidi override", { fileName: `a${String.fromCodePoint(0x202e)}gpj.exe`, mimeType: "image/jpeg", byteSize: 10 }]
@@ -681,6 +682,7 @@ describe("upload quotas", () => {
     await insertMedia({ ...base, uploadStatus: "failed" });
     await insertMedia({ ...base, createdAt: new Date(Date.now() - DAILY_UPLOAD_WINDOW_MS - 60_000) });
     await insertMedia({ ...base, deletedAt: new Date() }); // deleted still counts: 3900 MB
+    await insertMedia({ ...base, byteSize: 50 * MB }); // 3950 MB: what is left fits under the video cap
     const intent = (byteSize: number) =>
       app.inject({
         method: "POST",
@@ -690,8 +692,9 @@ describe("upload quotas", () => {
       });
 
     expect(DAILY_UPLOAD_BYTES).toBe(4096 * MB);
-    const over = await intent(DAILY_UPLOAD_BYTES - 3900 * MB + 1);
-    const fits = await intent(DAILY_UPLOAD_BYTES - 3900 * MB);
+    expect(DAILY_UPLOAD_BYTES - 3950 * MB).toBeLessThanOrEqual(MEDIA_SIZE_LIMITS.video);
+    const over = await intent(DAILY_UPLOAD_BYTES - 3950 * MB + 1);
+    const fits = await intent(DAILY_UPLOAD_BYTES - 3950 * MB);
     const nowOver = await intent(1);
 
     expect(over.statusCode).toBe(429);
@@ -711,7 +714,7 @@ describe("upload quotas", () => {
       method: "POST",
       url: "/api/cuencadas/2026/media/uploads",
       ...auth,
-      payload: { fileName: "a.mp4", mimeType: "video/mp4", byteSize: 300 * MB }
+      payload: { fileName: "a.mp4", mimeType: "video/mp4", byteSize: MEDIA_SIZE_LIMITS.video }
     });
 
     expect(response.statusCode).toBe(201);
