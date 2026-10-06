@@ -1,8 +1,9 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { authenticatedState, makeUser } from "../../../../test/auth";
+import { apiUrl, authenticatedState, errorBody, makeUser } from "../../../../test/auth";
 import { renderApp as renderAppBase } from "../../../../test/renderApp";
 import type { AppStore } from "../../../app/store";
 import { env } from "../../../shared/lib/env";
@@ -191,6 +192,23 @@ describe("GalleryPage grid", () => {
     fireEvent.error(within(viewer).getByRole("img", { name: "Foto número 1" }));
 
     await waitFor(() => expect(listRequests()).toHaveLength(2));
+  });
+});
+
+describe("GalleryPage access", () => {
+  it("asks an unverified member to verify the email on 403 instead of offering a retry", async () => {
+    server.use(http.get(apiUrl("/cuencadas/:year/media"), () => HttpResponse.json(errorBody("FORBIDDEN", "No."), { status: 403 })));
+    renderApp("/galeria/2026", authenticatedState(makeUser({ emailVerified: false })));
+
+    expect(await screen.findByRole("heading", { name: "Verifica tu correo para ver el álbum" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
+  });
+
+  it("says access is closed for any other 403", async () => {
+    server.use(http.get(apiUrl("/cuencadas/:year/media"), () => HttpResponse.json(errorBody("FORBIDDEN", "No."), { status: 403 })));
+    renderApp("/galeria/2026", authenticatedState());
+
+    expect(await screen.findByRole("heading", { name: "No tienes acceso al álbum" })).toBeInTheDocument();
   });
 });
 

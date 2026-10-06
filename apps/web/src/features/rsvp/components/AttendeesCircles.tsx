@@ -1,6 +1,6 @@
 import type { Attendee } from "@cuencada/types";
 import { type ReactNode, useState } from "react";
-import { isAbortError, isFetchBaseQueryError } from "../../../shared/api/errors";
+import { isAbortError } from "../../../shared/api/errors";
 import { AvatarCircle } from "../../../shared/ui/AvatarCircle";
 import { AvatarStack } from "../../../shared/ui/AvatarStack";
 import { Badge } from "../../../shared/ui/Badge";
@@ -8,6 +8,7 @@ import { Button } from "../../../shared/ui/Button";
 import { Card } from "../../../shared/ui/Card";
 import { Dialog } from "../../../shared/ui/Dialog";
 import { Skeleton } from "../../../shared/ui/Skeleton";
+import { classifyAccessDenial } from "../../auth/accessDenied";
 import { useGetCuencadaQuery } from "../../cuencadas/api";
 import { useListAttendeesQuery } from "../api";
 import { attendeeKey, safeAvatarUrl, useMember } from "../lib/members";
@@ -36,11 +37,11 @@ export function AttendeesCircles({ year }: AttendeesCirclesProps): ReactNode {
     body = <AttendeeStrip year={year} title={title} isPast={isPast} attendees={attendees.data} />;
   } else if (attendees.error !== undefined) {
     if (isAbortError(attendees.error)) return null;
-    const forbidden = isFetchBaseQueryError(attendees.error) && attendees.error.status === 403;
-    body = forbidden ? (
+    const denial = classifyAccessDenial(attendees.error, member);
+    body = denial !== null ? (
       <p className={styles.muted}>
-        <span aria-hidden="true">✉️ </span>
-        {member.emailVerified ? "No tienes acceso a la lista de asistentes." : "Verifica tu correo para ver quiénes asistieron."}
+        <span aria-hidden="true">{denial === "unverified" ? "✉️ " : "🔒 "}</span>
+        {denial === "unverified" ? "Verifica tu correo para ver quiénes asistieron." : "No tienes acceso a la lista de asistentes."}
       </p>
     ) : (
       <div className={styles.stack}>

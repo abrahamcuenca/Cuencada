@@ -7,7 +7,9 @@ import { Button } from "../../../shared/ui/Button";
 import { EmptyState } from "../../../shared/ui/EmptyState";
 import { Skeleton } from "../../../shared/ui/Skeleton";
 import { cx } from "../../../shared/ui/cx";
+import { useAccessDenial } from "../../auth/accessDenied";
 import { selectCurrentUser, selectIsAdmin } from "../../auth/authSlice";
+import { AccessDeniedState } from "../../auth/components/AccessDeniedState";
 import { useGetFamilyTreeQuery } from "../api";
 import { PersonSearch } from "../components/PersonSearch";
 import { Breadcrumbs, FocusCard, type OpenPerson, RelativeBand, SiblingStrip } from "../components/TreeParts";
@@ -233,13 +235,14 @@ interface TreeErrorProps {
 
 function TreeError({ error, hasPersonId, onRetry }: TreeErrorProps): ReactNode {
   const code = getApiErrorCode(error);
-  if (code === "FORBIDDEN") {
+  const denial = useAccessDenial(error);
+  if (denial !== null) {
     return (
-      <EmptyState
-        tone="lock"
-        icon="✉️"
-        title="Verifica tu correo para ver el árbol familiar"
-        description="El árbol tiene datos privados de la familia. Abre el enlace que te enviamos por correo; si no lo encuentras, pide otro desde el aviso de arriba."
+      <AccessDeniedState
+        denial={denial}
+        verifyTitle="Verifica tu correo para ver el árbol familiar"
+        forbiddenTitle="No tienes acceso al árbol familiar"
+        verifyDescription="El árbol tiene datos privados de la familia. Abre el enlace que te enviamos por correo; si no lo encuentras, pide otro."
       />
     );
   }

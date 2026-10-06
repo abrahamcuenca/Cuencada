@@ -24,6 +24,25 @@ function writes(): FamilyDb["log"] {
 }
 
 describe("AdminFamilyPage", { timeout: 15_000 }, () => {
+  it("shows the verify state, not a retry, to an admin whose email isn't verified", async () => {
+    server.use(
+      http.get(apiUrl("/family/people"), () => HttpResponse.json(errorBody("FORBIDDEN", "Verifica tu correo."), { status: 403 }))
+    );
+    const unverifiedAdmin = makeUser({ role: "admin", emailVerified: false });
+    renderApp("/admin/familia", authenticatedState(unverifiedAdmin));
+
+    expect(await screen.findByRole("heading", { name: "Verifica tu correo para administrar el árbol" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
+  });
+
+  it("shows the verify state on a person's page for an unverified admin", async () => {
+    server.use(http.get(apiUrl("/family/people/:id"), () => HttpResponse.json(errorBody("FORBIDDEN", "Verifica tu correo."), { status: 403 })));
+    renderApp(`/admin/familia/${IDS.jose}`, authenticatedState(makeUser({ role: "admin", emailVerified: false })));
+
+    expect(await screen.findByRole("heading", { name: "Verifica tu correo para administrar el árbol" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
+  });
+
   it("lists people with a search box", async () => {
     const user = userEvent.setup();
     renderApp("/admin/familia", authenticatedState(admin));

@@ -7,10 +7,13 @@ import { EmptyState } from "../../../../shared/ui/EmptyState";
 import { Skeleton } from "../../../../shared/ui/Skeleton";
 import { useToast } from "../../../../shared/ui/Toast";
 import { cx } from "../../../../shared/ui/cx";
+import { useAccessDenial } from "../../../auth/accessDenied";
+import { AccessDeniedState } from "../../../auth/components/AccessDeniedState";
 import { useGetPersonQuery } from "../../api";
 import { type FieldErrors, serverErrorToFieldErrors } from "../../lib/forms";
 import styles from "../admin.module.css";
 import { useDeletePersonMutation, useUpdatePersonMutation } from "../api";
+import { ADMIN_VERIFY_TITLE } from "./AdminFamilyPage";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PERSON_FORM_FIELDS, PersonForm, type PersonFormSubmit } from "../components/PersonForm";
 import { RelationshipManager } from "../components/RelationshipManager";
@@ -23,10 +26,13 @@ export function AdminPersonPage(): ReactNode {
   const { personId = "" } = useParams();
   const validId = idSchema.safeParse(personId).success;
   const person = useGetPersonQuery(personId, { skip: !validId });
+  const denial = useAccessDenial(person.error);
 
   let body: ReactNode;
   if (!validId || getApiErrorCode(person.error) === "NOT_FOUND") {
     body = <EmptyState icon="🔎" title="No encontramos a esa persona" action={<Button to="/admin/familia">Volver a la lista</Button>} />;
+  } else if (person.currentData === undefined && denial !== null) {
+    body = <AccessDeniedState denial={denial} verifyTitle={ADMIN_VERIFY_TITLE} forbiddenTitle="No tienes acceso a esta persona" />;
   } else if (person.currentData === undefined) {
     body = person.isError ? (
       <EmptyState icon="⚠️" title="No pudimos cargar a la persona" action={<Button onClick={() => void person.refetch()}>Reintentar</Button>} />

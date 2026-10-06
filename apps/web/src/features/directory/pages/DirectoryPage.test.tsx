@@ -188,6 +188,15 @@ describe("DirectoryPage access", () => {
     await waitFor(() => expect(requests).toEqual(["verify-request"]));
   });
 
+  it("treats EMAIL_UNVERIFIED as unverified whatever the cached user says", async () => {
+    server.use(
+      http.get(apiUrl("/directory"), () => HttpResponse.json({ error: { code: "EMAIL_UNVERIFIED", message: "Verifica tu correo." } }, { status: 403 }))
+    );
+    renderApp("/directorio", authenticatedState());
+
+    expect(await screen.findByRole("heading", { name: "Verifica tu correo para ver el directorio" })).toBeInTheDocument();
+  });
+
   it("says access is closed for any other 403", async () => {
     db.listError = "FORBIDDEN";
     renderApp("/directorio", authenticatedState());

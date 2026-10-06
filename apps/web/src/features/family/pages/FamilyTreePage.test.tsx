@@ -141,6 +141,25 @@ describe("FamilyTreePage", { timeout: 15_000 }, () => {
     expect(screen.queryByRole("region", { name: /^Padres/ })).not.toBeInTheDocument();
   });
 
+  it("shows the verify-email state for EMAIL_UNVERIFIED even when the cached user looks verified", async () => {
+    server.use(
+      http.get(apiUrl("/family/tree"), () => HttpResponse.json({ error: { code: "EMAIL_UNVERIFIED", message: "Verifica tu correo." } }, { status: 403 }))
+    );
+    renderApp("/arbol", authenticatedState(makeUser()));
+
+    expect(await screen.findByRole("heading", { name: "Verifica tu correo para ver el árbol familiar" })).toBeInTheDocument();
+    expect(within(screen.getByRole("main")).getByRole("button", { name: "Reenviar enlace" })).toBeInTheDocument();
+  });
+
+  it("says access is closed for a 403 to a verified member, with no retry", async () => {
+    server.use(http.get(apiUrl("/family/tree"), () => HttpResponse.json(errorBody("FORBIDDEN", "No."), { status: 403 })));
+    renderApp("/arbol", authenticatedState(makeUser()));
+
+    expect(await screen.findByRole("heading", { name: "No tienes acceso al árbol familiar" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Verifica tu correo/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
+  });
+
   it("prompts a search when I have no person node", async () => {
     server.use(...familyHandlers(db, { mePersonId: null }));
     renderApp("/arbol", authenticatedState(makeUser()));

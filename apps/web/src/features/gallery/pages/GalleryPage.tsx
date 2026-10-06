@@ -7,7 +7,9 @@ import { EmptyState } from "../../../shared/ui/EmptyState";
 import { Select } from "../../../shared/ui/Select";
 import { Skeleton } from "../../../shared/ui/Skeleton";
 import { cx } from "../../../shared/ui/cx";
+import { type AccessDenial, useAccessDenial } from "../../auth/accessDenied";
 import { selectIsAdmin } from "../../auth/authSlice";
+import { AccessDeniedState } from "../../auth/components/AccessDeniedState";
 import { MEDIA_PAGE_SIZE, useGalleryYearsQuery, useListMediaInfiniteQuery, useMediaHeadQuery } from "../api";
 import { GalleryLightbox } from "../components/GalleryLightbox";
 import { isViewable, MediaGrid, MediaGridSkeleton } from "../components/MediaGrid";
@@ -50,6 +52,18 @@ function LoadError({ onRetry }: { onRetry: () => void }): React.ReactNode {
           Reintentar
         </Button>
       }
+    />
+  );
+}
+
+/** The member-only album refused with 403: unverified email, or no access at all. */
+function AccessDenied({ denial }: { denial: AccessDenial }): React.ReactNode {
+  return (
+    <AccessDeniedState
+      denial={denial}
+      verifyTitle="Verifica tu correo para ver el álbum"
+      forbiddenTitle="No tienes acceso al álbum"
+      verifyDescription="El álbum es solo para la familia. Abre el enlace que te enviamos por correo; si no lo encuentras, pide otro."
     />
   );
 }
@@ -110,6 +124,7 @@ function GalleryYear({ year }: { year: number }): React.ReactNode {
   const items = useMemo(() => data?.pages.flatMap((page) => page.items) ?? [], [data]);
   const viewable = useMemo(() => items.filter(isViewable), [items]);
   const onMediaError = useExpiredUrlRefetch(refetch);
+  const denial = useAccessDenial(error);
 
   // The upload manager polls for its own uploads; the page polls only for processing items it
   // doesn't track (e.g. from an earlier visit). Only the first page is fetched and patched in.
@@ -129,7 +144,7 @@ function GalleryYear({ year }: { year: number }): React.ReactNode {
       </div>
     );
   } else if (isError && !data) {
-    content = isAbortError(error) ? null : <LoadError onRetry={() => void refetch()} />;
+    content = isAbortError(error) ? null : denial !== null ? <AccessDenied denial={denial} /> : <LoadError onRetry={() => void refetch()} />;
   } else if (items.length === 0) {
     content = (
       <EmptyState
