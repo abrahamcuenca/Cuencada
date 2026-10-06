@@ -11,13 +11,27 @@
  * principal.
  */
 import { randomUUID } from "node:crypto";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import type { App } from "../../app.js";
-import { avatarUploads, chatRooms, invites, MagicLinkPurpose, sessions, users } from "../../db/schema/index.js";
+import {
+  avatarUploads,
+  chatMessages,
+  chatReadStates,
+  chatRooms,
+  cuencadaRsvps,
+  invites,
+  MagicLinkPurpose,
+  mediaItems,
+  mediaReports,
+  people,
+  profiles,
+  sessions,
+  users
+} from "../../db/schema/index.js";
 import { createOpaqueToken, hashToken } from "../../lib/tokens.js";
 import { createEmailToken } from "../../modules/auth/emailTokens.js";
 import { CSRF_HEADERS, refreshCookie, TEST_REFRESH_COOKIE } from "../../../test/helpers/auth.js";
-import { insertGlobalRoom, insertMessage } from "../../../test/helpers/chat.js";
+import { insertEditionRoom, insertGlobalRoom, insertMessage } from "../../../test/helpers/chat.js";
 import {
   insertAnnouncement,
   insertCuencada,
@@ -105,8 +119,28 @@ export interface RouteSpec {
   success?: Expectation;
   /** Per-principal overrides of the derived expectation. */
   expect?: Partial<Record<Principal, Expectation>>;
-  /** IDOR: a verified member acting on `ctx.other`'s resource. */
-  idor?: { build(ctx: MatrixContext): Promise<BuiltRequest>; expect: Expectation };
+  /**
+   * Extra probes run as a verified member: IDOR on `ctx.other`'s resources,
+   * hidden rooms, own-item rules and mass assignment. When the request
+   * returns `state`, it is read before and after the call and must not change.
+   */
+  probes?: Probe[];
+}
+
+/** A request whose effect is checked by re-reading the rows it must not touch. */
+export interface ProbeRequest extends BuiltRequest {
+  /** Reads the protected state; compared before and after the request. */
+  state?: () => Promise<unknown>;
+}
+
+/** One extra probe (see {@link RouteSpec.probes}). */
+export interface Probe {
+  /** Short label for routes.md and failure messages. */
+  label: string;
+  /** `"idor"` probes fill the "Other member (IDOR)" column of routes.md. */
+  kind: "idor" | "rule" | "mass-assignment";
+  build(ctx: MatrixContext): Promise<ProbeRequest>;
+  expect: Expectation;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -253,6 +287,70 @@ async function listedMember(): Promise<TestUser> {
 
 const json = (url: string, payload?: unknown): BuiltRequest => (payload === undefined ? { url } : { url, payload });
 
+const NOT_FOUND: Expectation = { status: 404, code: "NOT_FOUND" };
+
+/** A gallery item of `owner` in any upload/moderation state. */
+async function mediaIn(
+  ctx: MatrixContext,
+  owner: Actor,
+  state: Pick<typeof mediaItems.$inferInsert, "uploadStatus" | "moderationStatus">
+): Promise<string> {
+  const edition = await upcoming(ctx);
+  const row = await insertMedia({ cuencadaId: edition.id, uploadedByUserId: owner.user.id, caption: "Leyenda original", ...state });
+  return row.id;
+}
+
+/** The full media row (compared before/after a probe). */
+function mediaState(id: string): () => Promise<unknown> {
+  return async () => getTestDb().select().from(mediaItems).where(eq(mediaItems.id, id));
+}
+
+/** A message by `sender` in a hidden room (the room of a draft edition). */
+async function hiddenRoomMessage(ctx: MatrixContext, sender: Actor): Promise<{ roomId: string; messageId: string }> {
+  const draft = await insertCuencada({ year: ctx.nextYear(), isPublished: false });
+  const room = await insertEditionRoom(draft.id, draft.year);
+  const message = await insertMessage({ roomId: room.id, senderUserId: sender.user.id });
+  return { roomId: room.id, messageId: message.id };
+}
+
+/**
+ * Mass assignment on the self-edit of the caller's tree node: keys outside
+ * nickname/familyBranch/birthYear (name, account link, death data) must have
+ * no effect on the caller's node nor on anyone else's.
+ */
+function familyMassAssignment(url: string): Probe {
+  return {
+    label: "extra keys (fullName/userId/deceased/deathYear/id)",
+    kind: "mass-assignment",
+    build: async (ctx) => {
+      const own = await insertPerson({ userId: ctx.actor.user.id, fullName: "Nombre Original" });
+      const theirs = await insertPerson({ userId: ctx.other.user.id, fullName: "Nombre Ajeno" });
+      return {
+        ...json(url, {
+          nickname: "Peque",
+          fullName: "Nombre Cambiado",
+          userId: ctx.other.user.id,
+          deceased: true,
+          deathYear: 2000,
+          id: theirs.id
+        }),
+        state: async () =>
+          getTestDb()
+            .select({ id: people.id, fullName: people.fullName, userId: people.userId, deceased: people.deceased, deathYear: people.deathYear })
+            .from(people)
+            .where(inArray(people.id, [own.id, theirs.id]))
+            .orderBy(people.fullName)
+      };
+    },
+    expect: "2xx"
+  };
+}
+
+/** The chat message row (compared before/after a probe). */
+function messageState(id: string): () => Promise<unknown> {
+  return async () => getTestDb().select().from(chatMessages).where(eq(chatMessages.id, id));
+}
+
 /* -------------------------------------------------------------------------- */
 /* The matrix                                                                  */
 /* -------------------------------------------------------------------------- */
@@ -311,7 +409,17 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
       const extra = await createSession(ctx.actor.user.id);
       return json(`/api/auth/sessions/${extra.id}`);
     },
-    idor: { build: async (ctx) => json(`/api/auth/sessions/${ctx.other.sessionId}`), expect: { status: 404, code: "NOT_FOUND" } }
+    probes: [
+      {
+        label: "another member's session",
+        kind: "idor",
+        build: async (ctx) => ({
+          ...json(`/api/auth/sessions/${ctx.other.sessionId}`),
+          state: async () => getTestDb().select().from(sessions).where(eq(sessions.id, ctx.other.sessionId))
+        }),
+        expect: NOT_FOUND
+      }
+    ]
   },
   {
     method: "POST",
@@ -450,10 +558,26 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     auth: "user",
     owner: "own upload intents only (404 for another user's uploadId)",
     build: async (ctx) => json("/api/profile/me/avatar/confirm", { uploadId: await avatarIntent(ctx, ctx.actor) }),
-    idor: {
-      build: async (ctx) => json("/api/profile/me/avatar/confirm", { uploadId: await avatarIntent(ctx, ctx.other) }),
-      expect: { status: 404, code: "NOT_FOUND" }
-    }
+    probes: [
+      {
+        label: "another member's upload intent",
+        kind: "idor",
+        build: async (ctx) => {
+          const uploadId = await avatarIntent(ctx, ctx.other);
+          return {
+            ...json("/api/profile/me/avatar/confirm", { uploadId }),
+            state: async () => ({
+              upload: await getTestDb().select().from(avatarUploads).where(eq(avatarUploads.id, uploadId)),
+              profiles: await getTestDb()
+                .select({ userId: profiles.userId, avatarKey: profiles.avatarKey })
+                .from(profiles)
+                .where(eq(profiles.userId, ctx.other.user.id))
+            })
+          };
+        },
+        expect: NOT_FOUND
+      }
+    ]
   },
   { method: "DELETE", url: "/api/profile/me/avatar", auth: "user", build: async () => json("/api/profile/me/avatar") },
 
@@ -472,13 +596,17 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     requireVerifiedEmail: true,
     owner: "listed members only (404 for unlisted)",
     build: async () => json(`/api/directory/${(await listedMember()).id}`),
-    idor: {
-      build: async () => {
-        const hidden = await createUser({ emailVerified: true, profile: { listedInDirectory: false } });
-        return json(`/api/directory/${hidden.id}`);
-      },
-      expect: { status: 404, code: "NOT_FOUND" }
-    }
+    probes: [
+      {
+        label: "unlisted member",
+        kind: "idor",
+        build: async () => {
+          const hidden = await createUser({ emailVerified: true, profile: { listedInDirectory: false } });
+          return json(`/api/directory/${hidden.id}`);
+        },
+        expect: NOT_FOUND
+      }
+    ]
   },
 
   // ---------------------------------------------------------------- cuencadas (public + member)
@@ -653,7 +781,31 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     url: "/api/cuencadas/:year/rsvp/me",
     auth: "user",
     owner: "self-scoped",
-    build: async (ctx) => json(`/api/cuencadas/${(await upcoming(ctx)).year}/rsvp/me`, { status: "yes" })
+    build: async (ctx) => json(`/api/cuencadas/${(await upcoming(ctx)).year}/rsvp/me`, { status: "yes" }),
+    probes: [
+      {
+        label: "RSVP body naming another member (userId/cuencadaId/createdByUserId)",
+        kind: "mass-assignment",
+        build: async (ctx) => {
+          const edition = await upcoming(ctx);
+          const other = await upcoming(ctx);
+          return {
+            ...json(`/api/cuencadas/${edition.year}/rsvp/me`, {
+              status: "yes",
+              userId: ctx.other.user.id,
+              cuencadaId: other.id,
+              id: randomUUID()
+            }),
+            // Nothing may be written for the other member or the other edition.
+            state: async () => ({
+              otherMember: await getTestDb().select().from(cuencadaRsvps).where(eq(cuencadaRsvps.userId, ctx.other.user.id)),
+              otherEdition: await getTestDb().select().from(cuencadaRsvps).where(eq(cuencadaRsvps.cuencadaId, other.id))
+            })
+          };
+        },
+        expect: "2xx"
+      }
+    ]
   },
   {
     method: "GET",
@@ -728,10 +880,17 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     requireVerifiedEmail: true,
     owner: "uploader only (404 for others)",
     build: async (ctx) => json(`/api/media/${await pendingUpload(ctx, ctx.actor)}/confirm`),
-    idor: {
-      build: async (ctx) => json(`/api/media/${await pendingUpload(ctx, ctx.other)}/confirm`),
-      expect: { status: 404, code: "NOT_FOUND" }
-    }
+    probes: [
+      {
+        label: "another member's pending upload",
+        kind: "idor",
+        build: async (ctx) => {
+          const id = await pendingUpload(ctx, ctx.other);
+          return { ...json(`/api/media/${id}/confirm`), state: mediaState(id) };
+        },
+        expect: NOT_FOUND
+      }
+    ]
   },
   {
     method: "GET",
@@ -748,10 +907,29 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     requireVerifiedEmail: true,
     owner: "hidden/pending items only for the uploader and admins (404 otherwise)",
     build: async (ctx) => json(`/api/media/${await readyMedia(ctx, ctx.other)}`),
-    idor: {
-      build: async (ctx) => json(`/api/media/${await readyMedia(ctx, ctx.other, "hidden")}`),
-      expect: { status: 404, code: "NOT_FOUND" }
-    }
+    probes: [
+      {
+        label: "another member's hidden item",
+        kind: "idor",
+        build: async (ctx) => json(`/api/media/${await mediaIn(ctx, ctx.other, { uploadStatus: "ready", moderationStatus: "hidden" })}`),
+        expect: NOT_FOUND
+      },
+      {
+        label: "another member's item pending review",
+        kind: "idor",
+        build: async (ctx) =>
+          json(`/api/media/${await mediaIn(ctx, ctx.other, { uploadStatus: "ready", moderationStatus: "pending_review" })}`),
+        expect: NOT_FOUND
+      },
+      ...(["pending_upload", "processing", "failed"] as const).map(
+        (uploadStatus): Probe => ({
+          label: `another member's ${uploadStatus} item`,
+          kind: "idor",
+          build: async (ctx) => json(`/api/media/${await mediaIn(ctx, ctx.other, { uploadStatus, moderationStatus: "approved" })}`),
+          expect: NOT_FOUND
+        })
+      )
+    ]
   },
   {
     method: "PATCH",
@@ -760,10 +938,19 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     requireVerifiedEmail: true,
     owner: "uploader or admin (404 for other members)",
     build: async (ctx) => json(`/api/media/${await readyMedia(ctx, ctx.actor)}`, { caption: "Nueva" }),
-    idor: {
-      build: async (ctx) => json(`/api/media/${await readyMedia(ctx, ctx.other)}`, { caption: "Mía" }),
-      expect: { status: 404, code: "NOT_FOUND" }
-    }
+    probes: [
+      ...(["ready", "pending_upload", "processing", "failed"] as const).map(
+        (uploadStatus): Probe => ({
+          label: `another member's ${uploadStatus} item`,
+          kind: "idor",
+          build: async (ctx) => {
+            const id = await mediaIn(ctx, ctx.other, { uploadStatus, moderationStatus: "approved" });
+            return { ...json(`/api/media/${id}`, { caption: "Mía" }), state: mediaState(id) };
+          },
+          expect: NOT_FOUND
+        })
+      )
+    ]
   },
   {
     method: "DELETE",
@@ -772,10 +959,19 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     requireVerifiedEmail: true,
     owner: "uploader or admin (404 for other members)",
     build: async (ctx) => json(`/api/media/${await readyMedia(ctx, ctx.actor)}`),
-    idor: {
-      build: async (ctx) => json(`/api/media/${await readyMedia(ctx, ctx.other)}`),
-      expect: { status: 404, code: "NOT_FOUND" }
-    }
+    probes: [
+      ...(["ready", "pending_upload", "processing", "failed"] as const).map(
+        (uploadStatus): Probe => ({
+          label: `another member's ${uploadStatus} item`,
+          kind: "idor",
+          build: async (ctx) => {
+            const id = await mediaIn(ctx, ctx.other, { uploadStatus, moderationStatus: "approved" });
+            return { ...json(`/api/media/${id}`), state: mediaState(id) };
+          },
+          expect: NOT_FOUND
+        })
+      )
+    ]
   },
   {
     method: "POST",
@@ -783,7 +979,33 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     auth: "user",
     requireVerifiedEmail: true,
     owner: "any member except the uploader (403 on own items)",
-    build: async (ctx) => json(`/api/media/${await readyMedia(ctx, ctx.other)}/report`, { reason: "other" })
+    build: async (ctx) => json(`/api/media/${await readyMedia(ctx, ctx.other)}/report`, { reason: "other" }),
+    probes: [
+      {
+        label: "report own item",
+        kind: "rule",
+        build: async (ctx) => {
+          const id = await readyMedia(ctx, ctx.actor);
+          return {
+            ...json(`/api/media/${id}/report`, { reason: "other" }),
+            state: async () => getTestDb().select().from(mediaReports).where(eq(mediaReports.mediaId, id))
+          };
+        },
+        expect: { status: 403, code: "FORBIDDEN" }
+      },
+      {
+        label: "another member's hidden item",
+        kind: "idor",
+        build: async (ctx) => {
+          const id = await mediaIn(ctx, ctx.other, { uploadStatus: "ready", moderationStatus: "hidden" });
+          return {
+            ...json(`/api/media/${id}/report`, { reason: "other" }),
+            state: async () => getTestDb().select().from(mediaReports).where(eq(mediaReports.mediaId, id))
+          };
+        },
+        expect: NOT_FOUND
+      }
+    ]
   },
   { method: "GET", url: "/api/admin/media", auth: "admin", build: async () => json("/api/admin/media") },
   {
@@ -833,7 +1055,8 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     build: async (ctx) => {
       await insertPerson({ userId: ctx.actor.user.id });
       return json("/api/family/me", { nickname: "Peque" });
-    }
+    },
+    probes: [familyMassAssignment("/api/family/me")]
   },
   {
     method: "PATCH",
@@ -844,7 +1067,8 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     build: async (ctx) => {
       await insertPerson({ userId: ctx.actor.user.id });
       return json("/api/family/people/me", { nickname: "Peque" });
-    }
+    },
+    probes: [familyMassAssignment("/api/family/people/me")]
   },
   {
     method: "POST",
@@ -900,7 +1124,15 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     url: "/api/chat/rooms/:id/messages",
     auth: "user",
     requireVerifiedEmail: true,
-    build: async (ctx) => json(`/api/chat/rooms/${(await chatMessage(ctx.other)).roomId}/messages`)
+    build: async (ctx) => json(`/api/chat/rooms/${(await chatMessage(ctx.other)).roomId}/messages`),
+    probes: [
+      {
+        label: "history of a hidden room",
+        kind: "rule",
+        build: async (ctx) => json(`/api/chat/rooms/${(await hiddenRoomMessage(ctx, ctx.other)).roomId}/messages`),
+        expect: NOT_FOUND
+      }
+    ]
   },
   {
     method: "POST",
@@ -910,7 +1142,34 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     build: async (ctx) => {
       const { roomId, messageId } = await chatMessage(ctx.other);
       return json(`/api/chat/rooms/${roomId}/read`, { messageId });
-    }
+    },
+    probes: [
+      {
+        label: "read state in a hidden room",
+        kind: "rule",
+        build: async (ctx) => {
+          const { roomId, messageId } = await hiddenRoomMessage(ctx, ctx.other);
+          return {
+            ...json(`/api/chat/rooms/${roomId}/read`, { messageId }),
+            state: async () => getTestDb().select().from(chatReadStates).where(eq(chatReadStates.roomId, roomId))
+          };
+        },
+        expect: NOT_FOUND
+      },
+      {
+        label: "message of another room",
+        kind: "rule",
+        build: async (ctx) => {
+          const { messageId } = await hiddenRoomMessage(ctx, ctx.other);
+          const room = await globalRoom();
+          return {
+            ...json(`/api/chat/rooms/${room.id}/read`, { messageId }),
+            state: async () => getTestDb().select().from(chatReadStates).where(eq(chatReadStates.roomId, room.id))
+          };
+        },
+        expect: NOT_FOUND
+      }
+    ]
   },
   {
     method: "DELETE",
@@ -919,10 +1178,26 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     requireVerifiedEmail: true,
     owner: "sender or admin (404 for other members)",
     build: async (ctx) => json(`/api/chat/messages/${(await chatMessage(ctx.actor)).messageId}`),
-    idor: {
-      build: async (ctx) => json(`/api/chat/messages/${(await chatMessage(ctx.other)).messageId}`),
-      expect: { status: 404, code: "NOT_FOUND" }
-    }
+    probes: [
+      {
+        label: "another member's message",
+        kind: "idor",
+        build: async (ctx) => {
+          const { messageId } = await chatMessage(ctx.other);
+          return { ...json(`/api/chat/messages/${messageId}`), state: messageState(messageId) };
+        },
+        expect: NOT_FOUND
+      },
+      {
+        label: "own message in a hidden room",
+        kind: "rule",
+        build: async (ctx) => {
+          const { messageId } = await hiddenRoomMessage(ctx, ctx.actor);
+          return { ...json(`/api/chat/messages/${messageId}`), state: messageState(messageId) };
+        },
+        expect: NOT_FOUND
+      }
+    ]
   },
   {
     method: "POST",

@@ -20,15 +20,17 @@
  * drop the scratch database `w23_csp_check`. Only fictional fixtures are used.
  */
 import { spawn } from "node:child_process";
-import { readFile, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { createRequire } from "node:module";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const DIST = path.join(ROOT, "apps/web/dist");
+/** The SPA is rebuilt into a temp dir with the harness bucket as `VITE_MEDIA_UPLOAD_ORIGIN` (uploads need it). */
+let DIST = "";
 const SERVER_DIR = path.join(ROOT, "apps/server");
 const requireFromServer = createRequire(path.join(SERVER_DIR, "package.json"));
 const requireFromRoot = createRequire(path.join(ROOT, "package.json"));
@@ -47,29 +49,35 @@ const TEMP_PASSWORD = "contrasena-temporal-de-prueba-csp";
 const PASSWORD = "contrasena-definitiva-de-prueba-csp";
 
 /**
- * The production SPA policy from docs/security/csp.md. For the local run the
- * `wss://cuencada.com` source becomes the harness origin's `ws:` form.
+ * The production SPA policy, parsed from the `add_header Content-Security-Policy`
+ * line in docs/security/csp.md, so the harness can never drift from the
+ * documented string. For the local run only:
+ * - `<bucket>` becomes the harness bucket name;
+ * - `wss://cuencada.com` becomes the harness origin's `ws:` form;
+ * - `upgrade-insecure-requests` is dropped: the harness serves plain
+ *   `http://127.0.0.1`, and the directive would rewrite every same-origin
+ *   subresource and API call to `https://`, which nothing listens on. In
+ *   production the site is HTTPS-only (HSTS), so the directive changes
+ *   nothing there.
+ *
+ * @param markdown - Contents of docs/security/csp.md.
+ * @returns The production header value and the local variant.
  */
-export function spaPolicy({ bucketOrigin, socketOrigin }) {
-  return [
-    "default-src 'self'",
-    "script-src 'self'",
-    "style-src 'self'",
-    `img-src 'self' data: blob: ${bucketOrigin}`,
-    `media-src 'self' blob: ${bucketOrigin}`,
-    `connect-src 'self' ${socketOrigin} ${bucketOrigin}`,
-    "font-src 'self'",
-    "frame-src https://weatherwidget.io",
-    "frame-ancestors 'none'",
-    "base-uri 'none'",
-    "form-action 'self'",
-    "manifest-src 'self'",
-    "worker-src 'self'",
-    "object-src 'none'"
-  ].join("; ");
+export function policiesFromDoc(markdown) {
+  const match = /add_header Content-Security-Policy "([^"]+)" always;/.exec(markdown);
+  if (match === null) throw new Error("csp.md: no add_header Content-Security-Policy line");
+  const production = match[1];
+  const local = production
+    .split(";")
+    .map((part) => part.trim())
+    .filter((part) => part !== "" && part !== "upgrade-insecure-requests")
+    .join("; ")
+    .replaceAll("<bucket>", BUCKET)
+    .replaceAll("wss://cuencada.com", `ws://127.0.0.1:${WEB_PORT}`);
+  return { production, local };
 }
 
-const CSP = spaPolicy({ bucketOrigin: BUCKET_ORIGIN, socketOrigin: `ws://127.0.0.1:${WEB_PORT}` });
+const CSP = policiesFromDoc(await readFile(path.join(ROOT, "docs/security/csp.md"), "utf8")).local;
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -257,7 +265,13 @@ async function main() {
   let webServer = null;
   let browser = null;
   const databaseUrl = `${ADMIN_URL.replace(/\/[^/]*$/, "")}/${DB_NAME}`;
+  const workDir = await mkdtemp(path.join(os.tmpdir(), "cuencada-csp-check-"));
+  DIST = path.join(workDir, "dist");
   try {
+    log("building the SPA with the harness bucket as upload origin");
+    await run("pnpm", ["--filter", "@cuencada/web", "exec", "vite", "build", "--outDir", DIST, "--emptyOutDir"], {
+      VITE_MEDIA_UPLOAD_ORIGIN: BUCKET_ORIGIN
+    });
     await admin.unsafe(`drop database if exists ${DB_NAME} with (force)`);
     await admin.unsafe(`create database ${DB_NAME}`);
     const env = serverEnv(databaseUrl);
@@ -320,6 +334,43 @@ async function main() {
     });
     log(`service worker: ${swState}`);
 
+    // Large-photo upload: a > 40 MP JPEG makes the gallery downscale it in the
+    // resize module worker (worker-src 'self') before the upload intent.
+    const workers = [];
+    page.on("worker", (worker) => workers.push(worker.url()));
+    const sharp = requireFromServer("sharp");
+    const big = await sharp({ create: { width: 8000, height: 6000, channels: 3, background: "#0b5e55" } })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+    const bigPath = path.join(workDir, "foto-48mp.jpg");
+    await writeFile(bigPath, big);
+    await page.goto(`${WEB_ORIGIN}/galeria/2026`, { waitUntil: "networkidle" });
+    await page.locator('[data-testid="gallery-file-input"]').setInputFiles(bigPath);
+    // The review sheet: confirm the single file.
+    await page.getByRole("button", { name: /^Subir$/ }).click({ timeout: 10_000 });
+    const intents = postgres(databaseUrl, { max: 1, onnotice: () => {} });
+    let intent;
+    for (let attempt = 0; attempt < 60 && intent === undefined; attempt += 1) {
+      [intent] = await intents`select byte_size, mime_type from media_items where file_name = 'foto-48mp.jpg'`;
+      if (intent === undefined) await page.waitForTimeout(500);
+    }
+    await intents.end();
+    await page.waitForTimeout(1000);
+    for (const violation of await page.evaluate(() => window.__cspViolations.splice(0))) {
+      violations.push({ route: "/galeria/2026 (upload)", ...violation });
+    }
+    const resizeWorkers = workers.filter((url) => /\/assets\/resize\.worker-[\w-]+\.js$/.test(url));
+    log(`resize worker loaded: ${resizeWorkers.join(", ") || "none"}`);
+    log(
+      intent === undefined
+        ? "upload intent: none"
+        : `upload intent: ${intent.mime_type}, ${intent.byte_size} bytes (original ${big.byteLength} bytes, 48 MP)`
+    );
+    if (resizeWorkers.length === 0 || intent === undefined) {
+      log("FAIL: the large-photo upload did not go through the resize worker");
+      process.exitCode = 1;
+    }
+
     // Control: the instrumentation must see what the policy blocks.
     controlPhase = true;
     await page.evaluate(() => {
@@ -363,6 +414,7 @@ async function main() {
     await new Promise((resolve) => setTimeout(resolve, 500));
     await admin.unsafe(`drop database if exists ${DB_NAME} with (force)`).catch(() => {});
     await admin.end();
+    await rm(workDir, { recursive: true, force: true });
   }
 }
 

@@ -76,10 +76,10 @@ Total: 99 routes (14 public, 38 user, 45 admin, 2 cookie).
 | GET | `/api/auth/sessions` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
 | DELETE | `/api/auth/sessions/:id` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 404 | own sessions only (404 for anyone else's) |
 | POST | `/api/auth/sessions/revoke-others` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
-| DELETE | `/api/chat/messages/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | sender or admin (404 for other members) |
+| DELETE | `/api/chat/messages/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | sender or admin (404 for other members); probe: own message in a hidden room → 404 |
 | GET | `/api/chat/rooms` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/chat/rooms/:id/messages` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/chat/rooms/:id/read` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
+| GET | `/api/chat/rooms/:id/messages` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | probe: history of a hidden room → 404 |
+| POST | `/api/chat/rooms/:id/read` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | probe: read state in a hidden room → 404; probe: message of another room → 404 |
 | POST | `/api/chat/ticket` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | GET | `/api/chat/ws` | public |  |  | ticket | ticket | ticket | ticket | ticket | ticket | ticket |  | authenticated by the single-use ticket + Origin check in the handler (see the WebSocket tests) |
 | GET | `/api/cuencadas` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
@@ -89,15 +89,15 @@ Total: 99 routes (14 public, 38 user, 45 admin, 2 cookie).
 | POST | `/api/cuencadas/:year/media/uploads` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | GET | `/api/cuencadas/:year/members` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | GET | `/api/cuencadas/:year/rsvp/me` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  | self-scoped (the caller's RSVP; no id in the path) |
-| PUT | `/api/cuencadas/:year/rsvp/me` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  | self-scoped |
+| PUT | `/api/cuencadas/:year/rsvp/me` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  | self-scoped; mass assignment: RSVP body naming another member (userId/cuencadaId/createdByUserId) → 2xx |
 | GET | `/api/cuencadas/:year/rsvp/summary` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  | counts only, no names |
 | GET | `/api/cuencadas/home` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
 | GET | `/api/directory` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | GET | `/api/directory/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | listed members only (404 for unlisted) |
-| PATCH | `/api/family/me` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | self-scoped (the caller's linked person) |
+| PATCH | `/api/family/me` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | self-scoped (the caller's linked person); mass assignment: extra keys (fullName/userId/deceased/deathYear/id) → 2xx |
 | GET | `/api/family/people` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | GET | `/api/family/people/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
-| PATCH | `/api/family/people/me` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | self-scoped alias of /api/family/me |
+| PATCH | `/api/family/people/me` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | self-scoped alias of /api/family/me; mass assignment: extra keys (fullName/userId/deceased/deathYear/id) → 2xx |
 | GET | `/api/family/tree` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | POST | `/api/invites/accept` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
 | POST | `/api/invites/inspect` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
@@ -106,7 +106,7 @@ Total: 99 routes (14 public, 38 user, 45 admin, 2 cookie).
 | GET | `/api/media/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | hidden/pending items only for the uploader and admins (404 otherwise) |
 | PATCH | `/api/media/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | uploader or admin (404 for other members) |
 | POST | `/api/media/:id/confirm` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | uploader only (404 for others) |
-| POST | `/api/media/:id/report` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | any member except the uploader (403 on own items) |
+| POST | `/api/media/:id/report` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | any member except the uploader (403 on own items); probe: report own item → 403 |
 | GET | `/api/profile/me` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
 | PATCH | `/api/profile/me` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
 | DELETE | `/api/profile/me/avatar` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |

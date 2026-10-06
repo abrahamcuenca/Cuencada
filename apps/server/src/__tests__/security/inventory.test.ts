@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { App } from "../../app.js";
 import { createTestApp } from "../../../test/helpers/app.js";
 import { type RouteRecord, recordedRoutes } from "../../../test/helpers/routes.js";
-import { expectationFor, PRINCIPALS, ROUTE_MATRIX, type RouteSpec, routeKey } from "./routeMatrix.js";
+import { type Expectation, expectationFor, PRINCIPALS, ROUTE_MATRIX, type RouteSpec, routeKey } from "./routeMatrix.js";
 
 vi.mock("fastify", async (importOriginal) => {
   const actual = await importOriginal<typeof import("fastify")>();
@@ -124,8 +124,13 @@ function renderRoutesDoc(): string {
   ];
   for (const { route, spec } of rows) {
     if (spec === undefined) continue;
-    const idor = spec.idor === undefined ? "" : String(spec.idor.expect === "2xx" ? "2xx" : spec.idor.expect.status);
-    const notes = [spec.owner, spec.note].filter((text): text is string => text !== undefined).join("; ");
+    const status = (expected: Expectation): string => (expected === "2xx" ? "2xx" : String(expected.status));
+    const probes = spec.probes ?? [];
+    const idor = [...new Set(probes.filter((probe) => probe.kind === "idor").map((probe) => status(probe.expect)))].join(", ");
+    const otherProbes = probes
+      .filter((probe) => probe.kind !== "idor")
+      .map((probe) => `${probe.kind === "mass-assignment" ? "mass assignment" : "probe"}: ${probe.label} → ${status(probe.expect)}`);
+    const notes = [spec.owner, spec.note, ...otherProbes].filter((text): text is string => text !== undefined).join("; ");
     lines.push(
       `| ${[
         route.method,
@@ -150,7 +155,12 @@ describe("route inventory", () => {
   it("classifies every registered route in the authorization matrix, and nothing else", () => {
     const registered = new Set(primaryRoutes().map(routeKey));
     const classified = new Set(ROUTE_MATRIX.map(routeKey));
-    expect({ unclassified: [...registered].filter((key) => !classified.has(key)) }).toEqual({ unclassified: [] });
+    expect(
+      { unclassified: [...registered].filter((key) => !classified.has(key)) },
+      "Unclassified route: add it to ROUTE_MATRIX in apps/server/src/__tests__/security/routeMatrix.ts " +
+        "(auth level + a minimal valid request), then regenerate docs/security/routes.md with " +
+        "UPDATE_SECURITY_DOCS=1 pnpm --filter @cuencada/server test -- inventory"
+    ).toEqual({ unclassified: [] });
     expect({ stale: [...classified].filter((key) => !registered.has(key)) }).toEqual({ stale: [] });
     expect(ROUTE_MATRIX.length).toBe(classified.size);
   });

@@ -131,12 +131,25 @@ describe("authorization matrix", () => {
         );
       }
     }
-    if (spec.idor !== undefined) {
+    for (const probe of spec.probes ?? []) {
       const ctx = await contextFor(Principal.Member, years);
-      const response = await send(spec, ctx, await spec.idor.build(ctx), true);
+      const built = await probe.build(ctx);
+      const before = await built.state?.();
+      const response = await send(spec, ctx, built, true);
+      const after = await built.state?.();
       const outcome = { status: response.statusCode, code: errorCode(response.body) };
-      if (!matches(spec.idor.expect, outcome)) {
-        failures.push(`other member (IDOR): expected ${describeExpectation(spec.idor.expect)}, got ${outcome.status} ${outcome.code ?? ""}`);
+      if (!matches(probe.expect, outcome)) {
+        failures.push(
+          `${probe.kind} "${probe.label}": expected ${describeExpectation(probe.expect)}, got ${outcome.status} ${outcome.code ?? ""} ${response.body.slice(0, 200)}`
+        );
+      }
+      // Re-read the protected rows: a denied (or stripped) request must not have changed them.
+      if (built.state !== undefined) {
+        try {
+          expect(after).toEqual(before);
+        } catch {
+          failures.push(`${probe.kind} "${probe.label}": protected state changed: ${JSON.stringify(before)} -> ${JSON.stringify(after)}`);
+        }
       }
     }
     expect(failures).toEqual([]);

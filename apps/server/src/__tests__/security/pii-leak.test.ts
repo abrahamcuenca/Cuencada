@@ -7,6 +7,12 @@
  *
  * Storage is the real `S3Storage` (presigning is offline), so presigned GET
  * URLs look exactly like production ones and can be told apart from PUTs.
+ *
+ * Hardening (PR #35 review N4): phones are matched on normalized digits, JWTs,
+ * raw S3 keys and opaque tokens have patterns, the actual planted secrets
+ * (access/refresh tokens, magic-link and invite tokens) are searched verbatim,
+ * the unlisted member is checked by name, a deleted chat message is planted,
+ * and the chat WebSocket frames are scanned too.
  */
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -15,8 +21,10 @@ import { cuencadaAttendance, MagicLinkPurpose } from "../../db/schema/index.js";
 import { systemClock } from "../../lib/clock.js";
 import { S3Storage } from "../../lib/storage/s3.js";
 import { createEmailToken } from "../../modules/auth/emailTokens.js";
+import { mailQueue } from "../../modules/auth/mailQueue.js";
 import { createTestApp, createTestConfig } from "../../../test/helpers/app.js";
-import { insertGlobalRoom, insertMessage } from "../../../test/helpers/chat.js";
+import { linkToken, refreshCookie } from "../../../test/helpers/auth.js";
+import { type ChatTestClient, connectMember, frameOf, insertGlobalRoom, insertMessage } from "../../../test/helpers/chat.js";
 import { insertCuencada } from "../../../test/helpers/cuencadas.js";
 import { getTestDb } from "../../../test/helpers/db.js";
 import { type AuthInjectOptions, bearerFor, createSession, createUser, type TestUser } from "../../../test/helpers/factories.js";
@@ -36,12 +44,16 @@ const S3_CONFIG = {
 const YEAR = 2099;
 /** Planted identifiers of the member who hides everything. */
 const HIDDEN = {
-  phone: "5557770123",
+  /** Stored formatted; matched on digits so any reformatting is still caught. */
+  phone: "+52 (555) 777-0123",
+  phoneDigits: "5557770123",
   city: "Ciudad-Oculta-W23",
   ip: "198.51.100.23",
   userAgent: "W23-Secret-Agent/1.0",
-  rsvpNote: "nota-privada-w23"
+  rsvpNote: "nota-privada-w23",
+  deletedChatBody: "cuerpo-borrado-w23"
 };
+const UNLISTED_NAME = "Persona No Listada";
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 const IPV4 = /\b(?:\d{1,3}\.){3}\d{1,3}\b/;
@@ -49,6 +61,13 @@ const ARGON2 = /\$argon2/i;
 const SHA256_HEX = /\b[a-f0-9]{64}\b/i;
 const PRESIGNED_PUT = /x-id=PutObject|X-Fake-Signature=put/i;
 const SIGNED_STORAGE_URL = /linodeobjects\.com\/[^"]*X-Amz-Signature/i;
+const JWT = /eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/;
+/** Raw object keys (outside presigned URLs, which are masked first). */
+const S3_KEY = /(?:cuencadas\/\d{4}\/(?:originals|thumbs|display)\/|avatars\/[0-9a-f-]{8,}\/)/;
+/** Opaque tokens are 32 random bytes in base64url (43 chars). */
+const OPAQUE_TOKEN = /^[A-Za-z0-9_-]{43}$/;
+/** Keys whose values are opaque by design (pagination cursors). */
+const CURSOR_KEYS = new Set(["nextCursor", "nextBefore", "cursor"]);
 /** Keys whose values may be presigned GET URLs. */
 const SIGNED_URL_KEYS = new Set(["thumbUrl", "displayUrl", "avatarUrl"]);
 /** Keys that must never be serialized to non-admins. */
@@ -76,6 +95,7 @@ const NEVER_KEYS = ["passwordHash", "tokenHash", "objectKey", "thumbKey", "displ
 
 let app: App;
 let storage: S3Storage;
+const mailer = new FakeMailer();
 let viewer: { user: TestUser; auth: AuthInjectOptions };
 let admin: { user: TestUser; auth: AuthInjectOptions };
 let hidden: TestUser;
@@ -84,10 +104,12 @@ let unlisted: TestUser;
 let roomId: string;
 let mediaId: string;
 let personId: string;
+/** Raw secrets planted in the database/cookies: none may ever appear in a body or frame. */
+let secrets: string[] = [];
 
 beforeAll(async () => {
   storage = new S3Storage({ ...createTestConfig(), ...S3_CONFIG }, systemClock);
-  app = await createTestApp({ config: S3_CONFIG, storage, mailer: new FakeMailer() });
+  app = await createTestApp({ config: S3_CONFIG, storage, mailer });
 });
 
 afterAll(async () => {
@@ -122,7 +144,7 @@ beforeEach(async () => {
     displayName: "Persona Abierta",
     profile: { listedInDirectory: true, showEmail: true, showPhone: true, showCity: true, phone: "5551112222", city: "Mérida" }
   });
-  unlisted = await createUser({ emailVerified: true, displayName: "Persona No Listada", profile: { listedInDirectory: false } });
+  unlisted = await createUser({ emailVerified: true, displayName: UNLISTED_NAME, profile: { listedInDirectory: false } });
 
   // Sessions with a planted IP and user agent, through the real login.
   const login = await app.inject({
@@ -133,20 +155,27 @@ beforeEach(async () => {
     payload: { email: hidden.email, password: hidden.password }
   });
   expect(login.statusCode).toBe(200);
-  const hiddenAuth = { headers: { authorization: `Bearer ${login.json<{ accessToken: string }>().accessToken}` } };
+  const accessToken = login.json<{ accessToken: string }>().accessToken;
+  const hiddenAuth = { headers: { authorization: `Bearer ${accessToken}` } };
 
-  // Email tokens and invites exist (their hashes must never surface).
-  await getTestDb().transaction((tx) =>
+  // Email tokens and invites exist (their hashes and raw values must never surface).
+  const magic = await getTestDb().transaction((tx) =>
     createEmailToken(tx, { userId: hidden.id, email: hidden.email, purpose: MagicLinkPurpose.Login, requestIp: HIDDEN.ip, now: new Date() })
   );
+  const inviteEmail = `invitada-${randomUUID()}@example.test`;
   const invite = await app.inject({
     method: "POST",
     url: "/api/admin/invites",
     remoteAddress: "203.0.113.9",
     ...admin.auth,
-    payload: { email: `invitada-${randomUUID()}@example.test`, sendEmail: true }
+    payload: { email: inviteEmail, sendEmail: true }
   });
   expect(invite.statusCode).toBe(201);
+  await mailQueue(app).onIdle();
+  secrets = [accessToken, refreshCookie(login)?.value ?? "", magic.token, linkToken(mailer.lastTo(inviteEmail))].filter(
+    (secret) => secret.length > 0
+  );
+  expect(secrets).toHaveLength(4);
 
   // An edition with an RSVP (with private notes), historical attendance and a photo.
   const edition = await insertCuencada({ year: YEAR });
@@ -163,7 +192,7 @@ beforeEach(async () => {
 
   // Family: the hidden member, the unlisted member and an unlinked person.
   personId = (await insertPerson({ userId: hidden.id, fullName: "Persona Reservada" })).id;
-  await insertPerson({ userId: unlisted.id, fullName: "Persona No Listada" });
+  await insertPerson({ userId: unlisted.id, fullName: UNLISTED_NAME });
   const relative = await insertPerson({ fullName: "Pariente Sin Cuenta" });
   await getTestDb().insert(cuencadaAttendance).values({ cuencadaId: edition.id, personId: relative.id });
   await insertPerson({ userId: viewer.user.id, fullName: "Persona Lectora" });
@@ -172,6 +201,8 @@ beforeEach(async () => {
   const room = await insertGlobalRoom();
   roomId = room.id;
   await insertMessage({ roomId, senderUserId: hidden.id, body: "hola" });
+  // A deleted message: only a tombstone may surface, never its body.
+  await insertMessage({ roomId, senderUserId: hidden.id, body: HIDDEN.deletedChatBody, deletedAt: new Date(), deletedByUserId: hidden.id });
 });
 
 /** Every (key, string value) pair in a JSON value. */
@@ -202,6 +233,8 @@ interface ScanOptions {
   admin?: boolean;
   /** Forbidden keys this body may carry (the caller's own data). */
   allowKeys?: string[];
+  /** The unlisted member's name must not appear (directory bodies). */
+  directory?: boolean;
 }
 
 /**
@@ -229,6 +262,15 @@ function scan(label: string, body: unknown, options: ScanOptions = {}): string[]
     if (bodyKeys.has(key) && !allowedKeys.has(key)) problems.push(`${label}: forbidden key "${key}"`);
   }
   if (ARGON2.test(text)) problems.push(`${label}: argon2 hash`);
+  if (JWT.test(text)) problems.push(`${label}: JWT`);
+  if (S3_KEY.test(text)) problems.push(`${label}: raw object key`);
+  for (const [key, value] of strings(body)) {
+    if (!CURSOR_KEYS.has(key) && OPAQUE_TOKEN.test(value)) problems.push(`${label}: opaque token-shaped value in "${key}"`);
+  }
+  for (const secret of secrets) {
+    if (text.includes(secret)) problems.push(`${label}: a planted raw token/secret`);
+  }
+  if (text.includes(HIDDEN.deletedChatBody)) problems.push(`${label}: body of a deleted chat message`);
   if (SHA256_HEX.test(text)) problems.push(`${label}: 64-hex digest (token hash?)`);
   if (PRESIGNED_PUT.test(text)) problems.push(`${label}: presigned PUT URL`);
   if (text.includes(HIDDEN.rsvpNote) && options.admin !== true) problems.push(`${label}: another member's RSVP notes`);
@@ -236,13 +278,14 @@ function scan(label: string, body: unknown, options: ScanOptions = {}): string[]
     for (const email of text.match(EMAIL) ?? []) {
       if (!allowed.has(email.toLowerCase())) problems.push(`${label}: email ${email}`);
     }
-    if (text.includes(HIDDEN.phone)) problems.push(`${label}: hidden phone`);
+    if (text.replace(/\D/g, "").includes(HIDDEN.phoneDigits)) problems.push(`${label}: hidden phone`);
     if (text.includes(HIDDEN.city)) problems.push(`${label}: hidden city`);
     if (text.includes(BUCKET)) problems.push(`${label}: bucket name`);
     if (text.includes(HIDDEN.userAgent)) problems.push(`${label}: another member's user agent`);
     if (options.allowIp !== true && IPV4.test(text)) problems.push(`${label}: IP address`);
   }
   if (options.admin === true && text.includes(BUCKET)) problems.push(`${label}: bucket name`);
+  if (options.directory === true && text.includes(UNLISTED_NAME)) problems.push(`${label}: unlisted member's name`);
   return problems;
 }
 
@@ -257,8 +300,9 @@ describe("member-facing reads never leak PII", () => {
     const list = await get("/api/directory", viewer.auth);
     const one = await get(`/api/directory/${hidden.id}`, viewer.auth);
     const problems = [
-      ...scan("GET /api/directory", list, { allowedEmails: [open.email] }),
-      ...scan("GET /api/directory/:id", one)
+      ...scan("GET /api/directory", list, { allowedEmails: [open.email], directory: true }),
+      ...scan("GET /api/directory?q=Listada", await get("/api/directory?q=Listada", viewer.auth), { directory: true }),
+      ...scan("GET /api/directory/:id", one, { directory: true })
     ];
     expect(problems).toEqual([]);
     expect(one).not.toHaveProperty("email");
@@ -296,6 +340,35 @@ describe("member-facing reads never leak PII", () => {
     const rooms = await get("/api/chat/rooms", viewer.auth);
     const history = await get(`/api/chat/rooms/${roomId}/messages`, viewer.auth);
     expect([...scan("GET /api/chat/rooms", rooms), ...scan("GET messages", history)]).toEqual([]);
+    // The planted deleted message is there as a tombstone, without its body.
+    expect(JSON.stringify(history)).not.toContain(HIDDEN.deletedChatBody);
+  });
+
+  it("chat WebSocket frames (presence, message, preview, deletion) expose names and avatars only", async () => {
+    const clients: ChatTestClient[] = [];
+    try {
+      const asChatMember = async (user: TestUser) => {
+        const session = await createSession(user.id);
+        return { user, sessionId: session.id, auth: await bearerFor(user, session) };
+      };
+      const reader = await connectMember(app, await asChatMember(viewer.user));
+      clients.push(reader);
+      const sender = await connectMember(app, await asChatMember(hidden));
+      clients.push(sender);
+      sender.send({ type: "send", roomId, body: "mensaje por socket", clientMessageId: randomUUID() });
+      const message = await reader.waitFor(frameOf("message", (frame) => frame.message.body === "mensaje por socket"));
+      const deleted = await app.inject({ method: "DELETE", url: `/api/chat/messages/${message.message.id}`, ...admin.auth });
+      expect(deleted.statusCode).toBe(204);
+      await reader.waitFor(frameOf("message_deleted"));
+      expect(reader.frames.length).toBeGreaterThan(2);
+      const problems = reader.frames.flatMap((frame, index) => scan(`ws frame ${index} (${frame.type})`, frame));
+      expect(problems).toEqual([]);
+      // After deletion the frame stream carries the tombstone only; the earlier "message" frame is the live delivery.
+      const afterDelete = reader.frames.slice(reader.frames.findIndex((frame) => frame.type === "message_deleted"));
+      expect(JSON.stringify(afterDelete)).not.toContain("mensaje por socket");
+    } finally {
+      for (const client of clients) client.ws.terminate();
+    }
   });
 
   it("media: list and item carry presigned GET URLs only in the URL fields", async () => {
@@ -369,16 +442,29 @@ describe("the PII scanner itself", () => {
   it("flags every planted leak class (so a green run means something)", () => {
     const leaky = {
       email: "otra.persona@example.test",
-      phone: HIDDEN.phone,
+      // Reformatted on purpose: matched on digits.
+      phone: "555.777.01 23",
       passwordHash: "$argon2id$v=19$m=4096,t=2,p=1$abc$def",
       digest: "a".repeat(64),
       ip: HIDDEN.ip,
       thumbUrl: `https://${BUCKET}.us-southeast-1.linodeobjects.com/cuencadas/2099/originals/x.jpg?x-id=PutObject&X-Amz-Signature=abc`,
       link: `https://${BUCKET}.us-southeast-1.linodeobjects.com/k?X-Amz-Signature=abc`,
-      showPhone: false
+      showPhone: false,
+      session: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4eHh4eHh4In0.c2lnbmF0dXJlLXZhbHVl",
+      key: "avatars/0f2c4e1a-0000-4000-8000-000000000000/large.webp",
+      opaque: "A".repeat(43),
+      planted: `prefix ${secrets[0] ?? "missing"} suffix`,
+      body: HIDDEN.deletedChatBody,
+      name: UNLISTED_NAME
     };
-    const problems = scan("synthetic", leaky);
+    const problems = scan("synthetic", leaky, { directory: true });
     for (const fragment of [
+      "JWT",
+      "raw object key",
+      'opaque token-shaped value in "opaque"',
+      "planted raw token",
+      "deleted chat message",
+      "unlisted member's name",
       "email otra.persona",
       "hidden phone",
       'forbidden key "passwordHash"',
