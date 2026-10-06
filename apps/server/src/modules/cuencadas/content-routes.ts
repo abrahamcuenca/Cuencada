@@ -8,6 +8,7 @@
  *   statement inside a transaction.
  */
 import {
+  AuditAction,
   AuditEntityType,
   apiErrorSchema,
   createItineraryItemInputSchema,
@@ -142,7 +143,7 @@ const cuencadaContentRoutes: FastifyPluginAsyncZod = async (app) => {
         if (created === undefined) throw new Error("create itinerary item: insert returned no row");
         await recordAudit(tx, {
           actorUserId: admin.id,
-          action: "itinerary_item.created",
+          action: AuditAction.ItineraryItemCreated,
           entityType: AuditEntityType.ItineraryItem,
           entityId: created.id,
           metadata: { cuencadaId: cuencada.id, date: created.date },
@@ -165,10 +166,10 @@ const cuencadaContentRoutes: FastifyPluginAsyncZod = async (app) => {
       const admin = authUser(request);
       const rows = await app.db.transaction(async (tx) => {
         const cuencada = await getCuencadaById(tx, request.params.id, true);
-        await rewriteSortOrder(tx, cuencadaItineraryItems, cuencada.id, request.body.ids);
+        await rewriteSortOrder(tx, cuencadaItineraryItems, cuencada.id, request.body.ids, app.clock.now());
         await recordAudit(tx, {
           actorUserId: admin.id,
-          action: "itinerary_item.reordered",
+          action: AuditAction.ItineraryReordered,
           entityType: AuditEntityType.Cuencada,
           entityId: cuencada.id,
           metadata: { count: request.body.ids.length },
@@ -204,7 +205,7 @@ const cuencadaContentRoutes: FastifyPluginAsyncZod = async (app) => {
         if (updated === undefined) throw new AppError("NOT_FOUND", ITEM_NOT_FOUND);
         await recordAudit(tx, {
           actorUserId: admin.id,
-          action: "itinerary_item.updated",
+          action: AuditAction.ItineraryItemUpdated,
           entityType: AuditEntityType.ItineraryItem,
           entityId: updated.id,
           metadata: { cuencadaId: updated.cuencadaId, fields: Object.keys(input) },
@@ -227,7 +228,7 @@ const cuencadaContentRoutes: FastifyPluginAsyncZod = async (app) => {
         await tx.delete(cuencadaItineraryItems).where(eq(cuencadaItineraryItems.id, current.id));
         await recordAudit(tx, {
           actorUserId: admin.id,
-          action: "itinerary_item.deleted",
+          action: AuditAction.ItineraryItemDeleted,
           entityType: AuditEntityType.ItineraryItem,
           entityId: current.id,
           metadata: { cuencadaId: current.cuencadaId, title: current.title },
@@ -259,7 +260,7 @@ const cuencadaContentRoutes: FastifyPluginAsyncZod = async (app) => {
         if (created === undefined) throw new Error("create location: insert returned no row");
         await recordAudit(tx, {
           actorUserId: admin.id,
-          action: "location.created",
+          action: AuditAction.LocationCreated,
           entityType: AuditEntityType.Location,
           entityId: created.id,
           metadata: { cuencadaId: cuencada.id, name: created.name },
@@ -282,10 +283,10 @@ const cuencadaContentRoutes: FastifyPluginAsyncZod = async (app) => {
       const admin = authUser(request);
       const rows = await app.db.transaction(async (tx) => {
         const cuencada = await getCuencadaById(tx, request.params.id, true);
-        await rewriteSortOrder(tx, cuencadaLocations, cuencada.id, request.body.ids);
+        await rewriteSortOrder(tx, cuencadaLocations, cuencada.id, request.body.ids, app.clock.now());
         await recordAudit(tx, {
           actorUserId: admin.id,
-          action: "location.reordered",
+          action: AuditAction.LocationsReordered,
           entityType: AuditEntityType.Cuencada,
           entityId: cuencada.id,
           metadata: { count: request.body.ids.length },
@@ -318,7 +319,7 @@ const cuencadaContentRoutes: FastifyPluginAsyncZod = async (app) => {
         if (updated === undefined) throw new AppError("NOT_FOUND", LOCATION_NOT_FOUND);
         await recordAudit(tx, {
           actorUserId: admin.id,
-          action: "location.updated",
+          action: AuditAction.LocationUpdated,
           entityType: AuditEntityType.Location,
           entityId: updated.id,
           metadata: { cuencadaId: updated.cuencadaId, fields: Object.keys(input) },
@@ -340,13 +341,13 @@ const cuencadaContentRoutes: FastifyPluginAsyncZod = async (app) => {
         const current = await lockLocation(tx, request.params.id);
         const unlinked = await tx
           .update(cuencadaItineraryItems)
-          .set({ locationId: null, updatedAt: sql`now()` })
+          .set({ locationId: null, updatedAt: app.clock.now() })
           .where(eq(cuencadaItineraryItems.locationId, current.id))
           .returning({ id: cuencadaItineraryItems.id });
         await tx.delete(cuencadaLocations).where(eq(cuencadaLocations.id, current.id));
         await recordAudit(tx, {
           actorUserId: admin.id,
-          action: "location.deleted",
+          action: AuditAction.LocationDeleted,
           entityType: AuditEntityType.Location,
           entityId: current.id,
           metadata: { cuencadaId: current.cuencadaId, name: current.name, unlinkedItineraryItems: unlinked.length },

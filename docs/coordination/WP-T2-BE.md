@@ -38,19 +38,23 @@ Every route in the WP-0.2 T2 tables, with params/query/body **and response** sch
 - **Privacy:** anonymous responses are built only from `visibility = public` rows and go through `publicCuencadaSchema`/`cuencadaSummarySchema`/`cuencadaHomeSchema`, which have no member-only fields. Tests assert that `whatsappUrl`/`externalAlbumUrl`/`isPublished` are absent and that the link values do not appear anywhere in the body.
 - **Announcements shown** = `publish_at <= now and (expires_at is null or expires_at > now)`, ordered pinned first, then newest. Admin lists and the admin edit screen show every row, including scheduled and expired ones.
 - **Publish** (`PATCH { isPublished: true }` or create with `isPublished: true`): audits `cuencada.published` (`metadata.chatRoomCreated`), and inserts the edition's chat room `Cuencada <year>` with `ON CONFLICT DO NOTHING` on the partial unique index, so it is idempotent. Unpublish audits `cuencada.unpublished`. Other changed fields audit `cuencada.updated` with sorted field **names only**: WhatsApp and album links are credential-like and are never copied into audit metadata.
+- **Year lock:** changing `year` on a **published** edition → 409 `CONFLICT` ("No se puede cambiar el año de una Cuencada publicada"). The year is the public URL, the slug and the chat room title. Drafts may change it. Unpublishing in the same PATCH does not unlock it: unpublish first.
 - **Delete** (409 otherwise): only when `is_published = false`, **no chat room exists** (the room is created on first publish, so this means "never published") and **no `media_items` row of any status** exists (avoids orphaning bucket objects). The row is locked `FOR UPDATE` first.
 - **Same-Cuencada integrity:** itinerary `locationId` from another edition (or unknown) → 400 `VALIDATION` at `locationId`, on create and on PATCH. Deleting a location unlinks its itinerary items in the same transaction (the FK would too) and audits the count.
 - **Merged-row re-validation on PATCH:** Cuencada `endsAt > startsAt`; itinerary `endTime > startTime` (DB `HH:MM:SS` normalized to `HH:MM`); location lat/lng pair; announcement `expiresAt > publishedAt`. All → 400 with the field path.
 - **Reorder** (`PUT …/order`): the edition row and its items are locked; `ids` must be exactly the edition's set (missing, foreign or duplicate → 400); `sort_order` is rewritten in **one** `UPDATE … FROM unnest($ids) WITH ORDINALITY` statement, which also sets `updated_at`.
 - **New items** are appended: `sort_order = max + 1` for the edition.
-- **Daily messages import** (`POST …/daily-messages/import`): accepts `text` (run through `parseDailyMessagesText`) and/or parsed `entries` (amendment). Any bad line or a repeated date → 400 `VALIDATION`, nothing is written, details are `lines.N` / `entries.N`, capped at 100 with a summary. A file with only comments/blank lines → 400. `merge` upserts; `replace` deletes the edition's dates that are not in the import, then upserts. The result is `{ created, updated, deleted }`; the edition row is locked so imports cannot interleave; inserts are chunked (1000 rows). Audited as `daily_message.imported` with the counts.
-- **Audit actions:**
+- **Daily messages import** (`POST …/daily-messages/import`): accepts `text` (run through `parseDailyMessagesText`) and/or parsed `entries` (amendment). Any bad line or a repeated date → 400 `VALIDATION`, nothing is written, details are `lines.N` / `entries.N`, capped at 100 with a summary. A file with only comments/blank lines → 400. `merge` upserts; `replace` deletes the edition's dates that are not in the import, then upserts. The result is `{ created, updated, deleted }`. `updated` counts only existing dates whose text changed; identical lines are skipped and not rewritten; the edition row is locked so imports cannot interleave; inserts are chunked (1000 rows). Audited as `daily_message.imported` with the counts.
+- **Clock:** every `updated_at` this module writes outside Drizzle's `$onUpdate` (reorder, location unlink, daily-message upserts) uses `app.clock.now()`, never the DB `now()`.
+- **Announcements cursor:** `[pinned, at, id]` in base64url, where `at` is UTC ISO with microseconds (`to_char(... 'US')`). The cursor schema validates `at` as `z.iso.datetime({ precision: 6 })` plus a calendar round-trip check, so a crafted cursor gets 400 `VALIDATION` and never reaches Postgres (no 22007/22008 → 500).
+- **Audit actions** (all now in `AuditAction`, `packages/types/src/admin.ts`):
   - `cuencada.created|updated|published|unpublished|deleted`
   - `itinerary_item.created|updated|deleted|reordered`
   - `location.created|updated|deleted|reordered`
   - `daily_message.saved|deleted|imported`
   - `announcement.created|updated|deleted`
 - **No N+1:** content for N editions = one query per table (`cuencada_id = any(...)`); home = editions (+ `hasMedia` EXISTS) + portal announcements + 3 content queries + today's message for the featured edition only.
+- **Status vs countdown (T2-FE):** on the start day the server reports `active` from local midnight, while a countdown to the `startsAt` instant can still show hours left. T2-FE should drive "¡YA LLEGÓ!" from `status`/`mode`. An admin who enters an exclusive end (next day `00:00`) extends `active` by one day; enter the last day's evening instead.
 - **Cross-module read:** `hasMedia` is an EXISTS on `media_items` (`deleted_at is null`, `upload_status = 'ready'`, `moderation_status = 'approved'`), served by `media_items_gallery_keyset_idx`. It is read-only; T4 owns the table. The draft-delete guard also reads `media_items` and `chat_rooms` (T7) read-only and inserts the edition room on publish, as WP-0.3 assigned to T2.
 
 ## Contract amendments (`packages/types/src/cuencadas.ts`) [flagged]
@@ -72,9 +76,10 @@ No breaking change for request senders. Response consumers gain fields (`timezon
 ## Requests (→ orchestrator)
 1. **Migration 0002 (WP-2.1): `cuencada_itinerary_items.tags text[]`** (max 6, each ≤ 24 chars, CHECK) for T2-FE's R1 `ItineraryItem.tags`. The schema is frozen in Phase 1, so it is skipped here.
 2. **Migration 0002: same-Cuencada FKs.** `unique (cuencada_id, id)` on `cuencada_locations` plus a composite FK `(cuencada_id, location_id)` with `ON DELETE SET NULL (location_id)` (PG15+), as WP-0.3 proposed. This moves the service-level check into the DB.
-3. **Migration 0002: `cuencadas.first_published_at timestamptz`.** It would make the "never published" delete guard explicit instead of inferring it from the chat room.
+3. **Migration 0002 (WP-2.1): `cuencadas.first_published_at timestamptz`**, set on the first publish and never cleared. The delete guard then uses `first_published_at is null` instead of inferring it from the chat room (see 6). This is kept on the list per the PR #12 review.
 4. **Contract (optional):** `MemberCuencadaDetails.chatRoomId: string | null`, if T2-FE/T7 want to deep-link from an edition to its chat room. It is cheap to add here once agreed.
-5. **T4 (media):** keep `hasMedia`'s definition (`ready` + `approved` + not deleted) aligned with what the gallery shows to members. If the gallery rule changes, update `hasMediaSql` in `modules/cuencadas/repository.ts`.
+5. **T4 (media):** once T4-BE lands, the `hasMedia` rule moves to the media module's `countVisibleMediaByCuencada` (same rule: `upload_status = ready` + `moderation_status = approved` + `deleted_at is null`), so "visible to members" has one owner. `hasMediaSql` in `modules/cuencadas/repository.ts` is the interim copy. T4-FE's `gallery/api.ts` TODO (use `CuencadaSummary.hasMedia`, drop the probes) is a T4 follow-up.
+6. **T7 handoff (chat): admins must not be able to delete per-edition chat rooms.** The draft-delete guard treats "a `chat_rooms` row exists for the edition" as "this edition was published at least once", because publishing is the only path that creates that room and it runs under a `FOR UPDATE` lock on the edition. If T7 ever adds room deletion, a published-then-unpublished edition (with RSVPs, history, links) could be hard-deleted. Until request 3 lands, T7 must keep edition rooms undeletable (archive/close instead).
 
 ## Verification (2026-10-06)
 - `pnpm lint && pnpm typecheck && pnpm test && pnpm build`: all green (53 files, 524 tests).
@@ -90,3 +95,12 @@ No breaking change for request senders. Response consumers gain fields (`timezon
 
 ## Review log
 - 2026-10-06: The orchestrator merged `origin/main` (T2-FE, PR #11) into this branch. With the orchestrator's approval, the web fixtures (`apps/web/src/features/cuencadas/testing/fixtures.ts`) gained `expiresAt: null` on `makeAnnouncement` and `timezone`/`hasMedia: false` on `makeSummary` for the contract amendments. Web behaviour is unchanged. `pnpm lint && pnpm typecheck && pnpm test && pnpm build`: green (59 files, 579 tests).
+- 2026-10-06: **PR #12 review: TL, CHANGES REQUESTED.** Addressed:
+  - **B1:** merged `origin/main` (T4-FE #9). `apps/web/src/features/gallery/testUtils.ts` `makeEdition()` gained `timezone: "America/Merida"` and `hasMedia: true` (authorized minimal fixture change, no behaviour change). The full `pnpm typecheck` is green.
+  - **Cursor 500 → 400:** `at` is validated as an ISO datetime with microseconds plus a calendar round-trip. The cursor is now encoded as UTC ISO instead of `timestamptz::text`. Tested with crafted cursors (`"nope"`, `2026-02-30`, the Postgres text form, a bad uuid, a non-tuple).
+  - **Published year lock:** 409 `CONFLICT` with a test. Drafts can still change the year.
+  - **Reorder `updated_at`** and the other non-Drizzle `updated_at` writes use `app.clock`. The test asserts the injected time.
+  - **`AuditAction`** gained `daily_message.saved|deleted`, `itinerary_item.created|updated|deleted|reordered`, `location.created|updated|deleted|reordered` and `announcement.created|updated|deleted`. The routes use the constants.
+  - **Import `updated`** excludes unchanged messages, which are not rewritten either. Tested.
+  - **Docs:** T7 handoff (edition rooms must stay undeletable), `first_published_at` request for 0002, the `hasMedia` move to `countVisibleMediaByCuencada`, and the status vs countdown note for T2-FE.
+  - `pnpm lint && pnpm typecheck && pnpm test && pnpm build`: green (64 files, 642 tests; typecheck run with `--force`).

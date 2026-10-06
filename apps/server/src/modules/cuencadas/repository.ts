@@ -243,13 +243,15 @@ export async function nextSortOrder(
  * @param table - `cuencada_itinerary_items` or `cuencada_locations`.
  * @param cuencadaId - Edition.
  * @param ids - New order.
+ * @param now - `updated_at` value (`app.clock.now()`).
  * @throws AppError `VALIDATION` when `ids` is not exactly the edition's set.
  */
 export async function rewriteSortOrder(
   db: DbOrTx,
   table: typeof cuencadaItineraryItems | typeof cuencadaLocations,
   cuencadaId: string,
-  ids: readonly string[]
+  ids: readonly string[],
+  now: Date
 ): Promise<void> {
   const existing = await db.execute<{ id: string }>(
     sql`select id from ${table} where cuencada_id = ${cuencadaId} for update`
@@ -267,7 +269,7 @@ export async function rewriteSortOrder(
   )}]::uuid[]`;
   await db.execute(sql`
     update ${table} as t
-    set sort_order = (v.ord - 1)::int, updated_at = now()
+    set sort_order = (v.ord - 1)::int, updated_at = ${now.toISOString()}::timestamptz
     from unnest(${idArray}) with ordinality as v(id, ord)
     where t.id = v.id and t.cuencada_id = ${cuencadaId}
   `);

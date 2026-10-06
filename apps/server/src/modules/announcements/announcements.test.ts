@@ -74,6 +74,21 @@ describe("GET /api/announcements", () => {
     const badCursor = await app.inject({ method: "GET", url: "/api/announcements?cursor=bm9wZQ", ...memberAuth });
     const badLimit = await app.inject({ method: "GET", url: "/api/announcements?limit=1000", ...memberAuth });
 
+    const crafted = (payload: unknown): string => Buffer.from(JSON.stringify(payload)).toString("base64url");
+    const id = randomUUID();
+    const craftedCursors = [
+      crafted([false, "nope", id]),
+      crafted([false, "2026-02-30T00:00:00.000000Z", id]),
+      crafted([false, "2026-01-01 00:00:00+00", id]),
+      crafted([false, "2026-01-01T00:00:00.000000Z", "no-uuid"]),
+      crafted({ pinned: false })
+    ];
+    for (const value of craftedCursors) {
+      const response = await app.inject({ method: "GET", url: `/api/announcements?cursor=${value}`, ...memberAuth });
+      expect(response.statusCode, value).toBe(400);
+      expect(response.json<ApiError>().error.code).toBe("VALIDATION");
+    }
+
     expect(anonymous.statusCode).toBe(401);
     expect(badCursor.statusCode).toBe(400);
     expect(badLimit.statusCode).toBe(400);

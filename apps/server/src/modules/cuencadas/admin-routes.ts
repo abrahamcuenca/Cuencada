@@ -39,6 +39,7 @@ import {
 } from "./repository.js";
 
 const DUPLICATE_YEAR = "Ya existe una Cuencada para ese año.";
+const PUBLISHED_YEAR_LOCKED = "No se puede cambiar el año de una Cuencada publicada. Despublícala primero.";
 
 function duplicateYear(cause: unknown): AppError {
   return new AppError("CONFLICT", DUPLICATE_YEAR, { details: [{ path: "year", message: DUPLICATE_YEAR }], cause });
@@ -177,6 +178,13 @@ const cuencadaAdminRoutes: FastifyPluginAsyncZod = async (app) => {
           const current = await getCuencadaById(tx, request.params.id, true);
 
           // The body refine only sees the fields that were sent; check the merged row.
+          // A published edition's year is its public URL (/cuencada/:year), slug and chat room title.
+          if (current.isPublished && input.year !== undefined && input.year !== current.year) {
+            throw new AppError("CONFLICT", PUBLISHED_YEAR_LOCKED, {
+              details: [{ path: "year", message: PUBLISHED_YEAR_LOCKED }]
+            });
+          }
+
           const startsAt = input.startsAt === undefined ? current.startsAt : new Date(input.startsAt);
           const endsAt = input.endsAt === undefined ? current.endsAt : new Date(input.endsAt);
           if (endsAt.getTime() <= startsAt.getTime()) {

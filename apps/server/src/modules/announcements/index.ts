@@ -10,6 +10,7 @@
 import {
   type Announcement,
   AnnouncementScope,
+  AuditAction,
   AuditEntityType,
   adminAnnouncementQuerySchema,
   announcementSchema,
@@ -41,14 +42,32 @@ const EXPIRY_MESSAGE = "La fecha de vencimiento debe ser posterior a la de publi
 
 /* ------------------------------- Cursor -------------------------------- */
 
-/** Keyset position: the last row's `(pinned, publish_at, id)`; `at` keeps Postgres' microseconds. */
+/**
+ * Keyset position: the last row's `(pinned, publish_at, id)`. `at` is UTC ISO
+ * with Postgres' microseconds (`2026-01-05T00:00:00.123456Z`), so pages never
+ * skip or repeat rows that differ below the millisecond.
+ */
 interface AnnouncementCursor {
   pinned: boolean;
   at: string;
   id: string;
 }
 
-const cursorPayloadSchema = z.tuple([z.boolean(), z.string().min(1).max(64), z.uuid()]);
+/**
+ * True for a real calendar instant: V8 rolls `2026-02-30` over to March, so
+ * compare the round-tripped date/time with the input instead of only parsing.
+ */
+function isRealInstant(value: string): boolean {
+  const parsed = Date.parse(value);
+  return !Number.isNaN(parsed) && new Date(parsed).toISOString().slice(0, 19) === value.slice(0, 19);
+}
+
+/** Validated before the value reaches SQL, so a crafted cursor is a 400, never a Postgres 22007/22008 (500). */
+const cursorPayloadSchema = z.tuple([
+  z.boolean(),
+  z.iso.datetime({ precision: 6 }).refine(isRealInstant),
+  z.uuid()
+]);
 
 function encodeCursor(cursor: AnnouncementCursor): string {
   return Buffer.from(JSON.stringify([cursor.pinned, cursor.at, cursor.id])).toString("base64url");
@@ -65,7 +84,7 @@ function decodeCursor(value: string): AnnouncementCursor {
     raw = undefined;
   }
   const parsed = cursorPayloadSchema.safeParse(raw);
-  if (!parsed.success || Number.isNaN(Date.parse(parsed.data[1]))) {
+  if (!parsed.success) {
     throw new AppError("VALIDATION", "Cursor inválido.", { details: [{ path: "cursor", message: "Cursor inválido." }] });
   }
   const [pinned, at, id] = parsed.data;
@@ -114,7 +133,7 @@ const announcementsModule: FastifyPluginAsyncZod = async (app) => {
           ? undefined
           : sql`(${announcements.pinned}, ${announcements.publishAt}, ${announcements.id}) < (${after.pinned}, ${after.at}::timestamptz, ${after.id}::uuid)`;
       const rows = await app.db
-        .select({ ...announcementColumns, cursorAt: sql<string>`${announcements.publishAt}::text` })
+        .select({ ...announcementColumns, cursorAt: sql<string>`to_char(${announcements.publishAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')` })
         .from(announcements)
         .leftJoin(users, eq(users.id, announcements.createdByUserId))
         .where(and(isNull(announcements.cuencadaId), isLive(app.clock.now()), keyset))
@@ -177,7 +196,7 @@ const announcementsModule: FastifyPluginAsyncZod = async (app) => {
         if (row === undefined) throw new Error("create announcement: insert returned no row");
         await recordAudit(tx, {
           actorUserId: admin.id,
-          action: "announcement.created",
+          action: AuditAction.AnnouncementCreated,
           entityType: AuditEntityType.Announcement,
           entityId: row.id,
           metadata: { cuencadaId: input.cuencadaId, visibility: input.visibility, pinned: input.pinned },
@@ -216,7 +235,7 @@ const announcementsModule: FastifyPluginAsyncZod = async (app) => {
         await tx.update(announcements).set(values).where(eq(announcements.id, current.id));
         await recordAudit(tx, {
           actorUserId: admin.id,
-          action: "announcement.updated",
+          action: AuditAction.AnnouncementUpdated,
           entityType: AuditEntityType.Announcement,
           entityId: current.id,
           metadata: { cuencadaId: current.cuencadaId, fields: Object.keys(request.body) },
@@ -244,7 +263,7 @@ const announcementsModule: FastifyPluginAsyncZod = async (app) => {
         if (deleted === undefined) throw new AppError("NOT_FOUND", NOT_FOUND_MESSAGE);
         await recordAudit(tx, {
           actorUserId: admin.id,
-          action: "announcement.deleted",
+          action: AuditAction.AnnouncementDeleted,
           entityType: AuditEntityType.Announcement,
           entityId: deleted.id,
           metadata: { cuencadaId: deleted.cuencadaId, title: deleted.title },

@@ -59,7 +59,12 @@ function combineEntries(text: string | undefined, jsonEntries: readonly DailyMes
   return { entries, errors };
 }
 
-async function upsertEntries(db: DbOrTx, cuencadaId: string, entries: readonly DailyMessageEntry[]): Promise<void> {
+async function upsertEntries(
+  db: DbOrTx,
+  cuencadaId: string,
+  entries: readonly DailyMessageEntry[],
+  now: Date
+): Promise<void> {
   for (let start = 0; start < entries.length; start += INSERT_CHUNK) {
     const chunk = entries.slice(start, start + INSERT_CHUNK);
     await db
@@ -67,7 +72,7 @@ async function upsertEntries(db: DbOrTx, cuencadaId: string, entries: readonly D
       .values(chunk.map((entry) => ({ cuencadaId, date: entry.date, message: entry.message })))
       .onConflictDoUpdate({
         target: [dailyMessages.cuencadaId, dailyMessages.date],
-        set: { message: sql`excluded.message`, updatedAt: sql`now()` }
+        set: { message: sql`excluded.message`, updatedAt: now }
       });
   }
 }
@@ -113,13 +118,13 @@ const dailyMessagesRoutes: FastifyPluginAsyncZod = async (app) => {
           .values({ cuencadaId: cuencada.id, date, message: request.body.message })
           .onConflictDoUpdate({
             target: [dailyMessages.cuencadaId, dailyMessages.date],
-            set: { message: request.body.message, updatedAt: sql`now()` }
+            set: { message: request.body.message, updatedAt: app.clock.now() }
           })
           .returning();
         if (saved === undefined) throw new Error("upsert daily message: no row returned");
         await recordAudit(tx, {
           actorUserId: admin.id,
-          action: "daily_message.saved",
+          action: AuditAction.DailyMessageSaved,
           entityType: AuditEntityType.DailyMessage,
           entityId: saved.id,
           metadata: { cuencadaId: cuencada.id, date },
@@ -149,7 +154,7 @@ const dailyMessagesRoutes: FastifyPluginAsyncZod = async (app) => {
         if (deleted === undefined) throw new AppError("NOT_FOUND", "No hay mensaje para ese día.");
         await recordAudit(tx, {
           actorUserId: admin.id,
-          action: "daily_message.deleted",
+          action: AuditAction.DailyMessageDeleted,
           entityType: AuditEntityType.DailyMessage,
           entityId: deleted.id,
           metadata: { cuencadaId: id, date },
@@ -162,6 +167,7 @@ const dailyMessagesRoutes: FastifyPluginAsyncZod = async (app) => {
 
   /**
    * `POST /api/admin/cuencadas/:id/daily-messages/import`: all-or-nothing.
+   * `updated` counts only existing dates whose text changed; identical lines are skipped.
    * Any bad line → 400 `VALIDATION` with `details[].path = "lines.N"` (capped
    * at 100 with a summary) and nothing is written.
    */
@@ -192,7 +198,7 @@ const dailyMessagesRoutes: FastifyPluginAsyncZod = async (app) => {
         const cuencada = await getCuencadaById(tx, request.params.id, true);
         const dates = entries.map((entry) => entry.date);
         const existing = await tx
-          .select({ date: dailyMessages.date })
+          .select({ date: dailyMessages.date, message: dailyMessages.message })
           .from(dailyMessages)
           .where(and(eq(dailyMessages.cuencadaId, cuencada.id), inArray(dailyMessages.date, dates)));
         let deleted = 0;
@@ -203,8 +209,12 @@ const dailyMessagesRoutes: FastifyPluginAsyncZod = async (app) => {
             .returning({ id: dailyMessages.id });
           deleted = removed.length;
         }
-        await upsertEntries(tx, cuencada.id, entries);
-        const result = { created: entries.length - existing.length, updated: existing.length, deleted };
+        // Unchanged messages are neither rewritten (updated_at stays) nor counted as updated.
+        const current = new Map(existing.map((row) => [row.date, row.message]));
+        const changed = entries.filter((entry) => current.get(entry.date) !== entry.message);
+        await upsertEntries(tx, cuencada.id, changed, app.clock.now());
+        const created = entries.length - existing.length;
+        const result = { created, updated: changed.length - created, deleted };
         await recordAudit(tx, {
           actorUserId: admin.id,
           action: AuditAction.DailyMessagesImported,

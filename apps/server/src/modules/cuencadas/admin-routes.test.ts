@@ -190,7 +190,7 @@ describe("cuencada CRUD", () => {
   });
 
   it("re-validates the merged row on PATCH and audits field names", async () => {
-    const edition = await insertCuencada({ year: 2027 });
+    const edition = await insertCuencada({ year: 2027, isPublished: false });
     const url = `/api/admin/cuencadas/${edition.id}`;
 
     const before = await app.inject({ method: "PATCH", url, payload: { endsAt: "2027-09-01T00:00:00-06:00" }, ...adminAuth });
@@ -209,9 +209,28 @@ describe("cuencada CRUD", () => {
     expect(rows[0]?.metadata).toEqual({ year: 2028, fields: ["title", "year"] });
   });
 
+  it("refuses to change the year of a published edition with 409, but allows it after unpublishing", async () => {
+    const edition = await insertCuencada({ year: 2026 });
+    const url = `/api/admin/cuencadas/${edition.id}`;
+
+    const locked = await app.inject({ method: "PATCH", url, payload: { year: 2030 }, ...adminAuth });
+    const sameYear = await app.inject({ method: "PATCH", url, payload: { year: 2026, title: "Cuencada 2026 en Mérida" }, ...adminAuth });
+    const unpublishAndMove = await app.inject({ method: "PATCH", url, payload: { year: 2030, isPublished: false }, ...adminAuth });
+    await app.inject({ method: "PATCH", url, payload: { isPublished: false }, ...adminAuth });
+    const draftMove = await app.inject({ method: "PATCH", url, payload: { year: 2030 }, ...adminAuth });
+
+    expect(locked.statusCode).toBe(409);
+    expect(errorOf(locked.body)).toMatchObject({ code: "CONFLICT", details: [{ path: "year" }] });
+    expect(errorOf(locked.body).message).toContain("No se puede cambiar el año de una Cuencada publicada");
+    expect(sameYear.statusCode).toBe(200);
+    expect(unpublishAndMove.statusCode).toBe(409);
+    expect(draftMove.statusCode).toBe(200);
+    expect(draftMove.json<AdminCuencada>()).toMatchObject({ year: 2030, slug: "2030", status: "draft" });
+  });
+
   it("answers 409 when PATCH moves an edition onto an existing year", async () => {
     await insertCuencada({ year: 2026 });
-    const other = await insertCuencada({ year: 2027 });
+    const other = await insertCuencada({ year: 2027, isPublished: false });
 
     const response = await app.inject({ method: "PATCH", url: `/api/admin/cuencadas/${other.id}`, payload: { year: 2026 }, ...adminAuth });
 
@@ -338,6 +357,8 @@ describe("itinerary admin", () => {
       ["A", 1],
       ["B", 2]
     ]);
+    const [moved] = await getTestDb().select().from(cuencadaItineraryItems).where(eq(cuencadaItineraryItems.id, c.id));
+    expect(moved?.updatedAt.toISOString()).toBe("2026-09-01T18:00:00.000Z");
     const [untouched] = await getTestDb()
       .select()
       .from(cuencadaItineraryItems)
@@ -446,13 +467,23 @@ describe("daily messages admin", () => {
       ...adminAuth
     });
     expect(replace.json()).toEqual({ created: 0, updated: 1, deleted: 3 });
+
+    const unchanged = await app.inject({
+      method: "POST",
+      url,
+      payload: { entries: [{ date: "2026-09-13", message: "Hoy otra vez" }, { date: "2026-09-14", message: "Nuevo" }] },
+      ...adminAuth
+    });
+    expect(unchanged.json()).toEqual({ created: 1, updated: 0, deleted: 0 });
+    await getTestDb().delete(dailyMessages).where(eq(dailyMessages.date, "2026-09-14"));
     const rows = await getTestDb().select().from(dailyMessages).where(eq(dailyMessages.cuencadaId, edition.id));
     expect(rows.map((row) => [row.date, row.message])).toEqual([["2026-09-13", "Hoy otra vez"]]);
 
     const audit = await audits("daily_message.imported");
     expect(audit.map((row) => row.metadata)).toEqual([
       { mode: "merge", created: 2, updated: 1, deleted: 0 },
-      { mode: "replace", created: 0, updated: 1, deleted: 3 }
+      { mode: "replace", created: 0, updated: 1, deleted: 3 },
+      { mode: "merge", created: 1, updated: 0, deleted: 0 }
     ]);
   });
 
