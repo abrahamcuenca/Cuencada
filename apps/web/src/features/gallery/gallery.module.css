@@ -40,6 +40,16 @@
   align-self: stretch;
 }
 
+.uploadUnavailable {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.uploadUnavailable code {
+  overflow-wrap: anywhere;
+  font-size: var(--text-xs);
+}
+
 .hint {
   margin: 0;
   color: var(--color-text-muted);

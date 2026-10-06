@@ -5,7 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { apiUrl, authenticatedState, errorBody } from "../../../test/auth";
 import { createTestServer } from "../../../test/msw";
 import { renderApp } from "../../../test/renderApp";
-import { ADMIN_USER, type AdminDb, adminHandlers, IDS, makeAdminDb, writes } from "./testing/fixtures";
+import { ADMIN_USER, type AdminDb, adminHandlers, IDS, makeAdminDb, makeUnverifiedUsers, writes } from "./testing/fixtures";
 
 const server = createTestServer();
 let db: AdminDb;
@@ -40,6 +40,52 @@ describe("UsersPage", { timeout: 15_000 }, () => {
     expect(await screen.findByRole("button", { name: /^Lucía Ramírez Soto/ })).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByRole("button", { name: /^Mateo Ortega Vidal/ })).not.toBeInTheDocument());
     expect(db.log.at(-1)).toMatchObject({ path: "/admin/users", query: { q: "lucía", role: "member", limit: "25" } });
+  });
+
+  it("filters unverified emails with ?correo=sin-verificar (emailVerified=false)", async () => {
+    const user = userEvent.setup();
+    const { router } = renderApp("/admin/usuarios?correo=sin-verificar", authenticatedState(ADMIN_USER));
+
+    expect(await screen.findByRole("button", { name: /^Lucía Ramírez Soto/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Mateo Ortega Vidal/ })).not.toBeInTheDocument();
+    expect(db.log.at(-1)).toMatchObject({ path: "/admin/users", query: { emailVerified: "false" } });
+    expect(screen.getByRole("combobox", { name: "Correo" })).toHaveValue("sin-verificar");
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Correo" }), "");
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    expect(await screen.findByRole("button", { name: /^Mateo Ortega Vidal/ })).toBeInTheDocument();
+  });
+
+  it("pages the server-filtered unverified list with «Cargar más» and the filter kept", async () => {
+    db.users = [...db.users, ...makeUnverifiedUsers(30)];
+    const user = userEvent.setup();
+    renderApp("/admin/usuarios?correo=sin-verificar", authenticatedState(ADMIN_USER));
+
+    await screen.findByRole("button", { name: /^Lucía Ramírez Soto/ });
+    const list = screen.getByRole("region", { name: "Lista de usuarios" });
+    expect(within(list).getAllByRole("listitem")).toHaveLength(25);
+    await user.click(screen.getByRole("button", { name: "Cargar más" }));
+
+    await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(31));
+    expect(db.log.at(-1)).toMatchObject({ path: "/admin/users", query: { emailVerified: "false", cursor: expect.any(String) } });
+    expect(screen.queryByRole("button", { name: "Cargar más" })).not.toBeInTheDocument();
+    expect(within(list).queryByRole("button", { name: /^Mateo Ortega Vidal/ })).not.toBeInTheDocument();
+  });
+
+  it("shows the server's Spanish message for the per-account change limit (429)", async () => {
+    server.use(
+      http.patch(apiUrl("/admin/users/:id"), () =>
+        HttpResponse.json(errorBody("RATE_LIMITED", "Esta cuenta ya cambió 3 veces en la última hora. Espera un poco."), { status: 429 })
+      )
+    );
+    const user = userEvent.setup();
+    renderApp("/admin/usuarios", authenticatedState(ADMIN_USER));
+    const sheet = await openSheet(user, "Lucía Ramírez Soto");
+
+    await user.click(within(sheet).getByRole("button", { name: "Deshabilitar cuenta" }));
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Deshabilitar cuenta" }));
+
+    expect(await within(sheet).findByText("Esta cuenta ya cambió 3 veces en la última hora. Espera un poco.")).toBeInTheDocument();
   });
 
   it("disables an account only after a confirmation that explains the consequences", async () => {

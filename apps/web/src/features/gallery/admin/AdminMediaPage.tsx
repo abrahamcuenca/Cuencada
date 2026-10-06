@@ -1,5 +1,6 @@
 import type { AdminMediaItem, MediaModerationAction, ModerationStatus } from "@cuencada/types";
 import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { getApiErrorMessage, isAbortError } from "../../../shared/api/errors";
 import { Badge } from "../../../shared/ui/Badge";
 import { Button } from "../../../shared/ui/Button";
@@ -39,9 +40,31 @@ const ACTION_DONE: Record<MediaModerationAction, string> = {
   delete: "Eliminada."
 };
 
-/** `/admin/media`: moderation queue (admins only; the server enforces it). */
+/** URL parameter that selects the queue, e.g. `/admin/media?cola=reported` (the dashboard's cards link there). */
+export const QUEUE_PARAM = "cola";
+
+/**
+ * @param value - `?cola=` from the URL (untrusted).
+ * @returns A known queue id; anything else falls back to `pending`.
+ */
+export function queueFromParam(value: string | null): QueueId {
+  return QUEUE_IDS.find((id) => id === value) ?? "pending";
+}
+
+/** `/admin/media`: moderation queue (admins only; the server enforces it). The tab lives in `?cola=`. */
 export function AdminMediaPage(): React.ReactNode {
-  const [queue, setQueue] = useState<QueueId>("pending");
+  const [params, setParams] = useSearchParams();
+  const queue = queueFromParam(params.get(QUEUE_PARAM));
+  const setQueue = (next: QueueId): void => {
+    setParams(
+      (current) => {
+        const updated = new URLSearchParams(current);
+        updated.set(QUEUE_PARAM, next);
+        return updated;
+      },
+      { replace: true }
+    );
+  };
   return (
     <div className={cx("cu-container", styles.page)}>
       <header className={styles.header}>

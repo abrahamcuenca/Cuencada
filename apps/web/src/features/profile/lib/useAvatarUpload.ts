@@ -9,13 +9,14 @@
  * - the signed URL never reaches the UI or a log.
  *
  * The preview is an object URL, revoked when it is replaced, when the upload
- * ends (success or failure) and on unmount. Unmounting also aborts the upload.
+ * ends (success or failure) and on unmount. Unmounting also aborts the intent
+ * request, the upload and the confirm request.
  */
 import { type AvatarUploadInput, type AvatarUploadResponse, avatarUploadInputSchema, avatarUploadResponseSchema } from "@cuencada/types";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getApiErrorCode, isAbortError } from "../../../shared/api/errors";
 import { env } from "../../../shared/lib/env";
-import { isAllowedUploadUrl, putToPresignedUrl, UploadTransferError } from "../../gallery";
+import { AVATAR_RESIZE, ImageDecodeError, isAllowedUploadUrl, putToPresignedUrl, shrinkImageIfNeeded, UploadTransferError, uploadsConfigured } from "../../gallery";
 import { useConfirmAvatarMutation, useCreateAvatarUploadMutation } from "../api";
 
 /** Exactly the contract allowlist (`avatarMimeTypeSchema`). */
@@ -23,6 +24,9 @@ export const AVATAR_ACCEPT = "image/jpeg,image/png,image/webp";
 
 /** Shown for every failure after the file was accepted (wireframe copy). */
 export const AVATAR_UPLOAD_FAILED = "No pudimos subir la foto. Inténtalo otra vez.";
+
+/** Shown when this build has no bucket origin (`VITE_MEDIA_UPLOAD_ORIGIN`). */
+export const AVATAR_UPLOADS_UNAVAILABLE = "Por ahora no se pueden subir fotos. Avísale a un administrador.";
 
 /** Where the upload is. */
 export type AvatarUploadPhase = "idle" | "uploading" | "confirming" | "done" | "error";
@@ -50,12 +54,13 @@ const MIME_BY_EXTENSION: Readonly<Record<string, string>> = { jpg: "image/jpeg",
  * Client-side check before anything is sent (the server checks again).
  *
  * @param file - The picked file.
+ * @param options - `typeOnly` checks the type alone (before a possible downscale shrinks the size).
  * @returns The validated MIME type and size, or a Spanish error.
  */
-export function validateAvatarFile(file: File): { ok: true; input: AvatarUploadInput } | { ok: false; error: string } {
+export function validateAvatarFile(file: File, options: { typeOnly?: boolean } = {}): { ok: true; input: AvatarUploadInput } | { ok: false; error: string } {
   const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
   const mimeType = file.type === "" ? (MIME_BY_EXTENSION[extension] ?? "") : file.type;
-  const parsed = avatarUploadInputSchema.safeParse({ mimeType, byteSize: file.size });
+  const parsed = avatarUploadInputSchema.safeParse({ mimeType, byteSize: options.typeOnly === true ? 1 : file.size });
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "No pudimos usar ese archivo." };
   return { ok: true, input: parsed.data };
 }
@@ -76,6 +81,7 @@ export function parseAvatarIntent(raw: unknown): AvatarUploadResponse | null {
 /** Spanish message for a failure; `null` for an abort (nothing to show). */
 function describeFailure(error: unknown): string | null {
   if (isAbortError(error)) return null;
+  if (error instanceof ImageDecodeError) return error.message;
   if (error instanceof UploadTransferError) return error.failure === "aborted" ? null : AVATAR_UPLOAD_FAILED;
   if (getApiErrorCode(error) === "RATE_LIMITED") return "Demasiados intentos. Espera unos minutos y vuelve a intentarlo.";
   return AVATAR_UPLOAD_FAILED;
@@ -108,7 +114,7 @@ export function useAvatarUpload(): AvatarUploadApi {
   );
 
   const run = useCallback(
-    async (file: File, input: AvatarUploadInput, controller: AbortController): Promise<void> => {
+    async (picked: File, controller: AbortController): Promise<void> => {
       const fail = (error: unknown): void => {
         if (controller.signal.aborted) return;
         setPreview(null);
@@ -117,6 +123,17 @@ export function useAvatarUpload(): AvatarUploadApi {
       };
 
       try {
+        // Phone photos can be 48–200 MP; the server caps avatars at 24 MP. Above 2048 px on the
+        // long edge, send a re-encoded JPEG instead (its type and size go in the intent).
+        const file = (await shrinkImageIfNeeded(picked, AVATAR_RESIZE)) ?? picked;
+        if (controller.signal.aborted) return;
+        const checked = validateAvatarFile(file);
+        if (!checked.ok) {
+          setPreview(null);
+          setState({ ...IDLE, phase: "error", error: checked.error });
+          return;
+        }
+        const input = checked.input;
         const request = createUpload(input);
         const abortRequest = (): void => request.abort();
         controller.signal.addEventListener("abort", abortRequest, { once: true });
@@ -149,7 +166,9 @@ export function useAvatarUpload(): AvatarUploadApi {
 
         setState((current) => ({ ...current, phase: "confirming", progress: 1 }));
         const confirm = confirmAvatar({ uploadId: intent.uploadId });
-        await confirm.unwrap();
+        const abortConfirm = (): void => confirm.abort();
+        controller.signal.addEventListener("abort", abortConfirm, { once: true });
+        await confirm.unwrap().finally(() => controller.signal.removeEventListener("abort", abortConfirm));
         if (controller.signal.aborted) return;
         setPreview(null);
         setState({ ...IDLE, phase: "done" });
@@ -165,10 +184,18 @@ export function useAvatarUpload(): AvatarUploadApi {
   const start = useCallback(
     (file: File): void => {
       if (controllerRef.current !== null) return;
-      const checked = validateAvatarFile(file);
+      // Type now; the size is checked after a possible downscale (see `run`).
+      const checked = validateAvatarFile(file, { typeOnly: true });
       if (!checked.ok) {
         setPreview(null);
         setState({ ...IDLE, phase: "error", error: checked.error });
+        return;
+      }
+      // Same gate as the gallery: without a bucket origin the intent would be refused after the
+      // server created it, so don't ask for one.
+      if (!uploadsConfigured()) {
+        setPreview(null);
+        setState({ ...IDLE, phase: "error", error: AVATAR_UPLOADS_UNAVAILABLE });
         return;
       }
       const controller = new AbortController();
@@ -176,7 +203,7 @@ export function useAvatarUpload(): AvatarUploadApi {
       const url = URL.createObjectURL(file);
       setPreview(url);
       setState({ phase: "uploading", progress: 0, previewUrl: url, error: null });
-      void run(file, checked.input, controller);
+      void run(file, controller);
     },
     [run, setPreview]
   );

@@ -44,6 +44,31 @@ describe("AuditLogPage", { timeout: 15_000 }, () => {
     expect(within(entries[1] ?? first).getByRole("heading")).toHaveTextContent("Sistema · Creó una invitación");
   });
 
+  it("shows the admin-alert flags as badges (only literal true counts)", async () => {
+    renderApp("/admin/bitacora", authenticatedState(ADMIN_USER));
+
+    const entries = await screen.findAllByRole("article");
+    const first = entries[0];
+    if (first === undefined) throw new Error("no entries");
+    const flags = within(first).getByLabelText("Avisos a administradores");
+    expect(within(flags).getByText("Aviso obligatorio")).toBeInTheDocument();
+    expect(within(flags).getByText("Límite de avisos alcanzado")).toBeInTheDocument();
+    expect(within(flags).getByText("Aviso no enviado")).toBeInTheDocument();
+    // Strings or numbers in free-form metadata don't become badges.
+    expect(within(entries[2] ?? first).queryByLabelText("Avisos a administradores")).not.toBeInTheDocument();
+  });
+
+  it("shortens entity ids for phones and keeps the full id for wider screens and screen readers", async () => {
+    renderApp("/admin/bitacora", authenticatedState(ADMIN_USER));
+
+    const entries = await screen.findAllByRole("article");
+    const first = entries[0];
+    if (first === undefined) throw new Error("no entries");
+    const full = within(first).getByText(IDS.mateo);
+    expect(full.parentElement).toHaveAttribute("title", IDS.mateo);
+    expect(within(first).getByText(`${IDS.mateo.slice(0, 8)}…`)).toHaveAttribute("aria-hidden", "true");
+  });
+
   it("pages with «Cargar más» using the keyset cursor", async () => {
     const user = userEvent.setup();
     renderApp("/admin/bitacora", authenticatedState(ADMIN_USER));
@@ -72,7 +97,8 @@ describe("AuditLogPage", { timeout: 15_000 }, () => {
       action: "user.disabled",
       entityType: "user",
       from: "2026-10-06T06:00:00.000Z",
-      to: "2026-10-07T05:59:59.999Z",
+      // Exclusive upper bound (WP-0.8b): the start of the day after «hasta».
+      to: "2026-10-07T06:00:00.000Z",
       limit: "25"
     });
   });

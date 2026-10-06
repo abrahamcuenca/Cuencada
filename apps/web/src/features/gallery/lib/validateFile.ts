@@ -6,6 +6,11 @@ export const UPLOAD_ACCEPT = Object.values(MimeTypes).join(",");
 const MB = 1024 * 1024;
 /** Upload rules in plain Spanish, from the contract limits. */
 export const UPLOAD_RULES_TEXT = `Fotos JPG, PNG o WebP de hasta ${MEDIA_SIZE_LIMITS.image / MB} MB y videos MP4 o MOV de hasta ${MEDIA_SIZE_LIMITS.video / MB} MB. iPhone convierte automáticamente a JPG al subir desde el navegador.`;
+/**
+ * Privacy note under the rules: the server strips photo EXIF, but some action
+ * cameras and drones write GPS into extra video tracks (T4 follow-up L5).
+ */
+export const UPLOAD_LOCATION_NOTE = "Las cámaras de acción y drones pueden guardar ubicación en el video.";
 
 const ALLOWED = new Set<string>(Object.values(MimeTypes));
 const HEIC = /\.(heic|heif)$/i;

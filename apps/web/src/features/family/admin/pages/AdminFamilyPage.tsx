@@ -11,6 +11,8 @@ import { Skeleton } from "../../../../shared/ui/Skeleton";
 import { TextInput } from "../../../../shared/ui/TextInput";
 import { useToast } from "../../../../shared/ui/Toast";
 import { cx } from "../../../../shared/ui/cx";
+import { useAccessDenial } from "../../../auth/accessDenied";
+import { AccessDeniedState } from "../../../auth/components/AccessDeniedState";
 import { useSearchPeopleQuery } from "../../api";
 import familyStyles from "../../family.module.css";
 import { type FieldErrors, serverErrorToFieldErrors } from "../../lib/forms";
@@ -21,6 +23,9 @@ import { useCreatePersonMutation } from "../api";
 import { PERSON_FORM_FIELDS, PersonForm, type PersonFormSubmit } from "../components/PersonForm";
 
 const PAGE_SIZE = 30;
+
+/** Title of the 403 state for an admin whose email isn't verified (the tree endpoints require it). */
+export const ADMIN_VERIFY_TITLE = "Verifica tu correo para administrar el árbol";
 
 /**
  * `/admin/familia`: everyone in the tree, searchable, with "Nueva persona".
@@ -123,8 +128,16 @@ function PeoplePage({ q, cursor, isLast, onMore }: PeoplePageProps): ReactNode {
     ...(q === "" ? {} : { q }),
     ...(cursor === null ? {} : { cursor })
   });
+  const denial = useAccessDenial(page.error);
 
   if (page.currentData === undefined) {
+    if (denial !== null) {
+      return (
+        <li>
+          <AccessDeniedState denial={denial} verifyTitle={ADMIN_VERIFY_TITLE} forbiddenTitle="No tienes acceso a las personas del árbol" />
+        </li>
+      );
+    }
     if (page.isError) {
       return (
         <li>

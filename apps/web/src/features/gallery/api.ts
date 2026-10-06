@@ -34,8 +34,6 @@ export const MEDIA_PAGE_SIZE = 30;
 export const PREVIEW_SIZE = 6;
 /** Admin queue page size. */
 export const ADMIN_PAGE_SIZE = 20;
-/** How many recent editions are probed when looking for the latest year with media. */
-const DEFAULT_YEAR_PROBES = 5;
 
 /** Admin queue filter without the cursor (the cursor is the page param). */
 export type AdminMediaFilter = Omit<AdminMediaQueryRequest, "cursor" | "limit">;
@@ -52,6 +50,21 @@ export interface GalleryYears {
 export interface MediaHeadArgs {
   year: number;
   limit: number;
+}
+
+/**
+ * Year switcher + default year from the editions list (pure, for tests).
+ *
+ * @param editions - `GET /cuencadas` (any order).
+ * @param now - Current time in ms.
+ * @returns Years newest first and the default year.
+ */
+export function galleryYearsFrom(editions: readonly CuencadaSummary[], now: number): GalleryYears {
+  const newestFirst = [...editions].sort((a, b) => b.year - a.year);
+  const years = [...new Set(newestFirst.map((e) => e.year))];
+  const withMedia = newestFirst.find((e) => e.hasMedia);
+  const started = newestFirst.find((e) => Date.parse(e.startsAt) <= now);
+  return { years, defaultYear: withMedia?.year ?? started?.year ?? years[0] ?? null };
 }
 
 /** Tag of the full (infinite) member list for one year. */
@@ -151,34 +164,15 @@ export const galleryApi = galleryListApi.injectEndpoints({
     }),
 
     /**
-     * Editions for the year switcher plus the default year. Up to
-     * {@link DEFAULT_YEAR_PROBES} editions are probed newest first with
-     * `limit=1`; a failing probe counts as "no media" so one bad year never
-     * breaks the page.
-     * TODO(T4, T2-BE `hasMedia`): use `CuencadaSummary.hasMedia` and drop the probes.
+     * Editions for the year switcher plus the default year, from one
+     * `GET /cuencadas`: the newest edition whose `CuencadaSummary.hasMedia` is
+     * true (server-computed: ready + approved + not deleted), else the newest
+     * one that has started, else the newest. No per-year probes.
      */
     galleryYears: build.query<GalleryYears, void>({
-      async queryFn(_arg, _api, _extra, baseQuery) {
-        const list = await baseQuery({ url: "/cuencadas" });
-        if (list.error) return { error: list.error };
-        // contract: `GET /cuencadas` returns `CuencadaSummary[]`, newest first.
-        const editions = (list.data ?? []) as CuencadaSummary[];
-        const now = Date.now();
-        const years = [...new Set(editions.map((e) => e.year))].sort((a, b) => b - a);
-        const started = editions
-          .filter((e) => Date.parse(e.startsAt) <= now)
-          .map((e) => e.year)
-          .sort((a, b) => b - a);
-
-        for (const year of years.slice(0, DEFAULT_YEAR_PROBES)) {
-          const probe = await baseQuery({ url: `/cuencadas/${year}/media`, params: { limit: 1 } });
-          if (probe.error) continue;
-          // contract: `GET /cuencadas/:year/media` returns `Page<MediaItem>`.
-          const page = probe.data as Page<MediaItem> | undefined;
-          if (page && page.items.length > 0) return { data: { years, defaultYear: year } };
-        }
-        return { data: { years, defaultYear: started[0] ?? years[0] ?? null } };
-      },
+      query: () => ({ url: "/cuencadas" }),
+      // contract: `GET /cuencadas` returns `CuencadaSummary[]`.
+      transformResponse: (raw: unknown) => galleryYearsFrom((raw ?? []) as CuencadaSummary[], Date.now()),
       providesTags: [{ type: "Cuencada", id: "LIST" }, YEARS_TAG]
     }),
 

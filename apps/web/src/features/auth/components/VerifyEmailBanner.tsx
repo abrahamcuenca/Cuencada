@@ -8,7 +8,7 @@ import { selectAuthStatus, selectCurrentUser } from "../authSlice";
 import { describeAuthError } from "../forms";
 
 /** Toast after a verification email was requested. */
-export const VERIFICATION_SENT_MESSAGE = "Te enviamos un enlace nuevo. Revisa tu correo (y la carpeta de spam).";
+export const VERIFICATION_SENT_MESSAGE = "Te enviamos un enlace nuevo. Revisa tu correo; si no llega en unos minutos, revisa la carpeta de spam o vuelve a pedirlo.";
 
 /** Client cooldown after a successful resend (Security L2). The server rate limit is the real control. */
 export const RESEND_COOLDOWN_MS = 60_000;

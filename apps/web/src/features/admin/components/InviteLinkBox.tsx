@@ -12,6 +12,10 @@ export interface InviteLinkBoxProps {
   onDone: () => void;
 }
 
+/** Shown after a successful copy: the clipboard outlives this page. */
+export const CLIPBOARD_WARNING =
+  "El enlace queda en tu portapapeles: pégalo solo en el chat de la familia y, al terminar, copia otra cosa para borrarlo.";
+
 /** Message shared on WhatsApp with the link. */
 export const WHATSAPP_INVITE_TEXT = "¡Te invitamos al portal de la Cuencada! Crea tu cuenta con este enlace:";
 
@@ -36,7 +40,7 @@ export function InviteLinkBox({ url, onDone }: InviteLinkBoxProps): ReactNode {
     try {
       if (typeof navigator.clipboard?.writeText !== "function") throw new Error("clipboard unavailable");
       await navigator.clipboard.writeText(url);
-      setStatus({ tone: "success", message: "Enlace copiado. Pégalo en el chat de la familia." });
+      setStatus({ tone: "success", message: `Enlace copiado. ${CLIPBOARD_WARNING}` });
     } catch {
       // Clipboard blocked (permissions, older browser): select the text so the admin can copy it by hand.
       input.current?.select();

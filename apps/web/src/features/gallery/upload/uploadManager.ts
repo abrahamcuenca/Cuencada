@@ -4,6 +4,8 @@ import { getApiErrorMessage } from "../../../shared/api/errors";
 import { selectCurrentUser, selectSessionEpoch } from "../../auth/authSlice";
 import { galleryApi, MEDIA_PAGE_SIZE } from "../api";
 import { putToPresignedUrl, UploadTransferError } from "../lib/putToPresignedUrl";
+import { GALLERY_RESIZE, ImageDecodeError, shrinkImageIfNeeded } from "../lib/resizeImage";
+import { UploadsUnavailableError, uploadsConfigured } from "../lib/uploadOrigin";
 import type { AcceptedFile } from "../lib/validateFile";
 
 /** Uploads running at once (intent → PUT → confirm). Keeps phones on 4G responsive. */
@@ -57,6 +59,8 @@ interface Job {
   file: File;
   mimeType: MediaMimeType;
   intent: CreateUploadResponse | null;
+  /** Very large photos were checked (and downscaled if needed) before the intent. */
+  prepared: boolean;
   putDone: boolean;
   /** The current step's in-flight work (intent or confirm request, or the PUT's controller). */
   inFlight: Abortable | null;
@@ -147,6 +151,7 @@ export class UploadManager {
         file: file.file,
         mimeType: file.mimeType,
         intent: null,
+        prepared: file.kind !== "image",
         putDone: false,
         inFlight: null,
         canceled: false,
@@ -287,6 +292,8 @@ export class UploadManager {
 
   private async run(job: Job): Promise<void> {
     try {
+      await this.prepare(job);
+      this.throwIfCanceled(job);
       await this.ensureIntent(job);
       this.throwIfCanceled(job);
       if (!job.putDone) {
@@ -312,16 +319,37 @@ export class UploadManager {
     if (job.canceled) throw canceledError();
   }
 
+  /**
+   * Photos above ~40 MP are downscaled to ≤ 24 MP (JPEG) before the intent,
+   * so the intent's type and size describe what is actually PUT. Smaller
+   * photos and videos are untouched.
+   */
+  private async prepare(job: Job): Promise<void> {
+    if (job.prepared) return;
+    // No point decoding a photo this build can't upload (ensureIntent refuses it too).
+    if (!uploadsConfigured()) throw new UploadsUnavailableError();
+    const resized = await shrinkImageIfNeeded(job.file, GALLERY_RESIZE);
+    if (resized !== null) {
+      job.file = resized;
+      job.mimeType = "image/jpeg";
+      this.update(job, { byteSize: resized.size });
+    }
+    job.prepared = true;
+  }
+
   private async ensureIntent(job: Job): Promise<void> {
     const intent = job.intent;
     if (intent && Date.parse(intent.expiresAt) - Date.now() > INTENT_MARGIN_MS) return;
     job.intent = null;
     job.putDone = false;
     this.update(job, { phase: "creating", progress: 0 });
+    // [SEC/ops] Without a bucket origin every intent would be refused after the server already
+    // created its row: don't ask for one at all.
+    if (!uploadsConfigured()) throw new UploadsUnavailableError();
     const request = this.store.dispatch(
       galleryApi.endpoints.createUpload.initiate({
         year: job.entry.year,
-        body: { fileName: job.entry.fileName, mimeType: job.mimeType, byteSize: job.file.size, caption: job.entry.caption }
+        body: { fileName: job.file.name, mimeType: job.mimeType, byteSize: job.file.size, caption: job.entry.caption }
       })
     );
     job.inFlight = request;
@@ -430,7 +458,7 @@ export class UploadManager {
 
 /** User-safe message for any failure in the pipeline (never the presigned URL or a raw error message). */
 function failureMessage(error: unknown): string {
-  if (error instanceof UploadTransferError) return error.message;
+  if (error instanceof UploadTransferError || error instanceof UploadsUnavailableError || error instanceof ImageDecodeError) return error.message;
   return getApiErrorMessage(error);
 }
 

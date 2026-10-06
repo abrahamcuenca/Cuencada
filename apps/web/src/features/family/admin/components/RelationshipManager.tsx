@@ -8,6 +8,8 @@ import { Dialog } from "../../../../shared/ui/Dialog";
 import { EmptyState } from "../../../../shared/ui/EmptyState";
 import { Skeleton } from "../../../../shared/ui/Skeleton";
 import { useToast } from "../../../../shared/ui/Toast";
+import { useAccessDenial } from "../../../auth/accessDenied";
+import { AccessDeniedState } from "../../../auth/components/AccessDeniedState";
 import { useGetFamilyTreeQuery } from "../../api";
 import { PersonSearch } from "../../components/PersonSearch";
 import familyStyles from "../../family.module.css";
@@ -125,6 +127,7 @@ export interface RelationshipManagerProps {
  */
 export function RelationshipManager({ personId, personName }: RelationshipManagerProps): ReactNode {
   const tree = useGetFamilyTreeQuery({ personId, depth: 1 });
+  const denial = useAccessDenial(tree.error);
   const [adding, setAdding] = useState<RelationRole | null>(null);
   const [addError, setAddError] = useState<string | null>(null);
   const [removing, setRemoving] = useState<{
@@ -137,6 +140,9 @@ export function RelationshipManager({ personId, personName }: RelationshipManage
   const toast = useToast();
 
   if (tree.currentData === undefined) {
+    if (denial !== null) {
+      return <AccessDeniedState denial={denial} verifyTitle="Verifica tu correo para ver sus relaciones" forbiddenTitle="No tienes acceso a sus relaciones" />;
+    }
     if (tree.isError) {
       return (
         <EmptyState icon="⚠️" title="No pudimos cargar las relaciones" action={<Button onClick={() => void tree.refetch()}>Reintentar</Button>} />
