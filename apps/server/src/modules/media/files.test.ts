@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { FakeStorage } from "../../../test/helpers/fakes.js";
 import {
+  createCuencada,
+  insertMedia,
   makeDecompressionBombPng,
   makeJpegWithGps,
   makeMp4,
@@ -8,7 +11,10 @@ import {
   makeWebp,
   PLANTED_LOCATION
 } from "../../../test/helpers/media.js";
+import { READ_CHUNK_BYTES } from "./constants.js";
 import { decodeCursor, encodeCursor } from "./cursor.js";
+import { readObjectInChunks } from "./jobs/mediaProcess.js";
+import { allObjectKeys } from "./service.js";
 import {
   extensionForMime,
   FILE_NAME_MAX_LENGTH,
@@ -103,11 +109,33 @@ describe("neutralizeVideoMetadata", () => {
     expect(copy.equals(plain)).toBe(true);
   });
 
+  it("tolerates and keeps 1–7 stray bytes after the last top-level box", () => {
+    const fixture = makeMp4WithLocation("isom");
+    for (const trailing of [1, 7]) {
+      const tail = Buffer.alloc(trailing, 0xab);
+      const output = Buffer.concat([fixture.bytes, tail]);
+
+      expect(neutralizeVideoMetadata(output)).toBe(4);
+      expect(output.length).toBe(fixture.bytes.length + trailing);
+      expect(output.subarray(-trailing)).toEqual(tail);
+      expect(output.includes(Buffer.from(PLANTED_LOCATION, "latin1"))).toBe(false);
+    }
+  });
+
+  it("stays fail-closed for 8+ stray bytes at the top level and any stray bytes inside a container", () => {
+    const plain = makeMp4("isom");
+    expect(() => neutralizeVideoMetadata(Buffer.concat([plain, Buffer.from([0, 0, 0, 99, 1, 2, 3, 4])]))).toThrow(VideoStructureError);
+    // A moov whose declared size leaves 3 bytes after its last child.
+    const child = Buffer.concat([Buffer.from([0, 0, 0, 8]), Buffer.from("free", "latin1")]);
+    const moov = Buffer.concat([Buffer.from([0, 0, 0, 8 + child.length + 3]), Buffer.from("moov", "latin1"), child, Buffer.alloc(3)]);
+    expect(() => neutralizeVideoMetadata(Buffer.from(moov))).toThrow(VideoStructureError);
+  });
+
   it("throws on inconsistent box sizes", () => {
     const broken = Buffer.from(makeMp4("isom"));
     broken.writeUInt32BE(0xffff, broken.indexOf(Buffer.from("moov")) - 4);
     expect(() => neutralizeVideoMetadata(broken)).toThrow(VideoStructureError);
-    expect(() => neutralizeVideoMetadata(Buffer.from([0, 0, 0, 4, 0x66]))).toThrow(VideoStructureError);
+    expect(() => neutralizeVideoMetadata(Buffer.from([0, 0, 0, 4, 0x66, 0x72, 0x65, 0x65]))).toThrow(VideoStructureError);
   });
 });
 
@@ -195,5 +223,63 @@ describe("cursor", () => {
 
   it("accepts the largest allowed timestamp", () => {
     expect(decodeCursor(encodeCursor({ micros: "253402300799999999", id: ID })).micros).toBe("253402300799999999");
+  });
+});
+
+describe("readObjectInChunks", () => {
+  it("reassembles an object exactly from sequential ranged reads into one buffer", async () => {
+    const storage = new FakeStorage();
+    const body = Buffer.from(Array.from({ length: 100 }, (_, index) => (index * 37) % 256));
+    await storage.put({ key: "k", body, contentType: "video/mp4" });
+    const ranges: Array<[number, number]> = [];
+    const realGetRange = storage.getRange.bind(storage);
+    storage.getRange = async (key, start, end) => {
+      ranges.push([start, end]);
+      return realGetRange(key, start, end);
+    };
+
+    const output = await readObjectInChunks(storage, "k", body.length, 16);
+
+    expect(output.equals(body)).toBe(true);
+    expect(ranges).toEqual([
+      [0, 15],
+      [16, 31],
+      [32, 47],
+      [48, 63],
+      [64, 79],
+      [80, 95],
+      [96, 99]
+    ]);
+    expect(READ_CHUNK_BYTES).toBe(8 * 1024 * 1024);
+  });
+
+  it("fails with size_mismatch when the object is shorter than declared", async () => {
+    const storage = new FakeStorage();
+    await storage.put({ key: "k", body: new Uint8Array(20), contentType: "video/mp4" });
+
+    await expect(readObjectInChunks(storage, "k", 40, 16)).rejects.toMatchObject({ code: "size_mismatch" });
+  });
+});
+
+describe("allObjectKeys", () => {
+  it("includes the scrubbed video display key and both image derivatives", async () => {
+    const { id: cuencadaId } = await createCuencada();
+    const video = await insertMedia({
+      id: ID,
+      cuencadaId,
+      kind: "video",
+      mimeType: "video/quicktime",
+      objectKey: `cuencadas/2026/originals/${ID}.mov`,
+      thumbKey: null,
+      displayKey: null
+    });
+    const image = await insertMedia({ cuencadaId, thumbKey: null, displayKey: null, mimeType: "image/png" });
+
+    expect(allObjectKeys(video, 2026)).toEqual([`cuencadas/2026/originals/${ID}.mov`, `cuencadas/2026/display/${ID}.mov`]);
+    expect(allObjectKeys(image, 2026)).toEqual([
+      image.objectKey,
+      `cuencadas/2026/display/${image.id}.webp`,
+      `cuencadas/2026/thumbs/${image.id}.webp`
+    ]);
   });
 });

@@ -191,9 +191,10 @@ Codex/opencode left a pnpm/turbo monorepo (`apps/web`, `apps/server`, `packages/
    - images (**sharp**): auto-rotates, **strips EXIF/GPS**, makes a 1600px WebP display copy and a 400px WebP thumbnail
    - videos (pure JS, no ffmpeg): **neutralizes location/identifying metadata in place** (`udta` incl. `©xyz`, `meta` incl. the QuickTime ISO6709 location key, `uuid`/XMP become same-size zeroed `free` boxes, so chunk offsets stay valid) and writes the result to its own display key
    - only the sanitized copies are ever served; the original is deleted afterwards (and on any failure)
-   - items interrupted by a restart are marked failed, never re-run (no crash loop)
+   - after a restart, items that never started are re-queued; items interrupted mid-work are marked failed, never re-run (no crash loop)
+   - not yet stripped (follow-up L5): GPS telemetry tracks from action cameras and drones (GoPro `gpmd`, `camm`, `mebx`, subtitle GPS); the uploader shows a warning meanwhile
 5. A cleanup job removes abandoned uploads and re-sweeps leftover objects of deleted/failed items.
-6. Per-user limits: intents/min, open intents, and a rolling 24 h byte budget.
+6. Per-user limits: intents/min, open intents, and a rolling 24 h byte budget (4 GiB for members; admins exempt).
 
 **Moderation:** items are auto-approved, members can report them, and admins hide or delete them. A flag can switch this to approval first.
 

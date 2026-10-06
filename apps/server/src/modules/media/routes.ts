@@ -161,7 +161,8 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
         if ((usage?.open ?? 0) >= MAX_PENDING_UPLOADS_PER_USER) {
           throw new AppError("RATE_LIMITED", "Tienes demasiadas subidas pendientes. Espera a que terminen.");
         }
-        if (Number(usage?.recentBytes ?? "0") + body.byteSize > DAILY_UPLOAD_BYTES) {
+        // Admins are exempt (they load historical albums); members get the rolling budget.
+        if (user.role !== "admin" && Number(usage?.recentBytes ?? "0") + body.byteSize > DAILY_UPLOAD_BYTES) {
           throw new AppError("RATE_LIMITED", "Llegaste al límite de subidas de hoy. Intenta de nuevo mañana.");
         }
 

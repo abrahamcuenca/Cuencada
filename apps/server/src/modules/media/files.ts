@@ -278,7 +278,8 @@ const FREE_TYPE = [0x66, 0x72, 0x65, 0x65]; // "free"
  *
  * @param bytes - The whole file; modified in place.
  * @returns How many metadata boxes were neutralized.
- * @throws VideoStructureError when a box size is inconsistent.
+ * @throws VideoStructureError when a box size is inconsistent. Only 1–7
+ *   trailing bytes after the last top-level box are tolerated (kept as-is).
  */
 export function neutralizeVideoMetadata(bytes: Uint8Array): number {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -289,7 +290,13 @@ function neutralizeBoxes(view: DataView, bytes: Uint8Array, start: number, end: 
   let neutralized = 0;
   let offset = start;
   while (offset < end) {
-    if (offset + 8 > end) throw new VideoStructureError();
+    if (offset + 8 > end) {
+      // Some muxers leave 1–7 stray bytes after the last top-level box. They
+      // cannot hold a box, so they are kept as-is; inside a container the
+      // same thing is a structure error (fail closed).
+      if (depth === 0) break;
+      throw new VideoStructureError();
+    }
     let size = view.getUint32(offset);
     let header = 8;
     if (size === 1) {

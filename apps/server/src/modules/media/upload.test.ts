@@ -25,6 +25,8 @@ import { systemClock } from "../../lib/clock.js";
 import { S3Storage } from "../../lib/storage/s3.js";
 import { DAILY_UPLOAD_BYTES, DAILY_UPLOAD_WINDOW_MS, DERIVATIVE_CACHE_CONTROL, SNIFF_BYTES, UPLOAD_URL_SECONDS } from "./constants.js";
 import { runMediaCleanup } from "./jobs/mediaCleanup.js";
+import { recoverProcessingOnStart } from "./jobs/mediaProcess.js";
+import { jobDeps } from "./shared.js";
 
 const MB = 1024 * 1024;
 let app: App | undefined;
@@ -547,23 +549,36 @@ describe("POST /api/media/:id/confirm and processing", () => {
   });
 });
 
-describe("startup", () => {
-  it("marks items left in processing as failed (interrupted) and deletes their objects instead of re-running them (L2)", async () => {
-    const storage = new FakeStorage();
-    const cuencada = await createCuencada();
+describe("startup recovery", () => {
+  const MINUTE_AGO = (): Date => new Date(Date.now() - 60_000);
+
+  async function stuckItem(
+    cuencadaId: string,
+    storage: FakeStorage,
+    overrides: Partial<Parameters<typeof insertMedia>[0]> = {}
+  ): Promise<typeof mediaItems.$inferSelect> {
     const png = await makePng();
-    const stuck = await insertMedia({
-      cuencadaId: cuencada.id,
+    const row = await insertMedia({
+      cuencadaId,
       mimeType: "image/png",
       byteSize: png.byteLength,
       thumbKey: null,
       displayKey: null,
       width: null,
       height: null,
-      uploadStatus: "processing"
+      uploadStatus: "processing",
+      confirmedAt: MINUTE_AGO(),
+      ...overrides
     });
-    await storage.put({ key: stuck.objectKey, body: png, contentType: "image/png" });
-    const deleted = await insertMedia({ cuencadaId: cuencada.id, uploadStatus: "processing", deletedAt: new Date() });
+    await storage.put({ key: row.objectKey, body: png, contentType: "image/png" });
+    return row;
+  }
+
+  it("fails items that had started (marker) as interrupted, deletes their objects and never re-reads them (L2)", async () => {
+    const storage = new FakeStorage();
+    const cuencada = await createCuencada();
+    const started = await stuckItem(cuencada.id, storage, { processingError: "started" });
+    const deleted = await insertMedia({ cuencadaId: cuencada.id, uploadStatus: "processing", confirmedAt: MINUTE_AGO(), deletedAt: new Date() });
     const getRangeCalls: string[] = [];
     const realGetRange = storage.getRange.bind(storage);
     storage.getRange = async (key, start, end) => {
@@ -573,12 +588,65 @@ describe("startup", () => {
 
     app = await createTestApp({ storage });
 
-    await vi.waitFor(async () => expect((await mediaRow(stuck.id)).uploadStatus).toBe("failed"), { timeout: 5000 });
+    await vi.waitFor(async () => expect((await mediaRow(started.id)).uploadStatus).toBe("failed"), { timeout: 5000 });
     await app.jobs.onIdle();
-    expect(await mediaRow(stuck.id)).toMatchObject({ uploadStatus: "failed", processingError: "interrupted" });
-    expect(storage.objects.has(stuck.objectKey)).toBe(false);
+    expect(await mediaRow(started.id)).toMatchObject({ uploadStatus: "failed", processingError: "interrupted" });
+    expect(storage.objects.has(started.objectKey)).toBe(false);
     expect(getRangeCalls).toEqual([]);
     expect((await mediaRow(deleted.id)).uploadStatus).toBe("processing");
+  });
+
+  it("re-queues items that were confirmed but never started", async () => {
+    const storage = new FakeStorage();
+    const cuencada = await createCuencada();
+    const queued = await stuckItem(cuencada.id, storage);
+
+    app = await createTestApp({ storage });
+
+    await vi.waitFor(async () => expect((await mediaRow(queued.id)).uploadStatus).toBe("ready"), { timeout: 5000 });
+    await app.jobs.onIdle();
+    expect(await mediaRow(queued.id)).toMatchObject({ uploadStatus: "ready", processingError: null, width: 40, height: 30 });
+  });
+
+  it("ignores items confirmed after the module started (a confirm right after boot is not failed)", async () => {
+    const storage = new FakeStorage();
+    app = await createTestApp({ storage });
+    await app.jobs.onIdle();
+    const cuencada = await createCuencada();
+    const startedAt = new Date(Date.now() - 1000);
+    const fresh = await stuckItem(cuencada.id, storage, { processingError: "started", confirmedAt: new Date() });
+
+    const result = await recoverProcessingOnStart(jobDeps(app), startedAt);
+
+    expect(result).toEqual({ requeued: 0, failed: 0 });
+    expect(await mediaRow(fresh.id)).toMatchObject({ uploadStatus: "processing", processingError: "started" });
+    expect(storage.objects.has(fresh.objectKey)).toBe(true);
+  });
+
+  it("deletes a video's scrubbed display copy when failing it as interrupted", async () => {
+    const storage = new FakeStorage();
+    const cuencada = await createCuencada();
+    const id = "6f1d3b0e-2c4a-4b8e-9f00-1234567890ab";
+    const original = `cuencadas/2026/originals/${id}.mov`;
+    const display = `cuencadas/2026/display/${id}.mov`;
+    await insertMedia({
+      id,
+      cuencadaId: cuencada.id,
+      kind: "video",
+      mimeType: "video/quicktime",
+      objectKey: original,
+      thumbKey: null,
+      displayKey: null,
+      uploadStatus: "processing",
+      processingError: "started",
+      confirmedAt: MINUTE_AGO()
+    });
+    for (const key of [original, display]) await storage.put({ key, body: new Uint8Array([1]), contentType: "video/quicktime" });
+
+    app = await createTestApp({ storage });
+
+    await vi.waitFor(async () => expect((await mediaRow(id)).uploadStatus).toBe("failed"), { timeout: 5000 });
+    expect(storage.objects.size).toBe(0);
   });
 });
 
@@ -608,10 +676,10 @@ describe("upload quotas", () => {
     const { user, auth } = await createMember();
     const big = 300 * MB;
     const base = { cuencadaId: cuencada.id, uploadedByUserId: user.id, kind: "video", mimeType: "video/mp4", byteSize: big } as const;
-    for (let index = 0; index < 5; index += 1) await insertMedia({ ...base }); // 1500 MB today
+    for (let index = 0; index < 12; index += 1) await insertMedia({ ...base }); // 3600 MB today
     await insertMedia({ ...base, uploadStatus: "failed" });
     await insertMedia({ ...base, createdAt: new Date(Date.now() - DAILY_UPLOAD_WINDOW_MS - 60_000) });
-    await insertMedia({ ...base, deletedAt: new Date() }); // deleted still counts: 1800 MB
+    await insertMedia({ ...base, deletedAt: new Date() }); // deleted still counts: 3900 MB
     const intent = (byteSize: number) =>
       app.inject({
         method: "POST",
@@ -620,14 +688,32 @@ describe("upload quotas", () => {
         payload: { fileName: "a.mp4", mimeType: "video/mp4", byteSize }
       });
 
-    const over = await intent(DAILY_UPLOAD_BYTES - 1800 * MB + 1);
-    const fits = await intent(DAILY_UPLOAD_BYTES - 1800 * MB);
+    expect(DAILY_UPLOAD_BYTES).toBe(4096 * MB);
+    const over = await intent(DAILY_UPLOAD_BYTES - 3900 * MB + 1);
+    const fits = await intent(DAILY_UPLOAD_BYTES - 3900 * MB);
     const nowOver = await intent(1);
 
     expect(over.statusCode).toBe(429);
     expect(over.json()).toMatchObject({ error: { code: "RATE_LIMITED", message: expect.stringContaining("límite") } });
     expect(fits.statusCode).toBe(201);
     expect(nowOver.statusCode).toBe(429);
+  });
+
+  it("exempts admins from the byte budget", async () => {
+    const { app } = await setup();
+    const cuencada = await createCuencada();
+    const { user, auth } = await createMember({ role: "admin" });
+    const base = { cuencadaId: cuencada.id, uploadedByUserId: user.id, kind: "video", mimeType: "video/mp4", byteSize: 300 * MB } as const;
+    for (let index = 0; index < 14; index += 1) await insertMedia({ ...base }); // 4200 MB, over the member budget
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/cuencadas/2026/media/uploads",
+      ...auth,
+      payload: { fileName: "a.mp4", mimeType: "video/mp4", byteSize: 300 * MB }
+    });
+
+    expect(response.statusCode).toBe(201);
   });
 });
 

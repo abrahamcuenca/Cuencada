@@ -34,10 +34,20 @@ export const CONFIRM_RATE_LIMIT = { max: 60, timeWindow: "1 minute" } as const;
 /**
  * Per-user upload budget over a rolling 24 h, in bytes (sum of `byte_size` of
  * the user's non-failed items created in the window, deleted ones included so
- * delete-and-reupload cannot bypass it). Future config key:
+ * delete-and-reupload cannot bypass it). 4 GiB covers a reunion week of
+ * phone videos (orchestrator decision); admins are exempt. Future config key:
  * `MEDIA_DAILY_UPLOAD_BYTES` (config.ts is frozen in Phase 1).
  */
-export const DAILY_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024;
+export const DAILY_UPLOAD_BYTES = 4 * 1024 * 1024 * 1024;
+
+/**
+ * Originals are read into one preallocated buffer with sequential ranged GETs
+ * of this size, so peak memory is ≈ the file size plus one chunk.
+ */
+export const READ_CHUNK_BYTES = 8 * 1024 * 1024;
+
+/** `processing_error` marker set when the job actually starts working on an item. */
+export const PROCESSING_STARTED_MARKER = "started";
 
 /** Window of {@link DAILY_UPLOAD_BYTES}. */
 export const DAILY_UPLOAD_WINDOW_MS = 24 * 60 * 60 * 1000;

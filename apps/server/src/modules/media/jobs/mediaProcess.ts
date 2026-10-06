@@ -15,13 +15,13 @@
  *   with same-size `free` boxes (`neutralizeVideoMetadata`), so chunk offsets
  *   stay valid; the result goes to `display/{id}.mp4|.mov`.
  *
- * State lives in the DB. An item still in `processing` at the next start was
- * interrupted (shutdown, or a native crash/OOM): {@link failInterruptedProcessing}
- * marks it `failed` (`interrupted`) instead of re-running it, so a poison
- * input cannot crash-loop the server. Logs carry the media id and a short
+ * State lives in the DB. The job sets `processing_error = 'started'` before
+ * any heavy work. On the next start {@link recoverProcessingOnStart} re-queues
+ * items that never started and fails the started ones as `interrupted`
+ * instead of re-running them, so a poison input cannot crash-loop the server. Logs carry the media id and a short
  * code only: never object keys, URLs, file names or user data.
  */
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, lt } from "drizzle-orm";
 import type { FastifyBaseLogger } from "fastify";
 import sharp, { type Metadata, type Sharp } from "sharp";
 import type { Database } from "../../../db/client.js";
@@ -34,6 +34,8 @@ import {
   DISPLAY_WIDTH,
   MAX_INPUT_PIXELS,
   MEDIA_PROCESS_JOB,
+  PROCESSING_STARTED_MARKER,
+  READ_CHUNK_BYTES,
   THUMB_WIDTH
 } from "../constants.js";
 import { mediaKeys, neutralizeVideoMetadata, readMp4DurationSeconds, signatureMatches } from "../files.js";
@@ -123,13 +125,44 @@ function toWebp(pipeline: Sharp, width: number): Promise<Buffer> {
 }
 
 /**
+ * Read an object of a known size into ONE preallocated buffer with sequential
+ * ranged GETs, so peak memory is ≈ the file size plus one chunk (not 2×).
+ *
+ * @param storage - Object storage.
+ * @param key - Object key.
+ * @param byteSize - Expected size; a short or long chunk is a size mismatch.
+ * @param chunkBytes - Bytes per ranged GET (8 MB in production).
+ * @param signal - Abort between chunks on shutdown.
+ * @throws MediaProcessingError `size_mismatch` / `storage_read_failed`.
+ */
+export async function readObjectInChunks(
+  storage: Pick<StorageService, "getRange">,
+  key: string,
+  byteSize: number,
+  chunkBytes: number,
+  signal?: AbortSignal
+): Promise<Buffer> {
+  if (!Number.isInteger(byteSize) || byteSize < 1 || !Number.isInteger(chunkBytes) || chunkBytes < 1) {
+    throw new MediaProcessingError(ProcessingErrorCode.SizeMismatch);
+  }
+  const output = Buffer.allocUnsafe(byteSize);
+  for (let offset = 0; offset < byteSize; offset += chunkBytes) {
+    signal?.throwIfAborted();
+    const end = Math.min(offset + chunkBytes, byteSize) - 1;
+    const chunk = await stage(ProcessingErrorCode.StorageRead, () => storage.getRange(key, offset, end));
+    if (chunk.byteLength !== end - offset + 1) throw new MediaProcessingError(ProcessingErrorCode.SizeMismatch);
+    output.set(chunk, offset);
+  }
+  return output;
+}
+
+/**
  * Read the whole original and re-validate it: exact size and an allowed
  * signature for the declared type. Closes the post-confirm swap window.
  */
-async function readValidatedOriginal(deps: MediaJobDeps, row: MediaRow): Promise<Uint8Array> {
+async function readValidatedOriginal(deps: MediaJobDeps, row: MediaRow, signal: AbortSignal): Promise<Uint8Array> {
   if (row.byteSize < 1) throw new MediaProcessingError(ProcessingErrorCode.SizeMismatch);
-  const input = await stage(ProcessingErrorCode.StorageRead, () => deps.storage.getRange(row.objectKey, 0, row.byteSize - 1));
-  if (input.byteLength !== row.byteSize) throw new MediaProcessingError(ProcessingErrorCode.SizeMismatch);
+  const input = await readObjectInChunks(deps.storage, row.objectKey, row.byteSize, READ_CHUNK_BYTES, signal);
   const head = await stage(ProcessingErrorCode.StorageRead, () => deps.storage.head(row.objectKey));
   if (head === null || head.contentLength !== row.byteSize) throw new MediaProcessingError(ProcessingErrorCode.SizeMismatch);
   if (!signatureMatches(row.mimeType, input)) throw new MediaProcessingError(ProcessingErrorCode.SignatureMismatch);
@@ -145,7 +178,7 @@ async function processImage(
 ): Promise<ProcessedFields> {
   const expectedFormat = SHARP_FORMAT[row.mimeType];
   if (expectedFormat === undefined) throw new MediaProcessingError(ProcessingErrorCode.FormatMismatch);
-  const input = await readValidatedOriginal(deps, row);
+  const input = await readValidatedOriginal(deps, row, signal);
   signal.throwIfAborted();
 
   let metadata: Metadata;
@@ -186,7 +219,9 @@ async function processImage(
 }
 
 /**
- * Videos are buffered whole (≤ 300 MB, one at a time on the serial queue):
+ * Videos are read into one preallocated buffer (≤ 300 MB, one at a time on
+ * the serial queue) and scrubbed in place, so peak memory is ≈ 1× the file
+ * plus one 8 MB chunk; `put` then hands that same buffer to the SDK.
  * `StorageService` has no streaming read/write yet (WP Request 1).
  */
 async function processVideo(
@@ -196,7 +231,7 @@ async function processVideo(
   signal: AbortSignal,
   created: string[]
 ): Promise<ProcessedFields> {
-  const input = await readValidatedOriginal(deps, row);
+  const input = await readValidatedOriginal(deps, row, signal);
   signal.throwIfAborted();
   try {
     neutralizeVideoMetadata(input);
@@ -239,6 +274,14 @@ export async function processMediaItem(deps: MediaJobDeps, mediaId: string, sign
     eq(mediaItems.uploadStatus, "processing"),
     isNull(mediaItems.deletedAt)
   );
+  // Mark the item as started before any heavy work: if the process dies from
+  // here on (native fault, OOM), the next boot fails it instead of re-running it.
+  const started = await deps.db
+    .update(mediaItems)
+    .set({ processingError: PROCESSING_STARTED_MARKER })
+    .where(stillProcessing)
+    .returning({ id: mediaItems.id });
+  if (started.length === 0) return;
   // Logged before decoding, so a native crash can be traced to an item.
   deps.log.info({ mediaId, kind: item.kind }, "media processing started");
 
@@ -277,37 +320,64 @@ export async function processMediaItem(deps: MediaJobDeps, mediaId: string, sign
 /**
  * Queue processing for one item.
  *
- * @returns `false` when the queue is closed (the row stays `processing` and is failed as `interrupted` on the next start).
+ * @returns `false` when the queue is closed (the row stays `processing` without the started marker and is re-queued on the next start).
  */
 export function enqueueMediaProcessing(deps: MediaJobDeps, mediaId: string): boolean {
   return deps.jobs.enqueue(MEDIA_PROCESS_JOB, (signal) => processMediaItem(deps, mediaId, signal));
 }
 
+/** What {@link recoverProcessingOnStart} did. */
+export interface StartupRecovery {
+  /** Confirmed but never started (no marker): queued again. */
+  requeued: number;
+  /** Started before the restart (marker set): failed as `interrupted`. */
+  failed: number;
+}
+
 /**
- * On start: every live item left in `processing` was interrupted (shutdown,
- * crash or OOM). Mark it `failed` (`interrupted`) and delete its objects;
- * never re-run it, so a poison input cannot crash-loop the server. The
- * uploader sees a failed tile and uploads again.
+ * On start, handle items left in `processing` by the previous process. Only
+ * rows confirmed **before** this module started (`confirmed_at < startedAt`)
+ * are touched, so a confirm that lands right after boot is never mistaken
+ * for a leftover.
+ * - Never started (`processing_error` is not the `started` marker): the job
+ *   was only queued, so it is queued again.
+ * - Started (marker set): it was interrupted mid-work (shutdown, native
+ *   crash or OOM). It is marked `failed` (`interrupted`) and its objects are
+ *   deleted; it is never re-run, so a poison input cannot crash-loop the
+ *   server. The uploader sees a failed tile and uploads again.
  *
- * @returns How many items were failed.
+ * @param deps - Job dependencies.
+ * @param startedAt - When this module started (from `app.clock`).
  */
-export async function failInterruptedProcessing(deps: Pick<MediaJobDeps, "db" | "storage" | "log">): Promise<number> {
+export async function recoverProcessingOnStart(deps: MediaJobDeps, startedAt: Date): Promise<StartupRecovery> {
+  const leftover = and(
+    eq(mediaItems.uploadStatus, "processing"),
+    isNull(mediaItems.deletedAt),
+    lt(mediaItems.confirmedAt, startedAt)
+  );
   const rows = await deps.db
     .select({ item: mediaItems, year: cuencadas.year })
     .from(mediaItems)
     .innerJoin(cuencadas, eq(cuencadas.id, mediaItems.cuencadaId))
-    .where(and(eq(mediaItems.uploadStatus, "processing"), isNull(mediaItems.deletedAt)));
-  let failed = 0;
+    .where(leftover)
+    .orderBy(mediaItems.confirmedAt);
+  const result: StartupRecovery = { requeued: 0, failed: 0 };
   for (const { item, year } of rows) {
+    if (item.processingError !== PROCESSING_STARTED_MARKER) {
+      enqueueMediaProcessing(deps, item.id);
+      result.requeued += 1;
+      continue;
+    }
     const updated = await deps.db
       .update(mediaItems)
       .set({ uploadStatus: "failed", processingError: ProcessingErrorCode.Interrupted })
-      .where(and(eq(mediaItems.id, item.id), eq(mediaItems.uploadStatus, "processing"), isNull(mediaItems.deletedAt)))
+      .where(and(eq(mediaItems.id, item.id), eq(mediaItems.processingError, PROCESSING_STARTED_MARKER), leftover))
       .returning({ id: mediaItems.id });
     if (updated.length === 0) continue;
-    failed += 1;
+    result.failed += 1;
     deps.log.warn({ mediaId: item.id, code: ProcessingErrorCode.Interrupted }, "media processing interrupted; marked failed");
     await deleteObjectsQuietly(deps, item.id, allObjectKeys(item, year));
   }
-  return failed;
+  if (result.requeued + result.failed > 0) deps.log.info({ ...result }, "media processing recovered on start");
+  return result;
 }

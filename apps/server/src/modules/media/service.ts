@@ -330,17 +330,17 @@ export async function toAdminMediaItem(
 
 /**
  * Every object key a row may own: the recorded original/thumbnail/display
- * keys plus, for images, the derivative keys a running job may be about to
- * write. De-duplicated (a video's display key is its original).
+ * keys plus the derivative keys a running job may be about to write (the
+ * display copy for every kind, the thumbnail for images). De-duplicated.
  *
  * @param item - The row.
  * @param year - Its Cuencada year (part of the key).
  */
 export function allObjectKeys(item: MediaRow, year: number): string[] {
   const keys = [item.objectKey, item.thumbKey, item.displayKey].filter((key): key is string => key !== null);
-  if (item.kind === "image") {
-    const derived = mediaKeys(year, item.id, item.mimeType);
-    keys.push(derived.thumb, derived.display);
-  }
+  const derived = mediaKeys(year, item.id, item.mimeType);
+  // Videos: `display/{id}.mp4|.mov` (the scrubbed copy). Images: both WebP copies.
+  keys.push(derived.display);
+  if (item.kind === "image") keys.push(derived.thumb);
   return [...new Set(keys)];
 }
