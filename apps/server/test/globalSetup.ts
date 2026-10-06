@@ -16,6 +16,9 @@ import {
 /** Harness databases from other runs are only reclaimed after this long. */
 const STALE_AFTER_SECONDS = 60 * 60;
 
+/** SQLSTATE `object_in_use`: the database still has a connection. */
+const OBJECT_IN_USE = "55006";
+
 type AdminClient = postgres.Sql;
 
 function connectAdmin(): AdminClient {
@@ -49,8 +52,11 @@ async function dropStaleDatabases(admin: AdminClient): Promise<void> {
     if (active.length > 0) continue;
     try {
       await admin.unsafe(`drop database if exists ${quoteIdent(name)}`);
-    } catch {
-      // Someone connected between the check and the drop; leave it for later.
+    } catch (error) {
+      // 55006 object_in_use: someone connected between the check and the drop;
+      // leave it for a later run. Anything else is a real failure.
+      if (error instanceof postgres.PostgresError && error.code === OBJECT_IN_USE) continue;
+      throw error;
     }
   }
 }

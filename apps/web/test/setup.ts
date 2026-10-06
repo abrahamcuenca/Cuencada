@@ -4,7 +4,7 @@
 //   automatically when Vitest globals are enabled, which we keep off.
 // MSW servers are created per feature test with `setupServer` from "msw/node".
 import "@testing-library/jest-dom/vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterEach } from "vitest";
 
 // jsdom replaces the global AbortController/AbortSignal, but fetch and Request
@@ -29,6 +29,10 @@ globalThis.Request = class JsdomSafeRequest extends NodeRequest {
     super(input, rest);
   }
 };
+
+// Lazy route chunks can take over a second to load on a busy CI machine; the
+// 1 s default made route-level `findBy*` queries flaky (R10, WP-T2-FE).
+configure({ asyncUtilTimeout: 5000 });
 
 afterEach(() => {
   cleanup();
