@@ -98,10 +98,12 @@ export function VerifyEmailPage(): ReactNode {
   return (
     <AuthLayout title="Verificar correo" icon="✉️" lead="Toca el botón para confirmar que este correo es tuyo.">
       {gate === "conflict" ? (
-        <p className={styles.notice}>
-          Tienes la sesión abierta como <strong translate="no">{user?.displayName ?? "otra cuenta"}</strong>. Confirmar este enlace no cambia
-          tu sesión.
-        </p>
+        <div className={styles.notice}>
+          <p>
+            Tienes la sesión abierta como <strong translate="no">{user?.displayName ?? "otra cuenta"}</strong>. Confirmar este enlace no cambia
+            tu sesión.
+          </p>
+        </div>
       ) : null}
       <div className={styles.actions}>
         <Button fullWidth size="lg" onClick={verify}>

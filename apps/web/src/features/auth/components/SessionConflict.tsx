@@ -82,9 +82,12 @@ export function SessionConflict({ title, action, onLoggedOut, onKeep }: SessionC
 
   return (
     <AuthLayout title={title} icon="👤">
-      <p className={styles.notice}>
-        Ya tienes la sesión abierta como <strong translate="no">{name}</strong>. ¿Quieres cerrar sesión y {action}?
-      </p>
+      {/* Inner <p>: `.notice` is a grid, which would split the text and <strong> into rows. */}
+      <div className={styles.notice}>
+        <p>
+          Ya tienes la sesión abierta como <strong translate="no">{name}</strong>. ¿Quieres cerrar sesión y {action}?
+        </p>
+      </div>
       <div className={styles.actions}>
         <Button fullWidth size="lg" loading={leaving} onClick={onSwitch}>
           Cerrar sesión y continuar
