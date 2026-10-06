@@ -2,12 +2,12 @@
 
 Deferred and cross-track work, grouped by status. Imported from the
 orchestrator's working backlog by WP-0.8a (2026-10-06) and checked against
-`main` after PRs #1–#28. Add new items here instead of leaving TODOs in code.
+`main` after PRs #1–#29. Add new items here instead of leaving TODOs in code.
 When an item ships, move it to **Done** with the PR number.
 
 Owners: **0.8a** platform & repo hygiene · **0.8b** backend modules (auth,
 family, profile, admin, chat, media, cuencadas) · **0.8c** web features
-(`apps/web/src/features/**`) · **T9** PWA ·
+(`apps/web/src/features/**`) ·
 **WP-2.x** later phase (2.1 migrations, 2.4–2.5 cutover).
 
 ## Done
@@ -29,6 +29,7 @@ family, profile, admin, chat, media, cuencadas) · **0.8c** web features
 | WP-2.1 (0002): same-Cuencada composite FKs, directory opt-out, tags, `first_published_at` | WP-2.1 #17 |
 | `itineraryTagSchema` rejects bidi/invisible chars, case-insensitive dedupe | T2-BE follow-up #21 |
 | T8-BE: admin disable burns pending email tokens and closes chat sockets; admin alerts independent of the global cap | T8-BE #24, #27 |
+| Service worker never caches private `/api/**`: only the PII-free public edition endpoints (NetworkFirst), purged on logout; CI `check:sw` | T9 #29 |
 | API CSP `connect-src` includes the `wss://` origin | WP-0.4 #8 / T7-BE #25 |
 | WP-0.8a: logging query-param **allowlist** (q, search, city, familyBranch, cursor, ticket… redacted) | WP-0.8a |
 | WP-0.8a: distinct 403 `EMAIL_UNVERIFIED` (server); web accepts both codes in 0.8c | WP-0.8a (+0.8c) |
@@ -77,9 +78,6 @@ family, profile, admin, chat, media, cuencadas) · **0.8c** web features
 - Chat fixtures/handlers answer `FORBIDDEN` for unverified members; the server now answers `EMAIL_UNVERIFIED` (`socket.ts` already branches on the 403 status).
 - `features/chat/testing/fixtures.ts` `ME` is "Prima Cuenca": rename to a fictional person and retake the `docs/ux/screenshots/t7/` screenshots if the name shows.
 - Preview update after delete.
-
-### T9 (PWA)
-- The service worker must never cache `/api/**` responses.
 
 ### WP-2.x
 - WP-2.1 nits: fix the NOT VALID locking comment; schema comments point to the WP-2.1.md hand-written SQL section.
