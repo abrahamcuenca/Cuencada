@@ -40,7 +40,7 @@ function FiltersForm({ value, onApply, branches }: Omit<FiltersSheetProps, "open
 
   return (
     <form className={styles.filtersForm} noValidate onSubmit={onSubmit}>
-      <Field label="Rama familiar" hint="Por ejemplo: Familia de Jorge.">
+      <Field label="Rama familiar" hint="Por ejemplo: Rama Norte.">
         {(control) => (
           <TextInput
             {...control}

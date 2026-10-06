@@ -10,6 +10,7 @@
 import { type HttpHandler, HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { makeMemoriesHome } from "../src/features/cuencadas/testing/fixtures";
+import { makeProfile } from "../src/features/profile/testUtils";
 import { apiUrl } from "./auth";
 
 /** Handlers every layout-rendering test needs (and what Home fetches). `server.resetHandlers()` restores them. */
@@ -17,7 +18,10 @@ export const defaultHandlers: readonly HttpHandler[] = [
   http.get(apiUrl("/cuencadas/home"), () => HttpResponse.json(makeMemoriesHome())),
   // Home page (T2) extras, fetched when a test lands on "/".
   http.get(apiUrl("/cuencadas"), () => HttpResponse.json([])),
-  http.get(apiUrl("/announcements"), () => HttpResponse.json({ items: [], nextCursor: null }))
+  http.get(apiUrl("/announcements"), () => HttpResponse.json({ items: [], nextCursor: null })),
+  // `/perfil` and `/directorio` (T5), rendered by guard and redirect tests.
+  http.get(apiUrl("/profile/me"), () => HttpResponse.json(makeProfile())),
+  http.get(apiUrl("/directory"), () => HttpResponse.json({ items: [], nextCursor: null }))
 ];
 
 /**

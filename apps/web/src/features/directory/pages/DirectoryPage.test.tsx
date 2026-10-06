@@ -16,9 +16,9 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
 beforeEach(() => {
   db = makeDirectoryDb([
-    makeEntry(1, { fullName: "Rosa Elena Cuenca", city: "Mérida", phone: "999 123 4567", email: "rosa@example.com" }),
-    makeEntry(2, { fullName: "Tomás Cuenca", familyBranch: "Familia de Tomás", city: "Monterrey" }),
-    makeEntry(3, { fullName: "Rosario Cuenca" })
+    makeEntry(1, { fullName: "Rosa Elena Ejemplo", city: "Mérida", phone: "999 123 4567", email: "rosa@example.com" }),
+    makeEntry(2, { fullName: "Tomás Ejemplo", familyBranch: "Rama Sur", city: "Monterrey" }),
+    makeEntry(3, { fullName: "Rosario Ejemplo" })
   ]);
   server.use(...directoryHandlers(db));
   resetResendCooldown();
@@ -31,17 +31,17 @@ describe("DirectoryPage list", () => {
   it("shows a card per member with name, branch and the city only when visible", async () => {
     renderApp("/directorio", authenticatedState());
 
-    const rosa = await screen.findByRole("link", { name: /Rosa Elena Cuenca/ });
+    const rosa = await screen.findByRole("link", { name: /Rosa Elena Ejemplo/ });
     expect(rosa).toHaveAttribute("href", `/directorio/${memberId(1)}`);
-    expect(rosa).toHaveTextContent("Mérida · Familia de Jorge");
-    expect(within(list()).getByRole("link", { name: /Rosario Cuenca/ })).toHaveTextContent(/^RCRosario CuencaFamilia de Jorge›$/);
+    expect(rosa).toHaveTextContent("Mérida · Rama Norte");
+    expect(within(list()).getByRole("link", { name: /Rosario Ejemplo/ })).toHaveTextContent(/^RERosario EjemploRama Norte›$/);
     expect(db.log).toEqual([`limit=${DIRECTORY_PAGE_SIZE}`]);
   });
 
   it("debounces the search and sends it only from two characters", async () => {
     const user = userEvent.setup();
     renderApp("/directorio", authenticatedState());
-    await screen.findByRole("link", { name: /Tomás Cuenca/ });
+    await screen.findByRole("link", { name: /Tomás Ejemplo/ });
     const search = screen.getByRole("searchbox", { name: "Buscar por nombre o ciudad" });
     expect(search).toHaveAttribute("inputmode", "search");
 
@@ -51,8 +51,8 @@ describe("DirectoryPage list", () => {
     expect(db.log).toEqual([`limit=${DIRECTORY_PAGE_SIZE}`]);
 
     await user.type(search, "osa");
-    await waitFor(() => expect(screen.queryByRole("link", { name: /Tomás Cuenca/ })).not.toBeInTheDocument());
-    expect(screen.getByRole("link", { name: /Rosa Elena Cuenca/ })).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("link", { name: /Tomás Ejemplo/ })).not.toBeInTheDocument());
+    expect(screen.getByRole("link", { name: /Rosa Elena Ejemplo/ })).toBeInTheDocument();
     expect(db.log).toEqual([`limit=${DIRECTORY_PAGE_SIZE}`, `q=Rosa&limit=${DIRECTORY_PAGE_SIZE}`]);
   });
 
@@ -61,7 +61,7 @@ describe("DirectoryPage list", () => {
     try {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       renderApp("/directorio", authenticatedState());
-      await screen.findByRole("link", { name: /Tomás Cuenca/ });
+      await screen.findByRole("link", { name: /Tomás Ejemplo/ });
 
       await user.type(screen.getByRole("searchbox"), "To");
       vi.advanceTimersByTime(299);
@@ -78,7 +78,7 @@ describe("DirectoryPage list", () => {
     const user = userEvent.setup();
     renderApp("/directorio", authenticatedState());
 
-    await screen.findByRole("link", { name: /Primo 1 Cuenca/ });
+    await screen.findByRole("link", { name: /Primo 1 Ejemplo/ });
     expect(within(list()).getAllByRole("link")).toHaveLength(DIRECTORY_PAGE_SIZE);
     await user.click(screen.getByRole("button", { name: "Cargar más" }));
 
@@ -90,7 +90,7 @@ describe("DirectoryPage list", () => {
   it("sends the branch and city filters to the server", async () => {
     const user = userEvent.setup();
     renderApp("/directorio", authenticatedState());
-    await screen.findByRole("link", { name: /Tomás Cuenca/ });
+    await screen.findByRole("link", { name: /Tomás Ejemplo/ });
 
     await user.click(screen.getByRole("button", { name: "Filtros" }));
     const sheet = await screen.findByRole("dialog", { name: "Filtros" });
@@ -100,30 +100,30 @@ describe("DirectoryPage list", () => {
     await waitFor(() => expect(db.log).toContain(`city=M%C3%A9rida&limit=${DIRECTORY_PAGE_SIZE}`));
 
     await waitFor(() => expect(within(list()).getAllByRole("link")).toHaveLength(1));
-    expect(within(list()).getByRole("link", { name: /Rosa Elena Cuenca/ })).toBeInTheDocument();
+    expect(within(list()).getByRole("link", { name: /Rosa Elena Ejemplo/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Filtros (1)" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Filtros (1)" }));
     const again = await screen.findByRole("dialog", { name: "Filtros" });
     await user.clear(within(again).getByLabelText(/Ciudad/));
-    await user.type(within(again).getByLabelText(/Rama familiar/), "Familia de Tomás");
+    await user.type(within(again).getByLabelText(/Rama familiar/), "Rama Sur");
     await user.click(within(again).getByRole("button", { name: "Ver resultados" }));
 
-    await waitFor(() => expect(db.log).toContain(`familyBranch=Familia+de+Tom%C3%A1s&limit=${DIRECTORY_PAGE_SIZE}`));
-    expect(await within(list()).findByRole("link", { name: /Tomás Cuenca/ })).toBeInTheDocument();
+    await waitFor(() => expect(db.log).toContain(`familyBranch=Rama+Sur&limit=${DIRECTORY_PAGE_SIZE}`));
+    expect(await within(list()).findByRole("link", { name: /Tomás Ejemplo/ })).toBeInTheDocument();
     expect(within(list()).getAllByRole("link")).toHaveLength(1);
   });
 
   it("shows the empty search state with a way to clear it", async () => {
     const user = userEvent.setup();
     renderApp("/directorio", authenticatedState());
-    await screen.findByRole("link", { name: /Tomás Cuenca/ });
+    await screen.findByRole("link", { name: /Tomás Ejemplo/ });
 
     await user.type(screen.getByRole("searchbox"), "Zacarías");
     expect(await screen.findByRole("heading", { name: 'No encontramos a nadie con "Zacarías"' })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Quitar filtros" }));
 
-    expect(await screen.findByRole("link", { name: /Tomás Cuenca/ })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /Tomás Ejemplo/ })).toBeInTheDocument();
     expect(screen.getByRole("searchbox")).toHaveValue("");
   });
 
@@ -135,14 +135,14 @@ describe("DirectoryPage list", () => {
     expect(await screen.findByRole("heading", { name: "No pudimos cargar el directorio" })).toBeInTheDocument();
     db.listError = null;
     await user.click(screen.getByRole("button", { name: "Reintentar" }));
-    expect(await screen.findByRole("link", { name: /Tomás Cuenca/ })).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /Tomás Ejemplo/ })).toBeInTheDocument();
   });
 
   it("never writes the directory to web storage", async () => {
     const setItem = vi.spyOn(Storage.prototype, "setItem");
     try {
       renderApp("/directorio", authenticatedState());
-      await screen.findByRole("link", { name: /Rosa Elena Cuenca/ });
+      await screen.findByRole("link", { name: /Rosa Elena Ejemplo/ });
 
       expect(setItem).not.toHaveBeenCalled();
       expect(window.localStorage.length).toBe(0);
@@ -155,10 +155,10 @@ describe("DirectoryPage list", () => {
 
 describe("DirectoryPage expired avatar URLs", () => {
   it("refetches the list once when an avatar fails to load", async () => {
-    db.entries = [makeEntry(1, { fullName: "Rosa Elena Cuenca", avatarUrl: "https://bucket.example/a1.webp?X-Amz-Signature=old" })];
+    db.entries = [makeEntry(1, { fullName: "Rosa Elena Ejemplo", avatarUrl: "https://bucket.example/a1.webp?X-Amz-Signature=old" })];
     renderApp("/directorio", authenticatedState());
 
-    const link = await screen.findByRole("link", { name: /Rosa Elena Cuenca/ });
+    const link = await screen.findByRole("link", { name: /Rosa Elena Ejemplo/ });
     const img = link.querySelector("img");
     if (!img) throw new Error("missing avatar image");
     fireEvent.error(img);
@@ -202,10 +202,10 @@ describe("DirectoryPage detail", () => {
     const user = userEvent.setup();
     renderApp("/directorio", authenticatedState());
 
-    await user.click(await screen.findByRole("link", { name: /Rosa Elena Cuenca/ }));
-    const card = await screen.findByRole("article", { name: "Rosa Elena Cuenca" });
+    await user.click(await screen.findByRole("link", { name: /Rosa Elena Ejemplo/ }));
+    const card = await screen.findByRole("article", { name: "Rosa Elena Ejemplo" });
 
-    expect(within(card).getByRole("heading", { name: "Rosa Elena Cuenca" })).toHaveFocus();
+    expect(within(card).getByRole("heading", { name: "Rosa Elena Ejemplo" })).toHaveFocus();
     expect(within(card).getByText("Mérida")).toBeInTheDocument();
     expect(within(card).getByText("rosa@example.com")).toBeInTheDocument();
     expect(within(card).getByRole("link", { name: /WhatsApp/ })).toHaveAttribute("href", "https://wa.me/529991234567");
@@ -217,8 +217,8 @@ describe("DirectoryPage detail", () => {
   it("shows no contact field or link the member did not share", async () => {
     renderApp(`/directorio/${memberId(3)}`, authenticatedState());
 
-    const card = await screen.findByRole("article", { name: "Rosario Cuenca" });
-    expect(within(card).getByText("Familia de Jorge")).toBeInTheDocument();
+    const card = await screen.findByRole("article", { name: "Rosario Ejemplo" });
+    expect(within(card).getByText("Rama Norte")).toBeInTheDocument();
     expect(within(card).queryByText("Ciudad")).not.toBeInTheDocument();
     expect(within(card).queryByText("Teléfono")).not.toBeInTheDocument();
     expect(within(card).queryByText("Correo")).not.toBeInTheDocument();
@@ -227,10 +227,10 @@ describe("DirectoryPage detail", () => {
   });
 
   it("links to the family tree when the member is in it", async () => {
-    db.entries = [makeEntry(4, { fullName: "Jorge Cuenca", personId: "5b000000-0000-4000-8000-000000000004" })];
+    db.entries = [makeEntry(4, { fullName: "Jorge Ejemplo", personId: "5b000000-0000-4000-8000-000000000004" })];
     renderApp(`/directorio/${memberId(4)}`, authenticatedState());
 
-    const card = await screen.findByRole("article", { name: "Jorge Cuenca" });
+    const card = await screen.findByRole("article", { name: "Jorge Ejemplo" });
     expect(within(card).getByRole("link", { name: /Ver en el árbol/ })).toHaveAttribute("href", "/arbol/5b000000-0000-4000-8000-000000000004");
   });
 

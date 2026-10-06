@@ -15,8 +15,7 @@ import { type AvatarUploadInput, type AvatarUploadResponse, avatarUploadInputSch
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getApiErrorCode, isAbortError } from "../../../shared/api/errors";
 import { env } from "../../../shared/lib/env";
-import { putToPresignedUrl, UploadTransferError } from "../../gallery/lib/putToPresignedUrl";
-import { isAllowedUploadUrl } from "../../gallery/lib/uploadOrigin";
+import { isAllowedUploadUrl, putToPresignedUrl, UploadTransferError } from "../../gallery";
 import { useConfirmAvatarMutation, useCreateAvatarUploadMutation } from "../api";
 
 /** Exactly the contract allowlist (`avatarMimeTypeSchema`). */

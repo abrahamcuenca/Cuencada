@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -65,7 +65,7 @@ describe("ProfilePage form", () => {
   it("loads the profile into the form with the right input types", async () => {
     await openProfile();
 
-    expect(screen.getByLabelText(/Nombre completo/)).toHaveValue("Rosa Elena Cuenca");
+    expect(screen.getByLabelText(/Nombre completo/)).toHaveValue("Rosa Elena Ejemplo");
     expect(screen.getByLabelText(/Cómo te dicen/)).toHaveValue("Rosa");
     expect(screen.getByLabelText(/Ciudad/)).toHaveAttribute("autocomplete", "address-level2");
     const phone = screen.getByLabelText(/Teléfono \/ WhatsApp/);
@@ -148,7 +148,7 @@ describe("ProfilePage privacy", () => {
 
     await screen.findByText("Cambios guardados.");
     expect(db.patches).toEqual([{ showEmail: false, showPhone: true }]);
-    expect(db.profile.visibility).toEqual({ showEmail: false, showPhone: true, showCity: true });
+    expect(db.profile.visibility).toEqual({ showEmail: false, showPhone: true, showCity: true, listedInDirectory: true });
   });
 
   it("explains each switch in Spanish", async () => {
@@ -160,15 +160,7 @@ describe("ProfilePage privacy", () => {
     expect(screen.getByText(/Tus datos solo los ve la familia con sesión iniciada/)).toBeInTheDocument();
   });
 
-  it("hides the directory switch while the API has no listedInDirectory field", async () => {
-    await openProfile();
-
-    expect(screen.queryByRole("switch", { name: "Aparecer en el directorio" })).not.toBeInTheDocument();
-    expect(screen.getAllByRole("switch")).toHaveLength(3);
-  });
-
-  it("shows and sends the directory switch once the API returns listedInDirectory", async () => {
-    db.profile = { ...makeProfile(), visibility: { ...makeProfile().visibility, listedInDirectory: true } };
+  it("sends \"Aparecer en el directorio\" as listedInDirectory", async () => {
     const user = await openProfile();
 
     const listed = screen.getByRole("switch", { name: "Aparecer en el directorio" });
@@ -200,7 +192,7 @@ describe("ProfilePage avatar", () => {
     expect(xhr.withCredentials).toBe(false);
     expect(xhr.headers).toEqual({ "Content-Type": "image/jpeg", "x-amz-acl": "private" });
     expect(xhr.body).toBe(file);
-    const preview = screen.getByRole("img", { name: "Rosa Elena Cuenca" }).querySelector("img");
+    const preview = screen.getByRole("img", { name: "Rosa Elena Ejemplo" }).querySelector("img");
     expect(preview).toHaveAttribute("src", "blob:http://localhost/preview-1");
 
     act(() => xhr.progress(1024, 2048));
@@ -211,7 +203,7 @@ describe("ProfilePage avatar", () => {
     expect(db.confirms).toEqual([{ uploadId: "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d" }]);
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:http://localhost/preview-1");
     await waitFor(() =>
-      expect(screen.getByRole("img", { name: "Rosa Elena Cuenca" }).querySelector("img")).toHaveAttribute(
+      expect(screen.getByRole("img", { name: "Rosa Elena Ejemplo" }).querySelector("img")).toHaveAttribute(
         "src",
         "https://bucket.example/avatars/new.webp?X-Amz-Signature=a1"
       )
@@ -267,7 +259,7 @@ describe("ProfilePage avatar", () => {
     expect(await screen.findByText("No pudimos subir la foto. Inténtalo otra vez.")).toBeInTheDocument();
     expect(db.confirms).toEqual([]);
     expect(revokeObjectURL).toHaveBeenCalledWith("blob:http://localhost/preview-1");
-    expect(screen.getByRole("img", { name: "Rosa Elena Cuenca" }).querySelector("img")).toBeNull();
+    expect(screen.getByRole("img", { name: "Rosa Elena Ejemplo" }).querySelector("img")).toBeNull();
   });
 
   it("revokes the preview and aborts the upload when the page unmounts", async () => {
@@ -287,6 +279,32 @@ describe("ProfilePage avatar", () => {
   });
 });
 
+describe("ProfilePage remove photo", () => {
+  it("asks for confirmation, then deletes the avatar", async () => {
+    db.profile = makeProfile({ avatarUrl: "https://bucket.example/avatars/old.webp?X-Amz-Signature=old" });
+    const user = await openProfile();
+
+    await user.click(screen.getByRole("button", { name: "Quitar foto" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "¿Quitar tu foto?" });
+    await user.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+    expect(db.deletes).toBe(0);
+
+    await user.click(screen.getByRole("button", { name: "Quitar foto" }));
+    const again = await screen.findByRole("alertdialog", { name: "¿Quitar tu foto?" });
+    await user.click(within(again).getByRole("button", { name: "Quitar foto" }));
+
+    expect(await screen.findByText("Quitaste tu foto.")).toBeInTheDocument();
+    expect(db.deletes).toBe(1);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Quitar foto" })).not.toBeInTheDocument());
+    expect(screen.getByRole("img", { name: "Rosa Elena Ejemplo" }).querySelector("img")).toBeNull();
+  });
+
+  it("offers no \"Quitar foto\" without a photo", async () => {
+    await openProfile();
+    expect(screen.queryByRole("button", { name: "Quitar foto" })).not.toBeInTheDocument();
+  });
+});
+
 describe("ProfilePage states", () => {
   it("refetches the profile once when the avatar URL has expired", async () => {
     db.profile = makeProfile({ avatarUrl: "https://bucket.example/avatars/old.webp?X-Amz-Signature=old" });
@@ -299,7 +317,7 @@ describe("ProfilePage states", () => {
     );
     await openProfile();
 
-    const img = screen.getByRole("img", { name: "Rosa Elena Cuenca" }).querySelector("img");
+    const img = screen.getByRole("img", { name: "Rosa Elena Ejemplo" }).querySelector("img");
     if (!img) throw new Error("missing avatar image");
     expect(gets).toBe(1);
     fireEvent.error(img);
@@ -320,6 +338,6 @@ describe("ProfilePage states", () => {
 
     expect(await screen.findByText("No pudimos cargar tu perfil")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Reintentar" }));
-    expect(await screen.findByLabelText(/Nombre completo/)).toHaveValue("Rosa Elena Cuenca");
+    expect(await screen.findByLabelText(/Nombre completo/)).toHaveValue("Rosa Elena Ejemplo");
   });
 });

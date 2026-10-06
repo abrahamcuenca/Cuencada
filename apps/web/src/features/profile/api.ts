@@ -1,7 +1,6 @@
-import type { AvatarConfirmRequest, AvatarUploadRequest, AvatarUploadResponse, OwnProfile } from "@cuencada/types";
+import type { AvatarConfirmRequest, AvatarUploadRequest, AvatarUploadResponse, OwnProfile, UpdateProfileRequest } from "@cuencada/types";
 import { baseApi } from "../../shared/api/baseApi";
 import { refreshCurrentUser } from "../auth/api";
-import type { ProfilePatch } from "./lib/profileForm";
 
 /** Cache tag of the caller's own profile. */
 const PROFILE_TAG = { type: "Profile", id: "ME" } as const;
@@ -32,7 +31,7 @@ export const profileApi = baseApi.injectEndpoints({
     }),
 
     /** `PATCH /profile/me` with the changed fields only. */
-    updateProfile: build.mutation<OwnProfile, ProfilePatch>({
+    updateProfile: build.mutation<OwnProfile, UpdateProfileRequest>({
       query: (body) => ({ url: "/profile/me", method: "PATCH", body }),
       async onQueryStarted(_patch, { dispatch, queryFulfilled }) {
         const saved = await queryFulfilled.then(({ data }) => data).catch(() => null);
@@ -58,8 +57,20 @@ export const profileApi = baseApi.injectEndpoints({
         dispatch(refreshCurrentUser());
       },
       invalidatesTags: (result) => (result ? directoryTags(result.userId) : [])
+    }),
+
+    /** `DELETE /profile/me/avatar`: removes the photo and returns the updated profile. */
+    deleteAvatar: build.mutation<OwnProfile, void>({
+      query: () => ({ url: "/profile/me/avatar", method: "DELETE" }),
+      async onQueryStarted(_arg, { dispatch, queryFulfilled }) {
+        const saved = await queryFulfilled.then(({ data }) => data).catch(() => null);
+        if (saved === null) return; // The avatar editor shows the error.
+        dispatch(profileApi.util.upsertQueryData("getProfile", undefined, saved));
+        dispatch(refreshCurrentUser());
+      },
+      invalidatesTags: (result) => (result ? directoryTags(result.userId) : [])
     })
   })
 });
 
-export const { useGetProfileQuery, useUpdateProfileMutation, useCreateAvatarUploadMutation, useConfirmAvatarMutation } = profileApi;
+export const { useGetProfileQuery, useUpdateProfileMutation, useCreateAvatarUploadMutation, useConfirmAvatarMutation, useDeleteAvatarMutation } = profileApi;

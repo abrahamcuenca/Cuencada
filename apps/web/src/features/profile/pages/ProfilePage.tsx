@@ -1,3 +1,4 @@
+import type { OwnProfile } from "@cuencada/types";
 import { type FormEvent, type ReactNode, useMemo, useRef, useState } from "react";
 import { getApiErrorCode, getApiErrorMessage, isAbortError } from "../../../shared/api/errors";
 import { Button } from "../../../shared/ui/Button";
@@ -13,9 +14,7 @@ import { useGetProfileQuery, useUpdateProfileMutation } from "../api";
 import { AvatarEditor } from "../components/AvatarEditor";
 import {
   buildProfilePatch,
-  detectSupport,
   dirtyFields,
-  isFieldSupported,
   PROFILE_SWITCH_FIELDS,
   PROFILE_TEXT_FIELDS,
   type ProfileField,
@@ -23,7 +22,6 @@ import {
   type ProfileFormValues,
   type ProfileSwitchField,
   type ProfileTextField,
-  type ProfileWithListing,
   toFormValues
 } from "../lib/profileForm";
 import styles from "../profile.module.css";
@@ -39,8 +37,7 @@ export function ProfilePage(): ReactNode {
   const { data, error, isLoading, refetch } = useGetProfileQuery();
 
   if (data) {
-    // Safe: an OwnProfile plus an optional field that is checked before use (see profileForm.ts).
-    return <ProfileForm profile={data as ProfileWithListing} />;
+    return <ProfileForm profile={data} />;
   }
   return (
     <div className={cx("cu-container", styles.page)} aria-busy={isLoading}>
@@ -88,7 +85,7 @@ interface TextFieldSpec {
 const TEXT_FIELDS: Record<ProfileTextField, TextFieldSpec> = {
   fullName: { label: "Nombre completo", required: true, autoComplete: "name", maxLength: 200 },
   displayName: { label: "Cómo te dicen", hint: "Así te verá la familia en el chat y en las fotos.", required: true, autoComplete: "nickname", maxLength: 80 },
-  familyBranch: { label: "Rama familiar", hint: "Por ejemplo: Familia de Jorge.", autoComplete: "off", maxLength: 120 },
+  familyBranch: { label: "Rama familiar", hint: "Por ejemplo: Rama Norte.", autoComplete: "off", maxLength: 120 },
   city: { label: "Ciudad", autoComplete: "address-level2", maxLength: 120 },
   phone: {
     label: "Teléfono / WhatsApp",
@@ -103,7 +100,7 @@ const TEXT_FIELDS: Record<ProfileTextField, TextFieldSpec> = {
 
 interface SwitchSpec {
   label: string;
-  hint: (profile: ProfileWithListing) => string;
+  hint: (profile: OwnProfile) => string;
 }
 
 const SWITCH_FIELDS: Record<ProfileSwitchField, SwitchSpec> = {
@@ -120,7 +117,7 @@ const SWITCH_FIELDS: Record<ProfileSwitchField, SwitchSpec> = {
 };
 
 /** The loaded profile form. Holds only the user's edits on top of the server values. */
-function ProfileForm({ profile }: { profile: ProfileWithListing }): ReactNode {
+function ProfileForm({ profile }: { profile: OwnProfile }): ReactNode {
   const toast = useToast();
   const [updateProfile, { isLoading: saving }] = useUpdateProfileMutation();
   const [edits, setEdits] = useState<Partial<ProfileFormValues>>({});
@@ -129,10 +126,9 @@ function ProfileForm({ profile }: { profile: ProfileWithListing }): ReactNode {
   const formRef = useRef<HTMLFormElement>(null);
   const submitting = useRef(false);
 
-  const support = useMemo(() => detectSupport(profile), [profile]);
   const baseline = useMemo(() => toFormValues(profile), [profile]);
   const values: ProfileFormValues = { ...baseline, ...edits };
-  const dirty = dirtyFields(baseline, values, support).length > 0;
+  const dirty = dirtyFields(baseline, values).length > 0;
 
   const setValue = <TField extends ProfileField>(field: TField, value: ProfileFormValues[TField]): void => {
     setEdits((current) => ({ ...current, [field]: value }));
@@ -154,7 +150,7 @@ function ProfileForm({ profile }: { profile: ProfileWithListing }): ReactNode {
     event.preventDefault();
     if (submitting.current) return;
     setFormError(null);
-    const result = buildProfilePatch(baseline, values, support);
+    const result = buildProfilePatch(baseline, values);
     if (!result.ok) {
       setErrors(result.errors);
       focusFirstError(result.errors);
@@ -231,7 +227,7 @@ function ProfileForm({ profile }: { profile: ProfileWithListing }): ReactNode {
             Tus datos solo los ve la familia con sesión iniciada. Lo que no muestres queda oculto, también en la búsqueda del directorio.
           </p>
           <div className={styles.switches}>
-            {PROFILE_SWITCH_FIELDS.filter((field) => isFieldSupported(field, support)).map((field) => (
+            {PROFILE_SWITCH_FIELDS.map((field) => (
               <Switch
                 key={field}
                 name={field}

@@ -5,7 +5,7 @@ import { AvatarCircle } from "../../../shared/ui/AvatarCircle";
 import { Button } from "../../../shared/ui/Button";
 import { EmptyState } from "../../../shared/ui/EmptyState";
 import { Skeleton } from "../../../shared/ui/Skeleton";
-import { useExpiredUrlRefetch } from "../../gallery/lib/useExpiredUrlRefetch";
+import { useExpiredUrlRefetch } from "../../gallery";
 import { useGetDirectoryEntryQuery } from "../api";
 import { mailtoHref, telHref, whatsappHref } from "../lib/contactLinks";
 import styles from "../directory.module.css";

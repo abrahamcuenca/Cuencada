@@ -4,7 +4,7 @@ import { isAbortError } from "../../../shared/api/errors";
 import { Button } from "../../../shared/ui/Button";
 import { cx } from "../../../shared/ui/cx";
 import { EmptyState } from "../../../shared/ui/EmptyState";
-import { useExpiredUrlRefetch } from "../../gallery/lib/useExpiredUrlRefetch";
+import { useExpiredUrlRefetch } from "../../gallery";
 import { useListDirectoryInfiniteQuery } from "../api";
 import { DirectoryError } from "../components/AccessStates";
 import { DirectoryDetail } from "../components/DirectoryDetail";

@@ -15,7 +15,6 @@ import {
 } from "@cuencada/types";
 import { HttpResponse, http, type HttpHandler } from "msw";
 import { apiUrl, errorBody, makeUser } from "../../../test/auth";
-import type { ProfileWithListing } from "./lib/profileForm";
 
 /** The bucket origin tests configure as `env.mediaUploadOrigin`. */
 export const AVATAR_BUCKET_ORIGIN = "https://bucket.example";
@@ -40,13 +39,13 @@ export function makeProfile(overrides: Partial<OwnProfile> = {}): OwnProfile {
     personId: null,
     email: user.email,
     displayName: "Rosa",
-    fullName: "Rosa Elena Cuenca",
-    familyBranch: "Familia de Jorge",
+    fullName: "Rosa Elena Ejemplo",
+    familyBranch: "Rama Norte",
     city: "Mérida",
     phone: null,
     bio: null,
     avatarUrl: null,
-    visibility: { showEmail: true, showPhone: false, showCity: true },
+    visibility: { showEmail: true, showPhone: false, showCity: true, listedInDirectory: true },
     updatedAt: "2026-10-01T12:00:00.000Z",
     ...overrides
   });
@@ -54,12 +53,14 @@ export function makeProfile(overrides: Partial<OwnProfile> = {}): OwnProfile {
 
 /** Mutable state behind {@link profileHandlers}. */
 export interface FakeProfileDb {
-  profile: ProfileWithListing;
+  profile: OwnProfile;
   /** PATCH bodies, in order. */
   patches: unknown[];
   /** Intent and confirm bodies, in order. */
   intents: unknown[];
   confirms: unknown[];
+  /** Number of `DELETE /profile/me/avatar` calls. */
+  deletes: number;
   /** `uploadUrl` returned by the intent. */
   uploadUrl: string;
   /** Status of the next PATCH (200 by default). */
@@ -67,13 +68,13 @@ export interface FakeProfileDb {
 }
 
 /** A fresh fake database. */
-export function makeProfileDb(profile: ProfileWithListing = makeProfile()): FakeProfileDb {
-  return { profile, patches: [], intents: [], confirms: [], uploadUrl: AVATAR_PUT_URL, patchStatus: 200 };
+export function makeProfileDb(profile: OwnProfile = makeProfile()): FakeProfileDb {
+  return { profile, patches: [], intents: [], confirms: [], deletes: 0, uploadUrl: AVATAR_PUT_URL, patchStatus: 200 };
 }
 
 /** Applies a validated PATCH to the fake profile (contract fields and the proposed extensions). */
-function applyPatch(profile: ProfileWithListing, body: Record<string, unknown>): ProfileWithListing {
-  const next: ProfileWithListing = { ...profile, visibility: { ...profile.visibility } };
+function applyPatch(profile: OwnProfile, body: Record<string, unknown>): OwnProfile {
+  const next: OwnProfile = { ...profile, visibility: { ...profile.visibility } };
   for (const key of ["displayName", "fullName", "familyBranch", "city", "phone", "bio"] as const) {
     if (key in body) Object.assign(next, { [key]: body[key] });
   }
@@ -96,12 +97,9 @@ export function profileHandlers(db: FakeProfileDb): HttpHandler[] {
       db.patches.push(body);
       if (db.patchStatus === 429) return HttpResponse.json(errorBody("RATE_LIMITED"), { status: errorHttpStatus.RATE_LIMITED });
       if (db.patchStatus === 500) return HttpResponse.json(errorBody("INTERNAL", "Algo salió mal en el servidor."), { status: 500 });
-      const fields = typeof body === "object" && body !== null ? body : {};
-      // `listedInDirectory` is pending in the contract (WP-2.1); everything else must pass it.
-      const onlyListing = Object.keys(fields).length > 0 && Object.keys(fields).every((key) => key === "listedInDirectory");
-      if (!onlyListing && !updateProfileInputSchema.safeParse(body).success) return HttpResponse.json(errorBody("VALIDATION"), { status: 400 });
-      // Safe: a JSON object body, checked just above.
-      db.profile = applyPatch(db.profile, fields as Record<string, unknown>);
+      const parsed = updateProfileInputSchema.safeParse(body);
+      if (!parsed.success) return HttpResponse.json(errorBody("VALIDATION"), { status: 400 });
+      db.profile = applyPatch(db.profile, parsed.data);
       return HttpResponse.json(db.profile);
     }),
     http.post(apiUrl("/profile/me/avatar/uploads"), async ({ request }) => {
@@ -121,6 +119,11 @@ export function profileHandlers(db: FakeProfileDb): HttpHandler[] {
       db.confirms.push(body);
       if (!avatarConfirmInputSchema.safeParse(body).success) return HttpResponse.json(errorBody("VALIDATION"), { status: 400 });
       db.profile = { ...db.profile, avatarUrl: "https://bucket.example/avatars/new.webp?X-Amz-Signature=a1", updatedAt: new Date().toISOString() };
+      return HttpResponse.json(db.profile);
+    }),
+    http.delete(apiUrl("/profile/me/avatar"), () => {
+      db.deletes += 1;
+      db.profile = { ...db.profile, avatarUrl: null, updatedAt: new Date().toISOString() };
       return HttpResponse.json(db.profile);
     }),
     // `refreshCurrentUser()` after a save.
