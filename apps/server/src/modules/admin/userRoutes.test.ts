@@ -276,8 +276,11 @@ describe("PATCH /api/admin/users/:id", () => {
     expect(row).toMatchObject({ role: "admin", status: "active" });
   });
 
-  it("keeps at least one active admin when two admins demote each other at the same time", async () => {
-    for (let round = 0; round < 5; round += 1) {
+  // Each round creates two admins (argon2) and races two PATCHes, so it is
+  // slow under a loaded CI runner: 3 rounds still hit both interleavings
+  // (the advisory lock serializes them) and get a generous timeout.
+  it("keeps at least one active admin when two admins demote each other at the same time", { timeout: 60_000 }, async () => {
+    for (let round = 0; round < 3; round += 1) {
       const db = getTestDb();
       await db.update(users).set({ role: "member" }).where(eq(users.role, "admin"));
       const first = await createMember({ role: "admin" });

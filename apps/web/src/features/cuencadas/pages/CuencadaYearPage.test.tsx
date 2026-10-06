@@ -3,7 +3,7 @@ import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { apiUrl, authenticatedState, errorBody, makeUser, statusState } from "../../../../test/auth";
-import { renderApp } from "../../../../test/renderApp";
+import { renderApp, warmRoutes } from "../../../../test/renderApp";
 import { LINKS, makeAnnouncement, makeMemberDetails, makePublicCuencada } from "../testing/fixtures";
 
 let memberRequests = 0;
@@ -24,6 +24,8 @@ const server = setupServer(
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+// Load the lazy page before the first test so its findBy* does not race a cold transform (WP-0.8a).
+beforeAll(() => warmRoutes("/cuencada/2026"), 30_000);
 afterEach(() => {
   server.resetHandlers();
   memberRequests = 0;
