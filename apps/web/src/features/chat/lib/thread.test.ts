@@ -1,3 +1,4 @@
+import type { ChatSender } from "@cuencada/types";
 import { describe, expect, it } from "vitest";
 import { makeMessage, makeRooms, ME, PEOPLE, ROOMS } from "../testing/fixtures";
 import {
@@ -11,6 +12,7 @@ import {
   firstUnreadMessageId,
   lastServerMessage,
   mergeLatestPage,
+  mergeRoomLists,
   prependOlderPage,
   removeLocalMessage,
   roomsFromResponse,
@@ -129,7 +131,8 @@ describe("room list updates", () => {
   const rooms = roomsFromResponse(makeRooms());
 
   it("sorts the global room first, then editions newest first", () => {
-    expect(rooms.map((room) => room.title)).toEqual(["Toda la familia", "Cuencada 2026", "Cuencada 2025"]);
+    // Global pinned first, then the most recent activity (2025 had messages; 2026 none yet).
+    expect(rooms.map((room) => room.title)).toEqual(["Toda la familia", "Cuencada 2025", "Cuencada 2026"]);
     expect(totalUnread(rooms)).toBe(3);
     expect(totalUnread(undefined)).toBe(0);
   });
@@ -139,11 +142,13 @@ describe("room list updates", () => {
     const { rooms: next, found } = applyMessageToRooms(rooms, message, { meId: ME.userId, viewingRoomId: null });
     const room = next.find((entry) => entry.id === ROOMS.y2026);
     expect(found).toBe(true);
-    expect(room).toMatchObject({ unreadCount: 1, lastMessageAt: message.createdAt, lastMessage: { body: "Mensaje 10", senderName: "Tomás Herrera Vidal" } });
+    expect(room).toMatchObject({ unreadCount: 1, lastMessageAt: message.createdAt, preview: { body: "Mensaje 10", senderName: "Tomás Herrera Vidal" } });
+    // The room with the newest activity moves up, after the pinned global room.
+    expect(next.map((entry) => entry.title)).toEqual(["Toda la familia", "Cuencada 2026", "Cuencada 2025"]);
   });
 
   it("does not count my own messages, the room I am reading, or the same message twice", () => {
-    const later = (n: number, sender = PEOPLE.lucia): ReturnType<typeof makeMessage> =>
+    const later = (n: number, sender: ChatSender = PEOPLE.lucia): ReturnType<typeof makeMessage> =>
       makeMessage(n, { sender, createdAt: `2026-10-01T10:0${n % 10}:00.000Z` });
     const mine = applyMessageToRooms(rooms, later(11, ME), { meId: ME.userId, viewingRoomId: null }).rooms;
     expect(mine.find((room) => room.id === ROOMS.familia)?.unreadCount).toBe(3);
@@ -165,14 +170,22 @@ describe("room list updates", () => {
     const read = applyReadToRooms(withPreview, ROOMS.familia, message.id);
     expect(read.find((room) => room.id === ROOMS.familia)).toMatchObject({ unreadCount: 0, lastReadMessageId: message.id });
     const deleted = applyDeletedToRooms(read, ROOMS.familia, message.id);
-    expect(deleted.find((room) => room.id === ROOMS.familia)?.lastMessage).toMatchObject({ deleted: true, body: "" });
+    expect(deleted.find((room) => room.id === ROOMS.familia)?.preview).toMatchObject({ deleted: true, body: "" });
   });
 
-  it("keeps known previews across a refetch", () => {
+  it("uses the server preview, but keeps a newer one learnt from a frame across a refetch", () => {
+    expect(rooms.find((room) => room.id === ROOMS.familia)?.preview).toMatchObject({ body: "Mensaje 5", senderName: "Lucía Ramírez Solís", senderId: null });
     const message = makeMessage(21, { createdAt: "2026-10-01T10:00:00.000Z" });
     const withPreview = applyMessageToRooms(rooms, message, { meId: ME.userId, viewingRoomId: null }).rooms;
-    const refetched = roomsFromResponse(makeRooms(), withPreview);
-    expect(refetched.find((room) => room.id === ROOMS.familia)?.lastMessage?.messageId).toBe(message.id);
+    const refetched = mergeRoomLists(withPreview, roomsFromResponse(makeRooms()));
+    expect(refetched.find((room) => room.id === ROOMS.familia)?.preview?.messageId).toBe(message.id);
+  });
+
+  it("caps the unread count like the server (999)", () => {
+    const capped = roomsFromResponse(makeRooms({ familia: { unreadCount: 999 } }));
+    const message = makeMessage(30, { createdAt: "2026-10-01T10:00:00.000Z" });
+    const next = applyMessageToRooms(capped, message, { meId: ME.userId, viewingRoomId: null }).rooms;
+    expect(next.find((room) => room.id === ROOMS.familia)?.unreadCount).toBe(999);
   });
 });
 

@@ -25,13 +25,21 @@
  *    (store subscription); a still-mounted chat reconnects with a ticket for
  *    the new session.
  * 6. 403 on the ticket or close code 4003 → `forbidden` (unverified email);
- *    no retries.
+ *    no retries. Close code 4010 (session revoked) → no blind retry: one
+ *    authenticated REST call runs the normal auth flow (refresh, or logout
+ *    if refused); only a session that survives it reconnects. 1008 (bad or
+ *    used ticket), 1009, 4400 and 4008 (backpressure, longer backoff) retry
+ *    with a fresh ticket.
+ * 7. Outgoing frames stay under the server's limits (20 sends and 60 frames
+ *    per 10 s, no bursts): extra `send`s wait in a short queue, extra
+ *    `typing`/`ping` frames are dropped.
  */
 import {
   type ChatTicketResponse,
   chatTicketResponseSchema,
   WS_MAX_FRAME_BYTES,
   WS_PING_INTERVAL_MS,
+  type WsClientMessage,
   type WsClientMessageRequest,
   WsCloseCode,
   wsClientMessageSchema,
@@ -91,6 +99,9 @@ export interface ChatSocketDeps {
   random: () => number;
 }
 
+/** A validated `send` frame. */
+type WsClientSend = Extract<WsClientMessage, { type: "send" }>;
+
 /** `WebSocket.OPEN`. */
 const OPEN = 1;
 /** First retry delay. */
@@ -105,8 +116,21 @@ export const HIDDEN_PAUSE_MS = 5 * 60_000;
 export const SEND_ACK_TIMEOUT_MS = 15_000;
 /** No inbound frame (pong included) for this long → the connection is dead. */
 export const LIVENESS_TIMEOUT_MS = WS_PING_INTERVAL_MS * 2 + 10_000;
-/** Backoff floor after the server closed with 4008 (rate limited). */
+/** Backoff floor after the server closed with 4008 (rate limited / backpressure). */
 const RATE_LIMITED_ATTEMPT = 3;
+
+/** A sliding-window budget. */
+interface FrameBudget {
+  max: number;
+  windowMs: number;
+}
+
+/** `send` frames: the server allows 20 per 10 s. */
+export const SEND_BUDGET: FrameBudget = { max: 18, windowMs: 10_000 };
+/** All frames: the server allows 60 per 10 s. */
+export const FRAME_BUDGET: FrameBudget = { max: 50, windowMs: 10_000 };
+/** Bursts: the server closes at 32 queued frames; stay far below. */
+export const BURST_BUDGET: FrameBudget = { max: 8, windowMs: 1000 };
 
 /**
  * Exponential backoff with "equal jitter": half the window is fixed, half is
@@ -209,6 +233,11 @@ export class ChatConnection {
   private hiddenTimer: Timer | null = null;
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private readonly ackTimers = new Map<string, Timer>();
+  /** `send` frames waiting for budget (oldest first). */
+  private outbox: WsClientSend[] = [];
+  private drainTimer: Timer | null = null;
+  private frameTimes: number[] = [];
+  private sendTimes: number[] = [];
   private detachers: (() => void)[] = [];
 
   constructor(store: ChatStore, deps: ChatSocketDeps) {
@@ -256,24 +285,83 @@ export class ChatConnection {
 
   /**
    * Writes a client frame to the open socket after validating it with the
-   * contract. A `send` frame starts the echo timer.
+   * contract, within the rate budget. Over budget, a `send` waits in the
+   * outbox (still `true`: it will go out); other frames are dropped. A
+   * written `send` starts the echo timer.
    *
    * @param frame - The frame.
-   * @returns Whether it was written.
+   * @returns Whether it was written or queued.
    */
   readonly send = (frame: WsClientMessageRequest): boolean => {
     const socket = this.socket;
     if (socket === null || socket.readyState !== OPEN) return false;
     const parsed = wsClientMessageSchema.safeParse(frame);
     if (!parsed.success) return false;
+    const data = parsed.data;
+    if (data.type === "send") {
+      if (this.outbox.length > 0 || !this.hasBudget(true)) {
+        if (!this.outbox.some((queued) => queued.clientMessageId === data.clientMessageId)) this.outbox.push(data);
+        this.scheduleDrain();
+        return true;
+      }
+      return this.write(data);
+    }
+    return this.hasBudget(false) && this.write(data);
+  };
+
+  private write(frame: WsClientMessage): boolean {
+    const socket = this.socket;
+    if (socket === null || socket.readyState !== OPEN) return false;
     try {
-      socket.send(JSON.stringify(parsed.data));
+      socket.send(JSON.stringify(frame));
     } catch {
       return false;
     }
-    if (parsed.data.type === "send") this.startAckTimer(parsed.data.clientMessageId);
+    const now = Date.now();
+    this.frameTimes.push(now);
+    if (frame.type === "send") {
+      this.sendTimes.push(now);
+      this.startAckTimer(frame.clientMessageId);
+    }
     return true;
-  };
+  }
+
+  private hasBudget(isSend: boolean): boolean {
+    const now = Date.now();
+    const recent = (times: number[], budget: FrameBudget): number[] => times.filter((time) => now - time < budget.windowMs);
+    this.frameTimes = recent(this.frameTimes, FRAME_BUDGET);
+    this.sendTimes = recent(this.sendTimes, SEND_BUDGET);
+    const burst = this.frameTimes.filter((time) => now - time < BURST_BUDGET.windowMs).length;
+    if (this.frameTimes.length >= FRAME_BUDGET.max || burst >= BURST_BUDGET.max) return false;
+    return !isSend || this.sendTimes.length < SEND_BUDGET.max;
+  }
+
+  /** @returns How long until a `send` fits the budget again. */
+  private budgetDelay(): number {
+    const now = Date.now();
+    const waits = [0];
+    const waitFor = (times: number[], budget: FrameBudget): void => {
+      const inWindow = times.filter((time) => now - time < budget.windowMs);
+      const oldest = inWindow[inWindow.length - budget.max];
+      if (inWindow.length >= budget.max && oldest !== undefined) waits.push(oldest + budget.windowMs - now);
+    };
+    waitFor(this.frameTimes, FRAME_BUDGET);
+    waitFor(this.sendTimes, SEND_BUDGET);
+    waitFor(this.frameTimes, BURST_BUDGET);
+    return Math.max(...waits) + 1;
+  }
+
+  private scheduleDrain(): void {
+    if (this.drainTimer !== null) return;
+    this.drainTimer = setTimeout(() => {
+      this.drainTimer = null;
+      while (this.outbox.length > 0 && this.hasBudget(true)) {
+        const next = this.outbox.shift();
+        if (next !== undefined) this.write(next);
+      }
+      if (this.outbox.length > 0) this.scheduleDrain();
+    }, this.budgetDelay());
+  }
 
   /** Closes everything for good (store replaced, tests). */
   dispose(): void {
@@ -479,8 +567,26 @@ export class ChatConnection {
       this.setStatus("forbidden");
       return;
     }
+    if (code === WsCloseCode.SessionRevoked) {
+      this.setStatus("reconnecting");
+      void this.verifySessionThenRetry();
+      return;
+    }
     if (openedAt !== null && Date.now() - openedAt >= STABLE_CONNECTION_MS) this.attempt = 0;
     if (code === WsCloseCode.RateLimited) this.attempt = Math.max(this.attempt, RATE_LIMITED_ATTEMPT);
+    this.scheduleRetry();
+  }
+
+  /**
+   * After 4010: one authenticated request runs the app's auth flow. A revoked
+   * session gets 401 → refresh → `loggedOut` (the store listener then stops
+   * everything); a session that is still valid reconnects with backoff.
+   */
+  private async verifySessionThenRetry(): Promise<void> {
+    const generation = this.generation;
+    const sessionKey = this.currentSessionKey();
+    await this.store.dispatch(chatApi.endpoints.getRooms.initiate(undefined, { subscribe: false, forceRefetch: true }));
+    if (generation !== this.generation || this.refs === 0 || this.currentSessionKey() !== sessionKey) return;
     this.scheduleRetry();
   }
 
@@ -540,6 +646,10 @@ export class ChatConnection {
     this.stopPing();
     for (const timer of this.ackTimers.values()) clearTimeout(timer);
     this.ackTimers.clear();
+    // Queued sends stay `pending` in the cache and are resent on the next `open`.
+    this.outbox = [];
+    if (this.drainTimer !== null) clearTimeout(this.drainTimer);
+    this.drainTimer = null;
     this.openedAt = null;
     const socket = this.socket;
     this.socket = null;

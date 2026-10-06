@@ -8,6 +8,7 @@
  * Outside `/chat` the count is refreshed by polling while the tab is focused;
  * inside, the socket keeps the same cache entry live.
  */
+import { CHAT_UNREAD_COUNT_MAX } from "@cuencada/types";
 import { useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
 import { chatApi, useGetRoomsQuery } from "./api";
@@ -40,7 +41,16 @@ const selectRoomsResult = chatApi.endpoints.getRooms.select();
  * @returns "1 mensaje sin leer" / "3 mensajes sin leer".
  */
 export function unreadLabel(count: number): string {
+  if (count >= CHAT_UNREAD_COUNT_MAX) return `Más de ${CHAT_UNREAD_COUNT_MAX} mensajes sin leer`;
   return count === 1 ? "1 mensaje sin leer" : `${count} mensajes sin leer`;
+}
+
+/**
+ * @param count - A room's unread count (the server caps it at 999).
+ * @returns The badge text: the number, or "999+" at the cap.
+ */
+export function unreadCountText(count: number): string {
+  return count >= CHAT_UNREAD_COUNT_MAX ? `${CHAT_UNREAD_COUNT_MAX}+` : String(count);
 }
 
 /**

@@ -3,7 +3,7 @@
  * (`getRooms`). They return new values and never mutate their inputs, so they
  * work inside and outside immer drafts and are easy to unit test.
  */
-import type { ChatHistoryPage, ChatMessage, ChatRoom } from "@cuencada/types";
+import { CHAT_UNREAD_COUNT_MAX, type ChatHistoryPage, type ChatMessage, type ChatRoom } from "@cuencada/types";
 
 /** Delivery state of a message in the local cache. */
 export type ChatMessageStatus = "sent" | "pending" | "failed";
@@ -22,18 +22,20 @@ export interface ChatThread {
   nextBefore: string | null;
 }
 
-/** One-line preview of a room's latest message (built from frames and loaded history). */
+/** One-line preview of a room's latest message (from the server, frames or loaded history). */
 export interface RoomPreview {
   messageId: string;
   senderName: string | null;
+  /** Known only from frames and history (the room list gives just the name). */
   senderId: string | null;
   body: string;
+  createdAt: string;
   deleted: boolean;
 }
 
-/** A room as cached: the contract `ChatRoom` plus the preview we know about. */
-export interface ChatRoomView extends ChatRoom {
-  lastMessage: RoomPreview | null;
+/** A room as cached: the contract `ChatRoom`, with its `lastMessage` turned into a {@link RoomPreview}. */
+export interface ChatRoomView extends Omit<ChatRoom, "lastMessage"> {
+  preview: RoomPreview | null;
 }
 
 /** Options for {@link applyMessageToRooms}. */
@@ -238,27 +240,62 @@ export function previewOf(message: ChatMessage): RoomPreview {
     senderName: message.sender?.displayName ?? null,
     senderId: message.sender?.userId ?? null,
     body: message.body,
+    createdAt: message.createdAt,
     deleted: message.deletedAt !== null
   };
 }
 
-/**
- * @param rooms - Rooms from `GET /chat/rooms`.
- * @param previous - What was cached before (keeps known previews across refetches).
- * @returns The cached room list: global room first, then editions newest first.
- */
-export function roomsFromResponse(rooms: ChatRoom[], previous: ChatRoomView[] = []): ChatRoomView[] {
-  const known = new Map(previous.map((room) => [room.id, room.lastMessage]));
-  return sortRooms(rooms.map((room) => ({ ...room, lastMessage: known.get(room.id) ?? null })));
+function previewFromRoom(room: ChatRoom): RoomPreview | null {
+  const last = room.lastMessage;
+  if (last === null) return null;
+  return { messageId: last.id, senderName: last.senderDisplayName, senderId: null, body: last.preview, createdAt: last.createdAt, deleted: false };
+}
+
+function newerPreview(a: RoomPreview | null, b: RoomPreview | null): RoomPreview | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  // Same message: keep the richer copy (with the sender id).
+  if (a.messageId === b.messageId) return a.senderId !== null ? a : b;
+  return Date.parse(a.createdAt) >= Date.parse(b.createdAt) ? a : b;
 }
 
 /**
+ * @param rooms - Rooms from `GET /chat/rooms`.
+ * @returns The cached room list, sorted with {@link sortRooms}.
+ */
+export function roomsFromResponse(rooms: ChatRoom[]): ChatRoomView[] {
+  return sortRooms(
+    rooms.map((room) => {
+      const { lastMessage: _lastMessage, ...rest } = room;
+      return { ...rest, preview: previewFromRoom(room) };
+    })
+  );
+}
+
+/**
+ * Merges a refetched room list into the cache: the server's counts win, but
+ * a newer preview learnt from a frame survives.
+ *
+ * @param current - What is cached.
+ * @param incoming - The refetched list (already through {@link roomsFromResponse}).
+ * @returns The merged, sorted list.
+ */
+export function mergeRoomLists(current: ChatRoomView[], incoming: ChatRoomView[]): ChatRoomView[] {
+  const known = new Map(current.map((room) => [room.id, room.preview]));
+  return sortRooms(incoming.map((room) => ({ ...room, preview: newerPreview(known.get(room.id) ?? null, room.preview) })));
+}
+
+const EPOCH = "1970-01-01T00:00:00.000Z";
+
+/**
  * @param rooms - Cached rooms.
- * @returns A sorted copy: the global room first, then editions by year (newest first), then title.
+ * @returns A sorted copy: the global room pinned first, then the most recent activity, then the newest edition.
  */
 export function sortRooms(rooms: ChatRoomView[]): ChatRoomView[] {
   return [...rooms].sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === "global" ? -1 : 1;
+    const byActivity = Date.parse(b.lastMessageAt ?? EPOCH) - Date.parse(a.lastMessageAt ?? EPOCH);
+    if (byActivity !== 0) return byActivity;
     const byYear = (b.year ?? 0) - (a.year ?? 0);
     return byYear !== 0 ? byYear : a.title.localeCompare(b.title, "es-MX");
   });
@@ -267,29 +304,29 @@ export function sortRooms(rooms: ChatRoomView[]): ChatRoomView[] {
 /**
  * Applies a `message` frame to the room list: newer `lastMessageAt`, the
  * preview and, for messages from other people in a room not being read
- * right now, `unreadCount + 1`.
+ * right now, `unreadCount + 1` (capped like the server's count).
  *
  * @param rooms - Cached rooms.
  * @param message - The message from the frame.
  * @param context - Who I am and which room is on screen.
- * @returns The updated list and whether the room was known.
+ * @returns The updated (re-sorted) list and whether the room was known.
  */
 export function applyMessageToRooms(rooms: ChatRoomView[], message: ChatMessage, context: RoomMessageContext): RoomsUpdate {
   const room = rooms.find((entry) => entry.id === message.roomId);
   if (room === undefined) return { rooms, found: false };
   const mine = message.sender !== null && message.sender.userId === context.meId;
   const isNewer = room.lastMessageAt === null || Date.parse(message.createdAt) >= Date.parse(room.lastMessageAt);
-  // An edit of a message we already previewed (or an older one) must not count twice.
-  const alreadyPreviewed = room.lastMessage?.messageId === message.id;
+  // A message we already previewed (an idempotent resend, a replay) must not count twice.
+  const alreadyPreviewed = room.preview?.messageId === message.id;
   const countsAsUnread = !mine && isNewer && !alreadyPreviewed && context.viewingRoomId !== message.roomId;
   const updated: ChatRoomView = {
     ...room,
     lastMessageAt: isNewer ? message.createdAt : room.lastMessageAt,
-    lastMessage: isNewer ? previewOf(message) : room.lastMessage,
-    unreadCount: countsAsUnread ? room.unreadCount + 1 : room.unreadCount,
+    preview: isNewer ? previewOf(message) : room.preview,
+    unreadCount: countsAsUnread ? Math.min(CHAT_UNREAD_COUNT_MAX, room.unreadCount + 1) : room.unreadCount,
     lastReadMessageId: mine && isNewer ? message.id : room.lastReadMessageId
   };
-  return { rooms: rooms.map((entry) => (entry.id === room.id ? updated : entry)), found: true };
+  return { rooms: sortRooms(rooms.map((entry) => (entry.id === room.id ? updated : entry))), found: true };
 }
 
 /**
@@ -302,7 +339,9 @@ export function applyMessageToRooms(rooms: ChatRoomView[], message: ChatMessage,
  */
 export function applyDeletedToRooms(rooms: ChatRoomView[], roomId: string, messageId: string): ChatRoomView[] {
   return rooms.map((room) =>
-    room.id === roomId && room.lastMessage?.messageId === messageId ? { ...room, lastMessage: { ...room.lastMessage, body: "", deleted: true } } : room
+    room.id === roomId && room.preview !== null && room.preview.messageId === messageId
+      ? { ...room, preview: { ...room.preview, body: "", deleted: true } }
+      : room
   );
 }
 
@@ -319,7 +358,8 @@ export function applyReadToRooms(rooms: ChatRoomView[], roomId: string, messageI
 }
 
 /**
- * Fills a room's preview from loaded history when the list has none yet.
+ * Updates a room's preview from its loaded history when that is newer (or
+ * the same message with the sender id, so "Tú:" can be shown).
  *
  * @param rooms - Cached rooms.
  * @param roomId - The room whose history was loaded.
@@ -327,11 +367,7 @@ export function applyReadToRooms(rooms: ChatRoomView[], roomId: string, messageI
  * @returns The updated list.
  */
 export function applyHistoryPreview(rooms: ChatRoomView[], roomId: string, message: ChatMessage): ChatRoomView[] {
-  return rooms.map((room) =>
-    room.id === roomId && (room.lastMessage === null || Date.parse(message.createdAt) > Date.parse(room.lastMessageAt ?? message.createdAt))
-      ? { ...room, lastMessage: previewOf(message) }
-      : room
-  );
+  return rooms.map((room) => (room.id === roomId ? { ...room, preview: newerPreview(previewOf(message), room.preview) } : room));
 }
 
 /**

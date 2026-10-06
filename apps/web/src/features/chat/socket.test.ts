@@ -1,12 +1,14 @@
 import { WS_MAX_FRAME_BYTES, WS_PING_INTERVAL_MS, WsCloseCode } from "@cuencada/types";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { authenticatedState, makeUser } from "../../../test/auth";
+import { HttpResponse, http } from "msw";
+import { apiUrl, authenticatedState, errorBody, makeUser } from "../../../test/auth";
 import { createTestServer } from "../../../test/msw";
 import { type AppStore, makeStore } from "../../app/store";
 import { credentialsReceived, loggedOut } from "../auth/authSlice";
 import { type ChatHubEvent, resetChatEventsForTests, sendChatFrame, subscribeChatEvents } from "./events";
 import {
   BACKOFF_MAX_MS,
+  BURST_BUDGET,
   backoffDelay,
   buildChatSocketUrl,
   type ChatConnection,
@@ -16,7 +18,8 @@ import {
   LIVENESS_TIMEOUT_MS,
   parseServerFrame,
   resetChatSocketForTests,
-  SEND_ACK_TIMEOUT_MS
+  SEND_ACK_TIMEOUT_MS,
+  SEND_BUDGET
 } from "./socket";
 import { createFakeSocket, FakeSocket } from "./testing/fakeSocket";
 import { type ChatDb, chatHandlers, frames, makeChatDb, makeMessage, ticketValue } from "./testing/fixtures";
@@ -247,6 +250,55 @@ describe("ChatConnection lifecycle", { timeout: 15_000 }, () => {
     socket.open();
     socket.serverClose(WsCloseCode.Forbidden);
     expect(connection.getStatus()).toBe("forbidden");
+  });
+
+  it("on 4010 (session revoked) runs the auth flow instead of reconnecting blindly", async () => {
+    const connection = getChatConnection(store);
+    connection.acquire();
+    const socket = await connectedSocket(connection);
+    server.use(http.get(apiUrl("/chat/rooms"), () => HttpResponse.json(errorBody("UNAUTHENTICATED", "Sesión revocada."), { status: 401 })));
+
+    socket.serverClose(WsCloseCode.SessionRevoked);
+    await vi.waitFor(() => expect(store.getState().auth.status).toBe("anonymous"));
+    expect(connection.getStatus()).toBe("idle");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(FakeSocket.instances).toHaveLength(1);
+    expect(db.tickets).toHaveLength(1);
+  });
+
+  it("on 4010 reconnects when the session turns out to be valid", async () => {
+    const connection = getChatConnection(store);
+    connection.acquire();
+    (await connectedSocket(connection)).serverClose(WsCloseCode.SessionRevoked);
+    await vi.advanceTimersByTimeAsync(1000);
+    await socketCount(2);
+  });
+
+  it("retries with a fresh ticket after 1008 (used or expired ticket)", async () => {
+    const connection = getChatConnection(store);
+    connection.acquire();
+    (await socketCount(1)).serverClose(1008);
+    await vi.advanceTimersByTimeAsync(500);
+    expect((await socketCount(2)).ticket).toBe(ticketValue(2));
+  });
+
+  it("keeps sends under the server's rate limits, queueing the extra ones in order", async () => {
+    const connection = getChatConnection(store);
+    connection.acquire();
+    const socket = await connectedSocket(connection);
+    const roomId = makeMessage(1).roomId;
+    const ids = Array.from({ length: 25 }, (_, index) => `aaaaaaaa-0000-4000-8000-${String(index).padStart(12, "0")}`);
+
+    for (const clientMessageId of ids) expect(sendChatFrame({ type: "send", roomId, body: "Hola", clientMessageId })).toBe(true);
+    const sent = (): unknown[] => socket.frames().filter((frame) => typeof frame === "object" && frame !== null && "clientMessageId" in frame);
+    expect(sent()).toHaveLength(BURST_BUDGET.max);
+    // Typing is dropped while over budget rather than queued.
+    expect(sendChatFrame({ type: "typing", roomId })).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(SEND_BUDGET.windowMs);
+    expect(sent()).toHaveLength(SEND_BUDGET.max);
+    await vi.advanceTimersByTimeAsync(SEND_BUDGET.windowMs);
+    expect(sent().map((frame) => (frame as { clientMessageId: string }).clientMessageId)).toEqual(ids); // Test-only: filtered to send frames above.
   });
 
   it("drops a silent connection (no pong) and reconnects", async () => {

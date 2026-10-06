@@ -7,7 +7,7 @@ import { renderApp } from "../../../../test/renderApp";
 import { resetChatEventsForTests } from "../events";
 import { configureChatSocketForTests, resetChatSocketForTests } from "../socket";
 import { createFakeSocket, FakeSocket } from "../testing/fakeSocket";
-import { type ChatDb, chatHandlers, frames, makeChatDb, makeMessage, ME, PEOPLE, ROOMS } from "../testing/fixtures";
+import { type ChatDb, chatHandlers, frames, makeChatDb, makeMessage, makeRooms, ME, PEOPLE, ROOMS } from "../testing/fixtures";
 
 const server = createTestServer();
 let db: ChatDb;
@@ -70,11 +70,22 @@ describe("ChatPage", { timeout: 20_000 }, () => {
 
     const list = await screen.findByRole("list", { name: "Salas" });
     const links = within(list).getAllByRole("link");
-    expect(links.map((link) => link.querySelector("span span")?.textContent)).toEqual(["Toda la familia", "Cuencada 2026", "Cuencada 2025"]);
+    // The global room is pinned first, then the most recent activity.
+    expect(links.map((link) => link.querySelector("span span")?.textContent)).toEqual(["Toda la familia", "Cuencada 2025", "Cuencada 2026"]);
     expect(links[0]).toHaveAttribute("href", `/chat/${ROOMS.familia}`);
     expect(within(links[0] as HTMLElement).getByText("3 mensajes sin leer")).toBeInTheDocument();
+    expect(within(links[0] as HTMLElement).getByText("Lucía: Mensaje 5")).toBeInTheDocument();
+    expect(within(links[1] as HTMLElement).getByText("Marta: ¡Gracias por todo, familia!")).toBeInTheDocument();
     const bottom = screen.getByRole("navigation", { name: "Navegación inferior" });
     await waitFor(() => expect(within(bottom).getByRole("link", { name: /Chat, 3 mensajes sin leer/ })).toBeInTheDocument());
+  });
+
+  it("shows 999+ when the server caps the unread count", async () => {
+    db.rooms = makeRooms({ familia: { unreadCount: 999 } });
+    renderApp("/chat", authenticatedState());
+    const room = await screen.findByRole("link", { name: /Toda la familia/ });
+    expect(within(room).getByText("999+")).toBeInTheDocument();
+    expect(within(room).getByText("Más de 999 mensajes sin leer")).toBeInTheDocument();
   });
 
   it("updates unread counts, previews and the tab badge from live frames", async () => {

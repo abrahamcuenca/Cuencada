@@ -7,7 +7,7 @@ import { Skeleton } from "../../../shared/ui/Skeleton";
 import styles from "../chat.module.css";
 import { roomTimeLabel } from "../lib/format";
 import type { ChatRoomView, RoomPreview } from "../lib/thread";
-import { unreadLabel } from "../unread";
+import { unreadCountText, unreadLabel } from "../unread";
 
 /** Props for {@link RoomList}. */
 export interface RoomListProps {
@@ -61,7 +61,7 @@ export function RoomList({ rooms, loading, error, onRetry, activeRoomId, meId, n
       ) : (
         <ul className={styles.rooms} aria-label="Salas">
           {rooms.map((room) => {
-            const preview = previewText(room.lastMessage, meId);
+            const preview = previewText(room.preview, meId);
             const unread = room.unreadCount > 0;
             return (
               <li key={room.id}>
@@ -81,7 +81,7 @@ export function RoomList({ rooms, loading, error, onRetry, activeRoomId, meId, n
                     {room.lastMessageAt === null ? null : <span>{roomTimeLabel(room.lastMessageAt, now, timeZone)}</span>}
                     {unread ? (
                       <Badge tone="festive" shape="count" srLabel={unreadLabel(room.unreadCount)}>
-                        {room.unreadCount}
+                        {unreadCountText(room.unreadCount)}
                       </Badge>
                     ) : null}
                   </span>

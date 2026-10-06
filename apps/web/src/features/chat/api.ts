@@ -1,4 +1,4 @@
-import type { ChatHistoryPage, ChatRoom, ChatTicketResponse } from "@cuencada/types";
+import { CHAT_HISTORY_LIMIT_MAX, type ChatHistoryPage, type ChatRoom, type ChatTicketResponse } from "@cuencada/types";
 import type { WithAuthState } from "../auth/authSlice";
 import { baseApi } from "../../shared/api/baseApi";
 import { type ChatHubEvent, getViewingRoom, sendChatFrame, subscribeChatEvents } from "./events";
@@ -13,13 +13,14 @@ import {
   type ChatThread,
   lastServerMessage,
   mergeLatestPage,
+  mergeRoomLists,
   roomsFromResponse,
   setLocalStatus,
   threadFromPage
 } from "./lib/thread";
 
-/** Messages per history page (the contract allows 1–100). */
-export const CHAT_PAGE_SIZE = 50;
+/** Messages per history page (the contract's maximum). */
+export const CHAT_PAGE_SIZE = CHAT_HISTORY_LIMIT_MAX;
 
 /** Args of `getMessagesBefore`. */
 export interface OlderMessagesArgs {
@@ -62,7 +63,7 @@ export const chatApi = baseApi.injectEndpoints({
       query: () => "/chat/rooms",
       // `merge` keeps previews we learnt from frames when the list is refetched.
       transformResponse: (rooms: ChatRoom[]) => roomsFromResponse(rooms),
-      merge: (current, incoming) => roomsFromResponse(incoming, current),
+      merge: (current, incoming) => mergeRoomLists(current, incoming),
       providesTags: [{ type: "ChatRoom", id: "LIST" }],
       async onCacheEntryAdded(_arg, { cacheDataLoaded, cacheEntryRemoved, updateCachedData, getState, dispatch }) {
         try {
