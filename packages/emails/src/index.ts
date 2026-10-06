@@ -14,7 +14,9 @@ export {
 export { EmailRenderError, EmailRenderErrorCode } from "./errors.js";
 export {
   assertSafeUrl,
+  cleanAlertName,
   cleanName,
+  defangLinks,
   endSentence,
   DEFAULT_LOCALE,
   DEFAULT_TIME_ZONE,
@@ -38,9 +40,15 @@ export {
 } from "./templates/AdminAccountChangedEmail.js";
 export {
   AdminAlertLimitEmail,
+  AdminAlertLimitTopic,
   type AdminAlertLimitEmailProps,
   buildAdminAlertLimitContent,
 } from "./templates/AdminAlertLimitEmail.js";
+export {
+  AdminInviteAcceptedEmail,
+  type AdminInviteAcceptedEmailProps,
+  buildAdminInviteAcceptedContent,
+} from "./templates/AdminInviteAcceptedEmail.js";
 export {
   buildInviteContent,
   InviteEmail,

@@ -4,9 +4,9 @@
  * text node, never as HTML, so a stored `<img onerror>` stays inert text.
  */
 
-/** A badge derived from T8-BE's admin-alert audit metadata. */
+/** A badge derived from the admin-alert audit metadata (T8-BE, WP-2.3b). */
 export interface AlertFlag {
-  key: "adminAlertExempt" | "adminAlertLimitNotice" | "adminAlertSkipped";
+  key: "adminAlertExempt" | "adminAlertLimitNotice" | "adminAlertSkipped" | "inviteAlertLimitNotice" | "inviteAlertSkipped";
   label: string;
   tone: "accent" | "danger" | "festive";
 }
@@ -15,7 +15,9 @@ export interface AlertFlag {
  * Badges for the admin-alert flags T8-BE writes on admin-account changes:
  * - `adminAlertExempt`: always announced, even past the daily cap;
  * - `adminAlertLimitNotice`: this change sent the day's single "límite de avisos" email instead;
- * - `adminAlertSkipped`: no alert email went out for this change.
+ * - `adminAlertSkipped`: no alert email went out for this change;
+ * - `inviteAlertLimitNotice` (WP-2.3b): this open-invite acceptance sent the day's single limit notice instead;
+ * - `inviteAlertSkipped` (WP-2.3b): an open-invite acceptance sent no admin alert (daily cap reached).
  * Only literal `true` counts (metadata is free-form JSON).
  *
  * @param metadata - An audit entry's metadata.
@@ -26,6 +28,10 @@ export function alertFlags(metadata: Record<string, unknown>): AlertFlag[] {
   if (metadata.adminAlertExempt === true) flags.push({ key: "adminAlertExempt", label: "Aviso obligatorio", tone: "festive" });
   if (metadata.adminAlertLimitNotice === true) flags.push({ key: "adminAlertLimitNotice", label: "Límite de avisos alcanzado", tone: "accent" });
   if (metadata.adminAlertSkipped === true) flags.push({ key: "adminAlertSkipped", label: "Aviso no enviado", tone: "danger" });
+  if (metadata.inviteAlertLimitNotice === true) {
+    flags.push({ key: "inviteAlertLimitNotice", label: "Límite de avisos alcanzado", tone: "accent" });
+  }
+  if (metadata.inviteAlertSkipped === true) flags.push({ key: "inviteAlertSkipped", label: "Aviso no enviado", tone: "danger" });
   return flags;
 }
 

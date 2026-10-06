@@ -78,6 +78,25 @@ describe("InvitesPage", { timeout: 15_000 }, () => {
     expect(screen.queryByText(/solo se muestra una vez/)).not.toBeInTheDocument();
   });
 
+  it("defaults an open link to 5 uses and 72 hours and explains why", async () => {
+    const user = userEvent.setup();
+    renderApp("/admin/invitaciones", authenticatedState(ADMIN_USER));
+    const form = await openForm(user);
+    const help = "Por seguridad, los enlaces abiertos caducan en 72 horas y avisan a los administradores cada vez que alguien se une.";
+    expect(within(form).queryByText(help)).not.toBeInTheDocument();
+
+    await user.click(within(form).getByRole("radio", { name: /Enlace para compartir/ }));
+
+    const uses = within(form).getByRole("spinbutton", { name: /Cuántas personas/ });
+    const days = within(form).getByRole("spinbutton", { name: /Vence en/ });
+    expect(uses).toHaveValue(5);
+    expect(uses).toHaveAttribute("max", "10");
+    expect(days).toHaveValue(3);
+    expect(days).toHaveAttribute("max", "3");
+    expect(within(form).getByText(help)).toBeInTheDocument();
+    expect(within(form).getByText(/hasta 10 personas y 72 horas/)).toBeInTheDocument();
+  });
+
   it("validates the open-invite limits before sending", async () => {
     const user = userEvent.setup();
     renderApp("/admin/invitaciones", authenticatedState(ADMIN_USER));
@@ -86,14 +105,14 @@ describe("InvitesPage", { timeout: 15_000 }, () => {
     await user.click(within(form).getByRole("radio", { name: /Enlace para compartir/ }));
     const uses = within(form).getByRole("spinbutton", { name: /Cuántas personas/ });
     await user.clear(uses);
-    await user.type(uses, "25");
+    await user.type(uses, "11");
     const days = within(form).getByRole("spinbutton", { name: /Vence en/ });
     await user.clear(days);
-    await user.type(days, "20");
+    await user.type(days, "4");
     await user.click(within(form).getByRole("button", { name: "Crear enlace" }));
 
-    expect(await within(form).findByText("Una invitación abierta admite como máximo 20 usos.")).toBeInTheDocument();
-    expect(within(form).getByText("Una invitación abierta dura como máximo 14 días.")).toBeInTheDocument();
+    expect(await within(form).findByText("Un enlace abierto admite como máximo 10 usos.")).toBeInTheDocument();
+    expect(within(form).getByText("Un enlace abierto dura como máximo 72 horas (3 días).")).toBeInTheDocument();
     expect(writes(db)).toHaveLength(0);
   });
 
@@ -109,7 +128,7 @@ describe("InvitesPage", { timeout: 15_000 }, () => {
     await user.click(within(form).getByRole("button", { name: "Crear enlace" }));
 
     const box = await screen.findByRole("region", { name: "Enlace de invitación listo" });
-    expect(writes(db)[0]?.body).toEqual({ email: null, role: "member", maxUses: 10, expiresInDays: 7, sendEmail: false, note: "Primos de Oaxaca" });
+    expect(writes(db)[0]?.body).toEqual({ email: null, role: "member", maxUses: 5, expiresInDays: 3, sendEmail: false, note: "Primos de Oaxaca" });
     expect(within(box).getByText(/Este enlace solo se muestra una vez/)).toBeInTheDocument();
     expect(within(box).getByRole("textbox", { name: "Enlace de invitación" })).toHaveValue(ONE_TIME_URL);
 

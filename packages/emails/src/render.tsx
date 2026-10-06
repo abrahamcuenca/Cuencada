@@ -15,6 +15,10 @@ import {
   buildAdminAlertLimitContent,
 } from "./templates/AdminAlertLimitEmail.js";
 import {
+  type AdminInviteAcceptedEmailProps,
+  buildAdminInviteAcceptedContent,
+} from "./templates/AdminInviteAcceptedEmail.js";
+import {
   type InviteEmailProps,
   buildInviteContent,
 } from "./templates/InviteEmail.js";
@@ -44,6 +48,7 @@ export const EmailKind = {
   VerifyEmail: "verify-email",
   AdminAccountChanged: "admin-account-changed",
   AdminAlertLimit: "admin-alert-limit",
+  AdminInviteAccepted: "admin-invite-accepted",
 } as const;
 
 export type EmailKind = (typeof EmailKind)[keyof typeof EmailKind];
@@ -59,7 +64,11 @@ export type EmailTemplate =
       kind: typeof EmailKind.AdminAccountChanged;
       props: AdminAccountChangedEmailProps;
     }
-  | { kind: typeof EmailKind.AdminAlertLimit; props: AdminAlertLimitEmailProps };
+  | { kind: typeof EmailKind.AdminAlertLimit; props: AdminAlertLimitEmailProps }
+  | {
+      kind: typeof EmailKind.AdminInviteAccepted;
+      props: AdminInviteAcceptedEmailProps;
+    };
 
 /** A rendered email, ready for the Mailer (Resend `subject`/`html`/`text`). */
 export interface RenderedEmail {
@@ -87,6 +96,8 @@ function buildContent(
       return buildAdminAccountChangedContent(template.props, options);
     case EmailKind.AdminAlertLimit:
       return buildAdminAlertLimitContent(template.props, options);
+    case EmailKind.AdminInviteAccepted:
+      return buildAdminInviteAcceptedContent(template.props, options);
     default: {
       // Compile-time exhaustiveness check; reached at runtime only with untyped input.
       // The props are never echoed: they carry single-use tokens.
