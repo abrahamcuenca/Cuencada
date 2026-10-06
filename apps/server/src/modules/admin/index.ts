@@ -1,11 +1,20 @@
 /**
- * Admin module (T8 owns this folder). Registered under `/api` by
- * `app.ts`; add routes here: `/admin/users*` and `/admin/audit-logs`.
- * See `docs/coordination/WP-0.4.md` for the route checklist.
+ * Admin module (T8) [SEC]: user management, the read-only audit log viewer
+ * and the dashboard summary. Registered under `/api` by `app.ts`. Every route
+ * is `auth: "admin"` and every mutation writes an audit row.
+ *
+ * See `docs/coordination/WP-T8-BE.md`.
  */
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
+import adminAuditRoutes from "./auditRoutes.js";
+import adminSummaryRoutes from "./summaryRoutes.js";
+import adminUserRoutes from "./userRoutes.js";
 
-/** Admin routes under `/api` (stub until T8). */
-const adminModule: FastifyPluginAsyncZod = async () => {};
+/** Admin routes under `/api`. */
+const adminModule: FastifyPluginAsyncZod = async (app) => {
+  await app.register(adminUserRoutes);
+  await app.register(adminAuditRoutes);
+  await app.register(adminSummaryRoutes);
+};
 
 export default adminModule;
