@@ -74,3 +74,4 @@ Usage: `const app = await createTestApp(); const user = await createUser({ role:
   - 9: jitter added.
   - 10: root vitest is now `^3.2.7`.
   - 11: `docs/plan.md` now references `scripts/test-db.sh`.
+- **Cross-WP edit (WP-0.6, PR #6):** `apps/web/test/setup.ts` now wraps `Request` to drop jsdom abort signals, which Node undici rejects ("Expected signal to be an instance of AbortSignal"); without it every RTK Query `fetchBaseQuery` call fails in jsdom. Bridging to a native signal is not feasible because jsdom replaces the global `AbortController`. There is a `TODO(WP-0.1)`, and the details are in WP-0.6.md.
