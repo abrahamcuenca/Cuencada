@@ -58,7 +58,7 @@ describe("verified-email gate", () => {
       expect(anonymous.statusCode, route.url).toBe(401);
       const forbidden = await app.inject({ ...route, ...unverifiedAuth });
       expect(forbidden.statusCode, route.url).toBe(403);
-      expect(forbidden.json<ApiError>().error.code).toBe("FORBIDDEN");
+      expect(forbidden.json<ApiError>().error.code).toBe("EMAIL_UNVERIFIED");
     }
   });
 });

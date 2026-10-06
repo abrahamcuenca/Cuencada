@@ -1,7 +1,7 @@
 /**
  * Directory module (T5): the member directory. Registered under `/api` by
  * `app.ts`. Both routes are `auth: "user"` with `requireVerifiedEmail`, so
- * unverified members get 403 `FORBIDDEN` (ADR 0001).
+ * unverified members get 403 `EMAIL_UNVERIFIED` (ADR 0001).
  *
  * Every entry goes through `toDirectoryEntry()` and `directoryEntrySchema`:
  * hidden contact fields are absent, never `null`.

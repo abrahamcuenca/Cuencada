@@ -543,7 +543,7 @@ describe("GET /api/cuencadas/:year/attendees", () => {
       ...(await loginAs(app, unverified))
     });
     expect(res.statusCode).toBe(403);
-    expect(errorOf(res.body).code).toBe("FORBIDDEN");
+    expect(errorOf(res.body).code).toBe("EMAIL_UNVERIFIED");
     expect(
       (
         await app.inject({

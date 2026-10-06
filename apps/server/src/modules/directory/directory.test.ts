@@ -313,7 +313,7 @@ describe("GET /api/directory", () => {
 
     expect(anonymous.statusCode).toBe(401);
     expect(forbidden.statusCode).toBe(403);
-    expect(errorCode(forbidden.body)).toBe("FORBIDDEN");
+    expect(errorCode(forbidden.body)).toBe("EMAIL_UNVERIFIED");
     expect(mustChange.statusCode).toBe(403);
   });
 
