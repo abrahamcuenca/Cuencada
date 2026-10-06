@@ -117,7 +117,25 @@ Both live in `tests/e2e/harness/`, **outside `apps/server/src`**. They aren't co
   - Before this, Chromium resolved the CSS stack (`system-ui, …, "Noto Sans", Arial, sans-serif`) to whatever each machine had. Glyph widths differed, so CI failed the 320 px overflow check on the year pages while local runs passed.
   - DejaVu is wide, so it's a pessimistic font for overflow, and it's Ubuntu's default fallback.
 - **Each route waits for a content heading before measuring** (year pages, Fotos, Directorio, Árbol). An error state can't pass the gate.
-- **Horizontal overflow** (`scrollWidth <= clientWidth`): 0 failures after the year-page fix (bug 3). Content clipped inside a horizontal scroller that itself fits isn't reported as a culprit. The 2027 fixture includes an item with long unbreakable tokens (a URL, a place name, a 24-character tag).
+- **Horizontal overflow:** 0 failures locally after the year-page fix (bug 3). Three assertions per check:
+  - `scrollWidth <= clientWidth` now;
+  - `innerWidth <= clientWidth`: mobile Chrome zooms out to fit wider content and **stays** zoomed out, so a fixed bar then measures wider than the screen;
+  - **no overflow at any point while the page loaded.** An init script records, from the first frame, the worst overflow and its culprits at that moment.
+
+  How culprits are listed:
+  - `position: fixed` elements and their descendants are skipped. They follow the (zoomed) layout viewport, so they're a symptom, never the cause.
+  - Sticky elements are kept on purpose: they stay in flow and can widen the page.
+  - Content clipped inside a horizontal scroller that itself fits isn't listed.
+
+  Fixtures and self-tests:
+  - The 2027 fixture includes an item with long unbreakable tokens (a URL, a place name, a 24-character tag).
+  - Self-tests: a synthetic page with a 2 px-too-wide fixed bar plus a block that is too wide only for its first 300 ms. The fixed bar isn't named, and the transient block is.
+  - `quality-gates.json` carries a font fingerprint (widths of reference strings in the body font), so a CI run can be compared with a local one.
+- **Open: `/directorio` @ 320 px fails in CI (run 37516431676) but not locally.** In CI, `scrollWidth` was 322 and only the fixed bottom nav was named; the layout viewport had become 322×745, i.e. zoomed out. What I checked:
+  - **Local runs pass:** the full suite with 2 workers and `CI=1`, a CPU-throttled (×6) replay of the gate's navigation sequence, and Chromium from `mcr.microsoft.com/playwright:v1.63.0-noble` with the same font files.
+  - **CI's DOM and CSS are fine:** the DOM snapshot from the CI trace (CI DOM and CSS, rendered locally at 320 px) lays out at exactly 320 (search bar 0–320, "Filtros" 209–304).
+  - **Fonts match:** CI's DejaVu and Noto Color Emoji are the same package versions as local.
+  - **Conclusion:** I couldn't reproduce or find the culprit, so I haven't guessed a product fix. The next CI run reports the transient culprits and the font fingerprint.
 - **Touch targets ≥ 44 px:** every visible interactive element is sampled (3–38 per route), 0 failures. The exemptions follow WCAG 2.5.8:
   - links inline in a sentence
   - the off-screen skip link

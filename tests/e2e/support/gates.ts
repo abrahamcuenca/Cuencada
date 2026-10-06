@@ -2,7 +2,7 @@
  * Mobile quality-gate probes run inside the page: horizontal overflow, touch
  * target sizes (sampled) and form-control font sizes.
  */
-import type { Page } from "@playwright/test";
+import type { BrowserContext, Page } from "@playwright/test";
 
 /** One element that failed a probe. */
 export interface GateFinding {
@@ -11,32 +11,94 @@ export interface GateFinding {
   detail: string;
 }
 
-/** Overflow: the document must not scroll sideways. */
-export async function horizontalOverflow(page: Page): Promise<{ scrollWidth: number; clientWidth: number; culprits: GateFinding[] }> {
-  return page.evaluate(() => {
-    const root = document.documentElement;
-    const clientWidth = root.clientWidth;
-    const culprits: { element: string; detail: string }[] = [];
-    if (root.scrollWidth > clientWidth) {
-      // Content inside a horizontal scroller (overflow-x other than visible) that itself fits is not a culprit.
-      const clippedByScroller = (element: HTMLElement): boolean => {
-        for (let parent = element.parentElement; parent !== null && parent !== document.body; parent = parent.parentElement) {
-          if (getComputedStyle(parent).overflowX !== "visible" && parent.getBoundingClientRect().right <= clientWidth + 1) return true;
-        }
-        return false;
-      };
-      for (const element of Array.from(document.body.querySelectorAll<HTMLElement>("*"))) {
-        const rect = element.getBoundingClientRect();
-        if (rect.width > 0 && rect.right > clientWidth + 1 && culprits.length < 5 && !clippedByScroller(element)) {
-          culprits.push({
-            element: `${element.tagName.toLowerCase()}${element.className ? `.${String(element.className).split(" ")[0]}` : ""}`,
-            detail: `right=${Math.round(rect.right)}px`
-          });
+/** Result of the overflow probe. */
+export interface OverflowResult {
+  scrollWidth: number;
+  clientWidth: number;
+  /** `window.innerWidth`: above `clientWidth` when the browser zoomed out to fit wider content. */
+  innerWidth: number;
+  culprits: GateFinding[];
+  /** The worst overflow seen while the page loaded (see {@link recordTransientOverflow}), or null. */
+  transient: { scrollWidth: number; clientWidth: number; atMs: number; culprits: GateFinding[] } | null;
+}
+
+/**
+ * In-page culprit finder (serialised into the page, so self-contained).
+ * Lists in-flow elements whose right edge passes the viewport. Skipped:
+ * `position: fixed` elements and their descendants (they follow the
+ * viewport, so they are a symptom of a wider layout viewport, never the
+ * cause) and content clipped by a horizontal scroller that itself fits.
+ * Sticky elements are kept: they stay in flow and can widen the page.
+ */
+function findOverflowCulprits(): { element: string; detail: string }[] {
+  const clientWidth = document.documentElement.clientWidth;
+  const inFixed = (element: Element): boolean => {
+    for (let node: Element | null = element; node !== null && node !== document.body; node = node.parentElement) {
+      if (getComputedStyle(node).position === "fixed") return true;
+    }
+    return false;
+  };
+  const clippedByScroller = (element: Element): boolean => {
+    for (let parent = element.parentElement; parent !== null && parent !== document.body; parent = parent.parentElement) {
+      if (getComputedStyle(parent).overflowX !== "visible" && parent.getBoundingClientRect().right <= clientWidth + 0.5) return true;
+    }
+    return false;
+  };
+  const culprits: { element: string; detail: string }[] = [];
+  for (const element of Array.from(document.body.querySelectorAll("*"))) {
+    if (culprits.length >= 8) break;
+    const rect = element.getBoundingClientRect();
+    if (rect.width === 0 || rect.right <= clientWidth + 0.5 || inFixed(element) || clippedByScroller(element)) continue;
+    const cls = typeof element.className === "string" && element.className !== "" ? `.${element.className.split(" ")[0]}` : "";
+    const text = (element.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 30);
+    culprits.push({
+      element: `${element.tagName.toLowerCase()}${cls}`,
+      detail: `right=${rect.right.toFixed(1)}px width=${rect.width.toFixed(1)}px position=${getComputedStyle(element).position} text="${text}"`
+    });
+  }
+  return culprits;
+}
+
+/**
+ * Record, from the first frame of every page in `context`, the worst
+ * horizontal overflow and its culprits at that moment. A transient overflow
+ * matters on its own: mobile Chrome zooms out to fit the widest content and
+ * stays zoomed out, which is how a CI run ended with a 322 px layout
+ * viewport on a 320 px phone.
+ */
+export async function recordTransientOverflow(context: BrowserContext): Promise<void> {
+  await context.addInitScript(`(() => {
+    const find = ${findOverflowCulprits.toString()};
+    const start = performance.now();
+    window.__e2eOverflow = null;
+    const tick = () => {
+      const root = document.documentElement;
+      if (root && document.body && root.scrollWidth > root.clientWidth) {
+        const worst = window.__e2eOverflow;
+        if (worst === null || root.scrollWidth > worst.scrollWidth) {
+          window.__e2eOverflow = { scrollWidth: root.scrollWidth, clientWidth: root.clientWidth, atMs: Math.round(performance.now() - start), culprits: find() };
         }
       }
-    }
-    return { scrollWidth: root.scrollWidth, clientWidth, culprits };
-  });
+      if (performance.now() - start < 15000) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  })();`);
+}
+
+/** Overflow: the document must not scroll sideways, now or at any point while it loaded. */
+export async function horizontalOverflow(page: Page): Promise<OverflowResult> {
+  const now = await page.evaluate(`(() => {
+    const find = ${findOverflowCulprits.toString()};
+    const root = document.documentElement;
+    return {
+      scrollWidth: root.scrollWidth,
+      clientWidth: root.clientWidth,
+      innerWidth: window.innerWidth,
+      culprits: root.scrollWidth > root.clientWidth || window.innerWidth > root.clientWidth ? find() : [],
+      transient: window.__e2eOverflow ?? null
+    };
+  })()`);
+  return now as OverflowResult; // shape built by the expression above
 }
 
 /** Minimum touch target (plan: 44×44 px). */

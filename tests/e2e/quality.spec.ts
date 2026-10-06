@@ -14,7 +14,7 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Page, TestInfo } from "@playwright/test";
 import { CastRole, castMember, FUTURE_YEAR, ProjectKey, SEEDED_YEAR } from "./harness/people.js";
 import { expect, login, test } from "./support/fixtures.js";
-import { type GateFinding, horizontalOverflow, smallInputFonts, smallTouchTargets } from "./support/gates.js";
+import { type GateFinding, horizontalOverflow, type OverflowResult, recordTransientOverflow, smallInputFonts, smallTouchTargets } from "./support/gates.js";
 
 const WIDTHS = [320, 375] as const;
 const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
@@ -68,7 +68,7 @@ const ADMIN_ROUTES: RouteCheck[] = [
 interface RouteResult {
   route: string;
   width: number;
-  overflow: { scrollWidth: number; clientWidth: number; culprits: GateFinding[] };
+  overflow: OverflowResult;
   targets: { sampled: number; findings: GateFinding[] };
   inputFonts: GateFinding[];
   axe?: { id: string; impact: string | null | undefined; nodes: number; help: string }[];
@@ -109,7 +109,21 @@ async function checkRoutes(page: Page, testInfo: TestInfo, routes: RouteCheck[])
       results.push(result);
     }
   }
-  const body = JSON.stringify(results, null, 2);
+  // Font fingerprint (widths of reference strings in the page's body font): compare a CI run
+  // with a local one to rule fonts in or out when only one of them overflows.
+  const fontProbe = await page.evaluate(() => {
+    const span = document.createElement("span");
+    span.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap;font:600 16px var(--font-body, sans-serif)";
+    document.body.append(span);
+    const widths: Record<string, number> = {};
+    for (const text of ["Directorio familiar", "Filtros", "⚙️🔎💬📅", "Pueblo Ejemplo · Norte"]) {
+      span.textContent = text;
+      widths[text] = Number(span.getBoundingClientRect().width.toFixed(3));
+    }
+    span.remove();
+    return widths;
+  });
+  const body = JSON.stringify({ fontProbe, results }, null, 2);
   writeFileSync(testInfo.outputPath("quality-gates.json"), body);
   await testInfo.attach("quality-gates.json", { body, contentType: "application/json" });
   return results;
@@ -118,9 +132,12 @@ async function checkRoutes(page: Page, testInfo: TestInfo, routes: RouteCheck[])
 function assertGates(results: RouteResult[]): void {
   for (const result of results) {
     const where = `${result.route} @ ${result.width}px`;
-    expect.soft(result.overflow.scrollWidth, `${where}: horizontal overflow ${JSON.stringify(result.overflow.culprits)}`).toBeLessThanOrEqual(
-      result.overflow.clientWidth
+    const { overflow } = result;
+    expect.soft(overflow.scrollWidth, `${where}: horizontal overflow ${JSON.stringify(overflow.culprits)}`).toBeLessThanOrEqual(overflow.clientWidth);
+    expect.soft(overflow.innerWidth, `${where}: layout viewport wider than the screen (zoomed out) ${JSON.stringify(overflow.culprits)}`).toBeLessThanOrEqual(
+      overflow.clientWidth
     );
+    expect.soft(overflow.transient, `${where}: horizontal overflow while the page loaded`).toBeNull();
     expect.soft(result.inputFonts, `${where}: form controls under 16px`).toEqual([]);
     expect.soft(result.targets.findings, `${where}: touch targets under 44px (${result.targets.sampled} sampled)`).toEqual([]);
     const serious = (result.axe ?? []).filter((violation) => violation.impact === "serious" || violation.impact === "critical");
@@ -141,24 +158,44 @@ test.describe("mobile quality gates", () => {
       </main>`);
     const overflow = await horizontalOverflow(page);
     expect(overflow.scrollWidth).toBeGreaterThan(overflow.clientWidth);
+    expect(overflow.culprits.map((culprit) => culprit.element)).toContain("div");
     const targets = await smallTouchTargets(page);
     expect(targets.findings.map((finding) => finding.element)).toEqual(['button "x"', 'input ""']);
     expect(await smallInputFonts(page)).toEqual([{ element: "input[name=small]", detail: "14px" }]);
   });
 
+  test("the overflow probe names in-flow culprits, skips fixed bars, and records transient overflow", async ({ page }) => {
+    await recordTransientOverflow(page.context());
+    await page.setViewportSize({ width: 320, height: 640 });
+    // A fixed bar that is 2 px too wide plus an in-flow block that is too wide only for the first 300 ms.
+    await page.goto(
+      `data:text/html,${encodeURIComponent(`<meta name="viewport" content="width=device-width, initial-scale=1">
+      <body style="margin:0"><main><div id="late" class="transient" style="width:400px">ancho al cargar</div></main>
+      <nav class="bar" style="position:fixed;bottom:0;left:0;width:322px;height:40px"><a href="#x">Inicio</a></nav>
+      <script>setTimeout(() => { document.getElementById("late").style.width = "100px"; }, 300);</script></body>`)}`
+    );
+    await page.waitForTimeout(800);
+    const overflow = await horizontalOverflow(page);
+    expect(overflow.culprits.some((culprit) => culprit.element.startsWith("nav") || culprit.element === "a")).toBe(false);
+    expect(overflow.transient?.culprits.map((culprit) => culprit.element)).toContain("div.transient");
+  });
+
   test("public routes", async ({ page }, testInfo) => {
     test.setTimeout(180_000);
+    await recordTransientOverflow(page.context());
     assertGates(await checkRoutes(page, testInfo, PUBLIC_ROUTES));
   });
 
   test("member routes", async ({ page }, testInfo) => {
     test.setTimeout(240_000);
+    await recordTransientOverflow(page.context());
     await login(page, castMember(ProjectKey.Iphone, CastRole.Fede));
     assertGates(await checkRoutes(page, testInfo, MEMBER_ROUTES));
   });
 
   test("admin routes", async ({ page }, testInfo) => {
     test.setTimeout(180_000);
+    await recordTransientOverflow(page.context());
     await login(page, castMember(ProjectKey.Iphone, CastRole.Admin));
     assertGates(await checkRoutes(page, testInfo, ADMIN_ROUTES));
   });
