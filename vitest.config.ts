@@ -45,16 +45,6 @@ export default defineConfig({
         }
       },
       {
-        root: fromRoot("./packages/emails"),
-        esbuild: { jsx: "automatic" },
-        test: {
-          name: "emails",
-          environment: "node",
-          include: ["src/**/*.test.{ts,tsx}"],
-          exclude: ["**/node_modules/**", "**/dist/**"]
-        }
-      },
-      {
         root: fromRoot("./packages/types"),
         resolve: { alias: sharedAlias },
         test: {
