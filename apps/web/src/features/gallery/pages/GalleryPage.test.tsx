@@ -278,7 +278,20 @@ describe("GalleryPage uploads", () => {
     expect(FakeXhr.instances).toHaveLength(0);
   });
 
-  it("downscales a photo above 40 MP to a ≤ 24 MP JPEG before the intent", async () => {
+  it("uploads a 48 MP iPhone photo as is when the canvas can't be created (iOS area cap)", async () => {
+    stubImagePipeline({ width: 8064, height: 6048 }, { canvasFails: true });
+    const user = userEvent.setup();
+    const file = pngOfSize(8064, 6048, "IMG_48MP.png");
+    renderApp("/galeria/2026", authenticatedState());
+
+    await pickAndUpload(user, [file]);
+
+    const xhr = await waitForXhr(1);
+    expect(db.bodies["POST uploads IMG_48MP.png"]).toMatchObject({ mimeType: "image/png", byteSize: file.size });
+    expect(xhr.body).toBe(file);
+  });
+
+  it("downscales a photo above 40 MP to a ≤ 16 MP JPEG before the intent", async () => {
     const fake = stubImagePipeline({ width: 16320, height: 12240 }, 4321);
     const user = userEvent.setup();
     renderApp("/galeria/2026", authenticatedState());

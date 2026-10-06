@@ -69,6 +69,6 @@ Built on `origin/main` against the profile contract (`packages/types/src/profile
   - "Cargar más" that gets a 400 (stale cursor, e.g. after hiding myself) drops the extra pages and reloads page 1.
   - **Phones:** no country code is ever assumed. `+`/`00`/11–15 digits are international (WhatsApp + `tel:+…`); shorter numbers are local (`tel:` as typed, no `wa.me`, note "Este número no tiene código de país…"). Buttons show the number ("WhatsApp +52 …", "Llamar al …"). Request: store E.164 server-side.
   - City filter: prefix suggestions (accent/case-insensitive) from the rows already loaded.
-  - Avatar: unmount also aborts the confirm request; no bucket origin → refused before any intent; photos above 2048 px on the long edge are re-encoded as a 2048 px JPEG (q 0.9) first, so 48–200 MP phone photos pass the server's 24 MP cap; the size limit is checked after that.
+  - Avatar: unmount also aborts the confirm request; no bucket origin → refused before any intent; photos above 2048 px on the long edge are re-encoded as a 2048 px JPEG (q 0.9) first, so 48–200 MP phone photos pass the server's 24 MP cap; the size limit is checked after that. If that resize fails, a photo within 24 MP goes as is; above it the user gets "No pudimos leer esta foto…".
   - 403 states use the shared `classifyAccessDenial` (also `EMAIL_UNVERIFIED`).
   - Screenshot `t5/directorio-telefonos-{375,1280}` (local number, no WhatsApp).

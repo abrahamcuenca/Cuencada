@@ -31,6 +31,18 @@ export interface ImagePipelineFake {
   closed: number;
   /** Size of the re-encoded blob. */
   outputBytes: number;
+  /** `resizeWidth` asked of the decoder, per decode (`null` for a full decode). */
+  decodeWidths: Array<number | null>;
+}
+
+/** Options of {@link stubImagePipeline}. */
+export interface ImagePipelineOptions {
+  /** Size of the fake re-encoded JPEG. */
+  outputBytes?: number;
+  /** Make the canvas fail like iOS WebKit above its 16,777,216 px area cap. */
+  canvasFails?: boolean;
+  /** Make the decoder reject `resizeWidth` (older WebKit), forcing a full decode. */
+  noResizeOptions?: boolean;
 }
 
 /**
@@ -38,18 +50,23 @@ export interface ImagePipelineFake {
  * `OffscreenCanvas` globals. Undo with `vi.unstubAllGlobals()`.
  *
  * @param decoded - The decoded size, or `"fail"` to reject like a corrupt file.
- * @param outputBytes - Size of the fake re-encoded JPEG.
+ * @param options - Output size and failure modes.
  * @returns The recorder.
  */
-export function stubImagePipeline(decoded: { width: number; height: number } | "fail", outputBytes = 1234): ImagePipelineFake {
-  const fake: ImagePipelineFake = { draws: [], encodes: [], closed: 0, outputBytes };
+export function stubImagePipeline(decoded: { width: number; height: number } | "fail", options: ImagePipelineOptions | number = {}): ImagePipelineFake {
+  const { outputBytes = 1234, canvasFails = false, noResizeOptions = false } = typeof options === "number" ? { outputBytes: options } : options;
+  const fake: ImagePipelineFake = { draws: [], encodes: [], closed: 0, outputBytes, decodeWidths: [] };
   vi.stubGlobal(
     "createImageBitmap",
-    vi.fn(async () => {
+    vi.fn(async (_source: unknown, bitmapOptions?: { resizeWidth?: number }) => {
       if (decoded === "fail") throw new DOMException("The source image could not be decoded.", "InvalidStateError");
+      const resizeWidth = bitmapOptions?.resizeWidth;
+      if (resizeWidth !== undefined && noResizeOptions) throw new TypeError("resizeWidth not supported");
+      fake.decodeWidths.push(resizeWidth ?? null);
+      const width = resizeWidth ?? decoded.width;
       return {
-        width: decoded.width,
-        height: decoded.height,
+        width,
+        height: Math.round((decoded.height * width) / decoded.width),
         close: () => {
           fake.closed += 1;
         }
@@ -62,6 +79,7 @@ export function stubImagePipeline(decoded: { width: number; height: number } | "
       width: number;
       height: number;
       constructor(width: number, height: number) {
+        if (canvasFails) throw new RangeError("Canvas area exceeds the maximum limit");
         this.width = width;
         this.height = height;
       }

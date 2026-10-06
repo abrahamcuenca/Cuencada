@@ -79,6 +79,37 @@ function makeCanvas(size: ImageSize): { context: Canvas2D; encode: (options: Enc
 }
 
 /**
+ * The canvas size for a decoded image the policy already decided to shrink:
+ * the policy's cap without the trigger (a bitmap the decoder already reduced is
+ * still drawn, never "kept as is").
+ */
+function fitSize(size: ImageSize, policy: ResizePolicy): ImageSize {
+  const { width, height } = size;
+  const scale =
+    policy.kind === "maxPixels"
+      ? Math.min(1, Math.sqrt(policy.targetPixels / (width * height)))
+      : Math.min(1, policy.maxEdge / Math.max(width, height));
+  return { width: Math.max(1, Math.floor(width * scale)), height: Math.max(1, Math.floor(height * scale)) };
+}
+
+/**
+ * Decodes with EXIF orientation applied. When the target is known (from the
+ * header), asks the decoder for that width directly (`resizeWidth`, aspect
+ * kept), so a 200 MP photo never sits in memory at full size. Decoders that
+ * refuse the resize options get a plain decode.
+ */
+async function decode(blob: Blob, target: ImageSize | null): Promise<ImageBitmap> {
+  if (target !== null) {
+    try {
+      return await createImageBitmap(blob, { imageOrientation: "from-image", resizeWidth: target.width, resizeQuality: "high" });
+    } catch {
+      // Older WebKit: no resize options; fall through to a full decode.
+    }
+  }
+  return createImageBitmap(blob, { imageOrientation: "from-image" });
+}
+
+/**
  * Decodes `blob` (EXIF orientation applied), and when the policy asks for it,
  * draws it smaller and re-encodes it. Re-encoding drops every metadata block
  * (EXIF/GPS) as a side effect. The bitmap and canvas are freed before returning.
@@ -86,19 +117,24 @@ function makeCanvas(size: ImageSize): { context: Canvas2D; encode: (options: Enc
  * @param blob - The picked image.
  * @param policy - When/how much to shrink.
  * @param encode - Output format.
+ * @param stored - Size read from the header, when known (lets the decoder downscale directly).
  * @returns The smaller image, or `null` when the original may go as is.
- * @throws {ImageDecodeError} When the image can't be decoded.
+ * @throws {ImageDecodeError} When the image can't be decoded; other errors for canvas or encode failures.
  */
-export async function decodeAndScale(blob: Blob, policy: ResizePolicy, encode: EncodeOptions): Promise<Blob | null> {
+export async function decodeAndScale(blob: Blob, policy: ResizePolicy, encode: EncodeOptions, stored: ImageSize | null = null): Promise<Blob | null> {
+  const planned = stored === null ? null : targetSize(stored, policy);
+  if (stored !== null && planned === null) return null;
   let bitmap: ImageBitmap;
   try {
-    bitmap = await createImageBitmap(blob, { imageOrientation: "from-image" });
+    bitmap = await decode(blob, planned);
   } catch {
     throw new ImageDecodeError();
   }
   try {
-    const size = targetSize({ width: bitmap.width, height: bitmap.height }, policy);
-    if (size === null) return null;
+    const decoded = { width: bitmap.width, height: bitmap.height };
+    // Unknown header: decide from the decoded size.
+    if (planned === null && targetSize(decoded, policy) === null) return null;
+    const size = fitSize(decoded, policy);
     const canvas = makeCanvas(size);
     try {
       canvas.context.imageSmoothingEnabled = true;

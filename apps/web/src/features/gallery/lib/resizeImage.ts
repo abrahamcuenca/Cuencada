@@ -20,21 +20,38 @@ export { ImageDecodeError } from "./resizeCore";
 
 /** Gallery photos above this many pixels are downscaled… */
 export const GALLERY_RESIZE_TRIGGER_PIXELS = 40_000_000;
-/** …to about this many (server cap: 50 MP). */
-export const GALLERY_RESIZE_TARGET_PIXELS = 24_000_000;
+/**
+ * …to at most this many. iOS WebKit refuses canvases above 16,777,216 px, so
+ * the target stays under that on every device (server cap: 50 MP).
+ */
+export const GALLERY_RESIZE_TARGET_PIXELS = 16_000_000;
+/** Server cap for decoded gallery photos. */
+export const GALLERY_SERVER_MAX_PIXELS = 50_000_000;
 /** Avatars: long edge at most this many pixels (server cap: 24 MP). */
 export const AVATAR_MAX_EDGE = 2048;
+/** Server cap for decoded avatars. */
+export const AVATAR_SERVER_MAX_PIXELS = 24_000_000;
+
+/** What to shrink, how to encode it, and what the server accepts as is. */
+export interface ResizeOptions {
+  policy: ResizePolicy;
+  encode: EncodeOptions;
+  /** Above this, the original would be refused too, so a failed resize is an error. */
+  serverMaxPixels: number;
+}
 
 /** Gallery policy and format. */
-export const GALLERY_RESIZE: { policy: ResizePolicy; encode: EncodeOptions } = {
+export const GALLERY_RESIZE: ResizeOptions = {
   policy: { kind: "maxPixels", triggerPixels: GALLERY_RESIZE_TRIGGER_PIXELS, targetPixels: GALLERY_RESIZE_TARGET_PIXELS },
-  encode: { type: "image/jpeg", quality: 0.92 }
+  encode: { type: "image/jpeg", quality: 0.92 },
+  serverMaxPixels: GALLERY_SERVER_MAX_PIXELS
 };
 
 /** Avatar policy and format. */
-export const AVATAR_RESIZE: { policy: ResizePolicy; encode: EncodeOptions } = {
+export const AVATAR_RESIZE: ResizeOptions = {
   policy: { kind: "maxEdge", maxEdge: AVATAR_MAX_EDGE },
-  encode: { type: "image/jpeg", quality: 0.9 }
+  encode: { type: "image/jpeg", quality: 0.9 },
+  serverMaxPixels: AVATAR_SERVER_MAX_PIXELS
 };
 
 /** Subtle note under the gallery upload rules. */
@@ -91,25 +108,41 @@ function renamed(name: string, type: string): string {
  * @param file - A picked JPEG/PNG/WebP.
  * @param options - {@link GALLERY_RESIZE} or {@link AVATAR_RESIZE}.
  * @returns A new, smaller JPEG `File`, or `null` when the original should be uploaded as is
- *   (within limits, or this browser can't decode images off the DOM).
- * @throws {ImageDecodeError} When the image needs shrinking but can't be decoded.
+ *   (within limits, or the resize failed but the server would take the original).
+ * @throws {ImageDecodeError} When the resize failed and the original would be refused too
+ *   (above `serverMaxPixels`), or the file can't be decoded and its size is unknown.
  */
-export async function shrinkImageIfNeeded(file: File, options: { policy: ResizePolicy; encode: EncodeOptions }): Promise<File | null> {
+export async function shrinkImageIfNeeded(file: File, options: ResizeOptions): Promise<File | null> {
   const known = await headerSize(file);
   if (known !== null && targetSize(known, options.policy) === null) return null;
-  if (typeof createImageBitmap !== "function") return null;
+  /** Best effort: the original goes as is when the server would take it, else a clear error. */
+  const originalOrRefuse = (): null => {
+    if (known !== null && known.width * known.height > options.serverMaxPixels) throw new ImageDecodeError();
+    return null;
+  };
+  if (typeof createImageBitmap !== "function") return originalOrRefuse();
 
-  const blob = await oneAtATime(async () => {
-    const request: ResizeWorkerRequest = { blob: file, policy: options.policy, encode: options.encode };
-    if (canUseWorker()) {
-      try {
-        return await inWorker(request);
-      } catch {
-        // Older WebViews lack createImageBitmap/OffscreenCanvas inside workers: do it here instead.
+  let blob: Blob | null;
+  try {
+    blob = await oneAtATime(async () => {
+      const request: ResizeWorkerRequest = { blob: file, policy: options.policy, encode: options.encode, stored: known };
+      if (canUseWorker()) {
+        try {
+          return await inWorker(request);
+        } catch {
+          // Older WebViews lack createImageBitmap/OffscreenCanvas inside workers: do it here instead.
+        }
       }
-    }
-    return decodeAndScale(file, options.policy, options.encode);
-  });
+      return decodeAndScale(file, options.policy, options.encode, known);
+    });
+  } catch (error) {
+    // A canvas the browser refuses (iOS caps canvas area), an encode failure, low memory…:
+    // never worse than before the downscale existed.
+    if (known !== null) return originalOrRefuse();
+    // Unknown size: only an undecodable file is an error; the server judges the rest.
+    if (error instanceof ImageDecodeError) throw error;
+    return null;
+  }
   if (blob === null) return null;
   return new File([blob], renamed(file.name, options.encode.type), { type: options.encode.type, lastModified: file.lastModified });
 }

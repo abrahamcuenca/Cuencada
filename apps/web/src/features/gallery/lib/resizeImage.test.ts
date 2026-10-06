@@ -37,8 +37,9 @@ describe("targetSize", () => {
     const shrunk = targetSize({ width: 16320, height: 12240 }, GALLERY_RESIZE.policy);
     expect(shrunk).not.toBeNull();
     if (shrunk === null) return;
-    expect(shrunk.width * shrunk.height).toBeLessThanOrEqual(24_000_000);
-    expect(shrunk.width * shrunk.height).toBeGreaterThan(23_900_000);
+    // Under iOS WebKit's 16,777,216 px canvas cap.
+    expect(shrunk.width * shrunk.height).toBeLessThanOrEqual(16_000_000);
+    expect(shrunk.width * shrunk.height).toBeGreaterThan(15_900_000);
     expect(shrunk.width / shrunk.height).toBeCloseTo(16320 / 12240, 2);
   });
 
@@ -49,7 +50,7 @@ describe("targetSize", () => {
 });
 
 describe("shrinkImageIfNeeded", () => {
-  it("re-encodes a 200 MP photo as a ≤ 24 MP JPEG and frees the bitmap", async () => {
+  it("re-encodes a 200 MP photo as a ≤ 16 MP JPEG, decoding straight to the target width", async () => {
     const fake = stubImagePipeline({ width: 16320, height: 12240 }, 4321);
     const resized = await shrinkImageIfNeeded(pngOfSize(16320, 12240, "IMG_0001.png"), GALLERY_RESIZE);
 
@@ -58,9 +59,40 @@ describe("shrinkImageIfNeeded", () => {
     expect(resized?.name).toBe("IMG_0001.jpg");
     expect(resized?.size).toBe(4321);
     expect(fake.encodes).toEqual([{ type: "image/jpeg", quality: 0.92 }]);
+    // One decode at the reduced width: the full 200 MP bitmap never exists.
+    expect(fake.decodeWidths).toHaveLength(1);
+    expect(fake.decodeWidths[0]).toBeLessThan(5000);
     const [draw] = fake.draws;
-    expect(draw && draw.width * draw.height).toBeLessThanOrEqual(24_000_000);
+    expect(draw && draw.width * draw.height).toBeLessThanOrEqual(16_000_000);
     expect(fake.closed).toBe(1);
+  });
+
+  it("falls back to a full decode when the decoder refuses the resize options", async () => {
+    const fake = stubImagePipeline({ width: 9000, height: 6000 }, { noResizeOptions: true });
+    const resized = await shrinkImageIfNeeded(pngOfSize(9000, 6000), GALLERY_RESIZE);
+
+    expect(resized?.type).toBe("image/jpeg");
+    expect(fake.decodeWidths).toEqual([null]);
+    const [draw] = fake.draws;
+    expect(draw && draw.width * draw.height).toBeLessThanOrEqual(16_000_000);
+  });
+
+  it("uploads the original 48 MP photo when the canvas can't be created (iOS area cap)", async () => {
+    stubImagePipeline({ width: 8064, height: 6048 }, { canvasFails: true });
+
+    expect(await shrinkImageIfNeeded(pngOfSize(8064, 6048), GALLERY_RESIZE)).toBeNull();
+  });
+
+  it("uploads the original when decoding a photo within the server cap fails", async () => {
+    stubImagePipeline("fail");
+
+    expect(await shrinkImageIfNeeded(pngOfSize(8064, 6048), GALLERY_RESIZE)).toBeNull();
+  });
+
+  it("gives a clear Spanish error when an over-cap photo can't be resized", async () => {
+    stubImagePipeline({ width: 16320, height: 12240 }, { canvasFails: true });
+
+    await expect(shrinkImageIfNeeded(pngOfSize(16320, 12240), GALLERY_RESIZE)).rejects.toThrow("No pudimos leer esta foto");
   });
 
   it("leaves a photo within the limit untouched without decoding it", async () => {
@@ -88,14 +120,24 @@ describe("shrinkImageIfNeeded", () => {
     expect(fake.encodes).toEqual([{ type: "image/jpeg", quality: 0.9 }]);
   });
 
-  it("throws a Spanish ImageDecodeError when a big image can't be decoded", async () => {
+  it("throws a Spanish ImageDecodeError when an over-cap image can't be decoded", async () => {
     stubImagePipeline("fail");
 
     await expect(shrinkImageIfNeeded(pngOfSize(16000, 12000), GALLERY_RESIZE)).rejects.toThrow(ImageDecodeError);
     await expect(shrinkImageIfNeeded(pngOfSize(16000, 12000), GALLERY_RESIZE)).rejects.toThrow("No pudimos leer esta foto");
   });
 
-  it("uploads the original when this browser has no createImageBitmap", async () => {
-    expect(await shrinkImageIfNeeded(pngOfSize(16000, 12000), GALLERY_RESIZE)).toBeNull();
+  it("throws for an undecodable file of unknown size, but uploads it when only the canvas fails", async () => {
+    stubImagePipeline("fail");
+    await expect(shrinkImageIfNeeded(new File(["x"], "rara.webp", { type: "image/webp" }), GALLERY_RESIZE)).rejects.toThrow(ImageDecodeError);
+
+    vi.unstubAllGlobals();
+    stubImagePipeline({ width: 9000, height: 6000 }, { canvasFails: true });
+    expect(await shrinkImageIfNeeded(new File(["x"], "rara.webp", { type: "image/webp" }), GALLERY_RESIZE)).toBeNull();
+  });
+
+  it("without createImageBitmap, uploads the original within the cap and refuses one above it", async () => {
+    expect(await shrinkImageIfNeeded(pngOfSize(8064, 6048), GALLERY_RESIZE)).toBeNull();
+    await expect(shrinkImageIfNeeded(pngOfSize(16000, 12000), GALLERY_RESIZE)).rejects.toThrow(ImageDecodeError);
   });
 });
