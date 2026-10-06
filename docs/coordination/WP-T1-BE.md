@@ -114,7 +114,7 @@ No web code consumed the changed shapes (checked with grep), so `apps/web` needs
 - **WP-2.4:** `/api/auth/*` responses carry `Set-Cookie`. nginx must not cache them and must forward `Origin` unchanged (the CSRF check compares it exactly).
 
 ## Verification
-After merging `origin/main` (T2-FE #11, T4-FE #9): `pnpm lint`, `pnpm typecheck`, `pnpm test` (665 tests, 4 consecutive green full runs), `pnpm build`, `pnpm audit --prod` (no known vulnerabilities). One earlier full run under load flaked in the login timing test (now compares the fastest of 5 runs with a 0.25 ratio) and in three web tests from main (T2-FE/T4-FE, not touched here).
+After merging `origin/main` (T2-FE #11, T4-FE #9, T2-BE #12): `pnpm lint`, `pnpm turbo run typecheck --force`, `pnpm test` (714 tests), `pnpm build` and `pnpm audit --prod` all green on two consecutive full runs. Earlier round: 665 tests, 4 consecutive green full runs, `pnpm build`, `pnpm audit --prod` (no known vulnerabilities). One earlier full run under load flaked in the login timing test (now compares the fastest of 5 runs with a 0.25 ratio) and in three web tests from main (T2-FE/T4-FE, not touched here).
 
 ## Review log
 - **Orchestrator round 1:** every decision and all 7 contract amendments signed off. Follow-ups done:
@@ -122,3 +122,6 @@ After merging `origin/main` (T2-FE #11, T4-FE #9): `pnpm lint`, `pnpm typecheck`
   - **authorized:** the `auth.*` actions and `invite.resent` are now in `AuditAction` (`packages/types/src/admin.ts`, with a test that every action passes `auditActionSchema`); `AuthAuditAction` and the invite resend use them
   - **authorized:** a separate mail queue (see Decisions), done without touching frozen files
   - noted: PR #10 (T1-FE) will switch "cerrar en todos los dispositivos" to `POST /api/auth/logout-all`
+- **Orchestrator round 2:**
+  - merged `origin/main` again (T2-BE #12). `AuditAction` auto-merged to the union of both lists (46 actions, no duplicate keys or values), and the "every action passes `auditActionSchema`" test is kept.
+  - **Security condition (PR #10 re-review), confirmed as built:** a verify token is a `magic_links` row bound to `user_id` and to `email` (the address at issue time). `POST /api/auth/email/verify` is `auth: "public"`, so it never reads the caller's session. Consuming the token sets `email_verified_at` only for the row's user, and only while that user's current email still equals the issued one. Otherwise the token is burned and the answer is a generic 400 `TOKEN_INVALID`. Tests: the address changed after issue (400, still unverified), and another user's bearer sent with the owner's token (the owner is verified, the caller is not).

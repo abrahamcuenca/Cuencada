@@ -214,6 +214,30 @@ describe("email verification", () => {
     expect(audits).toHaveLength(1);
   });
 
+  it("verifies the token's own user and ignores the caller's session", async () => {
+    const mailer = new FakeMailer();
+    app = await createTestApp({ mailer });
+    const owner = await createUser();
+    const caller = await createUser();
+    const ownerLogin = await loginFull(app, owner);
+    const callerLogin = await loginFull(app, caller);
+    await app.inject({ method: "POST", url: "/api/auth/email/verify-request", ...ownerLogin.auth });
+    await mailQueue(app).onIdle();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/auth/email/verify",
+      payload: { token: linkToken(mailer.lastTo(owner.email)) },
+      ...callerLogin.auth
+    });
+
+    expect(response.statusCode).toBe(204);
+    const [ownerRow] = await getTestDb().select().from(users).where(eq(users.id, owner.id));
+    const [callerRow] = await getTestDb().select().from(users).where(eq(users.id, caller.id));
+    expect(ownerRow?.emailVerifiedAt).not.toBeNull();
+    expect(callerRow?.emailVerifiedAt).toBeNull();
+  });
+
   it("does not send to an already verified user but still answers 202", async () => {
     const mailer = new FakeMailer();
     app = await createTestApp({ mailer });
@@ -242,7 +266,10 @@ describe("email verification", () => {
       payload: { token: linkToken(mailer.lastTo(user.email)) }
     });
 
+    expect(response.statusCode).toBe(400);
     expect(code(response)).toBe("TOKEN_INVALID");
+    const [row] = await getTestDb().select().from(users).where(eq(users.id, user.id));
+    expect(row?.emailVerifiedAt).toBeNull();
   });
 
   it("limits verify requests to 3 per user per window (429) and requires a token (401)", async () => {
