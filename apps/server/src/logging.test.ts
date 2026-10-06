@@ -123,7 +123,7 @@ describe("log redaction", () => {
       .filter((url): url is string => url !== undefined);
 
     expect(urls).toContain(`/api/chat/ws?ticket=${REDACTED}`);
-    expect(urls).toContain(`/t/log?ticket=${REDACTED}&page=2`);
+    expect(urls).toContain(`/t/log?ticket=${REDACTED}&page=${REDACTED}`);
   });
 });
 
@@ -219,30 +219,60 @@ describe("scrubUrl", () => {
     expect(scrubUrl("/api/cuencadas/2026")).toBe("/api/cuencadas/2026");
   });
 
-  it("redacts sensitive parameters regardless of case and keeps the others", () => {
-    expect(scrubUrl("/x?Ticket=a&token=b&t=c&year=2026")).toBe(
-      `/x?Ticket=${REDACTED}&token=${REDACTED}&t=${REDACTED}&year=2026`
+  it("keeps allowlisted enum, number and opaque-id parameters", () => {
+    const url = "/x?limit=20&year=2026&status=active&role=admin&kind=photo&depth=2&scope=portal&entityType=user&action=user.update";
+    expect(scrubUrl(url)).toBe(url);
+    expect(scrubUrl("/api/chat/rooms/r1/messages?before=MTcwMDAwMDAwMDAwMF9hYmM&limit=50")).toBe(
+      "/api/chat/rooms/r1/messages?before=MTcwMDAwMDAwMDAwMF9hYmM&limit=50"
     );
   });
 
-  it("redacts parameters whose names start with ticket or token", () => {
-    expect(scrubUrl("/x?ticket[]=a&token_hint=b&type=c")).toBe(`/x?ticket[]=${REDACTED}&token_hint=${REDACTED}&type=c`);
-  });
-
-  it("redacts percent-encoded parameter names", () => {
-    expect(scrubUrl("/x?%74icket=abc")).toBe(`/x?%74icket=${REDACTED}`);
-  });
-
-  it("redacts a pair whose name cannot be decoded", () => {
-    expect(scrubUrl("/x?%E0%A4%A=abc&ok=1")).toBe(`/x?${REDACTED}&ok=1`);
+  it("redacts every parameter that is not allowlisted, keeping its name", () => {
+    expect(scrubUrl("/x?ticket=a&token=b&cursor=c&city=Monterrey&familyBranch=Rama%20Norte&page=2&year=2026")).toBe(
+      `/x?ticket=${REDACTED}&token=${REDACTED}&cursor=${REDACTED}&city=${REDACTED}&familyBranch=${REDACTED}&page=${REDACTED}&year=2026`
+    );
   });
 
   it("redacts free-text search terms (q, search), which may hold names", () => {
-    expect(scrubUrl("/api/family/people?q=Rosa")).toBe(`/api/family/people?q=${REDACTED}`);
-    expect(scrubUrl("/api/directory?Search=Rosa%20Cuenca&limit=20")).toBe(`/api/directory?Search=${REDACTED}&limit=20`);
+    expect(scrubUrl("/api/family/people?q=Ana")).toBe(`/api/family/people?q=${REDACTED}`);
+    expect(scrubUrl("/api/directory?search=Ana%20Morales&limit=20")).toBe(`/api/directory?search=${REDACTED}&limit=20`);
+  });
+
+  it("redacts case variants of allowlisted names", () => {
+    expect(scrubUrl("/x?Limit=5&LIMIT=6&Ticket=t")).toBe(`/x?Limit=${REDACTED}&LIMIT=${REDACTED}&Ticket=${REDACTED}`);
+  });
+
+  it("redacts array-style names, including arrays of allowlisted names", () => {
+    expect(scrubUrl("/x?q[]=Ana&q[]=Luis&status[]=active")).toBe(
+      `/x?q[]=${REDACTED}&q[]=${REDACTED}&status[]=${REDACTED}`
+    );
+    expect(scrubUrl("/x?q%5B%5D=Ana")).toBe(`/x?q%5B%5D=${REDACTED}`);
+  });
+
+  it("decodes percent-encoded names before matching, keeping the raw name", () => {
+    expect(scrubUrl("/x?%71=Ana&%74icket=abc")).toBe(`/x?%71=${REDACTED}&%74icket=${REDACTED}`);
+    expect(scrubUrl("/x?%6Cimit=5")).toBe("/x?%6Cimit=5");
+  });
+
+  it("handles every occurrence of a repeated parameter", () => {
+    expect(scrubUrl("/x?q=Ana&limit=1&q=Luis&limit=2")).toBe(`/x?q=${REDACTED}&limit=1&q=${REDACTED}&limit=2`);
+  });
+
+  it("redacts allowlisted values that are not enum, number or id shaped", () => {
+    expect(scrubUrl("/x?status=Ana%20Morales&kind=ana@example.com&role=a+b")).toBe(
+      `/x?status=${REDACTED}&kind=${REDACTED}&role=${REDACTED}`
+    );
+    expect(scrubUrl(`/x?before=${"a".repeat(129)}`)).toBe(`/x?before=${REDACTED}`);
+    expect(scrubUrl("/x?limit=%E0%A4%A")).toBe(`/x?limit=${REDACTED}`);
+  });
+
+  it("drops the whole pair when the name is undecodable or not a plain identifier", () => {
+    expect(scrubUrl("/x?%E0%A4%A=abc&limit=1")).toBe(`/x?${REDACTED}&limit=1`);
+    expect(scrubUrl("/x?Ana%20Morales=1&limit=1")).toBe(`/x?${REDACTED}&limit=1`);
+    expect(scrubUrl("/x?ana%40example.com&limit=1")).toBe(`/x?${REDACTED}&limit=1`);
   });
 
   it("handles empty and valueless parameters", () => {
-    expect(scrubUrl("/x?&ticket&a=")).toBe(`/x?&ticket=${REDACTED}&a=`);
+    expect(scrubUrl("/x?&ticket&limit&a=")).toBe(`/x?&ticket=${REDACTED}&limit&a=${REDACTED}`);
   });
 });

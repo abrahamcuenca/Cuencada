@@ -8,9 +8,9 @@
  *   SQL text and the Postgres code/constraint/table/column/schema, never the
  *   bound parameters (`params`, `detail`, `where`), which carry emails,
  *   password hashes and token hashes.
- * - The request serializer logs a scrubbed URL: sensitive query parameters
- *   (the chat WebSocket `ticket`, any `token`) are redacted, so the one token
- *   that travels in a URL never reaches the logs.
+ * - The request serializer logs a scrubbed URL: only allowlisted query
+ *   parameters (enums, limits, opaque ids) keep their value; everything else
+ *   (the chat WebSocket `ticket`, free-text searches, cursors) is redacted.
  * - Request headers and bodies are not logged at all by default.
  */
 import type { FastifyRequest, FastifyServerOptions } from "fastify";
@@ -19,23 +19,41 @@ import type { AppConfig } from "./config.js";
 export const REDACTED = "[REDACTED]";
 
 /**
- * Query parameters whose values are always redacted from logged URLs.
- * `q`/`search` carry free-text searches (people's names in the family tree
- * and directory), which are PII.
+ * Query parameters whose values may be logged [SEC]. This is an ALLOWLIST:
+ * every other parameter keeps its name but its value becomes `[REDACTED]`,
+ * so free text (`q`, `search`, `city`, `familyBranch`), cursors and tokens
+ * (`ticket`, `token`, `cursor`) never reach the logs, including parameters
+ * added later that nobody remembered to deny.
+ *
+ * Every entry is an enum, a small integer or an opaque server-made id:
+ * `before` is the chat history cursor, `(created_at, id)` encoded, which
+ * carries no personal data. Matching is exact (case-sensitive) on the
+ * decoded name, because that is how the routes read them; `Limit`, `q[]` or
+ * `limit[]` are therefore redacted.
  */
-const SENSITIVE_QUERY_PARAMS = new Set([
-  "ticket",
-  "token",
-  "t",
-  "code",
-  "key",
-  "signature",
-  "x-amz-signature",
-  "q",
-  "search"
+const LOGGABLE_QUERY_PARAMS: ReadonlySet<string> = new Set([
+  "limit",
+  "year",
+  "status",
+  "role",
+  "kind",
+  "depth",
+  "before",
+  "scope",
+  "entityType",
+  "action"
 ]);
-/** Query parameter name prefixes that are always redacted (`ticket[]`, `token_x`, …). */
-const SENSITIVE_QUERY_PREFIXES = ["ticket", "token"];
+
+/**
+ * Shape a loggable value must have even for an allowlisted name: enum
+ * values, integers and opaque ids. Anything else (spaces, `@`, `%`-escapes,
+ * very long input) is redacted, because a client can put any text in any
+ * parameter.
+ */
+const LOGGABLE_QUERY_VALUE = /^[A-Za-z0-9_.:=-]{0,128}$/;
+
+/** Shape a parameter name must have to be logged at all (otherwise the whole pair is redacted). */
+const LOGGABLE_QUERY_NAME = /^[A-Za-z0-9_.[\]-]{1,64}$/;
 
 /** Object keys whose values never reach the logs (case-insensitive, substring). */
 export const SENSITIVE_LOG_KEY = /token|password|passwd|ticket|secret|authorization|cookie|hash|api[-_]?key|credential/i;
@@ -234,35 +252,46 @@ export const REDACT_PATHS: string[] = [
   ...SENSITIVE_FIELDS.map((field) => `*.*.${field}`)
 ];
 
+/** Decode a query-string component (`+` is a space), or `undefined` if malformed. */
+function decodeQueryComponent(raw: string): string | undefined {
+  try {
+    return decodeURIComponent(raw.replace(/\+/g, " "));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Scrub one `name=value` pair of a query string (see {@link scrubUrl}). */
+function scrubQueryPair(pair: string): string {
+  if (pair === "") return pair;
+  const separator = pair.indexOf("=");
+  const rawName = separator === -1 ? pair : pair.slice(0, separator);
+  const name = decodeQueryComponent(rawName);
+  // An undecodable or odd-looking name could itself be data: drop the whole pair.
+  if (name === undefined || !LOGGABLE_QUERY_NAME.test(name)) return REDACTED;
+  if (!LOGGABLE_QUERY_PARAMS.has(name)) return `${rawName}=${REDACTED}`;
+  if (separator === -1) return pair;
+  const value = decodeQueryComponent(pair.slice(separator + 1));
+  return value !== undefined && LOGGABLE_QUERY_VALUE.test(value) ? pair : `${rawName}=${REDACTED}`;
+}
+
 /**
- * Redact sensitive query parameter values from a request URL.
+ * Redact query parameter values from a request URL using an allowlist [SEC].
+ * Only the parameters in {@link LOGGABLE_QUERY_PARAMS} keep their value, and
+ * only when it looks like an enum, number or opaque id. Every other
+ * parameter keeps its (raw) name with the value `[REDACTED]`; repeated
+ * parameters are handled pair by pair. A pair whose name is undecodable or
+ * not a plain identifier is replaced entirely by `[REDACTED]`.
  *
  * @param rawUrl - Path plus query, e.g. `/api/chat/ws?ticket=abc`.
- * @returns The same URL with sensitive values replaced, e.g. `/api/chat/ws?ticket=[REDACTED]`.
+ * @returns The scrubbed URL, e.g. `/api/chat/ws?ticket=[REDACTED]`.
  */
 export function scrubUrl(rawUrl: string): string {
   const queryStart = rawUrl.indexOf("?");
   if (queryStart === -1) return rawUrl;
   const path = rawUrl.slice(0, queryStart);
   const query = rawUrl.slice(queryStart + 1);
-  const scrubbed = query
-    .split("&")
-    .map((pair) => {
-      const separator = pair.indexOf("=");
-      const rawName = separator === -1 ? pair : pair.slice(0, separator);
-      let name: string;
-      try {
-        name = decodeURIComponent(rawName.replace(/\+/g, " ")).toLowerCase();
-      } catch {
-        // Undecodable name: redact the whole pair rather than risk leaking it.
-        return REDACTED;
-      }
-      const sensitive =
-        SENSITIVE_QUERY_PARAMS.has(name) || SENSITIVE_QUERY_PREFIXES.some((prefix) => name.startsWith(prefix));
-      return sensitive ? `${rawName}=${REDACTED}` : pair;
-    })
-    .join("&");
-  return `${path}?${scrubbed}`;
+  return `${path}?${query.split("&").map(scrubQueryPair).join("&")}`;
 }
 
 /** Request fields that are logged (no headers, no body). */
