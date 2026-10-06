@@ -50,7 +50,7 @@ Stacked on `wp/0.1-test-infra`, `wp/0.2-contracts` (revised, 4e882d7) and `wp/0.
 | Path | Feature (track) | Level |
 |---|---|---|
 | `/`, `/cuencada/:year` | cuencadas (T2) | public |
-| `/entrar`, `/entrar/enlace`, `/invitacion`, `/recuperar`, `/restablecer` | auth (T1) | public |
+| `/entrar`, `/entrar/enlace`, `/invitacion`, `/recuperar`, `/restablecer`, `/verificar` | auth (T1) | public |
 | `/cambiar-contrasena` | auth (T1) | session (logged in, allowed while `mustChangePassword`) |
 | `/perfil/sesiones` | auth (T1) | member |
 | `/perfil` | profile (T5) | member |
@@ -145,9 +145,11 @@ export const { useListDirectoryQuery } = directoryApi;
 
 If you need a new tag, ask the orchestrator; it's a Phase-0 change to `baseApi.ts`.
 
-**4. Dates.** Use `formatDate`, `formatTime` and `toZonedParts` from `shared/lib/dates.ts` with `cuencada.timezone`. Never use the device timezone.
+**4. Fragment tokens [SEC].** Invite, magic-link, reset and verify links put their token in `#t=…`. In those pages, read it with `useFragmentToken()` (`features/auth/useFragmentToken.ts`). It wraps `readAndScrubFragmentToken()` from `shared/lib/fragmentToken.ts`, which reads `t` and immediately calls `history.replaceState` to drop the fragment. The token stays in memory for that page only; call `clearFragmentToken()` after the POST consumes it. Never put a token in a query string, a log or web storage. `index.html` sets `<meta name="referrer" content="strict-origin-when-cross-origin">`.
 
-**5. Tests.** Use `renderApp(path, preloadedState)` from `apps/web/test/renderApp.tsx` (the real router, guards and layout) and the fixtures in `apps/web/test/auth.ts`: `makeUser`, `authenticatedState`, `statusState`, `tokenBody`, `errorBody`, `apiUrl`. Mock HTTP with MSW, using `setupServer` per file and `apiUrl("/directory")` in handlers.
+**5. Dates.** Use `formatDate`, `formatTime` and `toZonedParts` from `shared/lib/dates.ts` with `cuencada.timezone`. Never use the device timezone.
+
+**6. Tests.** Use `renderApp(path, preloadedState)` from `apps/web/test/renderApp.tsx` (the real router, guards and layout) and the fixtures in `apps/web/test/auth.ts`: `makeUser`, `authenticatedState`, `statusState`, `tokenBody`, `errorBody`, `apiUrl`. Mock HTTP with MSW, using `setupServer` per file and `apiUrl("/directory")` in handlers.
 
 ## Decisions
 - **`passwordChangeRequired` is a 4th field in `authSlice`.** It's set from `user.mustChangePassword` and from 403 `PASSWORD_CHANGE_REQUIRED`, so the guard reacts to both.

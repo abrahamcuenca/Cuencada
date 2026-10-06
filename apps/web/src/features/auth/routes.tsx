@@ -7,7 +7,8 @@ export const authRoutes: FeatureRoutes = {
     { path: "/entrar/enlace", lazy: async () => ({ Component: (await import("./pages/MagicLinkPage")).MagicLinkPage }) },
     { path: "/invitacion", lazy: async () => ({ Component: (await import("./pages/InvitePage")).InvitePage }) },
     { path: "/recuperar", lazy: async () => ({ Component: (await import("./pages/ForgotPasswordPage")).ForgotPasswordPage }) },
-    { path: "/restablecer", lazy: async () => ({ Component: (await import("./pages/ResetPasswordPage")).ResetPasswordPage }) }
+    { path: "/restablecer", lazy: async () => ({ Component: (await import("./pages/ResetPasswordPage")).ResetPasswordPage }) },
+    { path: "/verificar", lazy: async () => ({ Component: (await import("./pages/VerifyEmailPage")).VerifyEmailPage }) }
   ],
   session: [
     { path: "/cambiar-contrasena", lazy: async () => ({ Component: (await import("./pages/ChangePasswordPage")).ChangePasswordPage }) }
