@@ -101,6 +101,7 @@ const chatModule: FastifyPluginAsyncZod = async (app) => {
   });
   app.addHook("onClose", async () => {
     for (const timer of timers) clearInterval(timer);
+    await hub.idle();
     hub.closeAll();
     hubs.delete(app.server);
   });
