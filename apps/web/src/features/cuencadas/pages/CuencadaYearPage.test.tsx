@@ -2,7 +2,7 @@ import { screen, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { apiUrl, authenticatedState, errorBody, statusState } from "../../../../test/auth";
+import { apiUrl, authenticatedState, errorBody, makeUser, statusState } from "../../../../test/auth";
 import { renderApp } from "../../../../test/renderApp";
 import { LINKS, makeAnnouncement, makeMemberDetails, makePublicCuencada } from "../testing/fixtures";
 
@@ -14,7 +14,13 @@ const server = setupServer(
     memberRequests += 1;
     return HttpResponse.json(makeMemberDetails());
   }),
-  http.get(apiUrl("/cuencadas/1999"), () => HttpResponse.json(errorBody("NOT_FOUND", "No encontramos esa Cuencada."), { status: 404 }))
+  // T3 attendee strip: the member attended 2026, so the RSVP slot shows "Fuiste a esta Cuencada".
+  http.get(apiUrl("/cuencadas/2026/attendees"), () =>
+    HttpResponse.json([
+      { personId: null, userId: makeUser().id, displayName: makeUser().displayName, avatarUrl: null, source: "rsvp", rsvpStatus: "yes" }
+    ])
+  ),
+  http.get(apiUrl("/cuencadas/1999"),() => HttpResponse.json(errorBody("NOT_FOUND", "No encontramos esa Cuencada."), { status: 404 }))
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
@@ -55,6 +61,7 @@ describe("CuencadaYearPage", () => {
     expect(await within(familia).findByRole("link", { name: /Grupo WhatsApp/ })).toHaveAttribute("href", LINKS.whatsapp);
     expect(within(familia).getByRole("link", { name: /Ver álbum compartido/ })).toHaveAttribute("href", LINKS.album);
     expect(within(familia).getByRole("heading", { name: "Ver letra oficial" })).toBeInTheDocument();
+    expect(await within(familia).findByText("🎉 Fuiste a esta Cuencada")).toBeInTheDocument();
     for (const slot of ["rsvp", "attendees", "gallery"]) {
       expect(familia.querySelector(`[data-slot="${slot}"]`)).not.toBeNull();
     }
