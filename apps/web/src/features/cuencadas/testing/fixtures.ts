@@ -80,6 +80,7 @@ export function makeAnnouncement(overrides: Partial<Announcement> = {}): Announc
     authorName: "Administración",
     // 03:30 UTC on Sep 1 is still Aug 31 in Mérida.
     publishedAt: "2026-09-01T03:30:00Z",
+    expiresAt: null,
     updatedAt: "2026-09-01T03:30:00Z",
     ...overrides
   };
@@ -154,10 +155,12 @@ export function makeSummary(overrides: Partial<CuencadaSummary> = {}): CuencadaS
     status: "past",
     startsAt: "2026-09-13T06:00:00Z",
     endsAt: "2026-09-19T05:59:59Z",
+    timezone: "America/Merida",
     city: "Mérida",
     state: "Yucatán",
     heroImageUrl: null,
     themeColor: "#0b5e55",
+    hasMedia: false,
     ...overrides
   };
 }

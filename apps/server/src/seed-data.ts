@@ -30,7 +30,8 @@ export interface SeedItineraryItem {
 }
 
 /** A seeded announcement (the Cuencada id and author are filled in by the seed). */
-export type SeedAnnouncement = Omit<CreateAnnouncementInput, "cuencadaId">;
+/** Seeded announcements publish at insert time (DB default) and never expire. */
+export type SeedAnnouncement = Omit<CreateAnnouncementInput, "cuencadaId" | "publishedAt" | "expiresAt">;
 
 /**
  * Member-only links of the 2026 edition. They are credentials-like (group
@@ -81,7 +82,7 @@ function itinerary(locationKey: SeedLocationKey | null, input: Record<string, un
 }
 
 function linkAnnouncement(title: string, label: string, url: string): SeedAnnouncement {
-  return createAnnouncementInputSchema.omit({ cuencadaId: true }).parse({
+  return createAnnouncementInputSchema.omit({ cuencadaId: true, publishedAt: true, expiresAt: true }).parse({
     title,
     body: `${label}: ${url}`,
     visibility: "members",
