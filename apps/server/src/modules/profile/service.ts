@@ -88,16 +88,27 @@ export async function toOwnProfile(app: AvatarUrlDeps, record: OwnProfileRecord)
     visibility: {
       showEmail: profile.showEmail,
       showPhone: profile.showPhone,
-      showCity: profile.showCity
-      // WP-2.1: listedInDirectory: profile.listedInDirectory
+      showCity: profile.showCity,
+      listedInDirectory: profile.listedInDirectory
     },
     updatedAt: profile.updatedAt.toISOString()
   };
 }
 
-/** Profile columns a PATCH may write (never `userId`, `avatarKey`, timestamps). WP-2.1 adds `listedInDirectory`. */
+/** Profile columns a PATCH may write (never `userId`, `avatarKey`, timestamps). */
 type ProfilePatch = Partial<
-  Pick<ProfileRow, "fullName" | "familyBranch" | "city" | "phone" | "bio" | "showEmail" | "showPhone" | "showCity">
+  Pick<
+    ProfileRow,
+    | "fullName"
+    | "familyBranch"
+    | "city"
+    | "phone"
+    | "bio"
+    | "showEmail"
+    | "showPhone"
+    | "showCity"
+    | "listedInDirectory"
+  >
 >;
 
 /**
@@ -120,6 +131,6 @@ export function splitProfilePatch(input: UpdateProfileInput): {
   if (input.showEmail !== undefined) profile.showEmail = input.showEmail;
   if (input.showPhone !== undefined) profile.showPhone = input.showPhone;
   if (input.showCity !== undefined) profile.showCity = input.showCity;
-  // WP-2.1: `if (input.listedInDirectory !== undefined) profile.listedInDirectory = input.listedInDirectory;`
+  if (input.listedInDirectory !== undefined) profile.listedInDirectory = input.listedInDirectory;
   return { profile, displayName: input.displayName };
 }

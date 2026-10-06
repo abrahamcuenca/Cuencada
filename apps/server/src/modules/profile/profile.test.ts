@@ -76,7 +76,7 @@ describe("GET /api/profile/me", () => {
       phone: "+52 999 123 4567",
       bio: "Hola",
       avatarUrl: null,
-      visibility: { showEmail: false, showPhone: false, showCity: false },
+      visibility: { showEmail: false, showPhone: false, showCity: false, listedInDirectory: true },
       updatedAt: user.profile.updatedAt.toISOString()
     });
   });
@@ -293,7 +293,41 @@ describe("PATCH /api/profile/me", () => {
   });
 });
 
-describe("listed in directory (WP-2.1: profiles.listed_in_directory, migration 0002)", () => {
-  it.todo("returns visibility.listedInDirectory (default true) in GET /api/profile/me");
-  it.todo("lets PATCH toggle listedInDirectory and audits only the field name");
+describe("listed in directory (profiles.listed_in_directory)", () => {
+  it("returns visibility.listedInDirectory (default true) in GET /api/profile/me", async () => {
+    const { auth } = await member();
+    const { auth: hiddenAuth } = await member({ profile: { fullName: "Oculta", listedInDirectory: false } });
+
+    const listed = await app.inject({ method: "GET", url: "/api/profile/me", ...auth });
+    const hidden = await app.inject({ method: "GET", url: "/api/profile/me", ...hiddenAuth });
+
+    expect(listed.json<OwnProfile>().visibility.listedInDirectory).toBe(true);
+    expect(hidden.json<OwnProfile>().visibility.listedInDirectory).toBe(false);
+  });
+
+  it("lets PATCH toggle listedInDirectory and audits only the field name", async () => {
+    const { user, auth } = await member();
+
+    const off = await app.inject({
+      method: "PATCH",
+      url: "/api/profile/me",
+      ...auth,
+      payload: { listedInDirectory: false }
+    });
+
+    expect(off.statusCode).toBe(200);
+    expect(off.json<OwnProfile>().visibility.listedInDirectory).toBe(false);
+    const [profile] = await getTestDb().select().from(profiles).where(eq(profiles.userId, user.id));
+    expect(profile?.listedInDirectory).toBe(false);
+    const [audit] = await getTestDb().select().from(auditLogs).where(eq(auditLogs.action, "profile.updated"));
+    expect(audit?.metadata).toEqual({ fields: ["listedInDirectory"] });
+
+    const bad = await app.inject({
+      method: "PATCH",
+      url: "/api/profile/me",
+      ...auth,
+      payload: { listedInDirectory: "no" }
+    });
+    expect(bad.statusCode).toBe(400);
+  });
 });

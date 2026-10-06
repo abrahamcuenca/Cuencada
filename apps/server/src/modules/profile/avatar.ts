@@ -12,6 +12,7 @@ import type { FastifyBaseLogger } from "fastify";
 import type { StorageService } from "../../lib/storage/types.js";
 import { AVATAR_MAX_INPUT_PIXELS, AVATAR_URL_TTL_SECONDS, AVATAR_WEBP_QUALITY, AvatarSize } from "./constants.js";
 import { errorName } from "./shared.js";
+import { normalizeContentType, signatureMatches, sniffMediaType } from "../media/files.js";
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 /** `profiles.avatar_key` values this module writes: `avatars/{userId}/{uploadId}-256.webp`. */
@@ -73,47 +74,34 @@ export function derivativeKeysFor(avatarKey: string | null): Pick<AvatarKeys, "l
   };
 }
 
+/** Re-exported from the media module (single implementation; drops parameters, lowercases). */
+export { normalizeContentType };
+
 /**
- * True when the leading bytes are the declared image type.
- * JPEG `FF D8 FF`, PNG `89 50 4E 47 0D 0A 1A 0A`, WebP `RIFF????WEBP`.
+ * Detect which avatar type the leading bytes belong to (media module's
+ * sniffer, restricted to the avatar image types).
+ *
+ * @param bytes - Leading bytes of a file.
+ * @returns The sniffed type, or `null` when it is not an accepted avatar image.
+ */
+export function sniffAvatarType(bytes: Uint8Array): AvatarMimeType | null {
+  const sniffed = sniffMediaType(bytes);
+  return sniffed !== null && isAvatarMimeType(sniffed) ? sniffed : null;
+}
+
+/**
+ * True when the leading bytes are exactly the declared image type
+ * (JPEG `FF D8 FF`, PNG signature, WebP `RIFF????WEBP`), via the media module.
  *
  * @param declared - MIME type from the upload intent.
  * @param bytes - At least the first 12 bytes of the object.
  */
 export function avatarSignatureMatches(declared: AvatarMimeType, bytes: Uint8Array): boolean {
-  return sniffAvatarType(bytes) === declared;
+  return signatureMatches(declared, bytes);
 }
 
-function startsWith(bytes: Uint8Array, signature: readonly number[], offset = 0): boolean {
-  if (bytes.byteLength < offset + signature.length) return false;
-  return signature.every((value, index) => bytes[offset + index] === value);
-}
-
-/**
- * Detect which avatar type the leading bytes belong to.
- *
- * @param bytes - Leading bytes of a file.
- * @returns The sniffed type, or `null` when it is not an accepted image.
- */
-export function sniffAvatarType(bytes: Uint8Array): AvatarMimeType | null {
-  if (startsWith(bytes, [0xff, 0xd8, 0xff])) return "image/jpeg";
-  if (startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return "image/png";
-  // "RIFF" … "WEBP"
-  if (startsWith(bytes, [0x52, 0x49, 0x46, 0x46]) && startsWith(bytes, [0x57, 0x45, 0x42, 0x50], 8))
-    return "image/webp";
-  return null;
-}
-
-/**
- * Normalize a `Content-Type` value for comparison (drops parameters, lowercases).
- *
- * @param value - Raw header value.
- */
-export function normalizeContentType(value: string | null): string | null {
-  if (value === null) return null;
-  const [type] = value.split(";");
-  const normalized = (type ?? "").trim().toLowerCase();
-  return normalized === "" ? null : normalized;
+function isAvatarMimeType(value: string): value is AvatarMimeType {
+  return value in EXTENSION_BY_MIME;
 }
 
 /** Why processing refused an image (logged and audited as a code, never the raw error). */

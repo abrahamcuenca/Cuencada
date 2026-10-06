@@ -344,6 +344,7 @@ describe("GET /api/directory", () => {
       }
     });
     await list();
+    await list(`?q=${encodeURIComponent("Pariente Discreto")}`);
     await app.inject({
       method: "GET",
       url: `/api/directory/${target.id}`,
@@ -356,6 +357,10 @@ describe("GET /api/directory", () => {
     expect(output).not.toContain("secreto@familia.test");
     expect(output).not.toContain("Hunucmá");
     expect(output).not.toContain("Biografía privada");
+    // The search term is scrubbed from the logged request URL.
+    expect(output).toContain("/api/directory");
+    expect(output).not.toContain("Pariente");
+    expect(output).not.toContain("Discreto");
   });
 });
 
@@ -415,9 +420,77 @@ describe("GET /api/directory/:id", () => {
   });
 });
 
-describe("unlisted members (WP-2.1: profiles.listed_in_directory, migration 0002)", () => {
-  it.todo("excludes members with listed_in_directory = false from the list, q search and familyBranch/city filters");
-  it.todo("answers 404 for an unlisted member's detail, like a disabled one");
-  it.todo("never leaks an unlisted member's contact fields, even with every show* flag on");
-  it.todo("lists a member again after they opt back in");
+describe("unlisted members (profiles.listed_in_directory)", () => {
+  async function unlisted(): Promise<TestUser> {
+    return createUser({
+      email: "oculta@familia.test",
+      displayName: "Prima Oculta",
+      profile: {
+        fullName: "Prima Oculta",
+        familyBranch: "Rama Este",
+        city: "Motul",
+        phone: "+52 999 303 0303",
+        showEmail: true,
+        showPhone: true,
+        showCity: true,
+        listedInDirectory: false
+      }
+    });
+  }
+
+  it("excludes members with listed_in_directory = false from the list, q search and familyBranch/city filters", async () => {
+    await unlisted();
+    await createUser({
+      profile: { fullName: "Primo Listado", familyBranch: "Rama Este", city: "Motul", showCity: true }
+    });
+
+    expect(names(await list())).toEqual(["Primo Listado", "Zz Visitante"]);
+    for (const query of ["?q=Oculta", "?q=prima", `?familyBranch=${encodeURIComponent("Rama Este")}`, "?city=Motul"]) {
+      expect(names(await list(query))).not.toContain("Prima Oculta");
+    }
+    expect(names(await list("?city=Motul"))).toEqual(["Primo Listado"]);
+  });
+
+  it("answers 404 for an unlisted member's detail, like a disabled one", async () => {
+    const target = await unlisted();
+    const response = await app.inject({ method: "GET", url: `/api/directory/${target.id}`, ...viewer.auth });
+    expect(response.statusCode).toBe(404);
+    expect(errorCode(response.body)).toBe("NOT_FOUND");
+    expect(response.body).not.toContain("Prima Oculta");
+  });
+
+  it("never leaks an unlisted member's contact fields, even with every show* flag on", async () => {
+    const target = await unlisted();
+    const bodies: string[] = [];
+    for (const url of [
+      "/api/directory",
+      "/api/directory?q=303",
+      "/api/directory?q=Motul",
+      `/api/directory/${target.id}`
+    ]) {
+      bodies.push((await app.inject({ method: "GET", url, ...viewer.auth })).body);
+    }
+    const all = bodies.join("\n");
+    expect(all).not.toContain("303 0303");
+    expect(all).not.toContain("oculta@familia.test");
+    expect(all).not.toContain(target.id);
+  });
+
+  it("lists a member again after they opt back in", async () => {
+    const target = await unlisted();
+    const auth = await bearerFor(target, await createSession(target.id));
+    expect(names(await list("?q=Oculta"))).toEqual([]);
+
+    const toggled = await app.inject({
+      method: "PATCH",
+      url: "/api/profile/me",
+      ...auth,
+      payload: { listedInDirectory: true }
+    });
+
+    expect(toggled.statusCode).toBe(200);
+    expect(names(await list("?q=Oculta"))).toEqual(["Prima Oculta"]);
+    const detail = await app.inject({ method: "GET", url: `/api/directory/${target.id}`, ...viewer.auth });
+    expect(detail.statusCode).toBe(200);
+  });
 });

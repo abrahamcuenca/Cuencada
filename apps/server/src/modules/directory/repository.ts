@@ -2,7 +2,7 @@
  * Directory queries. PII rules enforced here (and again by `toDirectoryEntry`
  * and the response schema):
  *
- * - Only **active** accounts with a profile are listed.
+ * - Only **active** accounts with a profile and `listed_in_directory` on are listed.
  * - `q` matches display name, full name, the linked person's nickname and
  *   family branch always; city only when `show_city` is on; **never** email
  *   or phone. Otherwise search would be an oracle for hidden contact data.
@@ -65,11 +65,10 @@ export interface DirectoryRow {
 }
 
 /**
- * Who appears in the directory at all (list, search and detail).
- * WP-2.1 (migration 0002 adds `profiles.listed_in_directory`): the one-line
- * switch is `and(eq(users.status, "active"), eq(profiles.listedInDirectory, true))`.
+ * Who appears in the directory at all (list, search, filters and detail):
+ * active accounts whose owner kept "Aparecer en el directorio" on.
  */
-const listedSql: SQL | undefined = and(eq(users.status, "active"));
+const listedSql: SQL | undefined = and(eq(users.status, "active"), eq(profiles.listedInDirectory, true));
 
 /** Filters for {@link listDirectory}. Blank strings mean "no filter". */
 export interface DirectoryFilters {
