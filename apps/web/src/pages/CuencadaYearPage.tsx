@@ -38,7 +38,7 @@ export function CuencadaYearPage(): React.ReactNode {
           {cuencada2026.publicItinerary.map((item) => (
             <article className="day" key={item.id}>
               <div className="date">{new Date(`${item.date}T12:00:00`).toLocaleDateString("es-MX", { day: "numeric" })}<span>{new Date(`${item.date}T12:00:00`).toLocaleDateString("es-MX", { weekday: "long" })}</span></div>
-              <div><h3>{item.title}</h3><p>{item.description}</p><div className="tags"><span className="tag">{item.time ?? "Horario por confirmar"}</span>{item.locationName ? <span className="tag">📍 {item.locationName}</span> : null}</div></div>
+              <div><h3>{item.title}</h3><p>{item.description}</p><div className="tags"><span className="tag">{item.startTime ?? "Horario por confirmar"}</span>{item.locationName ? <span className="tag">📍 {item.locationName}</span> : null}</div></div>
             </article>
           ))}
         </div>
