@@ -81,7 +81,46 @@ describe("ChangePasswordPage", () => {
     await waitFor(() => expect(router.state.location.pathname).toBe("/perfil/sesiones"));
   });
 
-  it("shows a field error when the current password is wrong", async () => {
+  it("shows a field error and keeps the session when the server rejects the current password with 400 VALIDATION", async () => {
+    server.use(
+      contractRoute("post", "/auth/change-password", changePasswordInputSchema, () =>
+        HttpResponse.json(
+          { error: { code: "VALIDATION", message: "Datos inválidos.", details: [{ path: "currentPassword", message: "Incorrecta." }] } },
+          { status: 400 }
+        )
+      )
+    );
+    const { store, router } = renderApp("/cambiar-contrasena", authenticatedState(makeUser({ mustChangePassword: true })));
+
+    await submitChange("Contraseña temporal");
+    await userEvent.click(screen.getByRole("button", { name: "Guardar y continuar" }));
+
+    expect(await screen.findByText(WRONG_CURRENT_PASSWORD_MESSAGE)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Contraseña temporal")).toHaveFocus());
+    expect(screen.getByLabelText("Contraseña temporal")).toHaveAttribute("aria-invalid", "true");
+    expect(store.getState().auth.status).toBe("authenticated");
+    expect(router.state.location.pathname).toBe("/cambiar-contrasena");
+  });
+
+  it("shows the server message for a VALIDATION error on another field", async () => {
+    server.use(
+      contractRoute("post", "/auth/change-password", changePasswordInputSchema, () =>
+        HttpResponse.json(
+          { error: { code: "VALIDATION", message: "La contraseña es demasiado común.", details: [{ path: "newPassword", message: "Común." }] } },
+          { status: 400 }
+        )
+      )
+    );
+    renderApp("/cambiar-contrasena", authenticatedState());
+
+    await submitChange("Contraseña actual");
+    await userEvent.click(screen.getByRole("button", { name: "Guardar contraseña" }));
+
+    expect(await screen.findByText("La contraseña es demasiado común.")).toBeInTheDocument();
+    expect(screen.queryByText(WRONG_CURRENT_PASSWORD_MESSAGE)).not.toBeInTheDocument();
+  });
+
+  it("treats 401 INVALID_CREDENTIALS as a wrong current password without logging out", async () => {
     server.use(contractRoute("post", "/auth/change-password", changePasswordInputSchema, () => apiError("INVALID_CREDENTIALS")));
     const { store } = renderApp("/cambiar-contrasena", authenticatedState(makeUser({ mustChangePassword: true })));
 

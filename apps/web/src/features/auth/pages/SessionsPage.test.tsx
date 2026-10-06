@@ -73,6 +73,16 @@ describe("SessionsPage", () => {
     expect(within(items[1] ?? list).getByText("Windows · Chrome")).toBeInTheDocument();
     expect(within(items[1] ?? list).getByText("hace 3 días")).toBeInTheDocument();
     expect(within(items[2] ?? list).getByText("Android · Chrome")).toBeInTheDocument();
+    expect(within(items[1] ?? list).getByText(/Último uso/)).toBeInTheDocument();
+  });
+
+  it("never shows the IP address", async () => {
+    serveSessions(SESSIONS);
+    renderApp("/perfil/sesiones", authenticatedState());
+
+    await screen.findByText("iPhone · Safari");
+    expect(screen.queryByText(/189\.203\.10\.4/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\bIP\b/)).not.toBeInTheDocument();
   });
 
   it("revokes one session and refreshes the list", async () => {

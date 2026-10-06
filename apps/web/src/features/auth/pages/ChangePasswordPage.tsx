@@ -2,7 +2,7 @@ import { changePasswordInputSchema } from "@cuencada/types";
 import { type FormEvent, type ReactNode, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAppDispatch, useAppSelector } from "../../../app/hooks";
-import { getApiErrorCode } from "../../../shared/api/errors";
+import { getApiErrorCode, parseApiError } from "../../../shared/api/errors";
 import { reportUnexpected } from "../../../shared/lib/reportUnexpected";
 import { Button } from "../../../shared/ui/Button";
 import { useToast } from "../../../shared/ui/Toast";
@@ -27,8 +27,21 @@ import { logout } from "../session";
 
 type ChangeField = "currentPassword" | "newPassword" | "confirm";
 
-/** 401 on change-password: the current password is wrong. */
+/** The current password is wrong. */
 export const WRONG_CURRENT_PASSWORD_MESSAGE = "La contraseña actual no es correcta.";
+
+/**
+ * Whether the server rejected the current password. WP-0.4 answers 400
+ * `VALIDATION` with a `details` entry on `currentPassword`; 401
+ * `INVALID_CREDENTIALS` is accepted too, defensively. Neither logs the user
+ * out: the base query only does that for 401 `UNAUTHENTICATED`.
+ */
+function isWrongCurrentPassword(error: unknown): boolean {
+  const code = getApiErrorCode(error);
+  if (code === "INVALID_CREDENTIALS") return true;
+  if (code !== "VALIDATION") return false;
+  return (parseApiError(error)?.error.details ?? []).some((detail) => detail.path === "currentPassword");
+}
 
 /**
  * `/cambiar-contrasena`: the forced change for temporary passwords
@@ -76,7 +89,7 @@ export function ChangePasswordPage(): ReactNode {
         toast.show({ message: "Contraseña actualizada. Cerramos tus otras sesiones.", tone: "success" });
         void navigate(redirectPathFromState(location.state), { replace: true });
       } catch (error) {
-        if (getApiErrorCode(error) === "INVALID_CREDENTIALS") {
+        if (isWrongCurrentPassword(error)) {
           setErrors({ currentPassword: WRONG_CURRENT_PASSWORD_MESSAGE });
           focusInvalid();
           return;

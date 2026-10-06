@@ -20,7 +20,11 @@ import { formatRelativeTime, PORTAL_TIME_ZONE, summarizeUserAgent } from "../ses
 
 type Confirming = "others" | "everywhere" | null;
 
-/** One session row: device, last activity, current badge, revoke. */
+/**
+ * One session row: device/browser summary, last use, current badge, revoke.
+ * The IP address is deliberately not shown (PII, and meaningless to most
+ * relatives); the contract still carries it for server-side auditing.
+ */
 function SessionRow({ session, onRevoke, revoking }: { session: SessionListItem; onRevoke: (id: string) => void; revoking: boolean }): ReactNode {
   const device = summarizeUserAgent(session.userAgent);
   const lastUsed = formatRelativeTime(session.lastUsedAt);
@@ -34,8 +38,7 @@ function SessionRow({ session, onRevoke, revoking }: { session: SessionListItem;
         {session.current ? <Badge tone="success">Esta sesión</Badge> : null}
       </p>
       <p className={styles.sessionMeta}>
-        Última actividad: <time dateTime={session.lastUsedAt} title={lastUsedFull}>{lastUsed}</time>
-        {session.ipAddress ? ` · IP ${session.ipAddress}` : null}
+        Último uso: <time dateTime={session.lastUsedAt} title={lastUsedFull}>{lastUsed}</time>
       </p>
       <p className={styles.sessionMeta}>Abierta el {formatDate(session.createdAt, PORTAL_TIME_ZONE, { dateStyle: "medium" })}</p>
       {session.current ? null : (
