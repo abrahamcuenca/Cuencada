@@ -149,52 +149,147 @@ What this means here:
   Retiring it means a `git rm` PR after the cutover, plus the nginx
   redirects. History stays.
 
+### Decisions added after the PR #38 review (owner answers, Security M1/L1–L4, TL nits)
+
+- **D12. Secrets reach the API as systemd credentials, not `Environment=`
+  (Security M1).** Owner decision: fix it in the Acleron patch.
+  - **Platform:** opt-in `server.credentials` writes each secret to
+    `/etc/credstore/<service>/<KEY>`:
+    - root:root 0600 files in a 0700 directory;
+    - `no_log`, no diff;
+    - stale keys are removed;
+    - a key can't be in both `env` and `credentials`.
+  - The unit gets `LoadCredential=KEY:<path>`, and no value is rendered.
+  - Projects without `server.credentials` render byte-for-byte as before, so
+    the other 9 services on `server_1` are unaffected.
+  - **App:** `config.ts` reads one file per key from `$CREDENTIALS_DIRECTORY`,
+    and falls back to env (dev).
+    - A key set in both env and a credential is a `ConfigError`, which names
+      only the key.
+    - An unknown file name is a `ConfigError` (typo guard).
+    - It drops one trailing newline.
+  - **`infra/project.yml`:** the 5 secrets move to `server.credentials`. The
+    preflight fails on any template or vault value in `server.env`, on a
+    secret missing from `credentials`, and on a platform without
+    `LoadCredential=`.
+  - **Runbook § 4:** after each deploy, the operator checks that
+    `sudo -u nobody systemctl show cuencada-server -p Environment` shows no
+    secret.
+- **D13. Postgres 18 runs on a separate server, reached over the VPC
+  (owner).**
+  - The runtime `DATABASE_URL` points at `<DB_VPC_HOST>:5432`, with
+    `?sslmode=require`.
+  - **The address isn't committed** (the repo is public); it lives only in the
+    vault URL.
+  - **`pg_hba`:** `hostssl cuencada cuencada_app <server_1 VPC IP>/32 scram-sha-256`
+    and `host cuencada cuencada_owner 127.0.0.1/32 scram-sha-256`. The owner
+    tunnel lands on the DB server's loopback, so the owner role can't be
+    tried from `server_1` at all.
+  - TLS on the VPC is recommended. `verify-full` works with
+    `NODE_EXTRA_CA_CERTS`, which the preflight now allows in `server.env`.
+- **D14. Migrations stay on the operator's machine through the tunnel, not on
+  `server_1`.** That is simpler (it is the path Acleron bundle mode already
+  takes) and safer:
+  - the owner/DDL credentials never touch the internet-facing VPS;
+  - a failed migration ships nothing;
+  - `build-bundle` already refuses a non-tunnel target, and the deploy
+    refuses an unmigrated bundle.
+
+  The cost is keeping the tunnel open during `mise run deploy`. The tunnel
+  port is `${TUNNEL_PORT}` in the runbook, and it must equal
+  `deploy.migrate_tunnel` (15432 today).
+- **D6 (revised). Memory:**
+  - The owner resizes `server_1` to **2 GB** before launch.
+  - The drop-in moves to `MemoryHigh=700M`/`MemoryMax=900M`, and must not be
+    installed on the 1 GB plan.
+  - The video cap stays **150 MB** for now. It may return to 300 MB after the
+    resize with no migration (the DB CHECK still allows 300 MB): raise
+    `MemoryMax` by about 300 MB with it.
+- **D9 (revised). Role passwords (Security L2):**
+  - `roles.sql` no longer takes or sets passwords. Roles start without one,
+    so they fail closed.
+  - Passwords are set only with psql's `\password`, or with a SCRAM-SHA-256
+    verifier from the new `infra/db/scram-verifier.mjs` (stdin in, verifier
+    out). Never inline `PASSWORD '…'`, never `-v`.
+  - `verify-roles.sh` proves it end to end:
+    - no login before a password exists;
+    - both roles store `SCRAM-SHA-256$…`;
+    - real scram-sha-256 logins over the container's non-loopback address,
+      since the image trusts loopback;
+    - a wrong password is refused.
+- **Security L1:** every secret in the runbook is pasted with `read -rsp` and
+  `unset` afterwards. That covers the owner URL, the seed password and links,
+  the smoke-test password, and the bucket keys. The s3cmd config is a
+  `mktemp` file under `umask 077`, removed by an `EXIT` trap.
+- **Security L3:** nginx logs are mode 0640, group `adm` (Ubuntu's logrotate
+  creates them `www-data:adm`), kept 14 days. The runbook and nginx.md now say
+  the error log can contain query strings.
+- **Security L4:** a separate short-lived bucket-admin key sets the
+  ACL/CORS/lifecycle and is deleted right after. The runtime key is a limited
+  key with read/write on this bucket only, and the real-bucket check runs
+  with it.
+- **TL nits:**
+  - `deploy-preflight` (used by `build-bundle` and `deploy`) now **fails**
+    when the Acleron checkout is missing; only `deploy-check` passes
+    `--allow-missing-platform`.
+  - The migrate command reads the same everywhere:
+    `server.migrate_command` = `pnpm --filter @cuencada/server db:migrate` =
+    `node apps/server/dist/db/migrate.js`.
+  - The code rollback ends with the `/health/ready` check.
+  - The `CUENCADA_NGINX_MANUAL` escape hatch is gone: secrets now depend on
+    the platform too, so a hand-installed nginx site is no longer a viable
+    fallback.
+
+## Acleron platform patch
+
+The `acleron-platform` repo was checked out at
+`/mnt/40DE47A6DE479358/Development/acleron-platform`, clean, on `main`
+(`33f7d74`).
+
+- **How the branch was made:** the work happened in a scratch clone, then the
+  branch was fetched into the owner's checkout. Only a new ref was added:
+  their working tree and `main` are untouched.
+- **Branch:** `cuencada-nginx-credentials`, commit **`03f8049`**. Not pushed.
+- **Files:**
+  - `ansible/roles/nginx/tasks/{main.yml,site_source.yml}`
+  - `ansible/roles/app_node/tasks/main.yml`
+  - `templates/systemd-node.service.j2`
+  - `README.md` (two new sections)
+  - `tests/run-tests.sh` (+7 tests)
+  - `tests/resolve-nginx-site.yml`
+  - three fixtures
+- **Tests:** `bash tests/run-tests.sh` passes 54/54.
+- **Lint:** `ansible-lint` adds no new rule categories. The FQCN/short-name
+  style matches the existing roles, and the new registered variables use the
+  role prefix.
+- **To use it:** review it, then `git -C <acleron-platform> merge cuencada-nginx-credentials`
+  (or check out the branch before `mise run deploy`), and push when happy.
+
 ## Automated vs owner-manual
 
 | Automated (in the repo, run by `mise`/scripts) | Owner-manual |
 |---|---|
-| `deploy-preflight`: env completeness against `config.ts`, secrets as vault refs, forbidden vars, production `loadConfig()`, `build_env` against the bucket, the migrate/seed contract, nginx against `csp.md`, XFF/CF, log format, WS timeout, platform support | Platform `site_template` change (or the interim manual install) |
-| `deploy-check`: preflight, production build, `check:sw`, bundle size | Bucket name; create the bucket, ACL, CORS and lifecycle; run `check-presigned-put.mjs` |
+| `deploy-preflight` (strict): env and credentials completeness against `config.ts`, secrets only as vault refs under `server.credentials`, forbidden vars, production `loadConfig()`, `build_env` against the bucket, the migrate/seed contract, nginx against `csp.md`, XFF/CF, log format, WS timeout, platform `site_template` + `LoadCredential=` support | Review, merge and push the Acleron branch `cuencada-nginx-credentials` |
+| `deploy-check`: the same preflight (a missing platform only warns), production build, `check:sw`, bundle size | Bucket name; create the bucket with a short-lived admin key (ACL, CORS, lifecycle), then delete that key; run `check-presigned-put.mjs` with the runtime key |
 | `build-bundle`: verify, build, migrate (owner role through the tunnel), pack | Vault values (list in runbook step 1.4) |
-| Ansible deploy: install, swap, systemd, certbot, nginx | Create the DB roles on PG18, plus `pg_hba` |
-| `verify-roles.sh` (local proof of the roles) | Rotate the WhatsApp and OneDrive links; the one-time seed |
+| Ansible deploy: install, swap, credentials files, systemd, certbot, nginx | DB roles on the PG18 server (`\password`), `pg_hba`, TLS, firewall |
+| `verify-roles.sh` (local proof: roles, SCRAM, grants, API via `CREDENTIALS_DIRECTORY`) | Rotate the WhatsApp and OneDrive links; the one-time seed |
 | `deploy-smoke.mjs` (post-deploy checks, including the WS through nginx) | Resend DNS and domain verification; a mailbox for `admin@cuencada.com` |
-| | Install the systemd drop-in once; `free -m`, swap or plan size |
-| | Approve and run `mise run deploy`; first admin login, password change, email verification |
+| `scram-verifier.mjs` (verifier from stdin) | Resize `server_1` to 2 GB, then install the systemd drop-in once |
+| | Approve and run `mise run deploy`; secrets check; first admin login, password change, email verification |
 | | Grafana alert rules from the runbook's LogQL; journald → Loki shipping |
 
-## Open questions (→ owner)
+## Owner answers (PR #38) and what is still open
 
-1. **Bucket name.** It goes in `project.yml` (2 lines) and
-   `cuencada.conf` (3 lines). The preflight blocks until it is set. Is the
-   bucket created yet, and is the access key limited to that bucket?
-2. **Server memory.**
-   - `server_1` has 961 MB in total for ten Node services. Please run
-     `free -m` (the `available` column).
-   - Add 1 GB of swap, or move to a 2 GB plan before launch?
-   - The 150 MB video cap is already in this branch. Say so if you want 300 MB
-     back and accept the risk.
-3. **Where Postgres 18 runs.** The read-only facts scan shows **no
-   `postgresql.service` and no listener on :5432 on `server_1`**. Is the DB on
-   another host, a container, or a non-default port?
-   - The runtime `DATABASE_URL` host and the `pg_hba` rules depend on it.
-   - **Tunnel port:** `deploy.migrate_tunnel` is set to Acleron's default
-     `127.0.0.1:15432`. Confirm it, or give the port your `db` alias uses.
-4. **Resend.**
-   - Is the account created and `cuencada.com` added?
-   - Who manages DNS for `cuencada.com`?
-   - Is there a mailbox for `admin@cuencada.com`? The seeded admin starts
-     unverified and must click a verification email before chat and the
-     gallery work.
-   - Which address should receive DMARC `rua` reports (proposed:
-     `admin@cuencada.com`)?
-5. **Platform change.** OK to add `nginx.site_template` to `acleron-platform`
-   (about 6 lines, opt-in, see nginx.md)? Or use the interim manual install
-   after each deploy?
-6. **Breached-password check (L5).** Build it before launch (offline top-100k
-   list, or HIBP k-anonymity), or waive it in writing for the first launch?
-7. **Observability.** Does `server_1` already ship journald to Loki (Alloy or
-   promtail)? The LogQL alert rules are ready in runbook § 10.
+| # | Question | Answer | Still open |
+|---|---|---|---|
+| 1 | Bucket name | — | **Yes:** the name, to replace `<bucket>` (`project.yml`: 2 lines; `cuencada.conf`: 3 lines) |
+| 2 | Memory | Resize to 2 GB before launch; keep 150 MB for now | Record `free -m` after the resize |
+| 3 | Where PG18 runs | Separate server, VPC (D13); the tunnel stays for the operator | **Confirm** `${TUNNEL_PORT}`/`deploy.migrate_tunnel` (15432), and whether the tunnel can land on the DB server's loopback (preferred `pg_hba`) |
+| 4 | Resend | — | Account and domain, the DNS operator, a mailbox for `admin@cuencada.com`, the DMARC `rua` address |
+| 5 | Platform change | Approved; delivered as a branch (above) | Owner review and merge |
+| 6 | Breached-password check | Being built in a separate WP | Launch gate |
+| 7 | Observability (journald → Loki) | — | Still to confirm |
 
 ## Verification (2026-10-06)
 
@@ -273,3 +368,37 @@ What this means here:
     manifest needs its own location.
   - **Found:** with `try_files`, `$uri` logs `/index.html` for SPA routes, so
     the log path comes from `$request_uri` with the query stripped.
+- 2026-10-06 PR #38 (head `158afc8`): **TL approved, Security requested
+  changes (M1).**
+  - **M1** (secrets in `Environment=`, readable through `systemctl show`):
+    fixed with D12, the platform credentials plus `CREDENTIALS_DIRECTORY` in
+    `config.ts`.
+  - **L1** (`read -rs`, temporary s3cfg), **L2** (no inline passwords, SCRAM),
+    **L3** (log mode and retention), **L4** (separate bucket-admin key): all
+    addressed (see D6/D9 revised and the L1–L4 entries above).
+  - **TL nits** (strict preflight, unified migrate wording, rollback ends
+    with `/health/ready`): done.
+  - **Owner answers:** applied (D13, D14, 2 GB memory, the platform patch, the
+    breached-password check in a separate WP).
+  - Re-verified, after merging `origin/main` (no new commits since `bc2d3d5`):
+    - `pnpm lint`: clean.
+    - `pnpm turbo run typecheck --force`: 6/6.
+    - `pnpm test`: 155 files, 1938 tests, all pass. One unrelated chat socket
+      test timed out once under load; its file passes alone (24/24), and the
+      full re-run passed.
+    - `pnpm build`, `check:sw`, bundle size: 174.4 kB gzip.
+    - `config.test.ts`: +5 credentials tests.
+    - `preflight.test.ts`: now 16 tests (credentials, secrets-in-env,
+      platform strict and relaxed).
+    - `verify-roles.sh`: passed. It covers roles without passwords failing
+      closed, SCRAM verifiers, real scram-sha-256 logins and a wrong password
+      refused, the grants, and an API started with its secrets **only** in a
+      `CREDENTIALS_DIRECTORY`.
+    - **Real systemd:** `systemd-run --user -p LoadCredential=…` delivered
+      the files. The built `config.js` read `JWT_SECRET` from
+      `$CREDENTIALS_DIRECTORY`, with `DATABASE_URL` absent from the
+      environment.
+    - `nginx -t` (1.24) is still OK.
+    - **Acleron:** `tests/run-tests.sh` passes 54/54.
+  - **Still not run:** anything against `server_1`, the production DB or a
+    bucket.

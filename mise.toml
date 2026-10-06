@@ -53,10 +53,15 @@ depends = ["build-bundle"]
 run = "ansible-playbook ../acleron-platform/acleron-platform/ansible/playbooks/deploy.yml -e project_config=$(pwd)/infra/project.yml -e artifact_bundle=$HOME/.acleron/bundles/cuencada/latest.tar.gz"
 description = "Build a bundle, then deploy it to the VPS"
 
-# Local and secret-free: safe to run anywhere, any time.
+# Local and secret-free: safe to run anywhere, any time. Unlike deploy-preflight
+# (strict, used by build-bundle/deploy), a missing Acleron checkout only warns here.
 [tasks.deploy-check]
-depends = ["deploy-preflight"]
-run = ["pnpm build", "pnpm --filter @cuencada/web check:sw", "pnpm --filter @cuencada/web size"]
+run = [
+  "pnpm --filter @cuencada/server deploy:preflight --allow-missing-platform",
+  "pnpm build",
+  "pnpm --filter @cuencada/web check:sw",
+  "pnpm --filter @cuencada/web size"
+]
 description = "Deploy gate without secrets: preflight, production build, service-worker rules, bundle size"
 
 # Ansible --check against server_1 (needs the vault and SSH; changes nothing).

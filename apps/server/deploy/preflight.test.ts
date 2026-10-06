@@ -9,28 +9,38 @@ const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const read = (path: string): string => readFileSync(resolve(repoRoot, path), "utf8");
 
 const BUCKET = "fictional-media-bucket";
-const PLATFORM_WITH_SUPPORT = "- name: Render the project's own site\n  when: project.nginx.site_template is defined\n";
+/** Stand-ins for the patched Acleron files (branch cuencada-nginx-credentials). */
+const PLATFORM_WITH_SUPPORT = {
+  nginxTasks: "- name: Resolve the nginx site source\n  # nginx.site_template\n",
+  systemdTemplate: "LoadCredential={{ key }}:/etc/credstore/{{ project.server.service_name }}/{{ key }}\n"
+};
+const STOCK_PLATFORM = {
+  nginxTasks: "- name: Render HTTPS Nginx config (TLS enabled)\n",
+  systemdTemplate: 'Environment="{{ key }}={{ value }}"\n'
+};
 
 type Dict = Record<string, unknown>;
 
 /** The repository's real files, with the bucket placeholder filled in. */
-function repoInput(overrides: { projectText?: string; nginxConf?: string; platform?: string | null } = {}): PreflightInput {
+function repoInput(
+  overrides: { projectText?: string; nginxConf?: string; platform?: PreflightInput["platform"] } = {}
+): PreflightInput {
   const projectText = overrides.projectText ?? read("infra/project.yml").replaceAll("<bucket>", BUCKET);
   return {
     project: parseYaml(projectText),
     nginxConf: overrides.nginxConf ?? read(NGINX_SITE_TEMPLATE).replaceAll("<bucket>", BUCKET),
     cspDoc: read("docs/security/csp.md"),
     serverPackage: JSON.parse(read("apps/server/package.json")),
-    platformNginxTasks: overrides.platform === undefined ? PLATFORM_WITH_SUPPORT : overrides.platform
+    platform: overrides.platform === undefined ? PLATFORM_WITH_SUPPORT : overrides.platform
   };
 }
 
-/** Run with one edit applied to the parsed project. */
-function withProject(edit: (project: Dict, env: Dict) => void): ReturnType<typeof runPreflight> {
+/** Run with one edit applied to the parsed project (env and credentials passed for convenience). */
+function withProject(edit: (project: Dict, env: Dict, credentials: Dict) => void): ReturnType<typeof runPreflight> {
   const input = repoInput();
   const project = input.project as Dict;
-  const env = (project.server as Dict).env as Dict;
-  edit(project, env);
+  const server = project.server as Dict;
+  edit(project, server.env as Dict, server.credentials as Dict);
   return runPreflight(input);
 }
 
@@ -68,16 +78,41 @@ describe("runPreflight", () => {
     );
   });
 
-  it("requires every secret to be a vault reference, never a literal or a filtered expression", () => {
-    const literal = withProject((_project, env) => {
-      env.JWT_SECRET = "a-literal-secret-that-is-long-enough-to-pass";
+  it("requires every secret to be a vault reference under server.credentials, never a literal or a filter", () => {
+    const literal = withProject((_project, _env, credentials) => {
+      credentials.JWT_SECRET = "a-literal-secret-that-is-long-enough-to-pass";
     });
-    expect(literal.problems).toContain("server.env.JWT_SECRET must be a {{ vault_cuencada_* }} reference, never a literal");
+    expect(literal.problems).toContain(
+      "server.credentials.JWT_SECRET must be exactly one {{ vault_cuencada_* }} reference (no literal, filter or default)"
+    );
 
-    const filtered = withProject((_project, env) => {
-      env.S3_SECRET_ACCESS_KEY = "{{ vault_cuencada_s3_secret_access_key | default('') }}";
+    const filtered = withProject((_project, _env, credentials) => {
+      credentials.S3_SECRET_ACCESS_KEY = "{{ vault_cuencada_s3_secret_access_key | default('') }}";
     });
-    expect(filtered.problems).toEqual(expect.arrayContaining([expect.stringContaining("no filters or defaults")]));
+    expect(filtered.problems).toEqual(expect.arrayContaining([expect.stringContaining("no literal, filter or default")]));
+  });
+
+  it("refuses secrets in server.env (Environment= is readable by any local user) and keys in both places", () => {
+    const inEnv = withProject((_project, env, credentials) => {
+      Reflect.deleteProperty(credentials, "JWT_SECRET");
+      env.JWT_SECRET = "{{ vault_cuencada_jwt_secret }}";
+    });
+    expect(inEnv.problems).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("server.env.JWT_SECRET holds a template/vault value: secrets belong in server.credentials"),
+        "JWT_SECRET is a secret: map it under server.credentials as a {{ vault_cuencada_* }} reference"
+      ])
+    );
+
+    const both = withProject((_project, env) => {
+      env.RESEND_API_KEY = "re_literal_in_env";
+    });
+    expect(both.problems).toContain("RESEND_API_KEY is in both server.env and server.credentials (one place only)");
+
+    const typo = withProject((_project, _env, credentials) => {
+      credentials.JWT_SECRETS = "{{ vault_cuencada_jwt_secret }}";
+    });
+    expect(typo.problems).toContain("server.credentials.JWT_SECRETS is not read by the server (typo?)");
   });
 
   it("fails when a variable config.ts reads is not mapped, or a mapped one is unknown", () => {
@@ -184,14 +219,25 @@ describe("runPreflight", () => {
     expect(missing.problems).toContain("nginx: location = /api/chat/ws (chat WebSocket upgrade) is missing");
   });
 
-  it("blocks when the Acleron platform would ignore the project's nginx site, and warns when it can't tell", () => {
-    const stock = runPreflight(repoInput({ platform: "- name: Render HTTPS Nginx config (TLS enabled)\n" }));
-    expect(stock.problems).toEqual(expect.arrayContaining([expect.stringContaining("ignores nginx.site_template")]));
-    const manual = runPreflight({ ...repoInput({ platform: "- name: Render HTTPS Nginx config\n" }), manualNginx: true });
-    expect(manual.problems).toEqual([]);
-    expect(manual.warnings).toEqual([expect.stringContaining("CUENCADA_NGINX_MANUAL=1")]);
-    const unknown = runPreflight(repoInput({ platform: null }));
-    expect(unknown.problems).toEqual([]);
-    expect(unknown.warnings).toEqual([expect.stringContaining("platform checkout not found")]);
+  it("blocks when the Acleron platform would ignore the project's nginx site or its credentials", () => {
+    const stock = runPreflight(repoInput({ platform: STOCK_PLATFORM }));
+    expect(stock.problems).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("ignores nginx.site_template"),
+        expect.stringContaining("no LoadCredential= support")
+      ])
+    );
+    const noCredentials = runPreflight(
+      repoInput({ platform: { nginxTasks: PLATFORM_WITH_SUPPORT.nginxTasks, systemdTemplate: STOCK_PLATFORM.systemdTemplate } })
+    );
+    expect(noCredentials.problems).toEqual([expect.stringContaining("no LoadCredential= support")]);
+  });
+
+  it("fails without the platform checkout (build-bundle, deploy) and only warns for deploy-check", () => {
+    const strict = runPreflight(repoInput({ platform: null }));
+    expect(strict.problems).toEqual([expect.stringContaining("platform checkout not found")]);
+    const relaxed = runPreflight({ ...repoInput({ platform: null }), allowMissingPlatform: true });
+    expect(relaxed.problems).toEqual([]);
+    expect(relaxed.warnings).toEqual([expect.stringContaining("platform checkout not found")]);
   });
 });

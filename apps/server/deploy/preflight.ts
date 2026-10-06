@@ -27,14 +27,18 @@ export interface PreflightInput {
   cspDoc: string;
   /** Parsed `apps/server/package.json`. */
   serverPackage: unknown;
-  /** Text of the Acleron nginx role's tasks, or `null` when the platform checkout wasn't found. */
-  platformNginxTasks: string | null;
+  /** Acleron platform files, or `null` when the checkout wasn't found. */
+  platform: {
+    /** `ansible/roles/nginx/tasks/main.yml`. */
+    nginxTasks: string;
+    /** `templates/systemd-node.service.j2`. */
+    systemdTemplate: string;
+  } | null;
   /**
-   * `CUENCADA_NGINX_MANUAL=1`: the operator installs the site by hand after
-   * each deploy (interim fallback in docs/deploy/nginx.md), so a platform
-   * without `site_template` support is a warning, not a blocker.
+   * `--allow-missing-platform` (`mise run deploy-check` only): a missing
+   * checkout is a warning. Everywhere else (build-bundle, deploy) it fails.
    */
-  manualNginx?: boolean;
+  allowMissingPlatform?: boolean;
 }
 
 /** Outcome of {@link runPreflight}. */
@@ -62,8 +66,11 @@ export const SECRET_ENV_KEYS = [
 /** Config keys that may stay unmapped: ignored in production. */
 const EXEMPT_CONFIG_KEYS = new Set(["DEV_ALLOWED_ORIGINS"]);
 
-/** Non-config runtime variables allowed in `server.env`. */
-const EXTRA_RUNTIME_KEYS = new Set(["UV_THREADPOOL_SIZE"]);
+/**
+ * Non-config runtime variables allowed in `server.env`: the libuv pool size,
+ * and the DB server's CA for `sslmode=verify-full` over the VPC (runbook § 3).
+ */
+const EXTRA_RUNTIME_KEYS = new Set(["UV_THREADPOOL_SIZE", "NODE_EXTRA_CA_CERTS"]);
 
 /**
  * Variables that must never reach the VPS: the owner-role migrate URL, the
@@ -115,7 +122,9 @@ function locationBlock(conf: string, spec: string): string | null {
 }
 
 /**
- * Validate `server.env` and run it through `loadConfig` with dummy secrets.
+ * Validate `server.env` (non-secret `Environment=` lines) and
+ * `server.credentials` (secrets, `LoadCredential=` files), then run their
+ * union through `loadConfig` with dummy secrets.
  *
  * @returns The validated config, or `null` when it can't be built.
  */
@@ -126,6 +135,7 @@ function checkServerEnv(
 ): ReturnType<typeof loadConfig> | null {
   const server = dict(project.server);
   const env = dict(server.env);
+  const credentials = dict(server.credentials);
   if (Object.keys(env).length === 0) {
     problems.push("server.env is missing or empty");
     return null;
@@ -145,14 +155,10 @@ function checkServerEnv(
       problems.push(`server.env.${key} is not read by the server (typo?)`);
       continue;
     }
-    const ref = VAULT_REF.exec(value);
-    if (ref?.[1] !== undefined) {
-      vaultRefs.add(ref[1]);
-      resolved[key] = dummyFor(key);
-      continue;
-    }
     if (value.includes("{{") || value.includes("{%")) {
-      problems.push(`server.env.${key} must be a literal or exactly one {{ vault_cuencada_* }} reference (no filters or defaults)`);
+      problems.push(
+        `server.env.${key} holds a template/vault value: secrets belong in server.credentials (Environment= is readable by any local user)`
+      );
       continue;
     }
     if (/[%"\\$]/.test(value)) {
@@ -161,14 +167,35 @@ function checkServerEnv(
     resolved[key] = value;
   }
 
+  for (const [key, value] of Object.entries(credentials)) {
+    if (FORBIDDEN_ENV.test(key)) {
+      problems.push(`server.credentials.${key} must not be on the VPS (operator-only, see docs/deploy/runbook.md)`);
+      continue;
+    }
+    if (!CONFIG_ENV_KEYS.includes(key)) {
+      problems.push(`server.credentials.${key} is not read by the server (typo?)`);
+      continue;
+    }
+    if (key in env) {
+      problems.push(`${key} is in both server.env and server.credentials (one place only)`);
+      continue;
+    }
+    const ref = typeof value === "string" ? VAULT_REF.exec(value) : null;
+    if (ref?.[1] === undefined) {
+      problems.push(`server.credentials.${key} must be exactly one {{ vault_cuencada_* }} reference (no literal, filter or default)`);
+      continue;
+    }
+    vaultRefs.add(ref[1]);
+    resolved[key] = dummyFor(key);
+  }
+
   for (const key of SECRET_ENV_KEYS) {
-    const value = env[key];
-    if (typeof value !== "string" || !VAULT_REF.test(value)) {
-      problems.push(`server.env.${key} must be a {{ vault_cuencada_* }} reference, never a literal`);
+    if (!(key in credentials)) {
+      problems.push(`${key} is a secret: map it under server.credentials as a {{ vault_cuencada_* }} reference`);
     }
   }
   for (const key of CONFIG_ENV_KEYS) {
-    if (!(key in env) && !EXEMPT_CONFIG_KEYS.has(key)) {
+    if (!(key in env) && !(key in credentials) && !EXEMPT_CONFIG_KEYS.has(key)) {
       problems.push(`server.env.${key} is not mapped (config.ts reads it; production must not fall back to its dev default)`);
     }
   }
@@ -361,22 +388,39 @@ export function runPreflight(input: PreflightInput): PreflightResult {
   const bucket = config?.S3_BUCKET ?? "";
   checkNginx(project, input, bucket, problems);
 
-  if (input.platformNginxTasks === null) {
-    warnings.push(
-      "Acleron platform checkout not found (set ACLERON_PLATFORM_DIR): can't confirm it renders nginx.site_template"
-    );
-  } else if (!input.platformNginxTasks.includes("site_template")) {
-    const message =
-      "the Acleron nginx role ignores nginx.site_template: a deploy renders the stock site (chat WebSocket " +
-      "broken, no SPA CSP, appended X-Forwarded-For, query strings in access logs)";
-    if (input.manualNginx === true) {
-      warnings.push(`${message}. CUENCADA_NGINX_MANUAL=1: install infra/nginx/cuencada.conf by hand right after the deploy.`);
-    } else {
-      problems.push(`${message}. Apply the platform change in docs/deploy/nginx.md first.`);
-    }
-  }
+  checkPlatform(input, problems, warnings);
 
   return { problems, warnings, vaultRefs: [...vaultRefs].sort() };
+}
+
+/**
+ * The Acleron checkout must render the project's nginx site and load
+ * `server.credentials` with `LoadCredential=` (platform branch
+ * `cuencada-nginx-credentials`). Without either, a deploy silently ships the
+ * stock nginx site (chat broken, no CSP) or drops every secret.
+ */
+function checkPlatform(input: PreflightInput, problems: string[], warnings: string[]): void {
+  if (input.platform === null) {
+    const message =
+      "Acleron platform checkout not found (set ACLERON_PLATFORM_DIR): can't confirm it supports " +
+      "nginx.site_template and server.credentials";
+    if (input.allowMissingPlatform === true) warnings.push(message);
+    else problems.push(message);
+    return;
+  }
+  if (!input.platform.nginxTasks.includes("site_template")) {
+    problems.push(
+      "the Acleron nginx role ignores nginx.site_template: a deploy would render the stock site (chat WebSocket " +
+        "broken, no SPA CSP, appended X-Forwarded-For, query strings in access logs). Use the platform branch " +
+        "cuencada-nginx-credentials (docs/deploy/nginx.md)."
+    );
+  }
+  if (!input.platform.systemdTemplate.includes("LoadCredential=")) {
+    problems.push(
+      "the Acleron systemd template has no LoadCredential= support: server.credentials (every secret) would never " +
+        "reach the API. Use the platform branch cuencada-nginx-credentials."
+    );
+  }
 }
 
 /** Vault values the operator needs that are deliberately NOT in project.yml. */
@@ -390,11 +434,14 @@ function main(): void {
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
   const read = (path: string): string => readFileSync(resolve(repoRoot, path), "utf8");
   const platformDir = process.env.ACLERON_PLATFORM_DIR ?? resolve(repoRoot, "../acleron-platform/acleron-platform");
-  let platformNginxTasks: string | null = null;
+  let platform: PreflightInput["platform"] = null;
   try {
-    platformNginxTasks = readFileSync(resolve(platformDir, "ansible/roles/nginx/tasks/main.yml"), "utf8");
+    platform = {
+      nginxTasks: readFileSync(resolve(platformDir, "ansible/roles/nginx/tasks/main.yml"), "utf8"),
+      systemdTemplate: readFileSync(resolve(platformDir, "templates/systemd-node.service.j2"), "utf8")
+    };
   } catch {
-    platformNginxTasks = null;
+    platform = null;
   }
 
   const result = runPreflight({
@@ -402,8 +449,10 @@ function main(): void {
     nginxConf: read(NGINX_SITE_TEMPLATE),
     cspDoc: read("docs/security/csp.md"),
     serverPackage: JSON.parse(read("apps/server/package.json")),
-    platformNginxTasks,
-    manualNginx: process.env.CUENCADA_NGINX_MANUAL === "1"
+    platform,
+    // Only `deploy-check` (local, may run without the platform checkout)
+    // passes this; build-bundle and deploy run the strict preflight.
+    allowMissingPlatform: process.argv.includes("--allow-missing-platform")
   });
 
   const out = process.stdout;

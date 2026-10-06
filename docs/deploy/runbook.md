@@ -1,8 +1,8 @@
 # Cutover runbook: first production deploy of cuencada.com
 
-WP-2.4 · Tech Lead · 2026-10-06. Decisions and open questions are in
-[`WP-2.4.md`](../coordination/WP-2.4.md). The nginx details are in
-[`nginx.md`](nginx.md).
+WP-2.4 · Tech Lead · 2026-10-06, revised after the PR #38 review. Decisions
+and open questions are in [`WP-2.4.md`](../coordination/WP-2.4.md). The nginx
+details are in [`nginx.md`](nginx.md).
 
 **Who does what**
 
@@ -14,14 +14,36 @@ WP-2.4 · Tech Lead · 2026-10-06. Decisions and open questions are in
 
 **Shape of production**
 
-- **Runtime:** Ubuntu 24.04 `server_1`, nginx 1.24, Node 24.
-- **Database:** PostgreSQL 18, reached from the operator's machine through an
-  SSH tunnel.
+- **API:** Ubuntu 24.04 `server_1` (resized to **2 GB** before launch),
+  nginx 1.24, Node 24.
+- **Database:** PostgreSQL 18 on a **separate DB server**:
+  - `server_1` reaches it over the private VPC at `<DB_VPC_HOST>:5432`. The
+    address is owner-provided and only lives in the vault URL.
+  - The operator reaches it from their machine through an SSH tunnel on
+    `127.0.0.1:${TUNNEL_PORT}`. That port must equal `deploy.migrate_tunnel`
+    in `infra/project.yml` (15432 today).
 - **Media:** a Linode Object Storage bucket in `us-southeast-1`.
 - **Email:** Resend.
 - **No Cloudflare:** DNS points straight at `server_1`.
-- **Deploy:** Acleron bundle mode. The build, migrations and verify run on the
+- **Deploy:** Acleron bundle mode, on the platform branch
+  `cuencada-nginx-credentials`. Build, verify and migrations run on the
   operator's machine, and the VPS only runs `pnpm install --prod`.
+- **Secrets:** they are not in the unit's `Environment=` lines. Each one is a
+  root-only file in `/etc/credstore/cuencada-server/`, loaded with
+  `LoadCredential=`, and the API reads it from `$CREDENTIALS_DIRECTORY`.
+
+**Shell hygiene for every secret below (Security L1):**
+
+- Paste secrets into `read -rsp`, which never echoes them and keeps them out
+  of shell history.
+- Never put a secret on a command line or in a file inside the repo.
+- `unset` each one when done.
+
+```sh
+read -rsp 'paste <name>: ' VAR; echo
+# … use "$VAR" …
+unset VAR
+```
 
 ---
 
@@ -31,12 +53,13 @@ WP-2.4 · Tech Lead · 2026-10-06. Decisions and open questions are in
 |---|---|---|
 | Home mosaic replaced, so there are no public family photos (CUTOVER GATE) | Done in #34 | — |
 | Stricter open invites: 5/10 uses, 72 h, admin alert per acceptance (threat model A2) | Done in #36 | — |
-| **Breached-password check** on set, change and reset (WP-2.3 L5, ASVS 2.1.7) | **Open.** Backend WP before launch, or O waives it in writing | O decides |
+| **Breached-password check** on set, change and reset (WP-2.3 L5, ASVS 2.1.7) | **In progress in a separate WP.** Launch waits for it | that WP |
 | Threat model updated for #35/#36 and WP-2.4 | Done in WP-2.4 | — |
 | WP-2.3 open findings: L1 (zod `jitless`, web), L4 (CI image digest) | Low. Not blocking, backlog | — |
-| **Platform change**: Acleron renders `nginx.site_template` ([nginx.md](nginx.md)) | **Open.** `deploy-preflight` fails until it lands | O (platform repo) |
-| Bucket name filled in (`<bucket>` in `infra/project.yml` ×2 and `infra/nginx/cuencada.conf` ×9) | **Open** | O gives the name; A edits it in a PR |
-| Video cap 150 MB (server_1 RAM, decision D6 in WP-2.4) | Done in WP-2.4 | — |
+| **Acleron platform:** `nginx.site_template` and `server.credentials`, on branch `cuencada-nginx-credentials` in the local `acleron-platform` checkout (commit `03f8049`) | Written and tested (54/54). **O reviews it, merges or checks it out, and pushes it** | O |
+| Bucket name filled in (`<bucket>` in `infra/project.yml`: 2 lines; `infra/nginx/cuencada.conf`: 3 CSP lines) | **Open** | O gives the name; A edits it in a PR |
+| `server_1` resized to 2 GB | **Open** (owner decision) | O |
+| Video cap 150 MB (it can return to 300 MB after the resize; see the runtime notes) | Done in WP-2.4 | — |
 | Minimum client version mechanism (force-update stale PWAs) | **Open** (backlog WP-2.x). Not needed for the first deploy: there are no old clients yet | — |
 
 ## 1. Pre-flight (no production changes)
@@ -48,36 +71,41 @@ WP-2.4 · Tech Lead · 2026-10-06. Decisions and open questions are in
    mise run verify            # lint, typecheck, tests (podman Postgres), prod audit
    mise run deploy-check      # preflight + production build + check:sw + bundle size
    ```
-   - `deploy-check` needs no secret and no SSH.
-   - It fails while the bucket name is a placeholder, or while the platform
-     can't render the project's nginx site.
-   - Set `ACLERON_PLATFORM_DIR` if the platform isn't checked out at
-     `../acleron-platform/acleron-platform`.
-2. **O:** port check. Read-only. 3104 was free on 2026-10-06, and the
-   cuencada service doesn't exist yet.
+   - `deploy-check` needs no secret and no SSH. A missing Acleron checkout
+     only warns there.
+   - `mise run deploy-preflight` is the strict version, and it runs again
+     inside `build-bundle` and `deploy`. It **fails** when any of these is
+     true:
+     - the Acleron checkout is missing;
+     - the checkout lacks `site_template` or `LoadCredential=` support;
+     - the bucket is still a placeholder;
+     - anything drifted.
+   - Point `ACLERON_PLATFORM_DIR` at the platform if it isn't at
+     `../acleron-platform/acleron-platform`. That checkout must be on
+     `cuencada-nginx-credentials`, or on `main` after the merge.
+2. **O:** port check. Read-only. 3104 was free on 2026-10-06.
    ```sh
    cd ../acleron-platform/acleron-platform && ansible-playbook -i ansible/inventory.ini \
      ansible/playbooks/ports.yml -e vps=server_1 -e range_start=3100 -e range_end=3199
    ```
-3. **O:** memory check on `server_1`: `free -m`.
-   - Facts on 2026-10-06: **961 MB total**, 76 MB `MemFree`, and nine other
-     Node services. That is why the video cap is now 150 MB.
-   - The API needs about 400 MB of headroom (systemd `MemoryHigh=400M`,
-     `MemoryMax=550M`). If `available` is below about 450 MB:
-     - add swap (`fallocate -l 1G /swapfile`, …), or
-     - move to a 2 GB plan before launch.
-   - Record the number in WP-2.4.md.
-4. **O:** vault values in `~/.acleron/vault-server_1.yml`. Generate every
-   secret as hex or alphanumeric only (`openssl rand -hex 32`). systemd treats
-   `%` in `Environment=` as a specifier, and URLs need no escaping that way.
+3. **O: resize `server_1` to 2 GB** in the Linode console (it needs a reboot
+   of the Linode). Then run `free -m`.
+   - On 2026-10-06 it had 961 MB in total, with nine other Node services.
+   - The drop-in's `MemoryHigh=700M`/`MemoryMax=900M` assumes 2 GB.
+   - **Don't install the drop-in on the 1 GB plan.**
+   - Record the new `total` and `available` in WP-2.4.md.
+4. **O:** vault values in `~/.acleron/vault-server_1.yml` (`ansible-vault edit`).
+   - Generate every secret as hex: `openssl rand -hex 32`.
+   - The five VPS secrets go to `server.credentials`, so they become root-only
+     files. They never become `Environment=` lines.
 
    | Vault key | Used by | Value |
    |---|---|---|
-   | `vault_cuencada_database_url` | VPS (`DATABASE_URL`) | `postgresql://cuencada_app:<app pw>@<db host>:5432/cuencada`, the **runtime** role |
-   | `vault_cuencada_jwt_secret` | VPS | `openssl rand -hex 48` (at least 32 chars) |
-   | `vault_cuencada_resend_api_key` | VPS | Resend API key, **sending access, cuencada.com domain only** |
-   | `vault_cuencada_s3_access_key_id` / `vault_cuencada_s3_secret_access_key` | VPS | Linode **limited** access key: read/write on the media bucket only |
-   | `vault_cuencada_migrate_database_url` | operator only | `postgresql://cuencada_owner:<owner pw>@127.0.0.1:15432/cuencada`, the **owner** role through the tunnel |
+   | `vault_cuencada_database_url` | VPS credential `DATABASE_URL` | `postgresql://cuencada_app:<app pw>@<DB_VPC_HOST>:5432/cuencada?sslmode=require`: the **runtime** role over the VPC (§ 3) |
+   | `vault_cuencada_jwt_secret` | VPS credential | `openssl rand -hex 48` (at least 32 chars) |
+   | `vault_cuencada_resend_api_key` | VPS credential | Resend API key: **sending access, cuencada.com domain only** |
+   | `vault_cuencada_s3_access_key_id` / `vault_cuencada_s3_secret_access_key` | VPS credentials | Linode **limited** key: read/write on this bucket only (§ Bucket) |
+   | `vault_cuencada_migrate_database_url` | operator only | `postgresql://cuencada_owner:<owner pw>@127.0.0.1:${TUNNEL_PORT}/cuencada`: the **owner** role through the tunnel |
    | `vault_cuencada_seed_admin_temp_password` | operator only | at least 16 chars, passes the password policy |
    | `vault_cuencada_seed_whatsapp_url`, `…_external_album_url`, `…_lyrics_url`, `…_program_url` | operator only | the **new** links from step 2 |
 
@@ -86,17 +114,19 @@ WP-2.4 · Tech Lead · 2026-10-06. Decisions and open questions are in
 5. **O:** DNS.
    - `cuencada.com` and `www.cuencada.com` A records point at `server_1`.
      Both already did on 2026-10-06.
-   - No AAAA record unless nginx listens on IPv6 (it doesn't).
-   - Today `https://cuencada.com` answers with another site's certificate
-     (`acleron.com`), because there is no cuencada vhost yet. The first deploy
-     issues the Let's Encrypt certificate with certbot (HTTP-01 on port 80).
-6. **O:** Resend domain verified (§ Resend below). The status is "Verified"
-   for SPF and DKIM.
+   - No AAAA record: nginx doesn't listen on IPv6.
+   - The first deploy issues the Let's Encrypt certificate (HTTP-01 on
+     port 80). Until then, `https://cuencada.com` shows `acleron.com`'s
+     certificate.
+6. **O:** Resend domain verified (§ Resend DNS). The status is "Verified" for
+   SPF and DKIM.
 7. **O:** bucket created, private, with CORS and lifecycle applied, and the
-   real-bucket check passing (§ Bucket below).
-8. **O:** DB roles created (§ Database roles below), and the tunnel works:
-   `pg_isready -h 127.0.0.1 -p 15432`.
-9. **O:** systemd drop-in ready to install (step 4).
+   real-bucket check passing (§ Bucket).
+8. **O:** DB roles, `pg_hba` and TLS done (§ 3), and the tunnel works:
+   ```sh
+   ssh -N -L ${TUNNEL_PORT}:127.0.0.1:5432 <db server> &   # see § 3 for the alternative through server_1
+   pg_isready -h 127.0.0.1 -p ${TUNNEL_PORT}
+   ```
 
 ## 2. Rotate the legacy links (before seeding)
 
@@ -104,83 +134,155 @@ The WhatsApp group invite and the OneDrive share links are public. They are
 in the legacy `index.html` and `cuencada2026.html`, and in git history. Git
 history is not rewritten (owner decision), so the old links must die.
 
-1. **O:** WhatsApp → group → Invite via link → **Reset link**. The old link
-   stops working immediately.
+1. **O:** WhatsApp → group → Invite via link → **Reset link**.
 2. **O:** OneDrive → each shared item (album, song lyrics, program) → Manage
    access → **remove the existing "Anyone with the link" links** → create new
    ones (view only, and an expiry if wanted).
-3. **O:** put the four new URLs in the vault
-   (`vault_cuencada_seed_*_url`). Never in the repo, a ticket or chat.
-4. **A** (WP-2.4, done): `apps/server/src/seed-data.ts` no longer contains the
-   legacy links. Development uses `example.com` placeholders, and **the
-   production seed refuses to run unless all four `SEED_*_URL` are set**.
+3. **O:** put the four new URLs in the vault (`vault_cuencada_seed_*_url`).
+   Never in the repo, a ticket or chat.
+4. **A** (WP-2.4, done): `seed-data.ts` no longer contains the legacy links,
+   and **the production seed refuses to run unless all four `SEED_*_URL` are
+   set**.
 
-## 3. Database roles (once, O)
+## 3. Database: roles, network, TLS (once, O, on the DB server)
 
 [`infra/db/roles.sql`](../../infra/db/roles.sql) creates two roles:
 
 - **`cuencada_owner`** owns the database, schema `public` and every table.
-  - It is used only by the migrator, as `MIGRATE_DATABASE_URL`, from the
+  - It is used only by the migrator and the one-off seed, from the
     operator's machine through the tunnel.
-  - It is never on the VPS.
-- **`cuencada_app`** is the runtime role, `DATABASE_URL` on the VPS.
-  - It gets `SELECT`/`INSERT`/`UPDATE`/`DELETE` on the app tables and
-    sequence usage.
-  - Default privileges cover every future table the owner creates.
-  - It gets no DDL, no `TRUNCATE`, no temp tables, and no access to the
-    migrator's `drizzle` schema.
+  - It is **never** on the VPS.
+- **`cuencada_app`** is the runtime role, `DATABASE_URL` on the VPS, over the
+  VPC.
+  - It gets DML on the app tables, sequence usage, and default privileges for
+    future tables.
+  - It gets no DDL, `TRUNCATE`, temp tables, or `drizzle` schema.
   - `statement_timeout` is 30 s, `idle_in_transaction_session_timeout` 60 s,
     and the connection limit 30.
 
+The script takes **no passwords** (Security L2). Set them with `\password`,
+which prompts without echo and sends only a SCRAM-SHA-256 verifier:
+
 ```sh
-# as the postgres superuser, on the DB host (or through the tunnel as a superuser)
-psql -v ON_ERROR_STOP=1 -v db_name=cuencada -v owner_role=cuencada_owner -v app_role=cuencada_app \
-     -v owner_password="$(cat owner.pw)" -v app_password="$(cat app.pw)" \
-     -d postgres -f infra/db/roles.sql
+sudo -u postgres psql -v ON_ERROR_STOP=1 -v db_name=cuencada -v owner_role=cuencada_owner \
+     -v app_role=cuencada_app -d postgres -f roles.sql      # copied from infra/db/
+sudo -u postgres psql -d postgres
+postgres=# \password cuencada_owner
+postgres=# \password cuencada_app
 ```
 
-- Re-running the script is safe: it resets the passwords and repeats the
-  grants.
-- `pg_hba.conf` must allow `cuencada_app` from `server_1` and
-  `cuencada_owner` from the tunnel endpoint only, with `scram-sha-256`.
-- **Proof:** [`infra/db/verify-roles.sh`](../../infra/db/verify-roles.sh)
-  runs the whole cycle against the disposable podman Postgres. It migrates as
-  the owner, then seeds, serves and smoke-tests as the runtime role, and
-  checks that DDL, `TRUNCATE`, temp tables and the drizzle schema are denied
-  (see WP-2.4.md).
+- Until a password is set, the roles can't log in (they fail closed).
+- **Non-interactive alternative:** compute the verifier on your machine with
+  `read -rs PW; printf '%s' "$PW" | node infra/db/scram-verifier.mjs; unset PW`,
+  then run `ALTER ROLE cuencada_app PASSWORD 'SCRAM-SHA-256$4096:…';`.
+- **Never** run `ALTER ROLE … PASSWORD '<plain>'`, and never pass passwords
+  as `psql -v` arguments: they would land in history, `ps` and the server log.
+
+**Network and auth.** In `postgresql.conf`:
+
+```ini
+listen_addresses = 'localhost,<DB_VPC_HOST>'   # never a public interface
+password_encryption = scram-sha-256
+ssl = on                                       # recommended: TLS on the VPC too
+ssl_cert_file = '…'  ssl_key_file = '…'        # a self-signed or private-CA cert is fine
+```
+
+In `pg_hba.conf`, put these lines **first** for this database, and remove any
+broader line that would also match it (for example
+`host all all 0.0.0.0/0 …`):
+
+```
+# TYPE    DATABASE  USER            ADDRESS                    METHOD
+hostssl   cuencada  cuencada_app    <server_1 VPC IP>/32       scram-sha-256
+host      cuencada  cuencada_owner  127.0.0.1/32               scram-sha-256
+```
+
+- **`cuencada_app`** is accepted only from `server_1`'s VPC address, over
+  TLS. Use `host` instead of `hostssl` only if the DB has no TLS.
+  - With TLS, end the URL with `?sslmode=require`. That encrypts the
+    connection but doesn't authenticate the server, which is acceptable
+    inside the private VPC.
+  - For full verification, use `?sslmode=verify-full` and add
+    `NODE_EXTRA_CA_CERTS: /etc/ssl/certs/<db-ca>.pem` to `server.env`
+    (allowed by the preflight).
+- **`cuencada_owner`** is accepted only from the DB server's own loopback,
+  which is where a tunnel lands with
+  `ssh -N -L ${TUNNEL_PORT}:127.0.0.1:5432 <db server>`. The owner role is
+  then unreachable from `server_1` even if `server_1` is compromised.
+  - If the owner can only reach the DB through `server_1` (`ssh -N -L ${TUNNEL_PORT}:<DB_VPC_HOST>:5432 server_1`),
+    the owner line must allow `<server_1 VPC IP>/32` instead. That is weaker:
+    a compromised `server_1` could then try the owner password. Prefer the
+    direct tunnel.
+- Reload with `sudo systemctl reload postgresql`, then test from `server_1`:
+  `PGPASSWORD=… psql "postgresql://cuencada_app@<DB_VPC_HOST>/cuencada?sslmode=require" -c 'select 1'`.
+  Paste the password with `read -rs`.
+
+**Proof:** [`infra/db/verify-roles.sh`](../../infra/db/verify-roles.sh) runs
+the whole cycle on the disposable podman Postgres (see WP-2.4.md):
+
+- roles without passwords, which fail closed;
+- passwords set as SCRAM verifiers, then real scram-sha-256 logins;
+- migration as the owner;
+- the DDL, `TRUNCATE`, temp-table and drizzle denials for the runtime role;
+- seed, API and smoke test as the runtime role, with its secrets read from a
+  `CREDENTIALS_DIRECTORY`.
+
+### Why migrations run through the tunnel, not on `server_1`
+
+Migrations run on the operator's machine, through the tunnel, as the owner
+role. That is the path Acleron's bundle mode already takes
+(`build-bundle.sh` runs `server.migrate_command`). Running them on `server_1`
+over the VPC was considered and rejected:
+
+- **Least privilege.** Running on `server_1` would put the owner (DDL)
+  credentials on the internet-facing VPS, even if only during a deploy. With
+  the tunnel, `server_1` only ever holds the DML-only runtime role.
+- **A failed migration ships nothing.** It fails before the bundle exists,
+  while the old release keeps running. A VPS-side step would run after the
+  upload, mid-deploy.
+- **Guard rails already exist.** `build-bundle.sh` refuses any
+  `MIGRATE_DATABASE_URL` that isn't `deploy.migrate_tunnel`, and the deploy
+  refuses a bundle whose manifest says the migrations didn't run. A VPS-side
+  migrate would need a new platform step with its own guards.
+- **Cost:** the tunnel must be open during `mise run deploy`. That is
+  acceptable for a single operator.
 
 ## 4. Deploy (O, explicit approval)
 
 ```sh
-db &                                                        # the SSH tunnel to Postgres (127.0.0.1:15432)
-export MIGRATE_DATABASE_URL='<vault_cuencada_migrate_database_url>'   # OWNER role, tunnel host:port
+ssh -N -L ${TUNNEL_PORT}:127.0.0.1:5432 <db server> & TUNNEL=$!
+read -rsp 'owner-role URL (vault_cuencada_migrate_database_url): ' MIGRATE_DATABASE_URL; echo
+export MIGRATE_DATABASE_URL
 mise run deploy
-unset MIGRATE_DATABASE_URL
+unset MIGRATE_DATABASE_URL; kill $TUNNEL
 ```
 
 What runs, in order:
 
-1. `deploy-preflight` fails fast on config drift.
+1. `deploy-preflight` (strict) fails fast on config drift, or on a platform
+   checkout without support.
 2. `build-bundle.sh` runs:
    - `mise run verify`;
    - `pnpm turbo build` with `build_env`;
-   - **migrate**: `node apps/server/dist/db/migrate.js` against
-     `MIGRATE_DATABASE_URL`. The script refuses any host:port other than
+   - **migrate**: `server.migrate_command`, i.e.
+     `pnpm --filter @cuencada/server db:migrate` (= `node apps/server/dist/db/migrate.js`),
+     against `MIGRATE_DATABASE_URL`. It refuses any host:port other than
      `deploy.migrate_tunnel`. A failed migration ships nothing.
    - pack the bundle.
 3. Ansible does the rest:
    - upload, then `pnpm install --prod --frozen-lockfile --filter @cuencada/server...`
-     on the VPS. Native argon2 and sharp come from the lockfile's linux-x64
-     glibc prebuilds; see WP-2.4 D7.
-   - swap the `current` symlink and rsync the SPA to `/srv/cuencada/web/current`;
-   - render the systemd unit, then restart and wait for `is-active`;
-   - certbot (first run only), then the nginx site, `nginx -t` and a reload.
+     on the VPS (native argon2 and sharp; see WP-2.4 D7);
+   - swap the `current` symlink and rsync the SPA;
+   - write `/etc/credstore/cuencada-server/*` (root:root 0600, `no_log`) and
+     render the unit (non-secret `Environment=`, plus `LoadCredential=`);
+   - restart and wait for `is-active`;
+   - certbot (first run only), then the project's nginx site, `nginx -t` and
+     a reload.
 
 The seed is **not** part of the deploy.
 
-**First deploy only, right after it (O, on `server_1`):** install the systemd
-hardening drop-in. Acleron never touches the drop-in directory, so this is
-done once.
+**First deploy only (O, on `server_1`, after the 2 GB resize):** install the
+hardening and memory drop-in. Acleron never touches the drop-in directory.
 
 ```sh
 sudo install -D -m 0644 cuencada-server.service.d/override.conf \
@@ -190,19 +292,32 @@ systemctl show cuencada-server -p MemoryHigh -p MemoryMax -p NoNewPrivileges -p 
 sudo systemd-analyze security cuencada-server
 ```
 
-**Health right after every deploy (O):**
+**Secrets check after every deploy (O, on `server_1`; Security M1):** an
+unprivileged user must see no secret.
 
 ```sh
-curl -fsS https://cuencada.com/healthz                     # liveness through nginx: {"ok":true,...}
-ssh server_1 'curl -fsS http://127.0.0.1:3104/health/ready' # DB reachable as the runtime role: "db":true
+sudo -u nobody systemctl show cuencada-server -p Environment \
+  | grep -Ec 'DATABASE_URL|JWT_SECRET|RESEND_API_KEY|S3_ACCESS_KEY_ID|S3_SECRET_ACCESS_KEY'   # must print 0
+systemctl show cuencada-server -p LoadCredential   # names and /etc/credstore paths only, no values
+sudo ls -la /etc/credstore/cuencada-server/        # dir drwx------ root root; files -rw------- root root
+sudo stat -c '%a %U' /etc/systemd/system/cuencada-server.service   # 600 root
+```
+
+**Health after every deploy (O):**
+
+```sh
+curl -fsS https://cuencada.com/healthz                       # liveness through nginx: {"ok":true,...}
+ssh server_1 'curl -fsS http://127.0.0.1:3104/health/ready'   # DB over the VPC as the runtime role: "db":true
 ssh server_1 'journalctl -u cuencada-server -n 50 --no-pager'
 ```
 
 If `/health/ready` reports `db:false`, check, in order:
 
-1. the `DATABASE_URL` vault value;
-2. `pg_hba.conf`;
-3. the role grants (`\dp` as the owner).
+1. the `vault_cuencada_database_url` value: host `<DB_VPC_HOST>`, and
+   `sslmode` matching `hostssl`/`host`;
+2. `pg_hba.conf` (`server_1`'s VPC IP);
+3. the DB server's firewall on 5432, open to that IP only;
+4. the role grants (`\dp` as the owner).
 
 ## 5. Rollback
 
@@ -211,10 +326,12 @@ If `/health/ready` reports `db:false`, check, in order:
   ssh server_1
   ls -dt /srv/cuencada/releases/*/
   sudo ln -sfn /srv/cuencada/releases/<previous> /srv/cuencada/current
-  sudo systemctl restart cuencada-server
   sudo rsync -a --delete /srv/cuencada/current/apps/web/dist/ /srv/cuencada/web/current/
+  sudo systemctl restart cuencada-server
+  curl -fsS http://127.0.0.1:3104/health/ready     # must report "db":true before you call it done
   ```
-  The last 3 releases are kept.
+  The last 3 releases are kept. The credentials and the unit belong to the
+  last deploy; a code rollback doesn't change them.
 - **Schema:** migrations are expand-only (0002 on), so the previous code runs
   on the new schema and there is no down-migration. If a migration itself is
   wrong, write a forward fix. Never edit the `drizzle` bookkeeping by hand.
@@ -225,61 +342,57 @@ If `/health/ready` reports `db:false`, check, in order:
   sudo systemctl reload nginx
   ```
   The domain falls back to the host's default site, as before the cutover.
-  Nothing else on `server_1` is touched.
 - **nginx:**
   ```sh
   sudo nginx -t
   sudo cp /etc/nginx/sites-available/cuencada{,.bad}
   ```
-  Then redeploy, or reinstall the last good `infra/nginx/cuencada.conf`.
+  Then redeploy, or reinstall the last good rendered site.
 
 ## 6. One-time production seed (O, over the tunnel, after the first migration)
 
-It runs from the operator's checkout, after `pnpm build`, through the same
-tunnel and owner-role URL as the migration (the seed only inserts rows; the
-runtime role's grants were proven by `infra/db/verify-roles.sh`). The values
-come from the vault and live in this shell only.
+It runs from the operator's checkout, after `pnpm build`, as the owner role
+through the tunnel (the seed only inserts rows). Every value is pasted with
+`read -rs`, so nothing lands in history or `ps`.
 
 ```sh
-db &
-export MIGRATE_DATABASE_URL='<vault_cuencada_migrate_database_url>'
-NODE_ENV=production \
-DATABASE_URL="$MIGRATE_DATABASE_URL" \
-SEED_ADMIN_EMAIL=admin@cuencada.com \
-SEED_ADMIN_TEMP_PASSWORD='<vault_cuencada_seed_admin_temp_password>' \
-SEED_WHATSAPP_URL='<new link>' \
-SEED_EXTERNAL_ALBUM_URL='<new link>' \
-SEED_LYRICS_URL='<new link>' \
-SEED_PROGRAM_URL='<new link>' \
-node apps/server/dist/seed.js
+ssh -N -L ${TUNNEL_PORT}:127.0.0.1:5432 <db server> & TUNNEL=$!
+read -rsp 'owner-role URL: '            DB_URL;  echo
+read -rsp 'seed admin temp password: '  SEED_PW; echo
+read -rsp 'new WhatsApp link: '         WA;      echo
+read -rsp 'new album link: '            ALBUM;   echo
+read -rsp 'new lyrics link: '           LYRICS;  echo
+read -rsp 'new program link: '          PROGRAM; echo
+NODE_ENV=production DATABASE_URL="$DB_URL" SEED_ADMIN_EMAIL=admin@cuencada.com \
+  SEED_ADMIN_TEMP_PASSWORD="$SEED_PW" SEED_WHATSAPP_URL="$WA" SEED_EXTERNAL_ALBUM_URL="$ALBUM" \
+  SEED_LYRICS_URL="$LYRICS" SEED_PROGRAM_URL="$PROGRAM" \
+  node apps/server/dist/seed.js
+unset DB_URL SEED_PW WA ALBUM LYRICS PROGRAM; kill $TUNNEL
 ```
 
 - **Expected output:** `seed: done {"adminCreated":true,…,"announcementsCreated":2,…}`.
 - **All four links are required.** The seed fails and names the missing
-  variables otherwise. Links reach the edition row only on its first insert.
-  A later re-run never overwrites them; change them in the admin UI instead.
-- With `NODE_ENV=production`, the seed refuses a missing, weak (< 16 chars)
-  or placeholder password.
+  variables otherwise. Links reach the edition row only on its first insert;
+  change them later in the admin UI.
+- The seed refuses a missing, weak (< 16 chars) or placeholder password.
 - The admin is created with `must_change_password = true` and an
   **unverified email**.
-- Afterwards: `unset MIGRATE_DATABASE_URL`, `history -d` the lines (or use a shell with `HISTCONTROL=ignorespace`
-  and a leading space), and `unset` the variables.
 
 **First admin login (O, in the browser):**
 
-1. Open `https://cuencada.com/entrar` and log in as `admin@cuencada.com` with
-   the temporary password.
-2. You are forced to the change-password screen. Set a new password and keep
-   it in a password manager.
-3. **Verify the email:** request the verification email from the prompt and
-   click the link. `admin@cuencada.com` must be a real, monitored mailbox:
-   chat and the gallery stay at 403 `EMAIL_UNVERIFIED` until then.
+1. Log in at `https://cuencada.com/entrar` as `admin@cuencada.com`.
+2. You are forced to change the password. Keep the new one in a password
+   manager.
+3. **Verify the email:** click the link in the verification email. Chat and
+   the gallery stay at 403 `EMAIL_UNVERIFIED` until then, so
+   `admin@cuencada.com` must be a real, monitored mailbox.
 
 ## 7. Smoke tests (O, A can read the output)
 
 ```sh
-SMOKE_BASE_URL=https://cuencada.com SMOKE_EMAIL=admin@cuencada.com SMOKE_PASSWORD='<new password>' \
-  node scripts/deploy-smoke.mjs
+read -rsp 'admin password: ' SMOKE_PASSWORD; echo; export SMOKE_PASSWORD
+SMOKE_BASE_URL=https://cuencada.com SMOKE_EMAIL=admin@cuencada.com node scripts/deploy-smoke.mjs
+unset SMOKE_PASSWORD
 ```
 
 The smoke test checks:
@@ -290,56 +403,53 @@ The smoke test checks:
 - the SPA fallback, and a 404 for a missing asset;
 - the legacy redirect;
 - login, `/api/me` (`no-store`) and `/api/cuencadas/2026`;
-- a chat ticket plus a **WebSocket through nginx** that stays open.
+- a chat ticket plus a **WebSocket through nginx**.
 
-It prints no secret.
+It prints no secret. Then, by hand:
 
-Then, by hand:
-
-- **Upload:** upload a photo on `/galeria/2026` from a phone, and from a
-  desktop with a > 40 MP image (resize worker). The item must reach "ready",
-  and the photo must have no EXIF/GPS (`exiftool` on the downloaded display
-  copy).
+- **Upload:** a phone photo, and a > 40 MP desktop image (resize worker), on
+  `/galeria/2026`. Each reaches "ready", and the display copy has no EXIF or
+  GPS (`exiftool`).
 - **CSP report:** DevTools → Console on `/`, `/galeria/2026` and `/chat`. The
-  only expected entry is the zod `eval` probe (WP-2.3 L1, until
-  `z.config({ jitless: true })` lands). Anything else is a regression; run
-  `node docs/security/csp-check.mjs` locally.
-- **Email:** request a password reset for a test account. The mail arrives
-  from `no-reply@cuencada.com`, and the headers show `spf=pass`, `dkim=pass`
-  and `dmarc=pass`.
-- **Logs:** `sudo tail /var/log/nginx/cuencada-access.log` shows paths
-  without query strings. `journalctl -u cuencada-server` shows
-  `ticket=[REDACTED]`.
-- **TLS:** `curl -sI http://cuencada.com` returns 301 to https, and
-  `curl -sI https://www.cuencada.com` returns 301 to the apex. Check the
-  certificate SAN covers both names, and the HSTS header is present.
+  only expected entry is the zod `eval` probe (WP-2.3 L1). Anything else is a
+  regression; run `node docs/security/csp-check.mjs` locally.
+- **Email:** a password reset for a test account arrives from
+  `no-reply@cuencada.com`, with `spf=pass`, `dkim=pass` and `dmarc=pass`.
+- **Secrets:** the M1 check in § 4.
+- **Logs:**
+  - `sudo tail /var/log/nginx/cuencada-access.log` shows paths without query
+    strings;
+  - `journalctl -u cuencada-server` shows `ticket=[REDACTED]`;
+  - log retention and permissions follow § 10.
+- **TLS:**
+  - `curl -sI http://cuencada.com` returns 301 to https;
+  - `curl -sI https://www.cuencada.com` returns 301 to the apex;
+  - the certificate's SAN covers both names, and the HSTS header is present.
 
 ## 8. Retire the legacy site
 
 **How it's deployed today:** it isn't.
 
-- `cuencada.com` resolves to `server_1`, but there is no cuencada vhost, so
-  nginx answers with the host's default site: `acleron.com`'s page and
-  certificate.
+- `cuencada.com` resolves to `server_1`, but there is no cuencada vhost: nginx
+  answers with `acleron.com`'s default site and certificate.
 - `/cuencada2026.html` and `/mensajes.txt` return 404.
-- There is no GitHub Pages site (API 404).
+- There is no GitHub Pages site.
 
-So the only places the legacy files still live are **the repo and its history**.
+So the legacy files live only in **the repo and its history**.
 
-1. **A** (done): nginx redirects the old URLs, in case anyone kept a link:
+1. **A** (done): nginx redirects the old URLs:
    - `/cuencada2026.html` → `/cuencada/2026`;
    - `/mensajes.txt`, `/mensajes.json` and `/images/fotos/*` → `/`.
 
    `/index.html` stays the SPA shell; see [nginx.md](nginx.md).
 2. **A** (follow-up PR after the cutover is green): `git rm` the root
-   `index.html`, `cuencada2026.html`, `images/` (including `images/fotos`),
-   `mensajes.json` and `canciones/`. Keep `mensajes.txt` until the seed no
-   longer reads it, or move it under `apps/server/`. The new app already
-   serves its own copies from `apps/web/public/`.
-   - Also update the Biome ignore list, AGENTS.md ("Repo Shape") and
-     `.gitignore`.
-   - History stays (owner decision: sweep forward, no rewrite). The rotated
-     links make the history copies harmless.
+   `index.html`, `cuencada2026.html`, `images/`, `mensajes.json` and
+   `canciones/`.
+   - Keep `mensajes.txt` until the seed no longer reads it, or move it under
+     `apps/server/`.
+   - Update the Biome ignore list and AGENTS.md.
+   - History stays (owner decision). The rotated links make the history
+     copies harmless.
 3. **O:** nothing to remove on the server.
 
 ## 9. PWA
@@ -347,56 +457,66 @@ So the only places the legacy files still live are **the repo and its history**.
 - `mise run deploy-check` runs `check:sw`, so the service worker never caches
   private `/api/**`.
 - nginx serves `sw.js`, `sw-purge.js`, `index.html` and the manifest with
-  `no-cache`. Open tabs check for a new worker hourly and show the
-  "Actualizar" prompt.
-- **Minimum client version** (backlog): until a server-driven minimum version
-  exists, a security fix reaches PWA users only when they accept the update
-  prompt or reload. See the release checklist (§ 11).
+  `no-cache`. Open tabs check for a new worker hourly and prompt
+  "Actualizar".
+- **Minimum client version** (backlog): until it exists, a security fix
+  reaches PWA users only when they accept the prompt or reload (§ 11).
 
-## 10. Observability
+## 10. Observability and logs
 
-Logs reach journald and then Loki:
+**Where logs go:**
 
-- **API:** Pino JSON on stdout. The unit has `StandardOutput=journal`,
-  `SyslogIdentifier=cuencada-server`.
-- **Shipping:** the host's Grafana Alloy or promtail ships journald to Loki
-  with `unit="cuencada-server.service"`. If the host doesn't ship journald
-  yet, add the unit to its journal scrape. That is O's monitoring stack.
-- **nginx:** `/var/log/nginx/cuencada-{access,error}.log`.
+- **API:** Pino JSON goes to journald (`SyslogIdentifier=cuencada-server`).
+  The host's Alloy or promtail ships journald to Loki with
+  `unit="cuencada-server.service"`. Confirming that shipping is O's
+  monitoring stack.
+- **nginx:** `/var/log/nginx/cuencada-access.log` and `cuencada-error.log`
+  (Security L3):
+  - **Mode 0640, group `adm`.** Ubuntu's `/etc/logrotate.d/nginx` creates
+    them as `www-data:adm 0640`. `root:adm 0640` is equally fine. Only root
+    and `adm` members may read them. Check with
+    `ls -l /var/log/nginx/cuencada-*`.
+  - **Retention 14 days.** That is the Ubuntu default (`daily`,
+    `rotate 14`, `compress`). Don't raise it: these logs hold IPs, user
+    agents and paths.
+  - **The access log** has no query strings (format `cuencada_redacted`).
+  - **The error log can contain query strings.** On upstream failures nginx
+    quotes the full request line, which can include `?ticket=` (single-use,
+    30 s), `?q=` and `?search=`. That is why its level is `error`, why it has
+    the same 0640 mode and 14-day retention, and why it must not be shipped
+    anywhere wider than the access log.
 
-Alert rules (Grafana, LogQL):
+**Alert rules (Grafana, LogQL):**
 
 | Alert | Query | Condition |
 |---|---|---|
 | Daily email cap reached | `count_over_time({unit="cuencada-server.service"} \| json \| event="mail.cap_reached" [15m])` | > 0 |
 | Mail queue full (emails dropped) | `count_over_time({unit="cuencada-server.service"} \| json \| event="mail.queue_full" [5m])` | > 0 |
 | Admin/invite alert caps | `count_over_time({unit="cuencada-server.service"} \| json \| event=~"mail.(admin_alert\|invite_alert)_cap_reached" [1h])` | > 0 |
-| Process restarts / crash loop | `count_over_time({unit="cuencada-server.service"} \|= "Main process exited" [10m])` (systemd's own line) or `{syslog_identifier="systemd"} \|= "cuencada-server.service: Scheduled restart job"` | ≥ 1 warn, ≥ 3 page |
+| Process restarts / crash loop | `count_over_time({unit="cuencada-server.service"} \|= "Main process exited" [10m])`, or `{syslog_identifier="systemd"} \|= "cuencada-server.service: Scheduled restart job"` | ≥ 1 warn, ≥ 3 page |
 | OOM kill | `{syslog_identifier="kernel"} \|= "oom-kill" \|= "cuencada-server"` | > 0 |
 | Fatal / failed start | `{unit="cuencada-server.service"} \| json \| level >= 50` | > 0 |
 | Chat at capacity | `{unit="cuencada-server.service"} \|= "chat socket refused: at capacity"` | > 0 |
 | 5xx rate (nginx) | `sum(count_over_time({filename="/var/log/nginx/cuencada-access.log"} \|~ "\" 5\\d\\d " [5m]))` | > 10 |
 
-Pino levels are numeric: 50 = error, 60 = fatal. The log scrubber already
-redacts tokens, cookies and query values; never add a raw request dump.
+Pino levels are numeric: 50 = error, 60 = fatal.
 
 ## 11. Release checklist (every later deploy)
 
-1. `main` is green in CI. `mise run verify` and `mise run deploy-check` pass
-   locally.
-2. Every new migration is **expand/contract**: the code currently live must
-   work on the new schema, because migrations run before the new code. Check
-   for drops, renames, `NOT NULL` without a default, and narrowed CHECKs.
-3. New config key? Map it in `infra/project.yml` (the preflight fails
-   otherwise), and add it to the vault when it's a secret.
-4. Open the tunnel, export `MIGRATE_DATABASE_URL` (owner role), then
-   `mise run deploy` (O approves).
-5. Health (§ 4) and smoke (§ 7).
+1. `main` is green in CI. `mise run verify` and `mise run deploy-check` pass.
+2. Every new migration is **expand/contract**: migrations run before the new
+   code, so the live code must work on the new schema.
+3. New config key?
+   - Map it in `infra/project.yml`: secrets under `server.credentials`,
+     everything else under `server.env`. The preflight fails otherwise.
+   - Add it to the vault when it's a secret.
+4. Open the tunnel, `read -rs` the owner-role URL into
+   `MIGRATE_DATABASE_URL`, then `mise run deploy` (O approves).
+5. Health and the secrets check (§ 4), then the smoke test (§ 7).
 6. **Security fix?**
    - **Bump the minimum client version**, once that mechanism exists
-     (backlog). It forces stale PWAs to reload instead of waiting for the
-     hourly update check.
-   - Until then, note the fix in the admin announcement so members reload.
+     (backlog).
+   - Until then, post an admin announcement so members reload.
    - Rotate any secret the fix concerns: `JWT_SECRET` logs everyone out;
      Resend and S3 keys are rotated in their dashboards, then the vault, then
      redeploy.
@@ -408,62 +528,76 @@ redacts tokens, cookies and query values; never add a raw request dump.
 ## Resend DNS
 
 Resend's dashboard is the source of truth for the exact values: Domains →
-cuencada.com. Add the records at the DNS provider of `cuencada.com`:
+cuencada.com.
 
 | Type | Name | Value | Notes |
 |---|---|---|---|
 | TXT | `resend._domainkey` | `p=<DKIM public key from the Resend dashboard>` | DKIM. Copy it exactly |
 | MX | `send` | `feedback-smtp.<region>.amazonses.com` (priority 10) | Return path (bounces). The region is shown in the dashboard |
 | TXT | `send` | `v=spf1 include:amazonses.com ~all` | SPF for the return-path subdomain |
-| TXT | `_dmarc` | `v=DMARC1; p=none; rua=mailto:admin@cuencada.com; adkim=r; aspf=r` | Start with `p=none`. Move to `p=quarantine` after 2 clean weeks of reports |
+| TXT | `_dmarc` | `v=DMARC1; p=none; rua=mailto:admin@cuencada.com; adkim=r; aspf=r` | Start with `p=none`. Move to `p=quarantine` after 2 clean weeks |
 
-- `MAIL_FROM` is `Cuencada <no-reply@cuencada.com>` (in `infra/project.yml`).
-  The preflight checks it sends from the project domain.
-- The root domain needs no SPF change for Resend: SPF aligns through `send.`,
-  and DKIM signs as `cuencada.com`. If the root already has an SPF record for
-  another sender, leave it alone. Never publish two SPF records on one name.
-- **Receiving mail** at `admin@cuencada.com`, the admin's verification and
-  reset emails, needs the domain's own MX for a mailbox provider. That is
-  separate from Resend's `send` MX. See WP-2.4's open question Q4.
+- `MAIL_FROM` is `Cuencada <no-reply@cuencada.com>`. The preflight checks it
+  sends from the project domain.
+- The root domain needs no SPF change for Resend. Never publish two SPF
+  records on one name.
+- **Receiving mail** at `admin@cuencada.com` needs the domain's own MX for a
+  mailbox provider. That is separate from Resend's `send` MX.
 - Restrict the API key to **sending only**, for the cuencada.com domain only.
 
 ## Bucket
 
-Use `s3cmd` with the Linode endpoint. Put the credentials in a temporary
-`~/.s3cfg` with mode 600, or pass `--access_key/--secret_key` from the vault.
-Never commit them. `B=<bucket>`:
+**Two keys (Security L4):**
+
+- **Runtime key:** a Linode *limited* access key with read/write on **this
+  bucket only**. It goes to the vault (`vault_cuencada_s3_*`) and lives on
+  the VPS as credentials.
+- **Bucket-admin key:** a separate, **short-lived** key, used only on the
+  operator's machine to create the bucket and set its ACL, CORS and
+  lifecycle. Use a full-access key if Linode's limited keys can't change
+  bucket configuration. **Delete it in the Linode console right after the
+  last command below.** It never enters the vault or the VPS.
+
+**Temporary s3cmd config:** mode 0600, deleted on exit, and the keys are
+pasted with `read -rs`.
 
 ```sh
-S3="s3cmd --host=us-southeast-1.linodeobjects.com --host-bucket=%(bucket)s.us-southeast-1.linodeobjects.com"
+B=<bucket>
+umask 077; S3CFG="$(mktemp)"; trap 'rm -f "$S3CFG"' EXIT
+read -rsp 'bucket-admin access key: ' AK; echo
+read -rsp 'bucket-admin secret key: ' SK; echo
+printf '[default]\naccess_key = %s\nsecret_key = %s\nhost_base = us-southeast-1.linodeobjects.com\nhost_bucket = %%(bucket)s.us-southeast-1.linodeobjects.com\nuse_https = True\n' \
+  "$AK" "$SK" > "$S3CFG"
+unset AK SK
+S3="s3cmd -c $S3CFG"
 $S3 mb s3://$B                                   # if not created in the Linode console
-$S3 setacl s3://$B --acl-private                 # private: objects are reachable only via presigned URLs
+$S3 setacl s3://$B --acl-private                 # objects only via presigned URLs
 $S3 setcors infra/bucket/cors.xml s3://$B        # PUT/GET/HEAD from https://cuencada.com, content-type only
 $S3 setlifecycle infra/bucket/lifecycle.xml s3://$B   # abort incomplete multipart uploads after 1 day
-$S3 info s3://$B                                 # shows the CORS and policy
-$S3 getlifecycle s3://$B
+$S3 info s3://$B; $S3 getlifecycle s3://$B
+rm -f "$S3CFG"; trap - EXIT
+# now delete the bucket-admin key in the Linode console
 ```
 
-With the AWS CLI instead:
-
-```sh
-aws --endpoint-url https://us-southeast-1.linodeobjects.com s3api put-bucket-cors --bucket "$B" --cors-configuration file://infra/bucket/cors.json
-```
+With the AWS CLI, the equivalent is
+`aws --endpoint-url https://us-southeast-1.linodeobjects.com s3api put-bucket-cors --bucket "$B" --cors-configuration file://infra/bucket/cors.json`.
+Use the same temporary-credential care: `AWS_ACCESS_KEY_ID` and
+`AWS_SECRET_ACCESS_KEY` come from `read -rs`, and you `unset` them afterwards.
 
 The lifecycle has **no expiration rule**. Originals are written straight to
 `cuencadas/<year>/originals/`, where accepted originals also live, so a
-prefix expiry would delete real photos. The app's cleanup job handles
-orphans. If the backlog's `incoming/` prefix ever lands, add an expiration
-rule for it then.
+prefix expiry would delete real photos.
 
-**Real-bucket check (O):** the bucket must reject a PUT whose length or type
-differs from what was signed. It must also refuse unsigned reads, and allow
-CORS only from the app origin:
+**Real-bucket check (O)**, with the **runtime** key, so it also proves that
+key can upload and delete:
 
 ```sh
 pnpm build
+read -rsp 'runtime access key: ' S3_ACCESS_KEY_ID; echo; read -rsp 'runtime secret key: ' S3_SECRET_ACCESS_KEY; echo
+export S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY
 S3_ENDPOINT=https://us-southeast-1.linodeobjects.com S3_REGION=us-southeast-1 S3_BUCKET=$B \
-S3_ACCESS_KEY_ID='<vault>' S3_SECRET_ACCESS_KEY='<vault>' \
-node infra/bucket/check-presigned-put.mjs
+  node infra/bucket/check-presigned-put.mjs
+unset S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY
 ```
 
 It writes one 1 KB object under `_preflight/`, deletes it, and expects:
@@ -476,29 +610,21 @@ It writes one 1 KB object under `_preflight/`, deletes it, and expects:
 
 ## Runtime notes
 
-- **Native modules (argon2, sharp):** the VPS installs them itself (`pnpm install --prod`).
-  - argon2 0.44 ships `linux-x64` glibc prebuilds, and its install script
-    (allowed in `pnpm-workspace.yaml`) falls back to `node-gyp`, which
-    `build-essential` (Acleron's base role) can run.
-  - sharp 0.35 installs `@img/sharp-linux-x64` and `@img/sharp-libvips-linux-x64`,
-    which need glibc ≥ 2.26. Ubuntu 24.04 has 2.39, the same as the build
-    machine.
-  - Check after the first deploy:
-    ```sh
-    cd /srv/cuencada/current/apps/server && sudo -u svc_cuencada node -e "require('argon2'); require('sharp'); console.log('native modules ok')"
-    ```
-    `/health/ready` plus a login (argon2) and a photo upload (sharp) prove it
-    too.
-- **Threadpool:**
-  - `UV_THREADPOOL_SIZE=6` is set in `infra/project.yml`. argon2 hashing,
-    sharp's async work and DNS/fs all share libuv's pool, which defaults to
-    4. WP-2.2 saw a caption save take about 13 s while images processed.
-  - sharp is already `concurrency(1)` with no cache (`mediaProcess.ts`).
-    Avatars process at most 2 at a time.
-  - Don't raise the pool further on a 1-vCPU host: it adds memory, not
-    throughput.
-- **Memory:** see step 1.3 and the drop-in.
-  - The video cap is 150 MB: one video job holds the whole file until
-    storage streaming lands (backlog).
-  - If OOM kills show up in the alerts, the next steps are swap, a 2 GB plan,
-    or the streaming storage work.
+- **Native modules:** the VPS installs argon2 0.44 (linux-x64 glibc
+  prebuild) and sharp 0.35 (`@img/sharp-linux-x64`, glibc ≥ 2.26; Ubuntu
+  24.04 has 2.39). Check after the first deploy:
+  ```sh
+  cd /srv/cuencada/current/apps/server && sudo -u svc_cuencada node -e "require('argon2'); require('sharp'); console.log('native modules ok')"
+  ```
+- **Threadpool:** `UV_THREADPOOL_SIZE=6` (in `server.env`).
+  - argon2, sharp's async work and DNS/fs share libuv's pool.
+  - WP-2.2 saw a caption save take about 13 s while images processed.
+  - sharp is `concurrency(1)` with no cache, and avatars process at most 2 at
+    a time.
+- **Memory (2 GB host):** the drop-in sets `MemoryHigh=700M`/`MemoryMax=900M`.
+  The video cap stays **150 MB** for now. After the resize it **may return to
+  300 MB** with no migration (the DB CHECK still allows 300 MB):
+  1. Change `MEDIA_SIZE_LIMITS.video` in `packages/types/src/media.ts` and
+     its tests.
+  2. Raise `MemoryMax` by about 300 MB.
+  3. Watch the OOM alert.

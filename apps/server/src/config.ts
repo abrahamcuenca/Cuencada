@@ -1,4 +1,5 @@
-import { dirname, resolve } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { config as loadDotEnv } from "dotenv";
 import { z } from "zod";
@@ -183,14 +184,53 @@ export class ConfigError extends Error {
 }
 
 /**
- * Parse and validate the server configuration.
+ * Read systemd credentials (`LoadCredential=`, WP-2.4). In production the
+ * secrets are not `Environment=` lines, which any local user can read through
+ * `systemctl show`. They are files in `$CREDENTIALS_DIRECTORY`, one per config
+ * key, named after the key. One trailing newline is dropped.
+ *
+ * @param directory - `CREDENTIALS_DIRECTORY`; unset or empty means no credentials (development).
+ * @returns Config values keyed by name.
+ * @throws ConfigError when the directory can't be read, or holds a file that
+ *   is not a config key (names only, never values).
+ */
+export function readCredentials(directory: string | undefined): Record<string, string> {
+  if (directory === undefined || directory.trim() === "") return {};
+  let names: string[];
+  try {
+    names = readdirSync(directory, { withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name);
+  } catch {
+    throw new ConfigError(["CREDENTIALS_DIRECTORY: cannot be read"]);
+  }
+  const unknown = names.filter((name) => !CONFIG_ENV_KEYS.includes(name));
+  if (unknown.length > 0) {
+    throw new ConfigError(unknown.map((name) => `CREDENTIALS_DIRECTORY/${name}: not a configuration key`));
+  }
+  const values: Record<string, string> = {};
+  for (const name of names) {
+    values[name] = readFileSync(join(directory, name), "utf8").replace(/\r?\n$/, "");
+  }
+  return values;
+}
+
+/**
+ * Parse and validate the server configuration. Values come from the
+ * environment, plus the credential files in `CREDENTIALS_DIRECTORY` when it is
+ * set (systemd `LoadCredential=`). Each key may come from only one of the two.
  *
  * @param env - Environment to read; defaults to `process.env` (after `.env` files are loaded).
  * @returns The validated config with production defaults applied.
  * @throws ConfigError naming the offending keys (never their values).
  */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const result = configSchema.safeParse(env);
+  const credentials = readCredentials(env.CREDENTIALS_DIRECTORY);
+  const duplicated = Object.keys(credentials).filter((key) => env[key] !== undefined && env[key] !== "");
+  if (duplicated.length > 0) {
+    throw new ConfigError(duplicated.map((key) => `${key}: set both as an environment variable and as a credential`));
+  }
+  const result = configSchema.safeParse({ ...env, ...credentials });
   if (!result.success) {
     throw new ConfigError(
       result.error.issues.map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)

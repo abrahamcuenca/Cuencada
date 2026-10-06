@@ -137,21 +137,21 @@ WP-2.4 prepared every item below; **the owner applies them** following
 [`docs/deploy/runbook.md`](../deploy/runbook.md). [x] = done in the repo,
 [ ] = owner action (or a later WP) still to do.
 
-- [ ] **Platform:** Acleron renders `nginx.site_template` (patch in [`docs/deploy/nginx.md`](../deploy/nginx.md)); `deploy-preflight` blocks until then. The stock template breaks chat and has no CSP.
+- [x] **Platform:** Acleron `nginx.site_template` + `server.credentials` (LoadCredential=, Security M1), on branch `cuencada-nginx-credentials` (commit `03f8049`) in the local `acleron-platform` checkout; tests 54/54. [ ] Owner reviews it, merges it and pushes it. `deploy-preflight` blocks on a platform without it.
 - [ ] **Bucket name:** replace `<bucket>` in `infra/project.yml` (2 lines) and `infra/nginx/cuencada.conf` (3 CSP lines).
 - [ ] Reset the WhatsApp group invite link and the OneDrive share links; new values only in the vault (`vault_cuencada_seed_*_url`) or the admin UI. [x] The legacy links are gone from `seed-data.ts` (dev uses example.com placeholders).
 - [x] The production seed refuses to run unless **all** `SEED_*_URL` are set (links only reach the edition row on first insert). [ ] Owner runs the seed once, manually, over the tunnel, after the first migration (runbook § 6).
-- [x] Separate DB roles: `infra/db/roles.sql` (owner for `MIGRATE_DATABASE_URL`, DML-only runtime for `DATABASE_URL`), proven by `infra/db/verify-roles.sh`. [ ] Owner creates them on PG18.
+- [x] Separate DB roles: `infra/db/roles.sql` (owner for `MIGRATE_DATABASE_URL` through the tunnel, DML-only runtime for `DATABASE_URL` over the VPC; passwords via `\password` or SCRAM verifiers only), proven by `infra/db/verify-roles.sh`. [ ] Owner creates them on the PG18 server, with `pg_hba` (`hostssl` from server_1's VPC IP; owner from loopback) and TLS (runbook § 3).
 - [ ] Recreate any local dev DB that applied the pre-review 0001.
 - [x] Not behind Cloudflare: nginx sets `X-Forwarded-For $remote_addr` (overwrite), drops `CF-Connecting-IP`/`Forwarded`/`X-Forwarded-Host`/`True-Client-IP`; TLS on the VPS with HSTS. [ ] Verify cert + HSTS after the first deploy (runbook § 7).
 - [x] CSP from `csp.md` pasted verbatim in all static locations (drift-checked); harness re-run green. [ ] Browser-console check on production; repeat the OWASP sign-off for the deployed headers.
 - [x] nginx access logs drop query strings and cut the Referer.
 - [x] `VITE_MEDIA_UPLOAD_ORIGIN` in `build_env`, checked against `S3_BUCKET` + `S3_ENDPOINT` by the preflight.
 - [x] Bucket CORS (`infra/bucket/cors.xml`/`.json`), lifecycle (abort multipart; no prefix expiry, see the file) and the real-bucket check script. [ ] Owner applies them and runs `check-presigned-put.mjs`.
-- [x] Memory: video cap 150 MB; systemd `MemoryHigh`/`MemoryMax` + hardening drop-in (`infra/systemd/`); OOM/restart alert queries. [ ] Owner installs the drop-in and records `free -m` (consider swap or a 2 GB plan).
+- [x] Memory: video cap 150 MB (may return to 300 MB after the resize, no migration); systemd `MemoryHigh=700M`/`MemoryMax=900M` + hardening drop-in (`infra/systemd/`); OOM/restart alert queries. [ ] Owner resizes server_1 to 2 GB, then installs the drop-in.
 - [ ] Resend: DNS records (runbook § Resend DNS), domain verified, sending-only key. `admin@cuencada.com` must receive mail (the seeded admin starts unverified).
 - [x] Legacy URLs redirected by nginx. [ ] `git rm` the root `index.html`, `cuencada2026.html`, `images/`, `mensajes.json`, root `canciones/` in a PR after cutover (owner: history stays).
-- [ ] **Pre-launch:** breached-password check on password set, change and reset (WP-2.3 L5, ASVS 2.1.7), or a written waiver.
+- [ ] **Pre-launch:** breached-password check on password set, change and reset (WP-2.3 L5, ASVS 2.1.7): being built in a separate WP; launch waits for it.
 - [x] **Pre-launch:** stricter open invites (#36).
 - [ ] Minimum client version mechanism, then "bump min client version" in the release checklist for security fixes (runbook § 11).
 - [ ] Git history still contains the pre-sweep real/real-looking family names and the legacy links; owner decided "sweep forward, no history rewrite". Revisit only if the owner asks.

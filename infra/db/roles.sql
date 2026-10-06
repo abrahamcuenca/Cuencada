@@ -2,28 +2,42 @@
 --
 -- Two LOGIN roles:
 --   owner role   (:owner_role) owns the database, the public schema and every
---                table. Only the migrator uses it: MIGRATE_DATABASE_URL, from
---                the operator's machine through the SSH tunnel. Never on the VPS.
---   runtime role (:app_role) is what the API runs as: DATABASE_URL in
---                infra/project.yml (vault_cuencada_database_url). DML on the app
---                tables and sequence usage only. No DDL, no TRUNCATE, no
---                REFERENCES/TRIGGER, no access to the migrator's bookkeeping
---                (schema "drizzle"), cannot create schemas, tables or temp tables.
+--                table. Only the migrator (and the one-off seed) use it:
+--                MIGRATE_DATABASE_URL, from the operator's machine through the
+--                SSH tunnel. Never on the VPS.
+--   runtime role (:app_role) is what the API on server_1 runs as, over the VPC:
+--                DATABASE_URL (server.credentials, vault_cuencada_database_url).
+--                DML on the app tables and sequence usage only. No DDL, no
+--                TRUNCATE, no REFERENCES/TRIGGER, no access to the migrator's
+--                bookkeeping (schema "drizzle"), cannot create schemas, tables
+--                or temp tables.
 --
--- Run ONCE as a superuser (postgres) with psql, before the first migration:
+-- Run ONCE as a superuser (postgres) with psql on the DB server, before the
+-- first migration. The script takes NO passwords (they would land in shell
+-- history, `ps` output and the server log):
 --
 --   psql -v ON_ERROR_STOP=1 \
 --        -v db_name=cuencada -v owner_role=cuencada_owner -v app_role=cuencada_app \
---        -v owner_password="$OWNER_PW" -v app_password="$APP_PW" \
 --        -d postgres -f infra/db/roles.sql
 --
--- Passwords: generate with `openssl rand -hex 32` (hex only: no characters that
--- need URL-encoding in the connection string, and no % that systemd would
--- treat as a specifier in Environment= lines). Never commit them; store them in
--- the vault (vault_cuencada_database_url / the operator's migrate URL).
+-- Then set each password interactively, in the same psql session or a new one:
+--
+--   \password cuencada_owner
+--   \password cuencada_app
+--
+-- `\password` prompts without echo and sends only a SCRAM-SHA-256 verifier
+-- (computed client-side), so the plain password never reaches the server, its
+-- logs or pg_stat_activity. Alternative for a non-interactive setup: compute
+-- the verifier locally with infra/db/scram-verifier.mjs (reads the password
+-- from stdin) and run `ALTER ROLE … PASSWORD '<SCRAM-SHA-256$…>'`.
+--
+-- Passwords: `openssl rand -hex 32` (hex only: nothing to URL-encode in the
+-- connection string). Never commit them; store them in the vault
+-- (vault_cuencada_database_url / vault_cuencada_migrate_database_url).
+-- Until a password is set the role can't log in (fails closed).
 --
 -- Re-running is safe: roles and the database are created only when missing,
--- passwords are (re)set, and the grants are idempotent.
+-- passwords are left alone, and the grants are idempotent.
 
 \set ON_ERROR_STOP on
 
@@ -35,8 +49,6 @@ WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'owner_role') \gexec
 SELECT format('CREATE ROLE %I LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT CONNECTION LIMIT 30', :'app_role')
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'app_role') \gexec
 
-ALTER ROLE :"owner_role" WITH LOGIN PASSWORD :'owner_password';
-ALTER ROLE :"app_role" WITH LOGIN PASSWORD :'app_password';
 
 -- Runtime guard rails: a stuck transaction or a runaway query can't hold locks
 -- or a pool slot forever. (The API's longest statements are batched cleanups.)

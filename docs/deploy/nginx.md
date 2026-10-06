@@ -26,49 +26,32 @@ The stock template has `canonical_redirect`, `health_path`, `immutable_dir` and
 `rate_limits`. `infra/project.yml` sets those keys too, so a stock render is as
 close as the stock template can get. It still breaks chat.
 
-## Platform change (recommended)
+## Platform change (owner-approved, delivered)
 
-This is a small, opt-in change to the `acleron-platform` repo, owned by the
-owner. It lets a project ship its own site file:
+The owner approved patching Acleron. The change sits on branch
+**`cuencada-nginx-credentials`** of the local `acleron-platform` checkout,
+commit `03f8049`. It is not pushed: the owner reviews it, merges it and pushes
+it. The same commit also carries `server.credentials`, the Security M1 fix,
+for secrets (see the runbook § 4).
 
-```yaml
-# ansible/roles/nginx/tasks/main.yml: before "Render HTTPS Nginx config (TLS enabled)"
-- name: Use the project's own nginx site when it declares one
-  set_fact:
-    _nginx_site_src: >-
-      {{ (project_config | dirname | dirname) ~ '/' ~ project.nginx.site_template
-         if (project.nginx | default({})).site_template is defined
-         else playbook_dir ~ '/../../templates/nginx-https-site.conf.j2' }}
+- **`nginx.site_template`** is opt-in:
+  - The new `ansible/roles/nginx/tasks/site_source.yml` resolves the path
+    against the project root (`project_config | dirname | dirname`).
+  - It rejects absolute paths and `..`.
+  - The role renders that file instead of `templates/nginx-https-site.conf.j2`,
+    through the same `nginx -t` gate.
+  - Certbot's first-run HTTP bootstrap is unchanged.
+  - Projects that don't declare the key get the stock template.
+- **Tests** (`tests/run-tests.sh`, 54/54 pass): the template path resolves
+  inside the project root, the stock template is used when the key is absent,
+  and `..` is rejected.
 
-# and in "Render HTTPS Nginx config (TLS enabled)":
-    src: "{{ _nginx_site_src }}"
-```
-
-- `project_config` is already an absolute path (an extra var), so
-  `dirname | dirname` is the project root. The site is read on the control
-  node, like the stock template.
-- The certbot role still uses its own HTTP bootstrap config for the first
-  issuance. The project site renders after that, once the certificate exists,
-  exactly like the stock template.
-- `nginx -t` runs before the reload, as it does today.
-
-`mise run deploy-preflight` reads the platform's nginx role. It **fails** until
-the role mentions `site_template`. A deploy before the change would silently
-render the stock site, with chat broken.
-
-## Interim fallback (only if the platform change must wait)
-
-1. Deploy with `CUENCADA_NGINX_MANUAL=1 mise run deploy`. This turns the
-   preflight blocker into a warning.
-2. Right after the deploy finishes, on `server_1`:
-   ```sh
-   sudo install -m 0644 cuencada.conf /etc/nginx/sites-available/cuencada   # copied with scp, <bucket> filled in
-   sudo nginx -t && sudo systemctl reload nginx
-   ```
-3. Every later deploy overwrites the file again. Between Ansible's reload and
-   step 2, the stock site is live (about a minute): chat is down and there is
-   no CSP. Repeat step 2 after **every** deploy until the platform change
-   lands.
+`mise run deploy-preflight` reads the platform checkout. It **fails** when
+the nginx role has no `site_template` support, when the systemd template has
+no `LoadCredential=`, or when the checkout is missing.
+`mise run deploy-check` only warns about a missing checkout. A deploy on a
+platform without the branch would silently render the stock site (chat
+broken) and drop every secret.
 
 ## What the site does
 
@@ -105,8 +88,17 @@ render the stock site, with chat broken.
 - **Access log** (`cuencada_redacted`):
   - It logs method, path (no query string), status, bytes, the Referer cut at
     `?`/`#`, user agent and timings.
-  - Error-log lines can still quote a request line on upstream failures, so
-    the level stays at `error`. The chat ticket is single-use and lives 30 s.
+  - **The error log can contain query strings.** On upstream failures nginx
+    quotes the whole request line (`?ticket=`, `?q=`, `?search=`). So:
+    - its level stays at `error`;
+    - both files are mode **0640, group `adm`** (Ubuntu's logrotate creates
+      them `www-data:adm 0640`);
+    - they are kept **14 days** (the Ubuntu logrotate default; don't raise
+      it);
+    - they are never shipped anywhere wider than the access log.
+
+    The chat ticket is single-use and lives 30 s. See runbook § 10
+    (Security L3).
 - **Body size:** 1 MiB, matching Fastify's JSON limit. Photos and videos go
   straight to the bucket.
 - **Backstop rate limit:** 20 r/s per IP on `/api/` (burst 60), answering

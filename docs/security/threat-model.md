@@ -7,7 +7,8 @@ Cuencada is a private family portal:
 - **SPA:** React/Vite PWA, served by nginx.
 - **API:** Fastify 5, on `server_1` behind nginx. TLS ends on the VPS; there is
   no Cloudflare.
-- **Database:** PostgreSQL through Drizzle.
+- **Database:** PostgreSQL 18 through Drizzle, on a separate DB server reached
+  from `server_1` over the private VPC.
 - **Media:** a private Linode Object Storage bucket (presigned URLs).
 - **Email:** Resend.
 - **Chat:** WebSockets.
@@ -66,8 +67,14 @@ flowchart LR
 
 - **TB1, Internet → nginx → API.** Every request is untrusted. The API trusts
   `X-Forwarded-For` only from loopback (`TRUST_PROXY=loopback`).
-- **TB2, API → database.** The runtime role should be least-privilege; that's
-  the cutover checklist's "separate DB roles" item.
+- **TB2, API → database (VPC).** The API connects as a DML-only runtime role
+  (`infra/db/roles.sql`), accepted by `pg_hba` only from `server_1`'s VPC
+  address over TLS (`hostssl`, scram-sha-256). The owner (DDL) role is used
+  only through the operator's tunnel and is never on the VPS (WP-2.4).
+- **TB2b, secrets on server_1.** Secrets are root-only files loaded with
+  systemd `LoadCredential=`, readable by the service through
+  `$CREDENTIALS_DIRECTORY`. They are not `Environment=` lines, which any local
+  user could read with `systemctl show` (WP-2.4 M1).
 - **TB3, browser ↔ bucket.** The browser talks to the bucket directly using
   URLs the API signed: a PUT bound to type and size, and a GET that lasts 1 h.
   The API re-checks the size, content type and magic bytes, then re-encodes
@@ -191,8 +198,13 @@ WP-2.4 prepared all of these; the owner applies them at cutover
 
 - nginx CSP and headers, verbatim from [csp.md](csp.md):
   `infra/nginx/cuencada.conf`, drift-checked by `mise run deploy-preflight`.
-  **Needs the Acleron `nginx.site_template` change** ([nginx.md](../deploy/nginx.md)):
-  the stock template has no CSP and breaks chat.
+  **Needs the Acleron platform branch `cuencada-nginx-credentials`**
+  ([nginx.md](../deploy/nginx.md)): the stock template has no CSP and breaks
+  chat.
+- Secrets out of `Environment=` (Security M1): `server.credentials` writes
+  root:root 0600 files, loaded with `LoadCredential=`; `config.ts` reads
+  `$CREDENTIALS_DIRECTORY`. The same platform branch carries it. Runbook § 4
+  has the check that an unprivileged `systemctl show` shows no secret.
 - `X-Forwarded-For $remote_addr` (overwrite); `CF-Connecting-IP`, `Forwarded`,
   `X-Forwarded-Host` and `True-Client-IP` dropped. Done in the site file.
 - Access logs without query strings (`?ticket=`, `?q=`, `?search=`, …) and a
@@ -200,13 +212,19 @@ WP-2.4 prepared all of these; the owner applies them at cutover
 - `/health*`: only the shallow `/healthz` (liveness) is public; `/health/ready`
   is loopback-only. Done in the site file.
 - Separate DB roles: `infra/db/roles.sql` (owner for migrations, DML-only
-  runtime), proven by `infra/db/verify-roles.sh`. The owner runs it.
+  runtime; passwords only through `\password` or SCRAM verifiers), with
+  `pg_hba` limited to `server_1`'s VPC IP (runtime, `hostssl`) and the DB
+  server's loopback (owner, tunnel). Proven by `infra/db/verify-roles.sh`. The
+  owner runs it.
 - Rotate the WhatsApp and OneDrive links: owner, before the seed (the seed
   enforces new links).
 - Real-bucket PUT enforcement and CORS: `infra/bucket/` (CORS, lifecycle,
   `check-presigned-put.mjs`). The owner runs it.
-- Memory: video cap lowered to 150 MB (server_1 has 961 MB in total), systemd
-  `MemoryHigh`/`MemoryMax` drop-in, restart and OOM alerts.
+- Memory: video cap lowered to 150 MB; `server_1` goes from 961 MB to 2 GB
+  before launch (owner); systemd `MemoryHigh=700M`/`MemoryMax=900M` drop-in;
+  restart and OOM alerts.
+- nginx logs: 0640 `adm`, 14-day retention; the error log can hold query
+  strings (runbook § 10).
 
 **Backend:**
 

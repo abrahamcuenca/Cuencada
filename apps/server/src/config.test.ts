@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { allowedOrigins, CONFIG_ENV_KEYS, ConfigError, loadConfig } from "./config.js";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { allowedOrigins, CONFIG_ENV_KEYS, ConfigError, loadConfig, readCredentials } from "./config.js";
 
 const DEV_ENV = {
   NODE_ENV: "development",
@@ -154,5 +157,59 @@ describe("CONFIG_ENV_KEYS", () => {
     expect([...CONFIG_ENV_KEYS].sort()).toEqual(Object.keys(config).sort());
     expect(CONFIG_ENV_KEYS).toContain("DATABASE_URL");
     expect(CONFIG_ENV_KEYS).not.toContain("MIGRATE_DATABASE_URL");
+  });
+});
+
+describe("loadConfig with systemd credentials (CREDENTIALS_DIRECTORY)", () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A credentials directory holding one file per entry. */
+  function credentialDir(files: Record<string, string>): string {
+    const dir = mkdtempSync(join(tmpdir(), "w24-creds-"));
+    dirs.push(dir);
+    for (const [name, value] of Object.entries(files)) writeFileSync(join(dir, name), value, { mode: 0o600 });
+    return dir;
+  }
+
+  const { DATABASE_URL: _db, JWT_SECRET: _jwt, RESEND_API_KEY: _resend, ...PROD_NON_SECRETS } = PROD_ENV;
+
+  it("reads secrets from credential files, dropping one trailing newline", () => {
+    const dir = credentialDir({
+      DATABASE_URL: "postgresql://app:from-credential@10.0.0.1:5432/db\n",
+      JWT_SECRET: `${STRONG_SECRET}\n`,
+      RESEND_API_KEY: "re_from_credential"
+    });
+    const config = loadConfig({ ...PROD_NON_SECRETS, CREDENTIALS_DIRECTORY: dir });
+    expect(config.DATABASE_URL).toBe("postgresql://app:from-credential@10.0.0.1:5432/db");
+    expect(config.JWT_SECRET).toBe(STRONG_SECRET);
+    expect(config.RESEND_API_KEY).toBe("re_from_credential");
+  });
+
+  it("falls back to the environment when CREDENTIALS_DIRECTORY is unset or empty (development)", () => {
+    expect(loadConfig(DEV_ENV).JWT_SECRET).toBe(DEV_ENV.JWT_SECRET);
+    expect(loadConfig({ ...DEV_ENV, CREDENTIALS_DIRECTORY: "" }).JWT_SECRET).toBe(DEV_ENV.JWT_SECRET);
+  });
+
+  it("refuses a key set both as an environment variable and as a credential, naming only the key", () => {
+    const dir = credentialDir({ JWT_SECRET: "credential-secret-value-long-enough-0123" });
+    const attempt = () => loadConfig({ ...PROD_ENV, CREDENTIALS_DIRECTORY: dir });
+    expect(attempt).toThrow(ConfigError);
+    expect(attempt).toThrow(/JWT_SECRET: set both as an environment variable and as a credential/);
+    expect(attempt).not.toThrow(/credential-secret-value/);
+  });
+
+  it("refuses a credential file that is not a config key, and an unreadable directory", () => {
+    const dir = credentialDir({ JWT_SECRETS: "typo" });
+    expect(() => readCredentials(dir)).toThrow(/CREDENTIALS_DIRECTORY\/JWT_SECRETS: not a configuration key/);
+    expect(() => readCredentials(join(dir, "missing"))).toThrow(/CREDENTIALS_DIRECTORY: cannot be read/);
+  });
+
+  it("ignores subdirectories and still applies production validation to credential values", () => {
+    const dir = credentialDir({ DATABASE_URL: "postgresql://a:b@h/d", JWT_SECRET: "too-short-but-16+", RESEND_API_KEY: "re" });
+    mkdirSync(join(dir, "nested"));
+    expect(() => loadConfig({ ...PROD_NON_SECRETS, CREDENTIALS_DIRECTORY: dir })).toThrow(/JWT_SECRET: must be at least 32/);
   });
 });

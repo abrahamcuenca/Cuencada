@@ -37,11 +37,18 @@ podman container exists "$CONTAINER" || { echo "verify-roles: run scripts/test-d
 [[ -f "$ROOT/apps/server/dist/index.js" ]] || { echo "verify-roles: run pnpm build first" >&2; exit 1; }
 
 superuser() { podman exec -i "$CONTAINER" psql -X -q -v ON_ERROR_STOP=1 -U "$SUPERUSER" "$@"; }
-as_app() { podman exec -i -e PGPASSWORD="$APP_PW" "$CONTAINER" psql -X -q -h 127.0.0.1 -U "$APP" -d "$DB" "$@"; }
+# The image trusts loopback connections, so the runtime role connects to the
+# container's own non-loopback address, where pg_hba demands scram-sha-256:
+# the password (and the SCRAM verifier it was stored as) is really checked.
+CONTAINER_IP="$(podman exec "$CONTAINER" hostname -i | awk '{print $1}')"
+as_app() { podman exec -i -e PGPASSWORD="$APP_PW" "$CONTAINER" psql -X -q -h "$CONTAINER_IP" -U "$APP" -d "$DB" "$@"; }
+as_owner() { podman exec -i -e PGPASSWORD="$OWNER_PW" "$CONTAINER" psql -X -q -h "$CONTAINER_IP" -U "$OWNER" -d "$DB" "$@"; }
 
 API_PID=""
+CRED_DIR=""
 cleanup() {
   [[ -n "$API_PID" ]] && kill "$API_PID" 2>/dev/null || true
+  [[ -n "$CRED_DIR" ]] && rm -rf "$CRED_DIR"
   superuser -d postgres -c "DROP DATABASE IF EXISTS ${DB} WITH (FORCE)" >/dev/null
   superuser -d postgres -c "DROP ROLE IF EXISTS ${APP}" -c "DROP ROLE IF EXISTS ${OWNER}" >/dev/null
 }
@@ -53,11 +60,31 @@ fail() { echo "FAIL  $*" >&2; exit 1; }
 step "reset scratch database ${DB} and roles"
 cleanup
 
-step "apply infra/db/roles.sql (twice: it must be idempotent)"
+step "apply infra/db/roles.sql (twice: it must be idempotent; it takes no passwords)"
 for _ in 1 2; do
-  superuser -d postgres -v db_name="$DB" -v owner_role="$OWNER" -v app_role="$APP" \
-    -v owner_password="$OWNER_PW" -v app_password="$APP_PW" -f - < "$ROOT/infra/db/roles.sql"
+  superuser -d postgres -v db_name="$DB" -v owner_role="$OWNER" -v app_role="$APP" -f - < "$ROOT/infra/db/roles.sql"
 done
+if as_app -tAc "select 1" >/dev/null 2>&1; then fail "the runtime role logged in before a password was set"; fi
+echo "PASS  no password set yet: the runtime role can't log in (fails closed)"
+
+step "set the passwords as SCRAM verifiers (infra/db/scram-verifier.mjs; plain passwords never reach Postgres)"
+OWNER_VERIFIER="$(printf '%s' "$OWNER_PW" | node "$ROOT/infra/db/scram-verifier.mjs")"
+APP_VERIFIER="$(printf '%s' "$APP_PW" | node "$ROOT/infra/db/scram-verifier.mjs")"
+superuser -d postgres -v role="$OWNER" -v verifier="$OWNER_VERIFIER" <<'SQL'
+ALTER ROLE :"role" PASSWORD :'verifier';
+SQL
+superuser -d postgres -v role="$APP" -v verifier="$APP_VERIFIER" <<'SQL'
+ALTER ROLE :"role" PASSWORD :'verifier';
+SQL
+superuser -d postgres -tAc "select rolname from pg_authid where rolname in ('${OWNER}', '${APP}') and rolpassword like 'SCRAM-SHA-256\$%'" | grep -c . | grep -qx 2 \
+  || fail "the stored passwords are not SCRAM verifiers"
+echo "PASS  both roles store a SCRAM-SHA-256 verifier"
+as_app -tAc "select 1" >/dev/null 2>&1 || fail "the runtime role can't log in with its password over scram-sha-256"
+as_owner -tAc "select 1" >/dev/null 2>&1 || fail "the owner role can't log in with its password over scram-sha-256"
+if podman exec -i -e PGPASSWORD=wrong-password "$CONTAINER" psql -X -q -h "$CONTAINER_IP" -U "$APP" -d "$DB" -tAc "select 1" >/dev/null 2>&1; then
+  fail "the runtime role logged in with a wrong password"
+fi
+echo "PASS  scram-sha-256 logins work with the verifier-set passwords and refuse a wrong one"
 
 step "migrate as the owner role"
 MIGRATE_DATABASE_URL="$OWNER_URL" DATABASE_URL="" node "$ROOT/apps/server/dist/db/migrate.js"
@@ -88,10 +115,15 @@ NODE_ENV=development DATABASE_URL="$APP_URL" node "$ROOT/apps/server/dist/seed.j
 as_app -tAc "update users set email_verified_at = now() where email = 'admin@cuencada.com'" >/dev/null \
   || fail "runtime role can't update users"
 
-step "start the built API as the runtime role on 127.0.0.1:${API_PORT}"
-NODE_ENV=development HOST=127.0.0.1 PORT="$API_PORT" LOG_LEVEL=warn \
+step "start the built API as the runtime role on 127.0.0.1:${API_PORT}, secrets from CREDENTIALS_DIRECTORY"
+# Same shape as systemd LoadCredential=: one 0600 file per secret in a 0700
+# directory; DATABASE_URL and JWT_SECRET are NOT in the environment.
+CRED_DIR="$(mktemp -d "${TMPDIR:-/tmp}/w24-verify-roles-creds.XXXXXX")"
+chmod 0700 "$CRED_DIR"
+( umask 077; printf '%s\n' "$APP_URL" > "$CRED_DIR/DATABASE_URL"; openssl rand -hex 32 > "$CRED_DIR/JWT_SECRET" )
+env -u DATABASE_URL -u JWT_SECRET NODE_ENV=development HOST=127.0.0.1 PORT="$API_PORT" LOG_LEVEL=warn \
   APP_BASE_URL="http://127.0.0.1:${API_PORT}" CORS_ORIGIN="http://127.0.0.1:${API_PORT}" \
-  DATABASE_URL="$APP_URL" JWT_SECRET="$(openssl rand -hex 32)" \
+  CREDENTIALS_DIRECTORY="$CRED_DIR" \
   node "$ROOT/apps/server/dist/index.js" &
 API_PID=$!
 for _ in $(seq 1 50); do
