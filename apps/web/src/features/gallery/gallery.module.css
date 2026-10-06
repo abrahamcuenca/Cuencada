@@ -1,0 +1,412 @@
+/* Gallery (T4). Mobile-first: min-width queries only. */
+
+/* AppLayout uses PageShell layout="bleed", so the page owns its top spacing. */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-block: var(--space-6) var(--space-12);
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  line-height: var(--leading-tight);
+  overflow-wrap: anywhere;
+}
+
+.headerTools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.yearSelect {
+  min-width: 7.5rem;
+}
+
+.uploadButton {
+  align-self: stretch;
+}
+
+.hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+/* ---------------------------------------------------------------- grid --- */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  margin: 0 calc(var(--gutter) * -1);
+  padding: 0;
+  list-style: none;
+}
+
+.tile {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  background: var(--gradient-photo-placeholder, var(--color-surface-sunken));
+}
+
+.tileButton {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+
+.tileButton:focus-visible {
+  outline-offset: -4px;
+}
+
+.thumb {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.videoBadge {
+  position: absolute;
+  right: var(--space-1);
+  bottom: var(--space-1);
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.75rem;
+  height: 1.75rem;
+  padding-inline: var(--space-1);
+  border-radius: var(--radius-pill);
+  background: rgb(0 0 0 / 0.6);
+  color: #fff;
+  font-size: var(--text-xs);
+  pointer-events: none;
+}
+
+.videoPlaceholder,
+.processingTile {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  padding: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.videoPlaceholder {
+  font-size: var(--text-2xl);
+  color: var(--color-primary);
+}
+
+.skeletonTile {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
+
+.more {
+  display: flex;
+  justify-content: center;
+  padding-block: var(--space-2);
+}
+
+/* ----------------------------------------------------------- lightbox --- */
+
+.caption {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  text-align: center;
+}
+
+.caption p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.captionMeta {
+  opacity: 0.8;
+  font-size: var(--text-sm);
+}
+
+/* ------------------------------------------------------------- upload --- */
+
+.fileInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.stageList,
+.uploadList,
+.reportList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stageItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.rejected {
+  border-color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+.fileName {
+  margin: 0;
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.fileMeta {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.errorText {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+.panel {
+  position: sticky;
+  bottom: calc(var(--bottom-nav-height) + var(--safe-bottom) + var(--space-2));
+  z-index: var(--z-raised);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-height: 60vh;
+  max-height: 60dvh;
+  overflow-y: auto;
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.panelHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.panelTitle {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.uploadRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+}
+
+.uploadInfo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.uploadName {
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.uploadStatus {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.uploadStatus.statusError {
+  color: var(--color-danger);
+}
+
+.uploadStatus.statusDone {
+  color: var(--color-success);
+}
+
+.progress {
+  width: 100%;
+  height: 0.5rem;
+  accent-color: var(--color-primary);
+}
+
+.rowActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+/* -------------------------------------------------------------- preview --- */
+
+.preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.previewGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  list-style: none;
+}
+
+.previewGrid a {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* -------------------------------------------------------------- admin --- */
+
+.queue {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.adminCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.adminMedia {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.adminThumb {
+  width: 6rem;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.adminActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.adminActions > * {
+  flex: 1 1 auto;
+}
+
+@media (min-width: 600px) {
+  .grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin: 0;
+  }
+
+  .uploadButton {
+    align-self: flex-start;
+  }
+
+  .previewGrid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .queue {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .adminActions > * {
+    flex: 0 0 auto;
+  }
+}
+
+@media (min-width: 900px) {
+  .page {
+    padding-block: var(--space-10) var(--space-16);
+  }
+
+  .grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: var(--space-1);
+  }
+
+  .tile {
+    border-radius: var(--radius-xs, 4px);
+  }
+
+  .panel {
+    position: fixed;
+    right: calc(var(--space-6) + var(--safe-right));
+    bottom: calc(var(--space-6) + var(--safe-bottom));
+    width: min(26rem, calc(100vw - var(--space-12)));
+  }
+}
+
+@media (min-width: 1200px) {
+  .grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+
+  .queue {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
