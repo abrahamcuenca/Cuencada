@@ -64,10 +64,12 @@ export function makeEdition(year: number, startsAt = `${year}-09-13T12:00:00.000
     status: "past",
     startsAt,
     endsAt: startsAt,
+    timezone: "America/Merida",
     city: "Mérida",
     state: "Yucatán",
     heroImageUrl: null,
-    themeColor: "#0b5e55"
+    themeColor: "#0b5e55",
+    hasMedia: true
   };
 }
 

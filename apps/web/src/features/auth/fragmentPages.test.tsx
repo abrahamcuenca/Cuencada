@@ -1,20 +1,32 @@
 import { screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { statusState } from "../../../test/auth";
+import { http } from "msw";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { apiUrl, statusState } from "../../../test/auth";
 import { renderApp } from "../../../test/renderApp";
 import { clearFragmentToken } from "../../shared/lib/fragmentToken";
+import { FRAGMENT_TOKEN as TOKEN } from "./testing/contractHandlers";
+import { createTestServer } from "../../../test/msw";
 
-const TOKEN = "Zt7".repeat(12);
+// Token-consuming POSTs stay pending: these tests only check the URL scrubbing.
+const pending = (): Promise<Response> => new Promise<Response>(() => {});
+const server = createTestServer(
+  http.post(apiUrl("/auth/magic-link/consume"), pending),
+  http.post(apiUrl("/invites/inspect"), pending),
+  http.post(apiUrl("/auth/email/verify"), pending)
+);
 
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+afterAll(() => server.close());
 afterEach(() => {
+  server.resetHandlers();
   clearFragmentToken();
   window.history.replaceState(null, "", "/");
 });
 
 describe("fragment-token pages", () => {
   it.each([
-    ["/entrar/enlace", "Entrando con tu enlace"],
-    ["/invitacion", "Únete a la familia"],
+    ["/entrar/enlace", "Entrar a la Cuencada"],
+    ["/invitacion", "Te invitaron a la Cuencada"],
     ["/restablecer", "Nueva contraseña"],
     ["/verificar", "Verificar correo"]
   ])("scrub the token from the address bar when %s loads", async (path, heading) => {
@@ -33,7 +45,7 @@ describe("fragment-token pages", () => {
 
     const { router } = renderApp(`/invitacion#t=${TOKEN}`, statusState("anonymous"));
 
-    await screen.findByRole("heading", { name: "Únete a la familia" });
+    await screen.findByRole("heading", { name: "Te invitaron a la Cuencada" });
     await vi.waitFor(() => expect(router.state.location.hash).toBe(""));
     expect(router.state.location.pathname).toBe("/invitacion");
   });

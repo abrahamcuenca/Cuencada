@@ -1,8 +1,16 @@
-import type { ReactNode } from "react";
-import { Link, Outlet, useLocation } from "react-router-dom";
-import { selectCurrentUser, selectIsAdmin, selectIsOffline, selectLogoutPending } from "../features/auth/authSlice";
+import { lazy, type ReactNode, Suspense } from "react";
+import { Link, Outlet, useLocation, useMatches } from "react-router-dom";
+import {
+  selectCurrentUser,
+  selectIsAdmin,
+  selectIsOffline,
+  selectLogoutPending,
+  type WithAuthState
+} from "../features/auth/authSlice";
 import { logout } from "../features/auth/session";
 import { useGetCuencadaHomeQuery } from "../features/cuencadas/api";
+import { wantsMinimalChrome } from "../shared/lib/featureRoutes";
+import { reportUnexpected } from "../shared/lib/reportUnexpected";
 // Direct imports (not the shared/ui barrel) keep unused primitives' CSS out of the initial chunk.
 import { BottomNav } from "../shared/ui/BottomNav";
 import { Button } from "../shared/ui/Button";
@@ -22,6 +30,24 @@ export const LOGOUT_PENDING_NOTICE =
   "Cerraste sesión en este dispositivo, pero no pudimos confirmarlo con el servidor. Se completará al reconectar.";
 /** Shown while a refresh cannot reach the server. */
 export const OFFLINE_NOTICE = "Sin conexión. Reintentaremos al volver la conexión.";
+
+/** Renders nothing: what the banner becomes when its chunk cannot load. */
+function NoBanner(): ReactNode {
+  return null;
+}
+
+// Lazy: only unverified users ever download it (keeps authApi out of the initial chunk).
+// Fails soft: a chunk that cannot load (offline, stale tab after a deploy) renders
+// nothing instead of reaching the layout's error boundary and taking down the shell.
+const VerifyEmailBanner = lazy(() =>
+  import("../features/auth/components/VerifyEmailBanner").then(
+    (module) => ({ default: module.VerifyEmailBanner }),
+    (error: unknown) => {
+      reportUnexpected(error);
+      return { default: NoBanner };
+    }
+  )
+);
 
 /**
  * Mobile tab bar destinations (Inicio, Programa, Fotos, Chat, Más).
@@ -74,8 +100,11 @@ function Brand(): ReactNode {
 function SessionAction(): ReactNode {
   const dispatch = useAppDispatch();
   const user = useAppSelector(selectCurrentUser);
+  const { pathname } = useLocation();
 
   if (user === null) {
+    // Already on the login screens: an "Entrar" button there is noise.
+    if (pathname === "/entrar" || pathname.startsWith("/entrar/")) return null;
     return (
       <Button to="/entrar" size="sm">
         Entrar
@@ -103,6 +132,11 @@ function StatusBanner(): ReactNode {
   return null;
 }
 
+/** True for a logged-in user whose email is not verified yet (shows the T1 banner). */
+function selectNeedsEmailVerification(state: WithAuthState): boolean {
+  return state.auth.status === "authenticated" && state.auth.user?.emailVerified === false;
+}
+
 /**
  * App shell built on the WP-0.7 primitives: `TopNav` (brand, links at
  * ≥900px, Entrar/Salir), the routed page inside `PageShell`'s `<main>`, and
@@ -114,14 +148,28 @@ function StatusBanner(): ReactNode {
 export function AppLayout(): ReactNode {
   const { pathname } = useLocation();
   const isAdmin = useAppSelector(selectIsAdmin);
-  const showBanner = useAppSelector((state) => selectIsOffline(state) || selectLogoutPending(state));
+  const showStatus = useAppSelector((state) => selectIsOffline(state) || selectLogoutPending(state));
+  const showVerify = useAppSelector(selectNeedsEmailVerification);
+  // Auth screens (route handle MINIMAL_CHROME) get no BottomNav; it is hidden at ≥900px anyway.
+  const minimalChrome = useMatches().some((match) => wantsMinimalChrome(match.handle));
   const programaPath = useProgramaPath();
   const topItems = isAdmin ? [...topNavItems(programaPath), ADMIN_NAV_ITEM] : topNavItems(programaPath);
 
   return (
     <PageShell
       layout="bleed"
-      banner={showBanner ? <StatusBanner /> : undefined}
+      banner={
+        showStatus || showVerify ? (
+          <>
+            {showStatus ? <StatusBanner /> : null}
+            {showVerify ? (
+              <Suspense fallback={null}>
+                <VerifyEmailBanner />
+              </Suspense>
+            ) : null}
+          </>
+        ) : undefined
+      }
       header={
         <TopNav
           items={topItems}
@@ -132,12 +180,9 @@ export function AppLayout(): ReactNode {
         />
       }
       bottomNav={
-        <BottomNav
-          items={bottomNavItems(programaPath)}
-          currentPath={pathname}
-          renderLink={renderRouterLink}
-          label="Navegación inferior"
-        />
+        minimalChrome ? undefined : (
+          <BottomNav items={bottomNavItems(programaPath)} currentPath={pathname} renderLink={renderRouterLink} label="Navegación inferior" />
+        )
       }
     >
       <Outlet />

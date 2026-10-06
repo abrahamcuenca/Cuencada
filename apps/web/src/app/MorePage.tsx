@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { selectIsAdmin } from "../features/auth/authSlice";
 import { logout } from "../features/auth/session";
@@ -17,8 +17,11 @@ const MEMBER_LINKS: readonly MoreLink[] = [
   { to: "/directorio", label: "Directorio", icon: "🧭" },
   { to: "/arbol", label: "Árbol familiar", icon: "🌳" },
   { to: "/perfil", label: "Mi perfil", icon: "🙂" },
-  { to: "/perfil/sesiones", label: "Sesiones", icon: "🔐" }
+  { to: "/perfil/sesiones", label: "Sesiones y seguridad", icon: "🔐" }
 ];
+
+/** Longest the logout waits for the navigation home before running anyway. */
+export const LOGOUT_NAVIGATION_TIMEOUT_MS = 1500;
 
 const ADMIN_LINK: MoreLink = { to: "/admin", label: "Administración", icon: "⭐" };
 
@@ -34,6 +37,39 @@ export function MorePage(): ReactNode {
   const navigate = useNavigate();
   const isAdmin = useAppSelector(selectIsAdmin);
   const links = isAdmin ? [...MEMBER_LINKS, ADMIN_LINK] : MEMBER_LINKS;
+  const [leaving, setLeaving] = useState(false);
+  const resolveLeft = useRef<(() => void) | null>(null);
+
+  // Resolves the "page has left" promise when /mas unmounts (the new route committed,
+  // or an error boundary replaced it).
+  useEffect(
+    () => () => {
+      resolveLeft.current?.();
+    },
+    []
+  );
+
+  /**
+   * "Cerrar sesión": leave the guarded /mas first, then log out, so RequireAuth's
+   * /entrar redirect cannot race the navigation home. The logout waits for the
+   * navigation to finish **and** this page to unmount (RR7 commits in a
+   * transition, so the promise alone can settle before the old tree is gone), but
+   * never longer than {@link LOGOUT_NAVIGATION_TIMEOUT_MS}: a slow chunk, a
+   * blocker or a stuck navigation can delay the logout, never skip it.
+   */
+  const onLogout = async (): Promise<void> => {
+    if (leaving) return;
+    setLeaving(true);
+    const left = new Promise<void>((resolve) => {
+      resolveLeft.current = resolve;
+    });
+    const timeout = new Promise<void>((resolve) => setTimeout(resolve, LOGOUT_NAVIGATION_TIMEOUT_MS));
+    try {
+      await Promise.race([Promise.resolve(navigate("/", { replace: true })).then(() => left), timeout]);
+    } finally {
+      dispatch(logout()).catch(reportUnexpected);
+    }
+  };
 
   return (
     <section className={styles.page}>
@@ -51,10 +87,9 @@ export function MorePage(): ReactNode {
             variant="danger"
             size="lg"
             fullWidth
+            loading={leaving}
             onClick={() => {
-              dispatch(logout())
-                .then(() => navigate("/", { replace: true }))
-                .catch(reportUnexpected);
+              onLogout().catch(reportUnexpected);
             }}
           >
             Cerrar sesión

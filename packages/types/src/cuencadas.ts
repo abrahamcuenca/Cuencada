@@ -151,6 +151,11 @@ export interface Announcement {
   pinned: boolean;
   authorName: string | null;
   publishedAt: string;
+  /**
+   * When it stops being shown, or `null` for never. Contract amendment (T2-BE):
+   * public/member reads only ever return unexpired items, admins see every row.
+   */
+  expiresAt: string | null;
   updatedAt: string;
 }
 
@@ -163,6 +168,7 @@ export const announcementSchema = z.object({
   pinned: z.boolean(),
   authorName: z.string().max(80).nullable(),
   publishedAt: dateTimeSchema,
+  expiresAt: dateTimeSchema.nullable(),
   updatedAt: dateTimeSchema
 }) satisfies z.ZodType<Announcement>;
 
@@ -179,10 +185,18 @@ export interface CuencadaSummary {
   status: CuencadaStatus;
   startsAt: string;
   endsAt: string;
+  /** IANA zone used for status and date display. Contract amendment (T2-BE, for T4-FE). */
+  timezone: string;
   city: string;
   state: string;
   heroImageUrl: string | null;
   themeColor: string;
+  /**
+   * True when the edition has at least one visible gallery item (approved,
+   * ready, not deleted). Lets the web hide empty galleries without a member
+   * request. Contract amendment (T2-BE, for T4-FE).
+   */
+  hasMedia: boolean;
 }
 
 export const cuencadaSummarySchema = z.object({
@@ -193,10 +207,12 @@ export const cuencadaSummarySchema = z.object({
   status: cuencadaStatusSchema,
   startsAt: dateTimeSchema,
   endsAt: dateTimeSchema,
+  timezone: z.string().max(64),
   city: z.string().max(120),
   state: z.string().max(120),
   heroImageUrl: z.string().max(2048).nullable(),
-  themeColor: z.string().max(7)
+  themeColor: z.string().max(7),
+  hasMedia: z.boolean()
 }) satisfies z.ZodType<CuencadaSummary>;
 
 /** Everything an anonymous visitor may see (`GET /api/cuencadas/:year`). */
@@ -502,16 +518,35 @@ const announcementFields = {
   title: requiredTextSchema(200),
   body: requiredTextSchema(5000),
   visibility: visibilitySchema,
-  pinned: z.boolean()
+  pinned: z.boolean(),
+  /** Schedules the announcement; a future value hides it until then. */
+  publishedAt: dateTimeSchema,
+  /** Hides it from that moment on; `null` = never expires. */
+  expiresAt: dateTimeSchema.nullable()
 };
 
-/** `POST /api/admin/announcements`. `cuencadaId: null` = portal-wide. */
-export const createAnnouncementInputSchema = z.object({
-  ...announcementFields,
-  cuencadaId: idSchema.nullable(),
-  visibility: visibilitySchema.default(Visibility.Members),
-  pinned: z.boolean().default(false)
-});
+function expiresAfterPublish(value: { publishedAt?: string | undefined; expiresAt?: string | null | undefined }): boolean {
+  if (value.publishedAt === undefined || value.expiresAt === undefined || value.expiresAt === null) return true;
+  return Date.parse(value.expiresAt) > Date.parse(value.publishedAt);
+}
+
+const expiresIssue = { error: "La fecha de vencimiento debe ser posterior a la de publicación.", path: ["expiresAt"] };
+
+/**
+ * `POST /api/admin/announcements`. `cuencadaId: null` = portal-wide.
+ * `publishedAt` defaults to the server's now (amendment T2-BE: `publishedAt`/`expiresAt`).
+ * Kept refinement-free so callers can `.omit()` it (the seed does); the server
+ * checks `expiresAt > publishedAt` after applying the default.
+ */
+export const createAnnouncementInputSchema = z
+  .object({
+    ...announcementFields,
+    cuencadaId: idSchema.nullable(),
+    visibility: visibilitySchema.default(Visibility.Members),
+    pinned: z.boolean().default(false),
+    publishedAt: dateTimeSchema.exactOptional(),
+    expiresAt: dateTimeSchema.nullable().default(null)
+  });
 export type CreateAnnouncementInput = z.infer<typeof createAnnouncementInputSchema>;
 export type CreateAnnouncementRequest = z.input<typeof createAnnouncementInputSchema>;
 
@@ -519,14 +554,35 @@ export type CreateAnnouncementRequest = z.input<typeof createAnnouncementInputSc
 export const updateAnnouncementInputSchema = z
   .object(announcementFields)
   .partial()
+  .refine(expiresAfterPublish, expiresIssue)
   .refine((value) => Object.keys(value).length > 0, { error: "No hay cambios que guardar." });
 export type UpdateAnnouncementInput = z.infer<typeof updateAnnouncementInputSchema>;
 export type UpdateAnnouncementRequest = z.input<typeof updateAnnouncementInputSchema>;
 
-/** `GET /api/admin/announcements` query. */
-export const adminAnnouncementQuerySchema = z.object({
-  cuencadaId: idSchema.exactOptional()
-});
+/** Which announcements an admin list shows (amendment T2-BE, requested by T2-FE as R7). */
+export const AnnouncementScope = {
+  /** Portal-wide only (`cuencadaId === null`). */
+  Portal: "portal",
+  /** Attached to some Cuencada. */
+  Cuencada: "cuencada"
+} as const;
+export type AnnouncementScope = (typeof AnnouncementScope)[keyof typeof AnnouncementScope];
+export const announcementScopeSchema = z.enum(AnnouncementScope);
+
+/**
+ * `GET /api/admin/announcements` query. `cuencadaId` lists one edition's
+ * announcements; `scope` lists portal-wide or edition ones; neither lists all.
+ * Sending both is accepted only with `scope: "cuencada"`.
+ */
+export const adminAnnouncementQuerySchema = z
+  .object({
+    cuencadaId: idSchema.exactOptional(),
+    scope: announcementScopeSchema.exactOptional()
+  })
+  .refine((value) => value.cuencadaId === undefined || value.scope !== AnnouncementScope.Portal, {
+    error: "Un aviso general no pertenece a una Cuencada.",
+    path: ["scope"]
+  });
 export type AdminAnnouncementQuery = z.infer<typeof adminAnnouncementQuerySchema>;
 export type AdminAnnouncementQueryRequest = z.input<typeof adminAnnouncementQuerySchema>;
 
@@ -584,6 +640,8 @@ export const dailyMessageLineSchema = z
   .pipe(dailyMessageEntrySchema);
 
 export const DAILY_MESSAGES_IMPORT_MAX_CHARS = 200_000;
+/** Maximum `entries` in one import (about three years of daily messages). */
+export const DAILY_MESSAGES_IMPORT_MAX_ENTRIES = 1000;
 
 export const DailyMessagesImportMode = {
   /** Upsert by date, keep dates not in the file. */
@@ -599,13 +657,24 @@ export const dailyMessagesImportModeSchema = z.enum(DailyMessagesImportMode);
  * {@link parseDailyMessagesText}; if any line fails, nothing is written and the
  * response is 400 `VALIDATION` with `details` paths like `lines.12`.
  */
-export const dailyMessagesImportInputSchema = z.object({
-  text: z
-    .string()
-    .min(1, { error: "El archivo está vacío." })
-    .max(DAILY_MESSAGES_IMPORT_MAX_CHARS, { error: "El archivo es demasiado grande." }),
-  mode: dailyMessagesImportModeSchema.default(DailyMessagesImportMode.Merge)
-});
+export const dailyMessagesImportInputSchema = z
+  .object({
+    text: z
+      .string()
+      .min(1, { error: "El archivo está vacío." })
+      .max(DAILY_MESSAGES_IMPORT_MAX_CHARS, { error: "El archivo es demasiado grande." })
+      .exactOptional(),
+    /**
+     * Already-parsed entries (amendment T2-BE), e.g. from a form. Combined with
+     * `text` when both are sent; a date repeated anywhere is an error.
+     */
+    entries: z.array(dailyMessageEntrySchema).min(1).max(DAILY_MESSAGES_IMPORT_MAX_ENTRIES).exactOptional(),
+    mode: dailyMessagesImportModeSchema.default(DailyMessagesImportMode.Merge)
+  })
+  .refine((value) => value.text !== undefined || value.entries !== undefined, {
+    error: "Envía el texto del archivo o la lista de mensajes.",
+    path: ["text"]
+  });
 export type DailyMessagesImportInput = z.infer<typeof dailyMessagesImportInputSchema>;
 export type DailyMessagesImportRequest = z.input<typeof dailyMessagesImportInputSchema>;
 

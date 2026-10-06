@@ -21,3 +21,18 @@ export interface FeatureRoutes {
   member?: RouteObject[];
   admin?: RouteObject[];
 }
+
+/**
+ * Route `handle` that asks the app layout for minimal chrome: no BottomNav
+ * under 900px (wireframes §3, auth screens). Set it on a route object:
+ * `{ path: "/entrar", handle: MINIMAL_CHROME, lazy }`.
+ */
+export const MINIMAL_CHROME = { chrome: "minimal" } as const;
+
+/**
+ * @param handle - A route match's `handle` (unknown by design).
+ * @returns Whether the route asked for minimal chrome.
+ */
+export function wantsMinimalChrome(handle: unknown): boolean {
+  return typeof handle === "object" && handle !== null && "chrome" in handle && handle.chrome === MINIMAL_CHROME.chrome;
+}

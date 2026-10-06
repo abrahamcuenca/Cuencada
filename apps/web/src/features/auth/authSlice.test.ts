@@ -4,6 +4,7 @@ import {
   type AuthState,
   authReducer,
   credentialsReceived,
+  currentUserLoaded,
   initialAuthState,
   loggedOut,
   logoutConfirmed,
@@ -105,5 +106,21 @@ describe("selectIsAdmin", () => {
     expect(selectIsAdmin({ auth: { ...authenticated, user: makeUser({ role: "admin" }) } })).toBe(true);
     expect(selectIsAdmin({ auth: authenticated })).toBe(false);
     expect(selectIsAdmin({ auth: initialAuthState })).toBe(false);
+  });
+});
+
+describe("currentUserLoaded", () => {
+  it("updates the in-memory user and keeps the token", () => {
+    const state = authReducer(authenticated, currentUserLoaded({ ...makeUser(), emailVerified: false, mustChangePassword: true }));
+
+    expect(state.user?.emailVerified).toBe(false);
+    expect(state.passwordChangeRequired).toBe(true);
+    expect(state.accessToken).toBe(authenticated.accessToken);
+  });
+
+  it("ignores a late response without a session or for another user", () => {
+    expect(authReducer(initialAuthState, currentUserLoaded(makeUser()))).toEqual(initialAuthState);
+    const other = makeUser({ id: "7a1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b", displayName: "Otra" });
+    expect(authReducer(authenticated, currentUserLoaded(other)).user).toEqual(authenticated.user);
   });
 });
