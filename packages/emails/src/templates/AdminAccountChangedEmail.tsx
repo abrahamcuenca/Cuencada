@@ -55,6 +55,11 @@ export interface AdminAccountChangedEmailProps {
   changedAt: Date | string;
   /** Link to the audit log, e.g. `https://cuencada.com/admin/bitacora`. */
   auditLogUrl: string;
+  /**
+   * `true` when the recipient is the changed account itself (demoted,
+   * disabled or force-reset): the copy then says "tu cuenta".
+   */
+  recipientIsTarget?: boolean;
 }
 
 /**
@@ -87,16 +92,18 @@ export function buildAdminAccountChangedContent(
   const actor = cleanName(props.actorName) ?? "Un administrador";
   const target = cleanName(props.targetName) ?? "un administrador";
   const when = formatDateTime(props.changedAt, "changedAt", options);
+  const own = props.recipientIsTarget === true;
+  const whose = own ? "tu cuenta" : `la cuenta de ${target}`;
   return {
     subject: "Cambio en una cuenta de administrador",
-    preview: `${actor} cambió la cuenta de ${target} en el portal de la Cuencada.`,
+    preview: `${actor} cambió ${whose} en el portal de la Cuencada.`,
     heading: "Cambio en una cuenta de administrador",
     greeting: recipient === null ? "¡Hola!" : `¡Hola, ${recipient}!`,
     paragraphs: [
       {
         id: "summary",
         text: endSentence(
-          `${actor} hizo este cambio en la cuenta de ${target} el ${when}`,
+          `${actor} hizo este cambio en ${whose} el ${when}`,
         ),
       },
       ...changes.map((change) => ({
@@ -105,13 +112,17 @@ export function buildAdminAccountChangedContent(
       })),
       {
         id: "why",
-        text: "Te avisamos porque eres administrador del portal de la Cuencada. Puedes revisar el detalle en la bitácora.",
+        text: own
+          ? "Te avisamos porque el cambio afecta tu cuenta de administrador del portal de la Cuencada."
+          : "Te avisamos porque eres administrador del portal de la Cuencada. Puedes revisar el detalle en la bitácora.",
       },
     ],
-    cta: { label: "Revisar la bitácora", url },
+    // The changed account may have just lost admin access: no link it cannot open.
+    cta: own ? null : { label: "Revisar la bitácora", url },
     notes: [],
-    warning:
-      "Si no reconoces este cambio, habla de inmediato con los demás administradores.",
+    warning: own
+      ? "Si no reconoces este cambio, avisa de inmediato a otro administrador de la Cuencada."
+      : "Si no reconoces este cambio, habla de inmediato con los demás administradores.",
     // A security notice must never tell the reader to ignore it.
     footerNote:
       "Recibes este aviso de seguridad porque administras el portal de la Cuencada.",

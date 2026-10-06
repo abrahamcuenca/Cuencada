@@ -12,7 +12,7 @@ Based on `origin/main` (2bcb7a0, includes T1-BE, T2-BE, T3-BE, T4-BE, T6-BE, WP-
   - `adminAlerts.ts`: admin-account change alerts (Security L1)
   - tests: `userRoutes.test.ts`, `auditRoutes.test.ts`, `summaryRoutes.test.ts` (real Postgres, `inject()`)
 - `packages/types/src/admin.ts`: contract amendments (below).
-- `packages/emails` (authorized): new `admin-account-changed` template (`templates/AdminAccountChangedEmail.tsx`, `EmailKind.AdminAccountChanged`, exports, tests in `render.test.tsx`).
+- `packages/emails` (authorized): new `admin-alert-limit` template and a `recipientIsTarget` variant of `admin-account-changed` (follow-up); the `admin-account-changed` template (`templates/AdminAccountChangedEmail.tsx`, `EmailKind.AdminAccountChanged`, exports, tests in `render.test.tsx`).
 - Imported (not edited): `modules/auth` (`revokeSessions`, `burnPendingEmailTokens`, `issueBudgetedEmailToken`, `sendInBackground`, `EMAIL_TOKEN_TTL_MINUTES`), `modules/media/cursor.ts` (`encodeCursor`/`decodeCursor`, microsecond keyset cursor), `modules/family/repository.ts` (`escapeLike`).
 
 ## Interfaces exposed
@@ -40,14 +40,19 @@ One transaction:
 
 **Chat sockets (Security L2, PR #24): T7 MUST wire this.** T7's `closeSocketsForUser` is not on main. `userRoutes.ts#closeChatSockets` is called after disable, revoke-sessions and force-reset and is a documented `TODO(T7)` no-op: until it is wired, a socket opened before a disable keeps receiving messages until it reconnects (REST and the ticket guard already refuse). The T7 PR must replace the body of `closeChatSockets` with `closeSocketsForUser(app, userId)`; Security will check it there.
 
-### Admin-account change alerts (Security L1, PR #24)
+### Admin-account change alerts (Security L1, PR #24; follow-up L3, `wp/t8-be-alerts`)
 When an **administrator** account changes (the target was or becomes an admin), every **other** active admin gets the `admin-account-changed` email ("Cambio en una cuenta de administrador"): who changed whom, what changed and when, with a button to `/admin/bitacora`. Names only, no addresses, no secrets.
-- Triggers: promoted, demoted, disabled, re-enabled, `mustChangePassword` set (PATCH), and a forced password reset of an admin. Member-only changes send nothing.
-- Recipients: active admins except the actor, read inside the mutation transaction after the change (so a demoted or disabled target is not included; a target who stays admin, e.g. on a forced reset, is).
-- Sent after commit on T1's mail queue (`sendInBackground`), idempotency key `admin-account-changed:<auditId>:<recipientId>`.
-- **Budget:** it is a security notice, so the per-recipient budget does not apply. It uses the reserved tier of the global daily cap (`withinGlobalMailCap(…, MailTier.Reserved)`, like the password-changed notice) plus a dedicated cap of `ADMIN_ALERT_DAILY_CAP = 100` alert emails per UTC day, counted from the audit rows' `adminAlertRecipients`. The count runs under the admin-users lock, so it cannot be raced. Over a cap, nothing is sent, `mail.admin_alert_cap_reached` is logged and the audit row gets `adminAlertSkipped: true`.
-- Audit metadata gains `adminAlertRecipients` (count only).
-- Tested: the other admin receives it with the right copy and link; the actor, the demoted target, a disabled admin and members do not; promotion and forced reset alert; member-only changes don't; repeated alerts are not stopped by the per-recipient budget; the dedicated cap stops them.
+- **Triggers:** promoted, demoted, disabled, re-enabled, `mustChangePassword` set (PATCH), and a forced password reset of an admin. Member-only changes send nothing.
+- **Recipients:** active admins except the actor, read inside the mutation transaction after the change. **The target is notified too** (a "tu cuenta" variant, without the bitácora button it may no longer open) when it is demoted, disabled or force-reset, even though it loses admin, and whenever it is still an active admin after the change (e.g. promoted).
+- Sent after commit on T1's mail queue (`sendInBackground`); idempotency keys `admin-account-changed:<auditId>:<recipientId>` and `admin-alert-limit:<auditId>:<recipientId>`.
+- **Limits:**
+  - These security notices skip the per-recipient budget **and do not depend on the global daily mail cap** (the reserved-tier check was removed): a demotion still alerts after invites exhausted the global cap (tested). Item 4 of the follow-up (checking the global cap per recipient, N−1 overshoot) is therefore moot.
+  - They are bounded by their own cap, `ADMIN_ALERT_DAILY_CAP = 100` emails per UTC day (counted from the audit rows' `adminAlertRecipients`, under the admin-users lock), by the number of admins, and by the 60/min per-admin mutation limit.
+  - **Exempt from the alert cap:** demote, disable and force-reset of an admin always send (`adminAlertExempt: true`); they still add to the day's count.
+  - **Limit notice:** the first non-exempt alert of the day that no longer fits is replaced by ONE `admin-alert-limit` email ("Se alcanzó el límite de avisos de seguridad de hoy") to every other active admin, saying removals are still announced (`adminAlertLimitNotice: true`). Later non-exempt alerts that day send nothing (`adminAlertSkipped: true`), and `mail.admin_alert_cap_reached` is logged.
+- Audit metadata: `adminAlertRecipients` (count), plus `adminAlertExempt` / `adminAlertLimitNotice` / `adminAlertSkipped` flags.
+- **Not counted by T1's `dailyMailCount`**, by design: the alerts must not be blocked by, nor block, the global cap.
+- Tested (`adminAlerts.test.ts`): other admin and target receive the right copy; actor, a disabled admin and members don't; forced reset alerts the target alongside the reset email; member-only changes send nothing; demotion after the global cap is exhausted; exempt actions past the alert cap; the limit notice fires once, then non-exempt alerts are skipped while exempt ones still go out.
 
 ### Audit rows (ids, field names and counts only)
 | Action | Metadata |
@@ -87,7 +92,7 @@ Mutations: 60/min per IP (route `rateLimit`) **and** 60/min per admin (one `extr
 
 ## Requests (→ orchestrator)
 - **T7 (Security L2, blocking for the T7 PR):** export `closeSocketsForUser(app, userId)` from `modules/chat` and wire it into `admin/userRoutes.ts#closeChatSockets` (called on disable, revoke-sessions, force reset).
-- **T1 / config:** admin alerts are not counted by `dailyMailCount` (it counts magic links, invites and password notices only); they are bounded by their own daily cap. Consider counting them there when `mailBudget.ts` is next touched, and moving `ADMIN_ALERT_DAILY_CAP` to config.
+- **Config:** move `ADMIN_ALERT_DAILY_CAP` to config when `config.ts` is unfrozen. (Admin alerts are intentionally outside T1's `dailyMailCount`.)
 - **T8-FE:** render audit metadata values as text only (never HTML).
 - **T8-FE:** consume `GET /admin/summary`, the two new user actions and `emailQueued`; T6-FE can switch `searchUsersForPersonLink` to `GET /admin/users`.
 - **WP-0.2 doc owner:** add the three new routes to the contract table.

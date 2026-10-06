@@ -11,6 +11,10 @@ import {
   buildAdminAccountChangedContent,
 } from "./templates/AdminAccountChangedEmail.js";
 import {
+  type AdminAlertLimitEmailProps,
+  buildAdminAlertLimitContent,
+} from "./templates/AdminAlertLimitEmail.js";
+import {
   type InviteEmailProps,
   buildInviteContent,
 } from "./templates/InviteEmail.js";
@@ -39,6 +43,7 @@ export const EmailKind = {
   PasswordChanged: "password-changed",
   VerifyEmail: "verify-email",
   AdminAccountChanged: "admin-account-changed",
+  AdminAlertLimit: "admin-alert-limit",
 } as const;
 
 export type EmailKind = (typeof EmailKind)[keyof typeof EmailKind];
@@ -53,7 +58,8 @@ export type EmailTemplate =
   | {
       kind: typeof EmailKind.AdminAccountChanged;
       props: AdminAccountChangedEmailProps;
-    };
+    }
+  | { kind: typeof EmailKind.AdminAlertLimit; props: AdminAlertLimitEmailProps };
 
 /** A rendered email, ready for the Mailer (Resend `subject`/`html`/`text`). */
 export interface RenderedEmail {
@@ -79,6 +85,8 @@ function buildContent(
       return buildVerifyContent(template.props, options);
     case EmailKind.AdminAccountChanged:
       return buildAdminAccountChangedContent(template.props, options);
+    case EmailKind.AdminAlertLimit:
+      return buildAdminAlertLimitContent(template.props, options);
     default: {
       // Compile-time exhaustiveness check; reached at runtime only with untyped input.
       // The props are never echoed: they carry single-use tokens.

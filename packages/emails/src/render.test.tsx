@@ -305,6 +305,19 @@ describe("renderEmail", () => {
       expect(countOccurrences(email.html, "&lt;script&gt;")).toBeGreaterThanOrEqual(3);
     });
 
+    it("tells the changed account it is about their own account, without a bitácora link", async () => {
+      const email = await renderEmail({
+        ...template,
+        props: { ...template.props, recipientName: "Tío Juan", recipientIsTarget: true },
+      });
+      expect(email.text).toMatch(/Primo Beto hizo este cambio en tu cuenta el lunes 14/);
+      expect(email.text).not.toContain("la cuenta de Tío Juan");
+      expect(email.text).toContain("el cambio afecta tu cuenta de administrador");
+      expect(email.text).toContain("IMPORTANTE: Si no reconoces este cambio, avisa de inmediato");
+      expect(email.text).not.toContain(auditLogUrl);
+      expect(email.html).not.toContain("<a ");
+    });
+
     it("rejects an empty or unknown change list", async () => {
       for (const changes of [[], ["deleted"]]) {
         await expect(
@@ -318,6 +331,33 @@ describe("renderEmail", () => {
           field: "changes",
         });
       }
+    });
+  });
+
+  describe("admin-alert-limit", () => {
+    const limit: EmailTemplate = {
+      kind: EmailKind.AdminAlertLimit,
+      props: { recipientName: "Tía Lupita", reachedAt: EXPIRES, auditLogUrl },
+    };
+
+    it("announces the daily limit, says removals still alert, and links to the bitácora", async () => {
+      const email = await renderEmail(limit);
+      expect(email.subject).toBe("Se alcanzó el límite de avisos de seguridad de hoy");
+      expect(email.text).toContain("¡Hola, Tía Lupita!");
+      expect(email.text).toMatch(/el lunes 14 de septiembre ·\s7:40/);
+      expect(email.text).toContain("le quiten el rol de administrador");
+      expect(countOccurrences(email.html, auditLogUrl)).toBe(2);
+      expect(countOccurrences(email.text, auditLogUrl)).toBe(1);
+      expect(email.text).not.toContain("ignorarlo");
+    });
+
+    it("escapes names and requires an https link", async () => {
+      const escaped = await renderEmail({ ...limit, props: { ...limit.props, recipientName: XSS } });
+      expect(escaped.html).not.toContain("<script");
+      expect(escaped.html).toContain("&lt;script&gt;");
+      await expect(
+        renderEmail({ ...limit, props: { ...limit.props, auditLogUrl: "http://cuencada.com/admin/bitacora" } }),
+      ).rejects.toMatchObject({ code: EmailRenderErrorCode.InsecureUrl });
     });
   });
 
