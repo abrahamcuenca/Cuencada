@@ -14,7 +14,9 @@ export {
 export { EmailRenderError, EmailRenderErrorCode } from "./errors.js";
 export {
   assertSafeUrl,
+  cleanAlertName,
   cleanName,
+  defangLinks,
   endSentence,
   DEFAULT_LOCALE,
   DEFAULT_TIME_ZONE,

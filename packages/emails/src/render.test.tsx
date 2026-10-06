@@ -5,7 +5,7 @@ import { render } from "@react-email/render";
 import { describe, expect, it } from "vitest";
 import { CTA_FALLBACK_LABEL, FOOTER_BRAND, FOOTER_IGNORE } from "./content.js";
 import { EmailRenderError, EmailRenderErrorCode } from "./errors.js";
-import { cleanName } from "./format.js";
+import { cleanName, defangLinks } from "./format.js";
 import { EmailKind, type EmailTemplate, renderEmail } from "./render.js";
 import { InviteEmail } from "./templates/InviteEmail.js";
 
@@ -434,6 +434,50 @@ describe("renderEmail", () => {
           renderEmail({ ...accepted, props: { ...accepted.props, useCount, maxUses } }),
         ).rejects.toMatchObject({ code: EmailRenderErrorCode.InvalidOption, field: "useCount" });
       }
+    });
+  });
+
+  describe("link-like names in admin alerts (Security L1)", () => {
+    const PHISH = "https://evil.example/login www.phish.example soporte.example J.R. Pérez";
+    const DEFANGED = "https[:]//evil[.]example/login www[.]phish[.]example soporte[.]example J.R. Pérez";
+    const templates: Array<[string, EmailTemplate]> = [
+      ["admin-account-changed", adminChanged(PHISH)],
+      [
+        "admin-alert-limit",
+        { kind: EmailKind.AdminAlertLimit, props: { recipientName: PHISH, reachedAt: EXPIRES, auditLogUrl } },
+      ],
+      [
+        "admin-invite-accepted",
+        {
+          kind: EmailKind.AdminInviteAccepted,
+          props: {
+            recipientName: PHISH,
+            memberName: PHISH,
+            inviteLabel: PHISH,
+            inviteShortId: "3f2a9c1b",
+            useCount: 1,
+            maxUses: 5,
+            acceptedAt: EXPIRES,
+            reviewUrl: auditLogUrl,
+          },
+        },
+      ],
+    ];
+
+    it.each(templates)("%s defangs URLs and domains in every name", async (_name, template) => {
+      const email = await renderEmail(template);
+      for (const body of [email.text, email.html, email.subject]) {
+        expect(body).not.toContain("://evil");
+        expect(body).not.toMatch(/evil\.example|phish\.example|soporte\.example/);
+      }
+      expect(email.text).toContain(DEFANGED);
+    });
+
+    it("defangLinks breaks schemes and domain dots (also fullwidth ones) but keeps initials", () => {
+      expect(defangLinks("http://a.b.example")).toBe("http[:]//a[.]b[.]example");
+      expect(defangLinks("evil。example")).toBe("evil[.]example");
+      expect(defangLinks("Ana M. Vega, J.R.")).toBe("Ana M. Vega, J.R.");
+      expect(cleanName(PHISH)).toBe(PHISH);
     });
   });
 

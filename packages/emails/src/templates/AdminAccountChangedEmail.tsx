@@ -6,7 +6,7 @@ import {
   type EmailRenderOptions,
   type ResolvedEmailOptions,
   assertSafeUrl,
-  cleanName,
+  cleanAlertName,
   endSentence,
   formatDateTime,
   resolveOptions,
@@ -88,9 +88,9 @@ export function buildAdminAccountChangedContent(
       "changes must list at least one known change.",
     );
   }
-  const recipient = cleanName(props.recipientName);
-  const actor = cleanName(props.actorName) ?? "Un administrador";
-  const target = cleanName(props.targetName) ?? "un administrador";
+  const recipient = cleanAlertName(props.recipientName);
+  const actor = cleanAlertName(props.actorName) ?? "Un administrador";
+  const target = cleanAlertName(props.targetName) ?? "un administrador";
   const when = formatDateTime(props.changedAt, "changedAt", options);
   const own = props.recipientIsTarget === true;
   const whose = own ? "tu cuenta" : `la cuenta de ${target}`;

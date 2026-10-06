@@ -111,3 +111,10 @@ Verifying an email proves that someone controls a mailbox, not that they belong 
     - It is **cap-exempt**, like demote, disable and force-reset, because it changes who holds admin access. It still adds to `adminAlertRecipients`. The audit row gets `adminAlertRecipients` and `adminAlertExempt`.
     - **Not alerted on creation:** the moment admin access exists is the acceptance, and creation is already in the bitácora. A creation alert would need new copy (no `AdminAccountChange` fits "invited as admin"), and every admin invite would then notify twice. If an earlier warning is wanted, it belongs in the backlog.
     - Tests: the other admins (inviter included) get one alert each; the new admin and members get none; no open-invite alert; a rollback sends nothing.
+  - **L1: a link-like display name could phish admins through auto-linking.**
+    - New shared helpers in `packages/emails/src/format.ts`:
+      - `defangLinks`: `://` becomes `[:]//`, and a dot that starts a domain-like label becomes `[.]`. ASCII, ideographic and fullwidth dots are covered. Visible ASCII only, no zero-width characters. Initials like "J.R." are kept.
+      - `cleanAlertName`: `cleanName` followed by `defangLinks`.
+    - All three admin alert templates (`admin-account-changed`, `admin-alert-limit`, `admin-invite-accepted`) now use it for every user-controlled name and label.
+    - Non-admin emails are unchanged: there the name shown is the sender's (an admin's) or the reader's own.
+    - Tests (`render.test.tsx`): each admin template, in text, HTML and subject; plus `defangLinks` unit cases.

@@ -5,7 +5,7 @@ import {
   type EmailRenderOptions,
   type ResolvedEmailOptions,
   assertSafeUrl,
-  cleanName,
+  cleanAlertName,
   endSentence,
   formatDateTime,
   resolveOptions,
@@ -37,7 +37,7 @@ export function buildAdminAlertLimitContent(
     "auditLogUrl",
     options.allowInsecureLinks,
   );
-  const recipient = cleanName(props.recipientName);
+  const recipient = cleanAlertName(props.recipientName);
   const when = formatDateTime(props.reachedAt, "reachedAt", options);
   return {
     subject: "Se alcanzó el límite de avisos de seguridad de hoy",

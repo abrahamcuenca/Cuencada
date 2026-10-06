@@ -6,7 +6,7 @@ import {
   type EmailRenderOptions,
   type ResolvedEmailOptions,
   assertSafeUrl,
-  cleanName,
+  cleanAlertName,
   endSentence,
   formatDateTime,
   resolveOptions,
@@ -80,9 +80,9 @@ export function buildAdminInviteAcceptedContent(
     );
   }
   assertUses(props.useCount, props.maxUses);
-  const recipient = cleanName(props.recipientName);
-  const member = cleanName(props.memberName) ?? "Una persona";
-  const label = cleanName(props.inviteLabel);
+  const recipient = cleanAlertName(props.recipientName);
+  const member = cleanAlertName(props.memberName) ?? "Una persona";
+  const label = cleanAlertName(props.inviteLabel);
   const when = formatDateTime(props.acceptedAt, "acceptedAt", options);
   const shortId = props.inviteShortId.toLowerCase();
   const uses = `${props.useCount} de ${props.maxUses} ${props.maxUses === 1 ? "uso" : "usos"}`;
