@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-06T18:27:43.944Z",
+  "generatedAt": "2026-10-06T19:03:01.054Z",
   "lighthouse": "13.x",
   "formFactor": "mobile",
   "throttling": "simulated (Lighthouse default)",
@@ -15,10 +15,10 @@
         "best-practices": 96
       },
       "metrics": {
-        "lcpMs": 1932.696,
-        "tbtMs": 25,
+        "lcpMs": 1930.327,
+        "tbtMs": 18.5,
         "cls": 0,
-        "fcpMs": 1782.696
+        "fcpMs": 1780.327
       },
       "failedAudits": [
         "errors-in-console",
@@ -38,10 +38,10 @@
         "best-practices": 96
       },
       "metrics": {
-        "lcpMs": 2085.1376,
-        "tbtMs": 91.5,
+        "lcpMs": 2035.4945,
+        "tbtMs": 15,
         "cls": 0,
-        "fcpMs": 1772.6376
+        "fcpMs": 1776.9945
       },
       "failedAudits": [
         "errors-in-console",
@@ -61,10 +61,10 @@
         "best-practices": 100
       },
       "metrics": {
-        "lcpMs": 939.6605078735352,
-        "tbtMs": 33.5,
-        "cls": 0.007637959519844131,
-        "fcpMs": 89.9119873046875
+        "lcpMs": 937.777799407959,
+        "tbtMs": 38.5,
+        "cls": 0.00722067962981865,
+        "fcpMs": 87.41627883911133
       },
       "failedAudits": [
         "valid-source-maps",
