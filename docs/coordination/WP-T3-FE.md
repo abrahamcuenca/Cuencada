@@ -53,6 +53,7 @@ Owner: Frontend · Reviewers: TL, Sec · Branch: wp/t3-fe-rsvp · PR: # (not ope
     - `CuencadaYearPage.test.tsx` adds an `attendees` handler (with `isMe: true`) and waits for the attended badge before checking the `data-slot`s.
 
 ## Decisions
+- **Fixtures use fictional people only (public repo).** Test fixtures, the MSW fake API and the screenshot stub use invented names (e.g. "Rosa Herrera Soto", "Tomás Navarro Ruiz"), never real family names.
 - **`Attendee.isMe` drives** "Fuiste a esta Cuencada", the "Tú" badge and the sort order. The earlier client-side id matching is removed (R1 done by T3-BE).
 - **The card reads `GET /cuencadas/:year` (public, cached)** for status, timezone and dates, because the slot props are only `{ year }`. On the year page this is the same cached request. On Home (upcoming mode) it adds one request for members only.
 - **Inline form, not the wireframe's "Sí, voy" dialog.** The brief asked for segmented Sí/Tal vez/No with guests, dates, hotel and notes. One inline card is fewer taps than a sheet, and the saved state shows the wireframe's "¡Vas! Tú + 2 acompañantes / Cambiar respuesta".
@@ -104,3 +105,4 @@ Owner: Frontend · Reviewers: TL, Sec · Branch: wp/t3-fe-rsvp · PR: # (not ope
 
 ## Review log
 - 2026-10-06, aligned with the merged T3-BE (orchestrator): `Attendee.isMe` replaces the id matching; 409 `CONFLICT` for closed RSVPs; admin attendance saved with `PUT { personIds }`; `RSVP_DATE_WINDOW_DAYS` (±14); deadline shown and enforced by local day; one CSV BOM; blob URL revoked (TL); `maybe` rows dropped from the strip (T3-BE lists `yes` + attendance). Screenshots re-taken.
+- 2026-10-06: fixtures and screenshots switched to fictional people only (public repo); screenshots re-taken. Web tests: 54 files, 471 passing after the main merge.

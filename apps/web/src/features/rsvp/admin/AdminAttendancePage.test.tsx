@@ -15,8 +15,8 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterAll(() => server.close());
 beforeEach(() => {
   db = makeRsvpDb();
-  db.people = [makePerson(2, "Rosa Cuenca"), makePerson(3, "Tomás Cuenca Ruiz", { nickname: "Tomy" }), makePerson(4, "Lucía Herrera")];
-  db.attendance = [{ personId: personId(2), displayName: "Rosa Cuenca", createdAt: "2026-10-01T12:00:00Z" }];
+  db.people = [makePerson(2, "Rosa Herrera Soto"), makePerson(3, "Tomás Navarro Ruiz", { nickname: "Tomy" }), makePerson(4, "Lucía Herrera")];
+  db.attendance = [{ personId: personId(2), displayName: "Rosa Herrera Soto", createdAt: "2026-10-01T12:00:00Z" }];
   server.use(...rsvpHandlers(db));
 });
 afterEach(() => {
@@ -30,9 +30,9 @@ describe("AdminAttendancePage", () => {
     renderApp(PATH, admin());
 
     expect(await screen.findByRole("heading", { name: "Asistencia" })).toBeInTheDocument();
-    const rosa = await screen.findByRole("checkbox", { name: "Rosa Cuenca" });
+    const rosa = await screen.findByRole("checkbox", { name: "Rosa Herrera Soto" });
     expect(rosa).toBeChecked();
-    const tomas = await screen.findByRole("checkbox", { name: "Tomás Cuenca Ruiz" });
+    const tomas = await screen.findByRole("checkbox", { name: "Tomás Navarro Ruiz" });
     expect(tomas).not.toBeChecked();
     expect(screen.getByRole("button", { name: "Guardar asistencia" })).toBeDisabled();
 
@@ -44,8 +44,8 @@ describe("AdminAttendancePage", () => {
     expect(await screen.findByText("Asistencia guardada.")).toBeInTheDocument();
     expect(db.log).toContain(`PUT /admin/cuencadas/${CUENCADA_2027_ID}/attendance`);
     expect(db.attendanceBodies).toEqual([{ personIds: [personId(3)] }]);
-    expect(await screen.findByRole("checkbox", { name: "Tomás Cuenca Ruiz" })).toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Rosa Cuenca" })).not.toBeChecked();
+    expect(await screen.findByRole("checkbox", { name: "Tomás Navarro Ruiz" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Rosa Herrera Soto" })).not.toBeChecked();
     expect(screen.getByText("1 asistente")).toBeInTheDocument();
   });
 
@@ -67,15 +67,15 @@ describe("AdminAttendancePage", () => {
     await user.type(screen.getByRole("searchbox", { name: "Buscar persona" }), "tomás");
 
     await waitFor(() => expect(screen.queryByRole("checkbox", { name: "Lucía Herrera" })).not.toBeInTheDocument());
-    expect(screen.getByRole("checkbox", { name: "Tomás Cuenca Ruiz" })).toBeInTheDocument();
-    expect(screen.queryByRole("checkbox", { name: "Rosa Cuenca" })).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Tomás Navarro Ruiz" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Rosa Herrera Soto" })).not.toBeInTheDocument();
     expect(db.log).toContain("GET /family/people?q=tom%C3%A1s&limit=100");
   });
 
   it("lists RSVPs with totals and a status filter", async () => {
     db.adminRows = [
-      makeAdminRow(2, { displayName: "Rosa Cuenca", status: "yes", guestCount: 2 }),
-      makeAdminRow(3, { displayName: "Tomás Cuenca Ruiz", status: "maybe", hotelName: null }),
+      makeAdminRow(2, { displayName: "Rosa Herrera Soto", status: "yes", guestCount: 2 }),
+      makeAdminRow(3, { displayName: "Tomás Navarro Ruiz", status: "maybe", hotelName: null }),
       makeAdminRow(4, { displayName: "Lucía Herrera", status: "no" })
     ];
     db.summary = { ...db.summary, yes: 1, maybe: 1, no: 1, expectedPeople: 3 };
@@ -89,8 +89,8 @@ describe("AdminAttendancePage", () => {
     await user.selectOptions(screen.getByRole("combobox", { name: "Respuesta" }), "maybe");
     expect(screen.getByText("1 de 3 respuestas")).toBeInTheDocument();
     const list = screen.getByRole("list", { name: "Respuestas" });
-    expect(within(list).getByText("Tomás Cuenca Ruiz")).toBeInTheDocument();
-    expect(within(list).queryByText("Rosa Cuenca")).not.toBeInTheDocument();
+    expect(within(list).getByText("Tomás Navarro Ruiz")).toBeInTheDocument();
+    expect(within(list).queryByText("Rosa Herrera Soto")).not.toBeInTheDocument();
   });
 
   it("downloads the CSV through a blob without putting the token in the URL", async () => {

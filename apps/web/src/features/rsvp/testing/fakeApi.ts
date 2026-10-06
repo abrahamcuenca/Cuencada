@@ -31,8 +31,8 @@ export const HOTEL_B = fixtureId(272);
 export const VENUE = fixtureId(273);
 const UTF8_BOM = String.fromCharCode(0xfeff);
 
-/** The current test user (member), as in `test/auth.ts`. */
-export const ME = makeUser({ personId: fixtureId(9001) });
+/** The current test user (member). Fixtures use fictional people only (public repo). */
+export const ME = makeUser({ personId: fixtureId(9001), displayName: "Inés Navarro Soto", email: "ines@example.com" });
 
 /** A person id for fixture `n`. */
 export function personId(n: number): string {
@@ -103,18 +103,18 @@ export function makeAttendee(n: number, overrides: Partial<Attendee> = {}): Atte
 
 /** Realistic attendee names for screenshots and stack tests. */
 export const FAMILY_NAMES = [
-  "Rosa Cuenca",
-  "Tomás Cuenca Ruiz",
-  "María de la Luz Cuenca",
-  "Javier Cuenca",
-  "Lucía Herrera Cuenca",
-  "Andrés Cuenca Pérez",
-  "Fernanda Cuenca",
-  "Diego Martín Cuenca",
-  "Sofía Cuenca Ríos",
-  "Emilio Cuenca",
-  "Valeria Cuenca Ortiz",
-  "Pablo Cuenca"
+  "Rosa Herrera Soto",
+  "Tomás Navarro Ruiz",
+  "María de la Luz Ibarra",
+  "Javier Molina",
+  "Lucía Herrera Vidal",
+  "Andrés Robles Pérez",
+  "Fernanda Salas",
+  "Diego Martín Lozano",
+  "Sofía Campos Ríos",
+  "Emilio Varela",
+  "Valeria Fuentes Ortiz",
+  "Pablo Garrido"
 ] as const;
 
 /** A list of attendees with names from {@link FAMILY_NAMES}. */
@@ -182,7 +182,7 @@ export function makeRsvpDb(): FakeRsvpDb {
     attendance: [],
     people: [],
     adminRows: [],
-    csv: "displayName,email,status\r\nRosa Cuenca,rosa@example.com,yes\r\n",
+    csv: "displayName,email,status\r\nRosa Herrera Soto,rosa@example.com,yes\r\n",
     failPutWith: null,
     putDelayMs: 0,
     putBodies: [],
