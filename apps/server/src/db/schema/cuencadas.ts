@@ -30,12 +30,17 @@ export const cuencadas = pgTable(
     year: integer("year").notNull().unique(),
     slug: text("slug").notNull().unique(),
     title: text("title").notNull(),
-    startsAt: timestamptz("starts_at").notNull(),
-    endsAt: timestamptz("ends_at").notNull(),
+    /**
+     * Null (0003) while the date is not decided yet ("announced" edition).
+     * Set together with `ends_at`: `cuencadas_dates_check` allows both or neither.
+     */
+    startsAt: timestamptz("starts_at"),
+    endsAt: timestamptz("ends_at"),
     /** IANA zone for status, countdown, itinerary dates and daily messages. */
     timezone: text("timezone").notNull().default("America/Merida"),
-    city: text("city").notNull(),
-    state: text("state").notNull(),
+    /** Null (0003) while the place is not decided yet; independent of the dates. */
+    city: text("city"),
+    state: text("state"),
     country: text("country").notNull().default("México"),
     description: text("description").notNull(),
     heroImageUrl: text("hero_image_url"),
@@ -59,7 +64,11 @@ export const cuencadas = pgTable(
   (table) => [
     index("cuencadas_published_starts_at_idx").on(table.isPublished, table.startsAt),
     check("cuencadas_year_check", sql`"year" between 1900 and 2200`),
-    check("cuencadas_dates_check", sql`"ends_at" > "starts_at"`),
+    // Both dates or neither (0003); `year` is its own column, never derived from the dates.
+    check(
+      "cuencadas_dates_check",
+      sql`("starts_at" is null and "ends_at" is null) or ("starts_at" is not null and "ends_at" is not null and "ends_at" > "starts_at")`
+    ),
     check("cuencadas_theme_color_check", sql`"theme_color" ~ '^#[0-9a-f]{6}$'`)
   ]
 );

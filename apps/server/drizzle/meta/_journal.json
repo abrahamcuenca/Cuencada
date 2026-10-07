@@ -22,6 +22,13 @@
       "when": 1791284957544,
       "tag": "0002_expand_directory_tags_fks",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791404226944,
+      "tag": "0003_undated_editions",
+      "breakpoints": true
     }
   ]
 }

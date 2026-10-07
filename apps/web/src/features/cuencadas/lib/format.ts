@@ -27,15 +27,58 @@ export function formatDateRange(startsAt: string, endsAt: string, timeZone: stri
   return `${formatDate(startsAt, timeZone, startOptions)} — ${endText}`;
 }
 
+/** Shown for an undecided date or place (announced edition, WP-3.1a). */
+export const TO_BE_ANNOUNCED = "Por anunciar";
+/** Shown when neither the date nor the place is decided. */
+export const DATE_AND_PLACE_TO_BE_ANNOUNCED = "Fecha y lugar por anunciar";
+
+/** The place and date fields of an edition; any of them may still be undecided. */
+export interface EditionPlaceAndDates {
+  city: string | null;
+  state: string | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  timezone: string;
+}
+
+/**
+ * "City, State", or `null` when the place is not decided yet.
+ *
+ * @param place - City and state (either may be `null`).
+ * @returns The place text, or `null`.
+ */
+export function formatPlace(place: Pick<EditionPlaceAndDates, "city" | "state">): string | null {
+  const parts = [place.city, place.state].filter((part): part is string => part !== null && part !== "");
+  return parts.length === 0 ? null : parts.join(", ");
+}
+
+/**
+ * The edition's date range, or {@link TO_BE_ANNOUNCED} when it has no dates yet.
+ *
+ * @param edition - Dates (both set or both `null`) and timezone.
+ * @returns The Spanish date range or "Por anunciar".
+ */
+export function formatEditionDates(edition: Pick<EditionPlaceAndDates, "startsAt" | "endsAt" | "timezone">): string {
+  if (edition.startsAt === null || edition.endsAt === null) return TO_BE_ANNOUNCED;
+  return formatDateRange(edition.startsAt, edition.endsAt, edition.timezone);
+}
+
 /**
  * The hero kicker line, e.g. `"Mérida · Yucatán · 13—18 de septiembre de 2026"`.
- * Uppercased by CSS (`.cu-kicker`), so screen readers get normal casing.
+ * Undecided parts read "Lugar por anunciar" / "Fecha por anunciar", or
+ * "Fecha y lugar por anunciar" when both are open. Uppercased by CSS
+ * (`.cu-kicker`), so screen readers get normal casing.
  *
- * @param place - City, state and the edition dates.
+ * @param place - City, state and the edition dates (any may be `null`).
  * @returns The kicker text.
  */
-export function formatKicker(place: { city: string; state: string; startsAt: string; endsAt: string; timezone: string }): string {
-  return [place.city, place.state, formatDateRange(place.startsAt, place.endsAt, place.timezone)].filter(Boolean).join(" · ");
+export function formatKicker(place: EditionPlaceAndDates): string {
+  const hasPlace = place.city !== null || place.state !== null;
+  const hasDates = place.startsAt !== null && place.endsAt !== null;
+  if (!hasPlace && !hasDates) return DATE_AND_PLACE_TO_BE_ANNOUNCED;
+  const where = hasPlace ? [place.city, place.state] : ["Lugar por anunciar"];
+  const when = place.startsAt !== null && place.endsAt !== null ? formatDateRange(place.startsAt, place.endsAt, place.timezone) : "Fecha por anunciar";
+  return [...where, when].filter(Boolean).join(" · ");
 }
 
 /**
@@ -96,6 +139,9 @@ export interface CountdownInstants {
  * "today" before its `startsAt` hour, still shows "¡YA LLEGÓ!" / the past
  * message. For `upcoming` the clock runs as usual, so the hero flips to live
  * on its own when `startsAt` passes while the page is open.
+ *
+ * Dated editions only: the `string` parameters refuse an announced edition's
+ * `null` dates at compile time (narrow with `hasDates` first).
  *
  * @param status - Server status of the edition.
  * @param startsAt - ISO start.

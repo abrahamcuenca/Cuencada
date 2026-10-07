@@ -36,6 +36,15 @@ describe("rsvpEditability", () => {
     expect(rsvpEditability(tokyo, new Date("2026-09-10T15:00:00Z")).editable).toBe(false);
   });
 
+  it("refuses changes for an announced edition (no dates), with or without a future deadline", () => {
+    const announced = { ...edition, startsAt: null, endsAt: null };
+    const now = new Date("2026-09-01T12:00:00Z");
+    expect(rsvpEditability(announced, now)).toEqual({ editable: false, reason: "dates_pending" });
+    expect(rsvpEditability({ ...announced, rsvpDeadline: null }, now)).toEqual({ editable: false, reason: "dates_pending" });
+    // Unpublished stays draft, whatever the dates.
+    expect(rsvpEditability({ ...announced, isPublished: false }, now)).toEqual({ editable: false, reason: "draft" });
+  });
+
   it("allows changes while the edition is active when there is no deadline", () => {
     const open = { ...edition, rsvpDeadline: null };
     expect(rsvpEditability(open, new Date("2026-09-15T12:00:00Z")).editable).toBe(true);

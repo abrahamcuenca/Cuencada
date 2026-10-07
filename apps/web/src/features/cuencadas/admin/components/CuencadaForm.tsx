@@ -1,4 +1,10 @@
-import { type AdminCuencada, type CreateCuencadaInput, type CreateCuencadaRequest, createCuencadaInputSchema } from "@cuencada/types";
+import {
+  type AdminCuencada,
+  CUENCADA_DATES_TOGETHER_MESSAGE,
+  type CreateCuencadaInput,
+  type CreateCuencadaRequest,
+  createCuencadaInputSchema
+} from "@cuencada/types";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { Button } from "../../../../shared/ui/Button";
 import type { SelectOption } from "../../../../shared/ui/Select";
@@ -77,12 +83,12 @@ function valuesFrom(cuencada: AdminCuencada): CuencadaValues {
     year: String(cuencada.year),
     title: cuencada.title,
     description: cuencada.description,
-    city: cuencada.city,
-    state: cuencada.state,
+    city: cuencada.city ?? "",
+    state: cuencada.state ?? "",
     country: cuencada.country,
     timezone: zone,
-    startsAt: isoToZonedLocal(cuencada.startsAt, zone),
-    endsAt: isoToZonedLocal(cuencada.endsAt, zone),
+    startsAt: cuencada.startsAt ? isoToZonedLocal(cuencada.startsAt, zone) : "",
+    endsAt: cuencada.endsAt ? isoToZonedLocal(cuencada.endsAt, zone) : "",
     rsvpDeadline: cuencada.rsvpDeadline ? isoToZonedLocal(cuencada.rsvpDeadline, zone) : "",
     themeColor: cuencada.themeColor,
     heroImageUrl: cuencada.heroImageUrl ?? "",
@@ -98,6 +104,12 @@ interface Draft {
   body: CreateCuencadaRequest;
   errors: FieldErrors;
 }
+
+/**
+ * Hint under the dates and the place: they may stay empty while undecided
+ * (an "announced" edition: no countdown and no RSVPs until both dates are set).
+ */
+export const UNDECIDED_HINT = "Déjalo vacío si aún no se define";
 
 /** Hint under "Pronóstico del clima": the only URL shape the weather widget renders. */
 export const FORECAST_URL_HINT = "Copia la dirección de la ciudad en forecast7.com, p. ej. https://forecast7.com/es/20d97n89d59/merida/ (sin «www.»).";
@@ -125,8 +137,11 @@ function buildDraft(values: CuencadaValues): Draft {
   const forecast = values.weatherWidgetUrl.trim();
   if (forecast !== "" && forecastUrl(forecast) === null) errors.weatherWidgetUrl = FORECAST_URL_ERROR;
 
-  const startsAt = instant("startsAt", true);
-  const endsAt = instant("endsAt", true);
+  // Both empty = an announced edition ("Fecha por anunciar"); one alone is an error on the missing one.
+  const startsAt = instant("startsAt", false);
+  const endsAt = instant("endsAt", false);
+  if (values.startsAt === "" && values.endsAt !== "") errors.startsAt = CUENCADA_DATES_TOGETHER_MESSAGE;
+  if (values.endsAt === "" && values.startsAt !== "") errors.endsAt = CUENCADA_DATES_TOGETHER_MESSAGE;
   // Also checked by the schema's refine, but zod skips object refines while any field is invalid.
   if (startsAt && endsAt && Date.parse(endsAt) <= Date.parse(startsAt)) errors.endsAt = "La fecha de fin debe ser posterior al inicio.";
 
@@ -138,8 +153,8 @@ function buildDraft(values: CuencadaValues): Draft {
     state: values.state,
     country: values.country,
     timezone: zone,
-    startsAt: startsAt ?? "",
-    endsAt: endsAt ?? "",
+    startsAt,
+    endsAt,
     rsvpDeadline: instant("rsvpDeadline", false),
     themeColor: values.themeColor,
     heroImageUrl: blankToNull(values.heroImageUrl),
@@ -227,8 +242,8 @@ export function CuencadaForm({ initial, onSubmit, submitLabel, onCancel }: Cuenc
       </div>
       <TextField {...bind(field, "description")} label="Descripción" required multiline maxLength={5000} />
       <div className={styles.grid3}>
-        <TextField {...bind(field, "city")} label="Ciudad" required maxLength={120} autoComplete="address-level2" />
-        <TextField {...bind(field, "state")} label="Estado" required maxLength={120} autoComplete="address-level1" />
+        <TextField {...bind(field, "city")} label="Ciudad" hint={UNDECIDED_HINT} maxLength={120} autoComplete="address-level2" />
+        <TextField {...bind(field, "state")} label="Estado" hint={UNDECIDED_HINT} maxLength={120} autoComplete="address-level1" />
         <TextField {...bind(field, "country")} label="País" required maxLength={120} autoComplete="country-name" />
       </div>
       <SelectField
@@ -241,8 +256,8 @@ export function CuencadaForm({ initial, onSubmit, submitLabel, onCancel }: Cuenc
         errors={errors}
       />
       <div className={styles.grid2}>
-        <TextField {...bind(field, "startsAt")} label="Inicio" required type="datetime-local" />
-        <TextField {...bind(field, "endsAt")} label="Fin" required type="datetime-local" />
+        <TextField {...bind(field, "startsAt")} label="Inicio" hint={UNDECIDED_HINT} type="datetime-local" />
+        <TextField {...bind(field, "endsAt")} label="Fin" hint={UNDECIDED_HINT} type="datetime-local" />
       </div>
       <TextField {...bind(field, "rsvpDeadline")} label="Límite para confirmar asistencia" type="datetime-local" />
       <TextField {...bind(field, "themeColor")} label="Color del tema" type="color" hint="Formato #rrggbb." />

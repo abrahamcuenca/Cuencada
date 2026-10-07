@@ -5,6 +5,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { apiUrl, authenticatedState, makeUser, statusState } from "../../../../test/auth";
 import { renderApp } from "../../../../test/renderApp";
 import {
+  makeAnnouncedCuencada,
+  makeAnnouncedHome,
   makeDailyMessage,
   makeMemoriesHome,
   makePublicCuencada,
@@ -57,6 +59,30 @@ describe("HomePage", () => {
     // T3: the RSVP card renders nothing (and calls no API) for visitors.
     expect(document.querySelector('[data-slot="rsvp"]')).toBeNull();
     expect(screen.getByRole("complementary", { name: "Mensaje del día" })).toHaveTextContent("¡Faltan pocos días!");
+  });
+
+  it("shows an announced edition without a countdown: year, Fecha y lugar por anunciar and the previous memories", async () => {
+    server.use(http.get(apiUrl("/cuencadas/home"), () => HttpResponse.json(makeAnnouncedHome())));
+    renderApp("/", statusState("anonymous"));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Cuencada 2027" })).toBeInTheDocument();
+    expect(screen.getByTestId("announced-pending")).toHaveTextContent("Fecha y lugar por anunciar");
+    expect(screen.queryByRole("timer")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Ver Cuencada 2027/ })).toHaveAttribute("href", "/cuencada/2027");
+    expect(screen.getByRole("link", { name: /Ver recuerdos de 2026/ })).toHaveAttribute("href", "/galeria/2026");
+    // The previous edition's photos section stays; the "no date yet" card of memories mode does not.
+    expect(screen.getByRole("region", { name: /Últimos momentos/ })).toBeInTheDocument();
+    expect(screen.queryByText(/Todavía no tiene fecha/)).not.toBeInTheDocument();
+  });
+
+  it("shows the place when an announced edition already has one", async () => {
+    const featured = makeAnnouncedCuencada({ city: "Valladolid", state: "Yucatán" });
+    server.use(http.get(apiUrl("/cuencadas/home"), () => HttpResponse.json(makeAnnouncedHome({ featured, latestPast: null }))));
+    renderApp("/", statusState("anonymous"));
+
+    expect(await screen.findByTestId("announced-pending")).toHaveTextContent("Valladolid, Yucatán · Fecha por anunciar");
+    expect(screen.queryByRole("link", { name: /Ver recuerdos/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("timer")).not.toBeInTheDocument();
   });
 
   it("hides a cached daily message that is not today's in the Cuencada's timezone", async () => {

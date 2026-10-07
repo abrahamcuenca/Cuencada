@@ -4,7 +4,9 @@ import { msUntilNextMidnight, zonedDayStart } from "../hooks/useZonedToday";
 import {
   countdownInstants,
   formatDateRange,
+  formatEditionDates,
   formatKicker,
+  formatPlace,
   formatTimeRange,
   groupItineraryByDay,
   idFromHash,
@@ -44,6 +46,30 @@ describe("formatKicker", () => {
     expect(formatKicker({ city: "Mérida", state: "Yucatán", startsAt: "2026-09-13T06:00:00Z", endsAt: "2026-09-19T05:59:59Z", timezone: MERIDA })).toBe(
       "Mérida · Yucatán · 13—18 de septiembre de 2026"
     );
+  });
+
+  it("says what is still to be announced for an undated edition", () => {
+    const undated = { city: null, state: null, startsAt: null, endsAt: null, timezone: MERIDA };
+    expect(formatKicker(undated)).toBe("Fecha y lugar por anunciar");
+    expect(formatKicker({ ...undated, city: "Valladolid", state: "Yucatán" })).toBe("Valladolid · Yucatán · Fecha por anunciar");
+    expect(formatKicker({ ...undated, startsAt: "2027-07-10T06:00:00Z", endsAt: "2027-07-16T05:59:59Z" })).toBe(
+      "Lugar por anunciar · 10—15 de julio de 2027"
+    );
+  });
+});
+
+describe("formatEditionDates / formatPlace", () => {
+  it("formats the range or says Por anunciar, never calling Intl with a null", () => {
+    expect(formatEditionDates({ startsAt: null, endsAt: null, timezone: MERIDA })).toBe("Por anunciar");
+    expect(formatEditionDates({ startsAt: "2026-09-13T06:00:00Z", endsAt: "2026-09-19T05:59:59Z", timezone: MERIDA })).toBe(
+      "13—18 de septiembre de 2026"
+    );
+  });
+
+  it("joins the known parts of the place, or returns null when there is none", () => {
+    expect(formatPlace({ city: "Mérida", state: "Yucatán" })).toBe("Mérida, Yucatán");
+    expect(formatPlace({ city: "Mérida", state: null })).toBe("Mérida");
+    expect(formatPlace({ city: null, state: null })).toBeNull();
   });
 });
 
