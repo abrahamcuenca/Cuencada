@@ -143,6 +143,27 @@ describe("AppLayout", () => {
     await waitFor(() => expect(within(bottom).getByRole("link", { name: /Programa/ })).toHaveAttribute("href", "/cuencada/2027"));
   });
 
+  it("points Programa at the latest past edition when the featured edition is announced without dates", async () => {
+    server.use(
+      http.get(apiUrl("/cuencadas/home"), () =>
+        // `announced` (WP-3.1a) is not in this build's HomeMode yet: an unknown mode counts as undated.
+        HttpResponse.json({
+          ...makeMemoriesHome(),
+          mode: "announced",
+          featured: makePublicCuencada({ year: 2027, status: "upcoming" })
+        })
+      )
+    );
+    renderApp("/chat", authenticatedState());
+
+    const bottom = await screen.findByRole("navigation", { name: "Navegación inferior" });
+    await waitFor(() => expect(within(bottom).getByRole("link", { name: /Programa/ })).toHaveAttribute("href", "/cuencada/2026"));
+    expect(within(screen.getByRole("navigation", { name: "Navegación principal" })).getByRole("link", { name: "Programa" })).toHaveAttribute(
+      "href",
+      "/cuencada/2026"
+    );
+  });
+
   it("falls back to / for Programa when the home query has no edition", async () => {
     server.use(http.get(apiUrl("/cuencadas/home"), () => HttpResponse.json(makeMemoriesHome({ latestPast: null }))));
     renderApp("/chat", statusState("anonymous"));

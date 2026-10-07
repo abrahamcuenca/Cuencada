@@ -17,6 +17,7 @@ import { RsvpSlot } from "../components/slots";
 import { useNow } from "../hooks/useNow";
 import { useOnNewDay } from "../hooks/useZonedToday";
 import { countdownInstants, formatKicker, safeAssetUrl } from "../lib/format";
+import { programaYear } from "../lib/programa";
 import styles from "./home.module.css";
 
 const TAGLINE = "Una familia. Una historia. Una celebración.";
@@ -59,7 +60,7 @@ export function HomePage(): ReactNode {
       {home.data.featured ? <TodayMessage featured={home.data.featured} onNewDay={() => void home.refetch()} /> : null}
       <HomeAnnouncements home={home.data} />
       {home.data.featured ? null : <Memories latestPast={home.data.latestPast} />}
-      <Highlights featuredYear={home.data.featured?.year ?? home.data.latestPast?.year ?? null} />
+      <Highlights featuredYear={programaYear(home.data)} />
       <PastEditions />
     </>
   );

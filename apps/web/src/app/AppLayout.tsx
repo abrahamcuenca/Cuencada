@@ -10,6 +10,7 @@ import {
 import { logout } from "../features/auth/session";
 import { type ChatUnreadBadge, useChatUnreadBadge } from "../features/chat/unread";
 import { useGetCuencadaHomeQuery } from "../features/cuencadas/api";
+import { programaYear } from "../features/cuencadas/lib/programa";
 import { PwaStatusMount } from "../features/pwa";
 import { wantsMinimalChrome } from "../shared/lib/featureRoutes";
 import { reportUnexpected } from "../shared/lib/reportUnexpected";
@@ -126,14 +127,16 @@ export function topNavItems(audience: SessionAudience, programaPath: string, cha
 }
 
 /**
- * The "Programa" destination: the featured (upcoming/live) edition, else the
- * latest past one, from the same cached `GET /cuencadas/home` the Home page
- * uses (one shared request). `/` while it loads or when there is none.
+ * The "Programa" destination ({@link programaYear}): the featured edition
+ * while it is upcoming or live, otherwise the latest past one (an announced
+ * edition without dates has no programa yet), from the same cached
+ * `GET /cuencadas/home` the Home page uses (one shared request). `/` while it
+ * loads or when there is none.
  */
 function useProgramaPath(): string {
   const { data } = useGetCuencadaHomeQuery();
-  const year = data?.featured?.year ?? data?.latestPast?.year;
-  return year === undefined ? PROGRAMA_FALLBACK_PATH : `/cuencada/${year}`;
+  const year = programaYear(data);
+  return year === null ? PROGRAMA_FALLBACK_PATH : `/cuencada/${year}`;
 }
 
 function Brand(): ReactNode {
