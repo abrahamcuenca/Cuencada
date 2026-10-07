@@ -44,7 +44,19 @@ Cuencada 2026 is over. The next one is 2027, but its place, month and day are no
 ## Open questions (→ orchestrator)
 - The `AppLayout` "Programa" destination uses `featured.year`. In announced mode it now opens `/cuencada/2027`, which shows "Por anunciar" and no programa. WP-3.1b owns the nav: it may want to fall back to `latestPast` when `home.mode === "announced"`.
 
-## Verification
-See the review log.
+## Verification (2026-10-07)
+- `pnpm lint`, `pnpm turbo run typecheck --force` (6/6), `pnpm test` (160 files, 2036 tests) and `pnpm build` (4/4): all green, both before and after `git merge origin/main` (main had not moved: 8a41310).
+- `drizzle-kit generate`: "No schema changes, nothing to migrate".
+- The migration test "migration 0003" runs 0000 → 0002, inserts rows in the 0002 shape (and checks that 0002 refuses an undated edition), then migrates to latest. It asserts:
+  - the `cuencadas` rows are identical before and after, and the RSVP is kept;
+  - an undated, placeless published insert works, and so does a place without dates;
+  - one date alone is rejected (23514) on insert (either column) and on update (clearing one, setting one);
+  - order is still enforced when both dates are set; setting and then clearing both works;
+  - `year` is still NOT NULL and unique.
+  - The 0002 test now compares against the journal length instead of a hard-coded count.
+- Unit tests for every `selectHome` branch: active > upcoming > announced > memories; the lowest announced year; a stale announced year; the 31 Dec → 1 Jan rollover in Mérida (05:59:59Z vs 06:00Z); a per-edition timezone (Tokyo vs Mérida at 2026-12-31T15:00Z); drafts and an empty list. Plus `computeCuencadaStatus`/`localYearInZone` for undated editions and `rsvpEditability` `dates_pending`.
+- Route tests: public `GET /cuencadas`, `/:year` and `/home` (announced mode, dated upcoming wins); admin create/publish announced, one-date 400, PATCH set → clear dates; RSVP 409 `RSVP_DATES_PENDING` with no row written, `rsvp/me` `editable: false`, attendees and summary for an announced edition; the admin summary ignores undated editions.
+- Web tests: Home announced (no `timer`, links, place variant), year page announced (Por anunciar, hidden sections and nav, no weather without a city; the programa reappears with items), RSVP note without calling `rsvp/me`, admin form (hint, both-or-neither error, null body), `formatKicker`/`formatPlace`/`formatEditionDates`, `galleryYearsFrom`.
+- E2E (`pnpm e2e:build` + `playwright test --project=iphone-13 --project=desktop-1280 --project=mobile-gates`, isolated ports 3290/3291/4290 and DB `cuencada_w31a_e2e`): 27 passed, including the new announced journey on iphone-13 and the quality gates.
 
 ## Review log
