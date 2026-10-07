@@ -46,7 +46,7 @@ export function AdminCuencadasPage(): ReactNode {
   return (
     <div className={`cu-container ${styles.page}`}>
       <Link to="/admin" className={styles.back}>
-        ‹ Administración
+        ‹ Panel
       </Link>
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>Cuencadas</h1>

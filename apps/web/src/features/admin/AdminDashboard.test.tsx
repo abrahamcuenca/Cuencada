@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { authenticatedState, makeUser } from "../../../test/auth";
 import { createTestServer } from "../../../test/msw";
@@ -20,7 +20,7 @@ describe("DashboardPage", { timeout: 15_000 }, () => {
   it("shows tappable count cards that link to the matching section", async () => {
     renderApp("/admin", authenticatedState(ADMIN_USER));
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Administración" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Panel de administración" })).toBeInTheDocument();
     const cards = await screen.findByRole("link", { name: /42\s*Usuarios activos/ });
     expect(cards).toHaveAttribute("href", "/admin/usuarios?estado=active");
     expect(screen.getByRole("link", { name: /3\s*Usuarios deshabilitados/ })).toHaveAttribute("href", "/admin/usuarios?estado=disabled");
@@ -59,18 +59,19 @@ describe("DashboardPage", { timeout: 15_000 }, () => {
 });
 
 describe("admin access", { timeout: 15_000 }, () => {
-  it("redirects a member away from /admin without calling the admin API", async () => {
+  it("shows a member the Acceso restringido screen on /admin without calling the admin API", async () => {
     const { router } = renderApp("/admin", authenticatedState(makeUser({ displayName: "Mateo Ortega Vidal", email: "mateo.ortega@example.com" })));
 
-    expect(await screen.findByRole("heading", { name: "CUENCADA" })).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/");
+    expect(await screen.findByRole("heading", { level: 1, name: "Acceso restringido" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/admin");
     expect(db.log).toHaveLength(0);
   });
 
-  it.each(["/admin/invitaciones", "/admin/usuarios", "/admin/bitacora"])("redirects a member away from %s", async (path) => {
-    const { router } = renderApp(path, authenticatedState(makeUser({ displayName: "Mateo Ortega Vidal", email: "mateo.ortega@example.com" })));
+  it.each(["/admin/invitaciones", "/admin/usuarios", "/admin/bitacora"])("shows a member the Acceso restringido screen on %s", async (path) => {
+    renderApp(path, authenticatedState(makeUser({ displayName: "Mateo Ortega Vidal", email: "mateo.ortega@example.com" })));
 
-    await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+    expect(await screen.findByRole("heading", { level: 1, name: "Acceso restringido" })).toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Secciones de administración" })).not.toBeInTheDocument();
     expect(db.log).toHaveLength(0);
   });
 });

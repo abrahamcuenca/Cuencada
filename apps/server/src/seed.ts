@@ -10,7 +10,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { emailSchema, httpsUrlSchema, parseDailyMessagesText, passwordSchema } from "@cuencada/types";
 import argon2 from "argon2";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { type Database, createDatabase } from "./db/client.js";
 import {
   type BreachCheckLogger,
@@ -68,11 +68,19 @@ export interface SeedOptions {
   dailyMessagesFile: string;
   /** Member-only links for the 2026 edition; `null` when not configured. */
   links: SeedLinks;
+  /**
+   * Development only (`SEED_DEV_VERIFY_ADMIN=1`): mark the admin's email as
+   * verified, so a local developer can open member pages without a mail round
+   * trip. {@link resolveSeedOptions} refuses it outside development.
+   */
+  verifyAdminEmail?: boolean;
 }
 
 /** What one seed run inserted (all zeros on a repeat run). */
 export interface SeedResult {
   adminCreated: boolean;
+  /** This run set the admin's `email_verified_at` (`SEED_DEV_VERIFY_ADMIN`, development only). */
+  adminEmailVerified: boolean;
   profileCreated: boolean;
   cuencadaCreated: boolean;
   locationsCreated: number;
@@ -136,6 +144,29 @@ function resolveLinks(env: NodeJS.ProcessEnv, devOrTest: boolean): SeedLinks {
   return links;
 }
 
+/** Values of `SEED_DEV_VERIFY_ADMIN` that turn it on / leave it off. */
+const TRUTHY = new Set(["1", "true", "yes", "on"]);
+const FALSY = new Set(["", "0", "false", "no", "off"]);
+
+/**
+ * Read `SEED_DEV_VERIFY_ADMIN` [SEC]. Allowed only when `NODE_ENV` is exactly
+ * `development`: verifying an account without proof of the mailbox is a
+ * local-development shortcut, never something a production (or test) seed may
+ * do. Unset or blank is off everywhere.
+ *
+ * @throws SeedConfigError when it is set (to any non-blank value) outside development, or is not a boolean.
+ */
+function resolveDevVerifyAdmin(env: NodeJS.ProcessEnv): boolean {
+  const raw = env.SEED_DEV_VERIFY_ADMIN?.trim().toLowerCase() ?? "";
+  if (raw === "") return false;
+  if (env.NODE_ENV !== "development") {
+    throw new SeedConfigError("SEED_DEV_VERIFY_ADMIN is allowed only when NODE_ENV=development. Unset it.");
+  }
+  if (TRUTHY.has(raw)) return true;
+  if (FALSY.has(raw)) return false;
+  throw new SeedConfigError("SEED_DEV_VERIFY_ADMIN must be 1 or 0.");
+}
+
 /**
  * Read and validate seed settings from the environment. Fails closed: the
  * development fallback password (and weak passwords) are allowed only when
@@ -177,7 +208,8 @@ export function resolveSeedOptions(env: NodeJS.ProcessEnv = process.env): SeedOp
     adminEmail: email.data,
     adminTempPassword: password,
     dailyMessagesFile: env.SEED_DAILY_MESSAGES_FILE || DEFAULT_DAILY_MESSAGES_FILE,
-    links: resolveLinks(env, devOrTest)
+    links: resolveLinks(env, devOrTest),
+    verifyAdminEmail: resolveDevVerifyAdmin(env)
   };
 }
 
@@ -222,11 +254,15 @@ export async function assertSeedPasswordNotBreached(
 
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
-/** Insert the admin (must change password on first login) and its profile if missing. */
+/**
+ * Insert the admin (must change password on first login) and its profile if
+ * missing. With `verifyAdminEmail` (development only) the admin's email is
+ * also marked verified, on creation or on a later run if it still is not.
+ */
 async function seedAdmin(
   tx: Transaction,
   options: SeedOptions
-): Promise<{ adminId: string } & Pick<SeedResult, "adminCreated" | "profileCreated">> {
+): Promise<{ adminId: string } & Pick<SeedResult, "adminCreated" | "adminEmailVerified" | "profileCreated">> {
   const [existing] = await tx
     .select({ id: users.id })
     .from(users)
@@ -244,12 +280,23 @@ async function seedAdmin(
         passwordHash: await argon2.hash(options.adminTempPassword, { type: argon2.argon2id }),
         role: "admin",
         status: "active",
-        mustChangePassword: true
+        mustChangePassword: true,
+        emailVerifiedAt: options.verifyAdminEmail === true ? new Date() : null
       })
       .returning({ id: users.id });
     if (!created) throw new Error("seed: admin insert returned no row");
     adminId = created.id;
     adminCreated = true;
+  }
+
+  let adminEmailVerified = adminCreated && options.verifyAdminEmail === true;
+  if (!adminCreated && options.verifyAdminEmail === true) {
+    const verified = await tx
+      .update(users)
+      .set({ emailVerifiedAt: new Date() })
+      .where(and(eq(users.id, adminId), isNull(users.emailVerifiedAt)))
+      .returning({ id: users.id });
+    adminEmailVerified = verified.length > 0;
   }
 
   const insertedProfile = await tx
@@ -258,7 +305,7 @@ async function seedAdmin(
     .onConflictDoNothing({ target: profiles.userId })
     .returning({ id: profiles.id });
 
-  return { adminId, adminCreated, profileCreated: insertedProfile.length > 0 };
+  return { adminId, adminCreated, adminEmailVerified, profileCreated: insertedProfile.length > 0 };
 }
 
 /** An ISO instant from the parsed seed input as a `Date`, keeping `null`. */

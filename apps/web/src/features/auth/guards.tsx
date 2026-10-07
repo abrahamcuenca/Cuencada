@@ -6,7 +6,7 @@
  * The server enforces authentication, `mustChangePassword` and the admin role
  * on every request, and member-only data never reaches the client without it.
  */
-import type { ReactNode } from "react";
+import { lazy, type ReactNode, Suspense } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import { Button } from "../../shared/ui/Button";
@@ -85,15 +85,29 @@ export function RequirePasswordChanged(): ReactNode {
   return <Outlet />;
 }
 
+// Lazy: only a member who opens /admin needs it, and AccessDeniedState pulls in
+// the resend-verification button (authApi), which stays out of the initial chunk.
+const AdminRestricted = lazy(() =>
+  import("./components/AdminRestricted").then((module) => ({ default: module.AdminRestricted }))
+);
+
 /**
- * Renders child routes only for users whose in-memory role is `admin`;
- * everyone else goes to `/`. Nest it inside {@link RequireAuth}.
+ * Renders child routes only for users whose in-memory role is `admin`; any
+ * other logged-in user gets the "Acceso restringido" screen with a link home
+ * (anonymous visitors never get here: {@link RequireAuth} sends them to
+ * `/entrar` with `state.from`). Nest it inside {@link RequireAuth}.
  *
  * UX only: **never** trust this role for security. Every `/api/admin/*`
  * route checks the role server-side against the DB session.
  */
 export function RequireAdmin(): ReactNode {
   const user = useAppSelector(selectCurrentUser);
-  if (user?.role !== "admin") return <Navigate to="/" replace />;
+  if (user?.role !== "admin") {
+    return (
+      <Suspense fallback={<SessionPending />}>
+        <AdminRestricted />
+      </Suspense>
+    );
+  }
   return <Outlet />;
 }

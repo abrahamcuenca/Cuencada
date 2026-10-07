@@ -12,7 +12,9 @@
 - Install with `pnpm install`.
 - Use `pnpm build`, `pnpm typecheck`, `pnpm lint`, and `pnpm test` from the repo root.
 - `pnpm test` needs the test Postgres: run `scripts/test-db.sh up` first. Never run `scripts/test-db.sh down` while other agents may share the container.
-- Use `pnpm --filter @cuencada/web dev` for the frontend and `pnpm --filter @cuencada/server dev` for the API.
+- Use `pnpm --filter @cuencada/web dev` for the frontend and `pnpm --filter @cuencada/server dev` for the API (or `pnpm dev` for both). Local setup from scratch is in `README.md` ("Run locally").
+- `scripts/dev-db.sh up|status|psql|stop|down` manages the local dev Postgres (podman `cuencada-dev-db`, port 55433, named volume). `down` keeps the data; only `down --delete-data` deletes it. It never touches the test container.
+- `pnpm e2e` builds and runs the Playwright journeys, the 320/375 mobile gates and Lighthouse (test Postgres required). `E2E_UPDATE_DOCS=1` refreshes the screenshots under `docs/ux/screenshots/`.
 - Use `mise run verify` before deploy work; it runs lint, typecheck, tests, and production audit.
 - Never use `drizzle-kit push`; apply schema only via migrations (`db:migrate`). `drizzle.config.ts` refuses `push`/`drop` unless `ALLOW_DRIZZLE_PUSH=1` and the database is on loopback. There is no `db:push` script; do not add one.
 

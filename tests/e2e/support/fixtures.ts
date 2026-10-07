@@ -137,4 +137,31 @@ export async function journeyShot(page: Page, testInfo: TestInfo, name: string):
   await sharp(png).resize(750).webp({ quality: 80 }).toFile(join(SCREENSHOT_DIR, `${name}-375.webp`));
 }
 
+/** Width of the UX doc screenshot each project takes (see {@link docShot}). */
+const DOC_SHOT_WIDTHS: Partial<Record<string, number>> = { "iphone-13": 375, "desktop-1280": 1280 };
+
+/**
+ * Save a UX doc screenshot of the current page (optionally scrolled so
+ * `focus` is centred) to
+ * `docs/ux/screenshots/<dir>/<name>-<width>.webp`: 375 px on the iPhone
+ * project, 1280 px on the desktop one (2x / 1x, WebP). Only when
+ * `E2E_UPDATE_DOCS=1`, so normal and CI runs never touch docs/.
+ */
+export async function docShot(page: Page, testInfo: TestInfo, dir: string, name: string, focus?: Locator): Promise<void> {
+  const width = DOC_SHOT_WIDTHS[testInfo.project.name];
+  if (process.env.E2E_UPDATE_DOCS !== "1" || width === undefined) return;
+  const previous = page.viewportSize();
+  await page.setViewportSize({ width, height: width === 375 ? 812 : 800 });
+  await page.waitForTimeout(300);
+  // Bring the part the shot is about into view (the sticky header and the fixed tab bar stay put).
+  if (focus !== undefined) await focus.evaluate((element) => element.scrollIntoView({ block: "center", behavior: "instant" }));
+  await page.waitForTimeout(500);
+  const png = await page.screenshot({ animations: "disabled" });
+  if (previous !== null) await page.setViewportSize(previous);
+  const out = join(REPO_ROOT, "docs/ux/screenshots", dir);
+  mkdirSync(out, { recursive: true });
+  const sharp = createRequire(join(REPO_ROOT, "apps/server/package.json"))("sharp") as SharpFactory; // CJS export: a callable factory
+  await sharp(png).resize(width === 375 ? 750 : 1280).webp({ quality: 80 }).toFile(join(out, `${name}-${width}.webp`));
+}
+
 export { CastRole };

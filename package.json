@@ -6,7 +6,7 @@
   "packageManager": "pnpm@11.0.0",
   "scripts": {
     "build": "turbo build",
-    "dev": "turbo dev --parallel",
+    "dev": "turbo dev",
     "lint": "biome lint .",
     "format": "biome format --write .",
     "test": "vitest run",

@@ -87,11 +87,25 @@ describe("RequirePasswordChanged", () => {
 });
 
 describe("RequireAdmin", () => {
-  it("sends a member away from /admin to the home page", async () => {
-    const { router } = renderApp("/admin/usuarios", authenticatedState());
+  it.each([
+    ["a verified member", makeUser()],
+    ["an unverified member", makeUser({ emailVerified: false })]
+  ])("shows %s the Acceso restringido screen with a link home instead of redirecting", async (_label, user) => {
+    const { router } = renderApp("/admin/usuarios", authenticatedState(user));
 
-    expect(await screen.findByRole("heading", { name: "CUENCADA" })).toBeInTheDocument();
-    expect(router.state.location.pathname).toBe("/");
+    expect(await screen.findByRole("heading", { level: 1, name: "Acceso restringido" })).toBeInTheDocument();
+    expect(screen.getByText("Esta sección es solo para administradores.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Volver al inicio" })).toHaveAttribute("href", "/");
+    expect(screen.queryByRole("navigation", { name: "Secciones de administración" })).not.toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/admin/usuarios");
+  });
+
+  it("still sends anonymous visitors from /admin to /entrar with state.from", async () => {
+    const { router } = renderApp("/admin/usuarios?estado=activo", statusState("anonymous"));
+
+    expect(await screen.findByRole("heading", { name: "Entrar" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/entrar");
+    expect(router.state.location.state).toEqual({ from: "/admin/usuarios?estado=activo" });
   });
 
   it("renders /admin/* for an admin", async () => {

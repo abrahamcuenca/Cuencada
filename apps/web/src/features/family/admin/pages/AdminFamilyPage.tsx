@@ -63,7 +63,7 @@ export function AdminFamilyPage(): ReactNode {
   return (
     <div className={cx("cu-container", styles.page)}>
       <Link to="/admin" className={styles.back}>
-        ‹ Administración
+        ‹ Panel
       </Link>
       <div className={styles.pageHeader}>
         <h1 className={styles.pageTitle}>Personas y árbol</h1>

@@ -59,7 +59,7 @@ export function AdminNav(): ReactNode {
 /**
  * Shell of the T8 admin pages (`/admin`, invitaciones, usuarios, bitácora).
  * On phones the dashboard lists the sections under its cards and the other
- * pages show "‹ Administración"; at ≥900px the sections are a sidebar.
+ * pages show "‹ Panel"; at ≥900px the sections are a sidebar.
  */
 export function AdminLayout(): ReactNode {
   const { pathname } = useLocation();
@@ -72,7 +72,7 @@ export function AdminLayout(): ReactNode {
       <div className={styles.content}>
         {isDashboard ? null : (
           <Link to="/admin" className={styles.back}>
-            ‹ Administración
+            ‹ Panel
           </Link>
         )}
         <Outlet />

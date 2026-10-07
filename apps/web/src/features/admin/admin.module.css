@@ -17,7 +17,7 @@
   min-width: 0;
 }
 
-/* Mobile: the nav follows the dashboard cards; other admin pages hide it and show "‹ Administración". */
+/* Mobile: the nav follows the dashboard cards; other admin pages hide it and show "‹ Panel". */
 .sidebar {
   order: 2;
   min-width: 0;
