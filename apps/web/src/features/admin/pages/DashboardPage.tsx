@@ -43,7 +43,7 @@ export function DashboardPage(): ReactNode {
   return (
     <>
       <div className={styles.pageHeader}>
-        <h1 className={styles.pageTitle}>Administración</h1>
+        <h1 className={styles.pageTitle}>Panel de administración</h1>
       </div>
       <section aria-labelledby="admin-resumen" className={styles.panel}>
         <h2 id="admin-resumen" className={styles.sectionTitle}>

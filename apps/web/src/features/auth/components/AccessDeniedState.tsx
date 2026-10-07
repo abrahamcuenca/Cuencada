@@ -13,8 +13,12 @@ export interface AccessDeniedStateProps {
   forbiddenTitle: string;
   /** Why verification is needed; a generic sentence by default. */
   verifyDescription?: ReactNode;
-  /** Heading level of the title (3 when the state sits inside a section). Defaults to 2. */
-  headingLevel?: 2 | 3;
+  /** Text under the "no access" title; defaults to "ask an administrator". */
+  forbiddenDescription?: ReactNode;
+  /** Action under the "no access" state (e.g. a link home); none by default (retrying a 403 cannot succeed). */
+  forbiddenAction?: ReactNode;
+  /** Heading level of the title (1 when the state is the whole page, 3 inside a section). Defaults to 2. */
+  headingLevel?: 1 | 2 | 3;
 }
 
 /**
@@ -27,6 +31,8 @@ export function AccessDeniedState({
   verifyTitle,
   forbiddenTitle,
   verifyDescription,
+  forbiddenDescription,
+  forbiddenAction,
   headingLevel = 2
 }: AccessDeniedStateProps): ReactNode {
   if (denial === "unverified") {
@@ -47,7 +53,8 @@ export function AccessDeniedState({
       icon="🔒"
       headingLevel={headingLevel}
       title={forbiddenTitle}
-      description="Si crees que es un error, pídele ayuda a un administrador."
+      description={forbiddenDescription ?? "Si crees que es un error, pídele ayuda a un administrador."}
+      {...(forbiddenAction === undefined ? {} : { action: forbiddenAction })}
     />
   );
 }

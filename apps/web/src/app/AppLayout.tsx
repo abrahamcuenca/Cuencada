@@ -1,10 +1,10 @@
 import { lazy, type ReactNode, Suspense } from "react";
 import { Link, Outlet, useLocation, useMatches } from "react-router-dom";
 import {
-  selectCurrentUser,
-  selectIsAdmin,
+  type SessionAudience,
   selectIsOffline,
   selectLogoutPending,
+  selectSessionAudience,
   type WithAuthState
 } from "../features/auth/authSlice";
 import { logout } from "../features/auth/session";
@@ -24,8 +24,12 @@ import styles from "./layout.module.css";
 
 /** "Programa" before the home query answers (or when there is no edition yet). */
 export const PROGRAMA_FALLBACK_PATH = "/";
-/** Mobile "Más" menu (Directorio, Árbol, Perfil, Sesiones, Admin, Cerrar sesión). */
+/** Mobile "Más" menu (Directorio, Árbol, Perfil, Sesiones, Panel, Cerrar sesión). */
 export const MORE_PATH = "/mas";
+/** Login page, the anonymous "Entrar" tab and button. */
+export const LOGIN_NAV_PATH = "/entrar";
+/** Visible label of the admin console link (TopNav). */
+export const ADMIN_NAV_LABEL = "Panel";
 
 /** Shown while the server has not confirmed a logout. */
 export const LOGOUT_PENDING_NOTICE =
@@ -51,37 +55,74 @@ const VerifyEmailBanner = lazy(() =>
   )
 );
 
-/**
- * Mobile tab bar destinations (Inicio, Programa, Fotos, Chat, Más).
- *
- * @param programaPath - `/cuencada/{year}` of the current or latest edition.
- * @param chatBadge - Unread chat messages for the "Chat" tab (T7).
- * @returns The five BottomNav items.
- */
-export function bottomNavItems(programaPath: string, chatBadge?: ChatUnreadBadge): readonly NavItem[] {
-  return [
-    { key: "inicio", label: "Inicio", href: "/", icon: "🏠", end: true },
-    { key: "programa", label: "Programa", href: programaPath, icon: "📅" },
-    { key: "fotos", label: "Fotos", href: "/galeria", icon: "📸" },
-    { key: "chat", label: "Chat", href: "/chat", icon: "💬", ...chatBadgeProps(chatBadge) },
-    { key: "mas", label: "Más", href: MORE_PATH, icon: "☰" }
-  ];
-}
-
 /** The `badge`/`badgeLabel` of the Chat nav item, or nothing when there is no unread message. */
 function chatBadgeProps(chatBadge: ChatUnreadBadge | undefined): Pick<NavItem, "badge" | "badgeLabel"> {
   if (chatBadge === undefined || chatBadge.count === 0 || chatBadge.label === undefined) return {};
   return { badge: chatBadge.count, badgeLabel: chatBadge.label };
 }
 
-function topNavItems(programaPath: string, chatBadge?: ChatUnreadBadge): NavItem[] {
-  return [
-    { key: "programa", label: "Programa", href: programaPath },
-    { key: "galeria", label: "Galería", href: "/galeria" },
-    { key: "directorio", label: "Directorio", href: "/directorio" },
-    { key: "arbol", label: "Árbol", href: "/arbol" },
-    { key: "chat", label: "Chat", href: "/chat", ...chatBadgeProps(chatBadge) }
+/**
+ * Mobile tab bar destinations for who is looking:
+ * - `member`/`admin`: Inicio, Programa, Fotos, Chat, Más (admin entries live in /mas);
+ * - `anonymous`: Inicio, Programa, Entrar (member pages would only bounce to /entrar);
+ * - `pending` (session restoring at boot): Inicio, Programa, so a returning
+ *   member never sees the anonymous tabs flash before their own.
+ *
+ * @param audience - From `selectSessionAudience`.
+ * @param programaPath - `/cuencada/{year}` of the current or latest edition.
+ * @param chatBadge - Unread chat messages for the "Chat" tab (T7).
+ * @returns The BottomNav items.
+ */
+export function bottomNavItems(audience: SessionAudience, programaPath: string, chatBadge?: ChatUnreadBadge): readonly NavItem[] {
+  const publicItems: NavItem[] = [
+    { key: "inicio", label: "Inicio", href: "/", icon: "🏠", end: true },
+    { key: "programa", label: "Programa", href: programaPath, icon: "📅" }
   ];
+  switch (audience) {
+    case "pending":
+      return publicItems;
+    case "anonymous":
+      return [...publicItems, { key: "entrar", label: "Entrar", href: LOGIN_NAV_PATH, icon: "🔑" }];
+    case "member":
+    case "admin":
+      return [
+        ...publicItems,
+        { key: "fotos", label: "Fotos", href: "/galeria", icon: "📸" },
+        { key: "chat", label: "Chat", href: "/chat", icon: "💬", ...chatBadgeProps(chatBadge) },
+        { key: "mas", label: "Más", href: MORE_PATH, icon: "☰" }
+      ];
+  }
+}
+
+/**
+ * TopNav (≥900px) destinations for who is looking. The brand links home for
+ * members; anonymous visitors also get an explicit "Inicio" next to "Programa".
+ * The admin link ("Panel") is a UX hint only; the server enforces the role.
+ *
+ * @param audience - From `selectSessionAudience`.
+ * @param programaPath - `/cuencada/{year}` of the current or latest edition.
+ * @param chatBadge - Unread chat messages for the "Chat" link.
+ * @returns The TopNav items.
+ */
+export function topNavItems(audience: SessionAudience, programaPath: string, chatBadge?: ChatUnreadBadge): readonly NavItem[] {
+  const programa: NavItem = { key: "programa", label: "Programa", href: programaPath };
+  switch (audience) {
+    case "pending":
+      return [programa];
+    case "anonymous":
+      return [{ key: "inicio", label: "Inicio", href: "/", end: true }, programa];
+    case "member":
+    case "admin": {
+      const items: NavItem[] = [
+        programa,
+        { key: "galeria", label: "Galería", href: "/galeria" },
+        { key: "directorio", label: "Directorio", href: "/directorio" },
+        { key: "arbol", label: "Árbol", href: "/arbol" },
+        { key: "chat", label: "Chat", href: "/chat", ...chatBadgeProps(chatBadge) }
+      ];
+      return audience === "admin" ? [...items, { key: "admin", label: ADMIN_NAV_LABEL, href: "/admin" }] : items;
+    }
+  }
 }
 
 /**
@@ -95,8 +136,6 @@ function useProgramaPath(): string {
   return year === undefined ? PROGRAMA_FALLBACK_PATH : `/cuencada/${year}`;
 }
 
-const ADMIN_NAV_ITEM: NavItem = { key: "admin", label: "Admin", href: "/admin" };
-
 function Brand(): ReactNode {
   return (
     <Link to="/" className={styles.brand}>
@@ -106,16 +145,17 @@ function Brand(): ReactNode {
   );
 }
 
-function SessionAction(): ReactNode {
+function SessionAction({ audience }: { audience: SessionAudience }): ReactNode {
   const dispatch = useAppDispatch();
-  const user = useAppSelector(selectCurrentUser);
   const { pathname } = useLocation();
 
-  if (user === null) {
+  // Session still restoring: neither "Entrar" nor "Salir" yet (no flash of the wrong one).
+  if (audience === "pending") return null;
+  if (audience === "anonymous") {
     // Already on the login screens: an "Entrar" button there is noise.
-    if (pathname === "/entrar" || pathname.startsWith("/entrar/")) return null;
+    if (pathname === LOGIN_NAV_PATH || pathname.startsWith(`${LOGIN_NAV_PATH}/`)) return null;
     return (
-      <Button to="/entrar" size="sm">
+      <Button to={LOGIN_NAV_PATH} size="sm">
         Entrar
       </Button>
     );
@@ -151,19 +191,21 @@ function selectNeedsEmailVerification(state: WithAuthState): boolean {
  * ≥900px, Entrar/Salir), the routed page inside `PageShell`'s `<main>`, and
  * the mobile `BottomNav`.
  *
- * The Admin link appears only when the in-memory role is admin. That is a UX
- * hint, not access control; the server enforces the role.
+ * The destinations depend on the session ({@link topNavItems},
+ * {@link bottomNavItems}): public ones while it restores, plus "Entrar" for
+ * anonymous visitors, the member destinations once logged in, and "Panel"
+ * for admins. That is a UX hint, not access control; the server enforces
+ * authentication and the role.
  */
 export function AppLayout(): ReactNode {
   const { pathname } = useLocation();
-  const isAdmin = useAppSelector(selectIsAdmin);
+  const audience = useAppSelector(selectSessionAudience);
   const showStatus = useAppSelector((state) => selectIsOffline(state) || selectLogoutPending(state));
   const showVerify = useAppSelector(selectNeedsEmailVerification);
   // Auth screens (route handle MINIMAL_CHROME) get no BottomNav; it is hidden at ≥900px anyway.
   const minimalChrome = useMatches().some((match) => wantsMinimalChrome(match.handle));
   const programaPath = useProgramaPath();
   const chatBadge = useChatUnreadBadge();
-  const topItems = isAdmin ? [...topNavItems(programaPath, chatBadge), ADMIN_NAV_ITEM] : topNavItems(programaPath, chatBadge);
 
   return (
     <PageShell
@@ -182,16 +224,16 @@ export function AppLayout(): ReactNode {
       }
       header={
         <TopNav
-          items={topItems}
+          items={topNavItems(audience, programaPath, chatBadge)}
           currentPath={pathname}
           renderLink={renderRouterLink}
           brand={<Brand />}
-          actions={<SessionAction />}
+          actions={<SessionAction audience={audience} />}
         />
       }
       bottomNav={
         minimalChrome ? undefined : (
-          <BottomNav items={bottomNavItems(programaPath, chatBadge)} currentPath={pathname} renderLink={renderRouterLink} label="Navegación inferior" />
+          <BottomNav items={bottomNavItems(audience, programaPath, chatBadge)} currentPath={pathname} renderLink={renderRouterLink} label="Navegación inferior" />
         )
       }
     >

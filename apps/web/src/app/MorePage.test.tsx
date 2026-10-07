@@ -26,13 +26,13 @@ describe("MorePage", () => {
     expect(main.getByRole("link", { name: /Árbol familiar/ })).toHaveAttribute("href", "/arbol");
     expect(main.getByRole("link", { name: /Mi perfil/ })).toHaveAttribute("href", "/perfil");
     expect(main.getByRole("link", { name: /Sesiones y seguridad/ })).toHaveAttribute("href", "/perfil/sesiones");
-    expect(main.queryByRole("link", { name: /Administración/ })).not.toBeInTheDocument();
+    expect(main.queryByRole("link", { name: /Panel de administración/ })).not.toBeInTheDocument();
   });
 
   it("adds the Admin row for an admin", async () => {
     renderApp("/mas", authenticatedState(makeUser({ role: "admin" })));
 
-    expect(await screen.findByRole("link", { name: /Administración/ })).toHaveAttribute("href", "/admin");
+    expect(await screen.findByRole("link", { name: /Panel de administración/ })).toHaveAttribute("href", "/admin");
   });
 
   it("logs out and goes home from Cerrar sesión", async () => {

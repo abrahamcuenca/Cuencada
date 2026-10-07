@@ -6,8 +6,10 @@
       "outputs": ["dist/**"]
     },
     "dev": {
+      "dependsOn": ["^build"],
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "passThroughEnv": ["HOST", "PORT", "LOG_LEVEL", "APP_BASE_URL", "CORS_ORIGIN", "DEV_ALLOWED_ORIGINS", "CUENCADA_DEV_*"]
     },
     "typecheck": {
       "dependsOn": ["^build"],

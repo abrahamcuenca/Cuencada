@@ -3,7 +3,9 @@
  * Resend; tests use `FakeMailer` from `apps/server/test/helpers/fakes.ts`.
  *
  * Message bodies may contain one-time tokens (magic links, invites), so
- * implementations must never log `html` or `text`.
+ * implementations must never log `html` or `text`. The one exception is the
+ * `DevMailer`, which prints the plain-text body to the terminal (not the log
+ * stream) under `NODE_ENV=development` only; it cannot run in production.
  */
 
 /** A single rendered email ready to send. */

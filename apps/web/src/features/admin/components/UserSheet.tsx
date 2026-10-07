@@ -53,7 +53,7 @@ function baseActionCopy(action: ConfirmableAction, user: AdminUserListItem): Act
     case "demote":
       return {
         title: `¿Quitarle el rol de administrador a ${name}?`,
-        description: "Seguirá siendo miembro de la familia, pero ya no podrá entrar a Administración.",
+        description: "Seguirá siendo miembro de la familia, pero ya no podrá entrar al Panel de administración.",
         confirmLabel: "Quitar administrador",
         tone: "danger"
       };

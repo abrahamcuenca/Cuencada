@@ -63,6 +63,7 @@ describe("runSeed", () => {
     const first = await runSeed(db, options);
     expect(first).toEqual({
       adminCreated: true,
+      adminEmailVerified: false,
       profileCreated: true,
       cuencadaCreated: true,
       locationsCreated: 6,
@@ -77,6 +78,7 @@ describe("runSeed", () => {
     const second = await runSeed(db, { ...options, adminTempPassword: "otra-contrasena-distinta" });
     expect(second).toEqual({
       adminCreated: false,
+      adminEmailVerified: false,
       profileCreated: false,
       cuencadaCreated: false,
       locationsCreated: 0,
@@ -102,7 +104,34 @@ describe("runSeed", () => {
     expect(admin?.passwordHash).toBe(adminBefore?.passwordHash);
     expect(admin?.role).toBe("admin");
     expect(admin?.mustChangePassword).toBe(true);
+    expect(admin?.emailVerifiedAt).toBeNull();
     expect(await argon2.verify(admin?.passwordHash ?? "", options.adminTempPassword)).toBe(true);
+  });
+
+  it("verifies the admin's email on creation when verifyAdminEmail is set", async () => {
+    const db = getTestDb();
+
+    const result = await runSeed(db, { ...options, verifyAdminEmail: true });
+
+    expect(result).toMatchObject({ adminCreated: true, adminEmailVerified: true });
+    const [admin] = await db.select().from(users);
+    expect(admin?.emailVerifiedAt).toBeInstanceOf(Date);
+    expect(admin?.mustChangePassword).toBe(true);
+  });
+
+  it("verifies an existing unverified admin on a later run and leaves a verified one untouched", async () => {
+    const db = getTestDb();
+    await runSeed(db, options);
+
+    const second = await runSeed(db, { ...options, verifyAdminEmail: true });
+    expect(second).toMatchObject({ adminCreated: false, adminEmailVerified: true });
+    const [verified] = await db.select().from(users);
+    expect(verified?.emailVerifiedAt).toBeInstanceOf(Date);
+
+    const third = await runSeed(db, { ...options, verifyAdminEmail: true });
+    expect(third.adminEmailVerified).toBe(false);
+    const [after] = await db.select().from(users);
+    expect(after?.emailVerifiedAt?.toISOString()).toBe(verified?.emailVerifiedAt?.toISOString());
   });
 
   it("stamps first_published_at on the published 2026 edition once and keeps it on re-runs", async () => {
@@ -315,6 +344,29 @@ describe("resolveSeedOptions", () => {
     expect(() => resolveSeedOptions({ NODE_ENV: "development", SEED_WHATSAPP_URL: "javascript:alert(1)" })).toThrow(
       SeedConfigError
     );
+  });
+
+  it("reads SEED_DEV_VERIFY_ADMIN in development and leaves it off when unset or blank", () => {
+    expect(resolveSeedOptions({ NODE_ENV: "development" }).verifyAdminEmail).toBe(false);
+    expect(resolveSeedOptions({ NODE_ENV: "development", SEED_DEV_VERIFY_ADMIN: "" }).verifyAdminEmail).toBe(false);
+    expect(resolveSeedOptions({ NODE_ENV: "development", SEED_DEV_VERIFY_ADMIN: "1" }).verifyAdminEmail).toBe(true);
+    expect(resolveSeedOptions({ NODE_ENV: "development", SEED_DEV_VERIFY_ADMIN: " TRUE " }).verifyAdminEmail).toBe(true);
+    expect(resolveSeedOptions({ NODE_ENV: "development", SEED_DEV_VERIFY_ADMIN: "0" }).verifyAdminEmail).toBe(false);
+    expect(() => resolveSeedOptions({ NODE_ENV: "development", SEED_DEV_VERIFY_ADMIN: "quizá" })).toThrow(SeedConfigError);
+    expect(resolveSeedOptions({ NODE_ENV: "production", SEED_ADMIN_TEMP_PASSWORD: STRONG, ...ALL_LINKS }).verifyAdminEmail).toBe(false);
+  });
+
+  it.each([
+    { NODE_ENV: "production", SEED_ADMIN_TEMP_PASSWORD: STRONG, ...ALL_LINKS },
+    { NODE_ENV: "test" },
+    { NODE_ENV: "staging", SEED_ADMIN_TEMP_PASSWORD: STRONG, ...ALL_LINKS },
+    { SEED_ADMIN_TEMP_PASSWORD: STRONG, ...ALL_LINKS }
+  ])("refuses SEED_DEV_VERIFY_ADMIN outside development (NODE_ENV=$NODE_ENV)", (env) => {
+    for (const value of ["1", "0"]) {
+      expect(() => resolveSeedOptions({ ...env, SEED_DEV_VERIFY_ADMIN: value })).toThrow(
+        /SEED_DEV_VERIFY_ADMIN is allowed only when NODE_ENV=development/
+      );
+    }
   });
 
   it("falls back to the development password and placeholder links only in development and test", () => {

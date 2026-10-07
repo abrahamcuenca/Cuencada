@@ -16,10 +16,11 @@ export type { Mailer, MailMessage, MailSendResult } from "./types.js";
 /**
  * Build the mailer for this environment: Resend when `RESEND_API_KEY` and
  * `MAIL_FROM` are set (config makes both mandatory in production), otherwise
- * the {@link DevMailer}.
+ * the {@link DevMailer} (which prints full messages only in development).
  *
  * @param config - Validated config.
  * @param log - Logger for the dev mailer.
+ * @throws Error in production without Resend: the dev mailer is never selected there.
  */
 export function createMailer(
   config: Pick<AppConfig, "NODE_ENV" | "RESEND_API_KEY" | "MAIL_FROM">,
@@ -27,6 +28,11 @@ export function createMailer(
 ): Mailer {
   if (config.RESEND_API_KEY !== undefined && config.MAIL_FROM !== undefined) {
     return new ResendMailer({ apiKey: config.RESEND_API_KEY, from: config.MAIL_FROM });
+  }
+  // Belt and braces: config already requires both keys in production, and the
+  // DevMailer constructor refuses production too.
+  if (config.NODE_ENV === "production") {
+    throw new Error("DevMailer must not be used in production: set RESEND_API_KEY and MAIL_FROM");
   }
   return new DevMailer(log, config.NODE_ENV);
 }

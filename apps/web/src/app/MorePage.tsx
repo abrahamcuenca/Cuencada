@@ -24,7 +24,7 @@ const MEMBER_LINKS: readonly MoreLink[] = [
 /** Longest the logout waits for the navigation home before running anyway. */
 export const LOGOUT_NAVIGATION_TIMEOUT_MS = 1500;
 
-const ADMIN_LINK: MoreLink = { to: "/admin", label: "Administración", icon: "⭐" };
+const ADMIN_LINK: MoreLink = { to: "/admin", label: "Panel de administración", icon: "⭐" };
 
 /**
  * `/mas`: the mobile "Más" tab. Large tappable rows for destinations that

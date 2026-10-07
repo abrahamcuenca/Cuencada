@@ -100,9 +100,9 @@ describe("AdminMediaPage", () => {
   });
 
   it("keeps members out (UX guard; the server enforces it)", async () => {
-    const { router } = renderApp("/admin/media", authenticatedState());
+    renderApp("/admin/media", authenticatedState());
 
-    await waitFor(() => expect(router.state.location.pathname).not.toBe("/admin/media"));
+    expect(await screen.findByRole("heading", { level: 1, name: "Acceso restringido" })).toBeInTheDocument();
     expect(db.log.some((line) => line.startsWith("GET /admin/media"))).toBe(false);
   });
 });

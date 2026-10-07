@@ -14,14 +14,14 @@ export interface EmptyStateProps {
   action?: ReactNode;
   /** `lock` styles the members-only state ("Inicia sesión para ver…"). */
   tone?: "default" | "lock";
-  /** Heading level for the title (default h2). */
-  headingLevel?: 2 | 3;
+  /** Heading level for the title (default h2; 1 when the state is the whole page). */
+  headingLevel?: 1 | 2 | 3;
   className?: string | undefined;
 }
 
 /** Friendly placeholder for empty lists, members-only locks and error fallbacks. */
 export function EmptyState({ icon, title, description, action, tone = "default", headingLevel = 2, className }: EmptyStateProps): React.ReactNode {
-  const Heading = headingLevel === 3 ? "h3" : "h2";
+  const Heading = headingLevel === 1 ? "h1" : headingLevel === 3 ? "h3" : "h2";
   return (
     <div className={cx(styles.empty, styles[tone], className)}>
       {icon ? (

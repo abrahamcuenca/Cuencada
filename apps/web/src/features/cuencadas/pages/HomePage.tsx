@@ -5,7 +5,7 @@ import { useAppSelector } from "../../../app/hooks";
 import { Button } from "../../../shared/ui/Button";
 import { Card } from "../../../shared/ui/Card";
 import { Countdown } from "../../../shared/ui/Countdown";
-import { selectAuthStatus, selectCurrentUser, selectPasswordChangeRequired } from "../../auth/authSlice";
+import { selectAuthStatus, selectCurrentUser, selectPasswordChangeRequired, selectSessionAudience } from "../../auth/authSlice";
 import { GalleryPreview } from "../../gallery/components/GalleryPreview";
 import { useGetCuencadaHomeQuery, useListCuencadasQuery, useListMemberAnnouncementsQuery } from "../api";
 import { AnnouncementList } from "../components/AnnouncementList";
@@ -209,36 +209,61 @@ function Memories({ latestPast }: { latestPast: CuencadaSummary | null }): React
 }
 
 const HIGHLIGHTS = [
-  { icon: "📅", title: "Programa", text: "Consulta cada día, horarios y actividades.", path: (year: number | null) => (year ? `/cuencada/${year}` : null) },
-  { icon: "📸", title: "Álbum vivo", text: "Fotos y videos por año, privados para la familia.", path: (year: number | null) => (year ? `/galeria/${year}` : "/galeria") },
-  { icon: "🧭", title: "Directorio", text: "Perfiles familiares con privacidad para correo y teléfono.", path: () => "/directorio" },
-  { icon: "🌳", title: "Árbol familiar", text: "Generaciones, parentescos e historia de la Familia Cuenca.", path: () => "/arbol" }
+  { icon: "📅", title: "Programa", text: "Consulta cada día, horarios y actividades.", memberOnly: false, path: (year: number | null) => (year ? `/cuencada/${year}` : null) },
+  { icon: "📸", title: "Álbum vivo", text: "Fotos y videos por año, privados para la familia.", memberOnly: true, path: (year: number | null) => (year ? `/galeria/${year}` : "/galeria") },
+  { icon: "🧭", title: "Directorio", text: "Perfiles familiares con privacidad para correo y teléfono.", memberOnly: true, path: () => "/directorio" },
+  { icon: "🌳", title: "Árbol familiar", text: "Generaciones, parentescos e historia de la Familia Cuenca.", memberOnly: true, path: () => "/arbol" }
 ] as const;
 
+/** The anonymous visitor's stand-in for the member-only highlights. */
+export const MEMBER_TEASER_TEXT = "Inicia sesión para ver el directorio, el árbol familiar, las fotos y el chat";
+
+/**
+ * "Todo en un solo lugar". Members (verified or not) get every highlight;
+ * anonymous visitors get the public ones plus one compact "Inicia sesión…"
+ * teaser instead of links that would only bounce them to /entrar. While the
+ * session restores at boot, only the public ones (no teaser flash for a
+ * returning member). UX only: the server guards the member pages.
+ */
 function Highlights({ featuredYear }: { featuredYear: number | null }): ReactNode {
+  const audience = useAppSelector(selectSessionAudience);
+  const isMember = audience === "member" || audience === "admin";
+  const links = HIGHLIGHTS.flatMap((item) => {
+    const to = item.path(featuredYear);
+    return to === null || (item.memberOnly && !isMember) ? [] : [{ ...item, to }];
+  });
   return (
     <Section id="todo" title="Todo en un solo lugar">
       <ul className={styles.highlights}>
-        {HIGHLIGHTS.map((item) => {
-          const to = item.path(featuredYear);
-          if (to === null) return null;
-          return (
-            <li key={item.title}>
-              <Link to={to} className={styles.highlight}>
-                <span aria-hidden="true" className={styles.highlightIcon}>
-                  {item.icon}
-                </span>
-                <span className={styles.highlightText}>
-                  <strong>{item.title}</strong>
-                  <span>{item.text}</span>
-                </span>
-                <span aria-hidden="true" className={styles.chevron}>
-                  ›
-                </span>
-              </Link>
-            </li>
-          );
-        })}
+        {links.map((item) => (
+          <li key={item.title}>
+            <Link to={item.to} className={styles.highlight}>
+              <span aria-hidden="true" className={styles.highlightIcon}>
+                {item.icon}
+              </span>
+              <span className={styles.highlightText}>
+                <strong>{item.title}</strong>
+                <span>{item.text}</span>
+              </span>
+              <span aria-hidden="true" className={styles.chevron}>
+                ›
+              </span>
+            </Link>
+          </li>
+        ))}
+        {audience === "anonymous" ? (
+          <li className={links.length === 0 ? styles.teaserAlone : styles.teaserItem}>
+            <div className={styles.teaser}>
+              <span aria-hidden="true" className={styles.highlightIcon}>
+                🔒
+              </span>
+              <p className={styles.teaserText}>{MEMBER_TEASER_TEXT}</p>
+              <Button to="/entrar" className={styles.teaserAction}>
+                Entrar
+              </Button>
+            </div>
+          </li>
+        ) : null}
       </ul>
     </Section>
   );

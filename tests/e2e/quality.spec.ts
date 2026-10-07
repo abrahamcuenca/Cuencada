@@ -53,7 +53,9 @@ const MEMBER_ROUTES: RouteCheck[] = [
   },
   { name: "perfil", open: "/perfil" },
   { name: "sesiones", open: "/perfil/sesiones" },
-  { name: "mas", open: "/mas" }
+  { name: "mas", open: "/mas" },
+  // A member on /admin: the "Acceso restringido" screen (WP-3.1b).
+  { name: "admin-restringido", open: "/admin", ready: "Acceso restringido" }
 ];
 
 const ADMIN_ROUTES: RouteCheck[] = [

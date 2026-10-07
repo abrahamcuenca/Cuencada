@@ -31,7 +31,7 @@ test.describe("auth journeys", () => {
     await expect(page).not.toHaveURL(/\/cambiar-contrasena/);
 
     await page.goto("/admin");
-    await expect(page.getByRole("heading", { name: "Administración", level: 1 })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Panel de administración", level: 1 })).toBeVisible();
     await expect(page.getByRole("navigation", { name: "Secciones de administración" })).toBeVisible();
     await journeyShot(page, testInfo, "01-admin-console");
 

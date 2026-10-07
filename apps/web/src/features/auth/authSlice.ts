@@ -181,3 +181,27 @@ export const selectPasswordChangeRequired = (state: WithAuthState): boolean => s
  * @returns Whether the in-memory user claims the admin role.
  */
 export const selectIsAdmin = (state: WithAuthState): boolean => state.auth.user?.role === "admin";
+
+/**
+ * Who the navigation is for, from the in-memory session:
+ * - `pending`: the boot refresh has not answered yet (`idle`/`restoring`).
+ *   Render only public destinations, so a returning member never sees the
+ *   anonymous nav flash before their own.
+ * - `anonymous`: no session.
+ * - `member`: logged in (verified or not; member pages show the verify state).
+ * - `admin`: logged in with the admin role.
+ */
+export type SessionAudience = "pending" | "anonymous" | "member" | "admin";
+
+/**
+ * UX hint only (which links to show). **Never** a security decision: the
+ * server enforces authentication and roles on every request.
+ *
+ * @returns The {@link SessionAudience} of the current session.
+ */
+export const selectSessionAudience = (state: WithAuthState): SessionAudience => {
+  const { status, user } = state.auth;
+  if (status === "authenticated" && user !== null) return user.role === "admin" ? "admin" : "member";
+  if (status === "idle" || status === "restoring") return "pending";
+  return "anonymous";
+};
