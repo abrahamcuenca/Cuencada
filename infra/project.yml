@@ -131,7 +131,7 @@ server:
     S3_REGION: us-east-1
     # Not a secret (it is in the CSP and every presigned URL). Same value as
     # in VITE_MEDIA_UPLOAD_ORIGIN and infra/nginx/cuencada.conf.
-    S3_BUCKET: cuencada 
+    S3_BUCKET: cuencada
     # Private bucket: everything is presigned, no public base URL.
     S3_PUBLIC_BASE_URL: ""
     # libuv pool shared by argon2, sharp and DNS/fs: 6 keeps a long image job
