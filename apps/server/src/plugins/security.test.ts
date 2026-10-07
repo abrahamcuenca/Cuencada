@@ -9,19 +9,19 @@ const base = {
   APP_BASE_URL: "https://cuencada.com",
   CORS_ORIGIN: ["https://cuencada.com"],
   DEV_ALLOWED_ORIGINS: ["http://localhost:5173"],
-  S3_ENDPOINT: "https://us-southeast-1.linodeobjects.com",
+  S3_ENDPOINT: "https://us-east-1.linodeobjects.com",
   S3_BUCKET: "cuencada",
   S3_PUBLIC_BASE_URL: ""
 };
 
 describe("storageOrigins", () => {
   it("includes only the bucket-specific host, never the shared regional endpoint", () => {
-    expect(storageOrigins(base)).toEqual(["https://cuencada.us-southeast-1.linodeobjects.com"]);
+    expect(storageOrigins(base)).toEqual(["https://cuencada.us-east-1.linodeobjects.com"]);
   });
 
   it("adds a configured public base URL", () => {
     expect(storageOrigins({ ...base, S3_PUBLIC_BASE_URL: "https://media.cuencada.com/x" })).toEqual([
-      "https://cuencada.us-southeast-1.linodeobjects.com",
+      "https://cuencada.us-east-1.linodeobjects.com",
       "https://media.cuencada.com"
     ]);
   });
@@ -39,14 +39,14 @@ describe("contentSecurityPolicyDirectives", () => {
     expect(directives["default-src"]).toEqual(["'self'"]);
     expect(directives["script-src"]).toEqual(["'self'"]);
     expect(directives["frame-src"]).toEqual(["'self'", "https://weatherwidget.io"]);
-    expect(directives["img-src"]).toContain("https://cuencada.us-southeast-1.linodeobjects.com");
+    expect(directives["img-src"]).toContain("https://cuencada.us-east-1.linodeobjects.com");
     expect(directives["connect-src"]).toContain("wss://cuencada.com");
     expect(directives["connect-src"]).not.toContain("http://localhost:5173");
     expect(directives["upgrade-insecure-requests"]).toEqual([]);
     for (const [name, values] of Object.entries(directives)) {
       if (name !== "frame-src") expect(values).not.toContain("https://weatherwidget.io");
     }
-    expect(JSON.stringify(directives)).not.toContain('"https://us-southeast-1.linodeobjects.com"');
+    expect(JSON.stringify(directives)).not.toContain('"https://us-east-1.linodeobjects.com"');
   });
 
   it("allows the Vite dev origin only outside production", () => {
@@ -63,7 +63,7 @@ describe("contentSecurityPolicy", () => {
 
     expect(header).toContain("default-src 'self'; base-uri 'self'; object-src 'none'");
     expect(header).toContain(
-      "connect-src 'self' wss://cuencada.com https://cuencada.us-southeast-1.linodeobjects.com"
+      "connect-src 'self' wss://cuencada.com https://cuencada.us-east-1.linodeobjects.com"
     );
     expect(header.endsWith("upgrade-insecure-requests")).toBe(true);
   });

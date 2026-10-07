@@ -14,11 +14,11 @@ const PROD_LIKE = {
   APP_BASE_URL: "https://cuencada.com",
   CORS_ORIGIN: ["https://cuencada.com"],
   DEV_ALLOWED_ORIGINS: [],
-  S3_ENDPOINT: "https://us-southeast-1.linodeobjects.com",
+  S3_ENDPOINT: "https://us-east-1.linodeobjects.com",
   S3_BUCKET: "cuencada-media",
   S3_PUBLIC_BASE_URL: ""
 };
-const BUCKET_ORIGIN = "https://cuencada-media.us-southeast-1.linodeobjects.com";
+const BUCKET_ORIGIN = "https://cuencada-media.us-east-1.linodeobjects.com";
 
 let app: App;
 
@@ -79,7 +79,7 @@ describe("API security headers", () => {
     expect(csp.has("upgrade-insecure-requests")).toBe(true);
     const raw = String(response.headers["content-security-policy"]);
     // Never the shared regional endpoint (any customer's bucket), never a wildcard or inline script.
-    expect(raw).not.toMatch(/https:\/\/us-southeast-1\.linodeobjects\.com(\s|;|$)/);
+    expect(raw).not.toMatch(/https:\/\/us-east-1\.linodeobjects\.com(\s|;|$)/);
     expect(raw).not.toMatch(/\*|'unsafe-inline'|'unsafe-eval'|http:/);
     // The weather widget is only ever a frame source.
     for (const [name, sources] of csp) {

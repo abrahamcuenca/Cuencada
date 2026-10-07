@@ -3,8 +3,8 @@ import { AppError } from "../errors.js";
 import { isS3Configured, type S3Settings, S3Storage } from "./s3.js";
 
 const settings: S3Settings = {
-  S3_ENDPOINT: "https://us-southeast-1.linodeobjects.com",
-  S3_REGION: "us-southeast-1",
+  S3_ENDPOINT: "https://us-east-1.linodeobjects.com",
+  S3_REGION: "us-east-1",
   S3_BUCKET: "cuencada",
   S3_ACCESS_KEY_ID: "AKIATESTONLY",
   S3_SECRET_ACCESS_KEY: "test-secret-key-not-real"
@@ -47,7 +47,7 @@ describe("S3Storage", () => {
     });
 
     const url = new URL(presigned.url);
-    expect(url.origin).toBe("https://cuencada.us-southeast-1.linodeobjects.com");
+    expect(url.origin).toBe("https://cuencada.us-east-1.linodeobjects.com");
     expect(url.pathname).toBe("/cuencadas/2026/media/abc.jpg");
     expect(url.searchParams.get("X-Amz-Expires")).toBe("120");
     expect(url.searchParams.get("X-Amz-SignedHeaders")?.split(";")).toEqual(

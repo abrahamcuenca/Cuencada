@@ -70,7 +70,7 @@ Every 15 min (unref'd interval, cleared on close; a pass never overlaps another)
 6. **Approval-first flag (Request 7):** config `MEDIA_REQUIRE_APPROVAL` (WP-0.4), applied at insert.
 
 ### Upload origin (orchestrator note 3)
-`S3Storage` uses virtual-hosted addressing (`forcePathStyle: false`), so the presigned PUT/GET origin is `https://<S3_BUCKET>.<host of S3_ENDPOINT>`. For production (`S3_ENDPOINT=https://us-southeast-1.linodeobjects.com`, bucket from `vault_cuencada_s3_bucket`) set **`VITE_MEDIA_UPLOAD_ORIGIN=https://<bucket>.us-southeast-1.linodeobjects.com`** (no path, no trailing slash). This is the same bucket-specific origin WP-0.4 puts in the CSP `connect-src`/`img-src`/`media-src`. A test presigns with real `S3Storage` settings and asserts that origin.
+`S3Storage` uses virtual-hosted addressing (`forcePathStyle: false`), so the presigned PUT/GET origin is `https://<S3_BUCKET>.<host of S3_ENDPOINT>`. For production (`S3_ENDPOINT=https://us-east-1.linodeobjects.com`, bucket from `vault_cuencada_s3_bucket`) set **`VITE_MEDIA_UPLOAD_ORIGIN=https://cuencada.us-east-1.linodeobjects.com`** (no path, no trailing slash). This is the same bucket-specific origin WP-0.4 puts in the CSP `connect-src`/`img-src`/`media-src`. A test presigns with real `S3Storage` settings and asserts that origin.
 
 ## WP-2.4 items (bucket)
 - **CORS** on the bucket (`s3cmd setcors` / Linode console):

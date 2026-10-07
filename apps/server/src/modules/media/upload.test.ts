@@ -92,8 +92,8 @@ describe("POST /api/cuencadas/:year/media/uploads", () => {
 
   it("presigns against the bucket's virtual-hosted origin with real S3 settings", async () => {
     const config = createTestConfig({
-      S3_ENDPOINT: "https://us-southeast-1.linodeobjects.com",
-      S3_REGION: "us-southeast-1",
+      S3_ENDPOINT: "https://us-east-1.linodeobjects.com",
+      S3_REGION: "us-east-1",
       S3_BUCKET: "cuencada-media",
       S3_ACCESS_KEY_ID: "test-access-key",
       S3_SECRET_ACCESS_KEY: "test-secret-key-value"
@@ -101,7 +101,7 @@ describe("POST /api/cuencadas/:year/media/uploads", () => {
     const storage = new S3Storage(config, systemClock);
     try {
       const presigned = await storage.presignPut({ key: "cuencadas/2026/originals/x.jpg", contentType: "image/jpeg", contentLength: 10 });
-      expect(new URL(presigned.url).origin).toBe("https://cuencada-media.us-southeast-1.linodeobjects.com");
+      expect(new URL(presigned.url).origin).toBe("https://cuencada-media.us-east-1.linodeobjects.com");
     } finally {
       storage.destroy();
     }

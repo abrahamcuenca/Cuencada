@@ -43,7 +43,7 @@ const WEB_PORT = Number(process.env.CSP_CHECK_WEB_PORT ?? 47_310);
 const API_PORT = Number(process.env.CSP_CHECK_API_PORT ?? 47_311);
 const WEB_ORIGIN = `http://127.0.0.1:${WEB_PORT}`;
 const BUCKET = "cuencada-csp-check";
-const BUCKET_ORIGIN = `https://${BUCKET}.us-southeast-1.linodeobjects.com`;
+const BUCKET_ORIGIN = `https://${BUCKET}.us-east-1.linodeobjects.com`;
 const ADMIN_EMAIL = "admin@example.com";
 const TEMP_PASSWORD = "contrasena-temporal-de-prueba-csp";
 const PASSWORD = "contrasena-definitiva-de-prueba-csp";
@@ -123,7 +123,7 @@ function serverEnv(databaseUrl) {
     HOST: "127.0.0.1",
     PORT: String(API_PORT),
     LOG_LEVEL: "warn",
-    S3_ENDPOINT: "https://us-southeast-1.linodeobjects.com",
+    S3_ENDPOINT: "https://us-east-1.linodeobjects.com",
     S3_BUCKET: BUCKET,
     S3_ACCESS_KEY_ID: "AKIACSPCHECKFAKE",
     S3_SECRET_ACCESS_KEY: "csp-check-fake-secret",

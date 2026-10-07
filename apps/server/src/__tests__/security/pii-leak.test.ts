@@ -34,8 +34,8 @@ import { insertMedia } from "../../../test/helpers/media.js";
 
 const BUCKET = "w23-pii-bucket";
 const S3_CONFIG = {
-  S3_ENDPOINT: "https://us-southeast-1.linodeobjects.com",
-  S3_REGION: "us-southeast-1",
+  S3_ENDPOINT: "https://us-east-1.linodeobjects.com",
+  S3_REGION: "us-east-1",
   S3_BUCKET: BUCKET,
   S3_ACCESS_KEY_ID: "AKIAW23FAKEFAKEFAKE",
   S3_SECRET_ACCESS_KEY: "w23-fake-secret-key-not-real",
@@ -447,8 +447,8 @@ describe("the PII scanner itself", () => {
       passwordHash: "$argon2id$v=19$m=4096,t=2,p=1$abc$def",
       digest: "a".repeat(64),
       ip: HIDDEN.ip,
-      thumbUrl: `https://${BUCKET}.us-southeast-1.linodeobjects.com/cuencadas/2099/originals/x.jpg?x-id=PutObject&X-Amz-Signature=abc`,
-      link: `https://${BUCKET}.us-southeast-1.linodeobjects.com/k?X-Amz-Signature=abc`,
+      thumbUrl: `https://${BUCKET}.us-east-1.linodeobjects.com/cuencadas/2099/originals/x.jpg?x-id=PutObject&X-Amz-Signature=abc`,
+      link: `https://${BUCKET}.us-east-1.linodeobjects.com/k?X-Amz-Signature=abc`,
       showPhone: false,
       session: "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4eHh4eHh4In0.c2lnbmF0dXJlLXZhbHVl",
       key: "avatars/0f2c4e1a-0000-4000-8000-000000000000/large.webp",

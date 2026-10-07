@@ -22,7 +22,7 @@ details are in [`nginx.md`](nginx.md).
   - The operator reaches it from their machine through an SSH tunnel on
     `127.0.0.1:${TUNNEL_PORT}`. That port must equal `deploy.migrate_tunnel`
     in `infra/project.yml` (15432 today).
-- **Media:** a Linode Object Storage bucket in `us-southeast-1`.
+- **Media:** a Linode Object Storage bucket in `us-east-1`.
 - **Email:** Resend.
 - **No Cloudflare:** DNS points straight at `server_1`.
 - **Deploy:** Acleron bundle mode, on the platform branch
@@ -614,7 +614,7 @@ B=<bucket>
 umask 077; S3CFG="$(mktemp)"; trap 'rm -f "$S3CFG"' EXIT
 read -rsp 'bucket-admin access key: ' AK; echo
 read -rsp 'bucket-admin secret key: ' SK; echo
-printf '[default]\naccess_key = %s\nsecret_key = %s\nhost_base = us-southeast-1.linodeobjects.com\nhost_bucket = %%(bucket)s.us-southeast-1.linodeobjects.com\nuse_https = True\n' \
+printf '[default]\naccess_key = %s\nsecret_key = %s\nhost_base = us-east-1.linodeobjects.com\nhost_bucket = %%(bucket)s.us-east-1.linodeobjects.com\nuse_https = True\n' \
   "$AK" "$SK" > "$S3CFG"
 unset AK SK
 S3="s3cmd -c $S3CFG"
@@ -628,7 +628,7 @@ rm -f "$S3CFG"; trap - EXIT
 ```
 
 With the AWS CLI, the equivalent is
-`aws --endpoint-url https://us-southeast-1.linodeobjects.com s3api put-bucket-cors --bucket "$B" --cors-configuration file://infra/bucket/cors.json`.
+`aws --endpoint-url https://us-east-1.linodeobjects.com s3api put-bucket-cors --bucket "$B" --cors-configuration file://infra/bucket/cors.json`.
 Use the same temporary-credential care: `AWS_ACCESS_KEY_ID` and
 `AWS_SECRET_ACCESS_KEY` come from `read -rs`, and you `unset` them afterwards.
 
@@ -643,7 +643,7 @@ key can upload and delete:
 pnpm build
 read -rsp 'runtime access key: ' S3_ACCESS_KEY_ID; echo; read -rsp 'runtime secret key: ' S3_SECRET_ACCESS_KEY; echo
 export S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY
-S3_ENDPOINT=https://us-southeast-1.linodeobjects.com S3_REGION=us-southeast-1 S3_BUCKET=$B \
+S3_ENDPOINT=https://us-east-1.linodeobjects.com S3_REGION=us-east-1 S3_BUCKET=$B \
   node infra/bucket/check-presigned-put.mjs
 unset S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY
 ```

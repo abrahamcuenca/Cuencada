@@ -19,15 +19,15 @@ There are two policies:
 
 ## SPA policy for nginx (WP-2.4)
 
-Production values: the bucket is `<bucket>` in region `us-southeast-1`, so its
-origin is `https://<bucket>.us-southeast-1.linodeobjects.com`. If
+Production values: the bucket is `cuencada` in region `us-east-1`, so its
+origin is `https://cuencada.us-east-1.linodeobjects.com`. If
 `S3_PUBLIC_BASE_URL` is set, add its origin next to the bucket host in
 `img-src`, `media-src` and `connect-src`.
 
 ```nginx
 # server { … } for cuencada.com. Repeat every add_header inside any location
 # that has its own add_header, because nginx drops the inherited ones.
-add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https://<bucket>.us-southeast-1.linodeobjects.com; media-src 'self' blob: https://<bucket>.us-southeast-1.linodeobjects.com; connect-src 'self' wss://cuencada.com https://<bucket>.us-southeast-1.linodeobjects.com; font-src 'self'; frame-src https://weatherwidget.io; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; upgrade-insecure-requests" always;
+add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https://cuencada.us-east-1.linodeobjects.com; media-src 'self' blob: https://cuencada.us-east-1.linodeobjects.com; connect-src 'self' wss://cuencada.com https://cuencada.us-east-1.linodeobjects.com; font-src 'self'; frame-src https://weatherwidget.io; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; upgrade-insecure-requests" always;
 add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 add_header X-Content-Type-Options "nosniff" always;
 add_header X-Frame-Options "DENY" always;
@@ -40,9 +40,9 @@ add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment
 | `default-src` | `'self'` | Deny by default. |
 | `script-src` | `'self'` | Vite emits one external module entry and lazy chunks. There's no inline script (`injectRegister: null`, no modulepreload polyfill inline), no `eval`, and no third-party script. The weather widget is an iframe, not a script (WP-0.4). |
 | `style-src` | `'self'` | **No `'unsafe-inline'` needed.** The built `index.html` has no `<style>` and no `style=""`. CSS Modules are extracted to `/assets/*.css`. React `style={…}` props (WeatherWidget height, Skeleton, TreeParts, AvatarEditor) are applied through the CSSOM (`element.style.x = …`), which CSP doesn't restrict. The Chromium run below confirms it. |
-| `img-src` | `'self' data: blob: <bucket>` | `blob:` covers the avatar/upload previews (`URL.createObjectURL`). `data:` is for tiny inline icons. Presigned GET URLs point only at the bucket's own host. **The shared regional endpoint `https://us-southeast-1.linodeobjects.com` is never allowed**, because path-style URLs would reach any customer's bucket. |
-| `media-src` | `'self' blob: <bucket>` | Videos and song. `data:` isn't needed. |
-| `connect-src` | `'self' wss://cuencada.com <bucket>` | API (`'self'`), chat socket, and direct presigned PUT uploads to the bucket. |
+| `img-src` | `'self' data: blob: cuencada` | `blob:` covers the avatar/upload previews (`URL.createObjectURL`). `data:` is for tiny inline icons. Presigned GET URLs point only at the bucket's own host. **The shared regional endpoint `https://us-east-1.linodeobjects.com` is never allowed**, because path-style URLs would reach any customer's bucket. |
+| `media-src` | `'self' blob: cuencada` | Videos and song. `data:` isn't needed. |
+| `connect-src` | `'self' wss://cuencada.com cuencada` | API (`'self'`), chat socket, and direct presigned PUT uploads to the bucket. |
 | `font-src` | `'self'` | System fonts only. |
 | `frame-src` | `https://weatherwidget.io` | Only the weather iframe (`https://weatherwidget.io/w/`, sandboxed, see WP-0.4's embed contract). The SPA frames nothing of its own, so `'self'` isn't needed. |
 | `frame-ancestors` | `'none'` | No one may frame the app (clickjacking). `X-Frame-Options: DENY` covers old browsers. |

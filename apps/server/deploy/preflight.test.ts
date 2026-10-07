@@ -155,10 +155,10 @@ describe("runPreflight", () => {
 
   it("requires the upload origin in the client build to match the bucket the server presigns for", () => {
     const result = withProject((project) => {
-      ((project.deploy as Dict).build_env as Dict).VITE_MEDIA_UPLOAD_ORIGIN = "https://us-southeast-1.linodeobjects.com";
+      ((project.deploy as Dict).build_env as Dict).VITE_MEDIA_UPLOAD_ORIGIN = "https://us-east-1.linodeobjects.com";
     });
     expect(result.problems).toEqual(
-      expect.arrayContaining([expect.stringContaining(`VITE_MEDIA_UPLOAD_ORIGIN must be https://${BUCKET}.us-southeast-1.linodeobjects.com`)])
+      expect.arrayContaining([expect.stringContaining(`VITE_MEDIA_UPLOAD_ORIGIN must be https://${BUCKET}.us-east-1.linodeobjects.com`)])
     );
   });
 
