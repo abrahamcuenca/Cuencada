@@ -34,7 +34,7 @@ describe("resolveMediaUploadOrigin", () => {
   });
 
   it("normalises an origin and allows a bare trailing slash", () => {
-    expect(resolveMediaUploadOrigin("https://cuencada.us-southeast-1.linodeobjects.com/", true)).toBe("https://cuencada.us-southeast-1.linodeobjects.com");
+    expect(resolveMediaUploadOrigin("https://cuencada.us-east-1.linodeobjects.com/", true)).toBe("https://cuencada.us-east-1.linodeobjects.com");
     expect(resolveMediaUploadOrigin("http://127.0.0.1:9000")).toBe("http://127.0.0.1:9000");
   });
 

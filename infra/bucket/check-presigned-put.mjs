@@ -5,7 +5,7 @@
  * production does.
  *
  *   pnpm build
- *   S3_ENDPOINT=https://us-southeast-1.linodeobjects.com S3_REGION=us-southeast-1 \
+ *   S3_ENDPOINT=https://us-east-1.linodeobjects.com S3_REGION=us-east-1 \
  *   S3_BUCKET=<bucket> S3_ACCESS_KEY_ID=… S3_SECRET_ACCESS_KEY=… \
  *   node infra/bucket/check-presigned-put.mjs
  *
@@ -24,7 +24,7 @@ import { S3Storage } from "../../apps/server/dist/lib/storage/s3.js";
 
 const settings = {
   S3_ENDPOINT: process.env.S3_ENDPOINT ?? "",
-  S3_REGION: process.env.S3_REGION ?? "us-southeast-1",
+  S3_REGION: process.env.S3_REGION ?? "us-east-1",
   S3_BUCKET: process.env.S3_BUCKET ?? "",
   S3_ACCESS_KEY_ID: process.env.S3_ACCESS_KEY_ID ?? "",
   S3_SECRET_ACCESS_KEY: process.env.S3_SECRET_ACCESS_KEY ?? ""

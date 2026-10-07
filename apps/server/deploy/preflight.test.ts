@@ -8,7 +8,14 @@ import { NGINX_SITE_TEMPLATE, type PreflightInput, runPreflight } from "./prefli
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const read = (path: string): string => readFileSync(resolve(repoRoot, path), "utf8");
 
-const BUCKET = "fictional-media-bucket";
+/** The production bucket (not a secret: it is in the CSP). */
+const BUCKET = "cuencada";
+const BUCKET_ORIGIN = `https://${BUCKET}.us-east-1.linodeobjects.com`;
+
+/** The repository's files with the real bucket swapped back to the `<bucket>` placeholder. */
+function withPlaceholder(text: string): string {
+  return text.replaceAll(BUCKET_ORIGIN, "https://<bucket>.us-east-1.linodeobjects.com").replace(/S3_BUCKET: cuencada$/m, "S3_BUCKET: <bucket>");
+}
 /** Stand-ins for the patched Acleron files (branch cuencada-nginx-credentials). */
 const PLATFORM_WITH_SUPPORT = {
   nginxTasks: "- name: Resolve the nginx site source\n  # nginx.site_template\n",
@@ -21,14 +28,14 @@ const STOCK_PLATFORM = {
 
 type Dict = Record<string, unknown>;
 
-/** The repository's real files, with the bucket placeholder filled in. */
+/** The repository's real deploy files. */
 function repoInput(
   overrides: { projectText?: string; nginxConf?: string; platform?: PreflightInput["platform"] } = {}
 ): PreflightInput {
-  const projectText = overrides.projectText ?? read("infra/project.yml").replaceAll("<bucket>", BUCKET);
+  const projectText = overrides.projectText ?? read("infra/project.yml");
   return {
     project: parseYaml(projectText),
-    nginxConf: overrides.nginxConf ?? read(NGINX_SITE_TEMPLATE).replaceAll("<bucket>", BUCKET),
+    nginxConf: overrides.nginxConf ?? read(NGINX_SITE_TEMPLATE),
     cspDoc: read("docs/security/csp.md"),
     serverPackage: JSON.parse(read("apps/server/package.json")),
     platform: overrides.platform === undefined ? PLATFORM_WITH_SUPPORT : overrides.platform
@@ -46,14 +53,14 @@ function withProject(edit: (project: Dict, env: Dict, credentials: Dict) => void
 
 /** Run with a text substitution in the nginx site (the substitution must apply). */
 function withNginx(from: string | RegExp, to: string): ReturnType<typeof runPreflight> {
-  const conf = read(NGINX_SITE_TEMPLATE).replaceAll("<bucket>", BUCKET);
+  const conf = read(NGINX_SITE_TEMPLATE);
   const edited = conf.replace(from, to);
   expect(edited).not.toBe(conf);
   return runPreflight(repoInput({ nginxConf: edited }));
 }
 
 describe("runPreflight", () => {
-  it("passes on the repository's deploy files once the bucket name is filled in", () => {
+  it("passes on the repository's deploy files", () => {
     const result = runPreflight(repoInput());
     expect(result.problems).toEqual([]);
     expect(result.warnings).toEqual([]);
@@ -68,7 +75,10 @@ describe("runPreflight", () => {
 
   it("fails while the <bucket> placeholder is still in project.yml and the nginx site", () => {
     const result = runPreflight(
-      repoInput({ projectText: read("infra/project.yml"), nginxConf: read(NGINX_SITE_TEMPLATE) })
+      repoInput({
+        projectText: withPlaceholder(read("infra/project.yml")),
+        nginxConf: withPlaceholder(read(NGINX_SITE_TEMPLATE))
+      })
     );
     expect(result.problems).toEqual(
       expect.arrayContaining([
@@ -155,10 +165,10 @@ describe("runPreflight", () => {
 
   it("requires the upload origin in the client build to match the bucket the server presigns for", () => {
     const result = withProject((project) => {
-      ((project.deploy as Dict).build_env as Dict).VITE_MEDIA_UPLOAD_ORIGIN = "https://us-southeast-1.linodeobjects.com";
+      ((project.deploy as Dict).build_env as Dict).VITE_MEDIA_UPLOAD_ORIGIN = "https://us-east-1.linodeobjects.com";
     });
     expect(result.problems).toEqual(
-      expect.arrayContaining([expect.stringContaining(`VITE_MEDIA_UPLOAD_ORIGIN must be https://${BUCKET}.us-southeast-1.linodeobjects.com`)])
+      expect.arrayContaining([expect.stringContaining(`VITE_MEDIA_UPLOAD_ORIGIN must be ${BUCKET_ORIGIN}`)])
     );
   });
 

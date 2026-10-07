@@ -77,7 +77,7 @@ export function resolveApiBaseUrl(raw: string | undefined, origin: string, produ
  *
  * @param raw - The raw env value.
  * @param production - True for production builds (`import.meta.env.PROD`).
- * @returns The normalised origin (e.g. `https://cuencada.us-southeast-1.linodeobjects.com`), or `null` when unset.
+ * @returns The normalised origin (e.g. `https://cuencada.us-east-1.linodeobjects.com`), or `null` when unset.
  * @throws {EnvConfigError} When the value is not an allowed origin.
  */
 export function resolveMediaUploadOrigin(raw: string | undefined, production = false): string | null {

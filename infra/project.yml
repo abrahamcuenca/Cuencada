@@ -64,7 +64,7 @@ deploy:
     # Must equal https://<S3_BUCKET>.<S3_ENDPOINT host>: the presigned PUT
     # origin. Unset or wrong = gallery uploads are refused. The bucket name is
     # not a secret (it is in the CSP). OPEN QUESTION (owner): bucket name.
-    VITE_MEDIA_UPLOAD_ORIGIN: https://<bucket>.us-southeast-1.linodeobjects.com
+    VITE_MEDIA_UPLOAD_ORIGIN: https://cuencada.us-east-1.linodeobjects.com
 
 tls:
   enabled: true
@@ -127,11 +127,11 @@ server:
     # Breached-password check (WP-2.3c): needs outbound HTTPS to api.pwnedpasswords.com; fails open.
     PASSWORD_BREACH_CHECK: "on"
     PASSWORD_BREACH_MIN_COUNT: "1"
-    S3_ENDPOINT: https://us-southeast-1.linodeobjects.com
-    S3_REGION: us-southeast-1
+    S3_ENDPOINT: https://us-east-1.linodeobjects.com
+    S3_REGION: us-east-1
     # Not a secret (it is in the CSP and every presigned URL). Same value as
     # in VITE_MEDIA_UPLOAD_ORIGIN and infra/nginx/cuencada.conf.
-    S3_BUCKET: <bucket>
+    S3_BUCKET: cuencada
     # Private bucket: everything is presigned, no public base URL.
     S3_PUBLIC_BASE_URL: ""
     # libuv pool shared by argon2, sharp and DNS/fs: 6 keeps a long image job
