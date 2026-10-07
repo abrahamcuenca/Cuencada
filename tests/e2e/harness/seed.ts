@@ -14,6 +14,7 @@ import { runMigrations } from "../../../apps/server/dist/db/migrate.js";
 import { hashPassword } from "../../../apps/server/dist/lib/passwords.js";
 import { resolveSeedOptions, runSeed } from "../../../apps/server/dist/seed.js";
 import {
+  ANNOUNCED_YEAR,
   CastRole,
   castMember,
   FUTURE_YEAR,
@@ -95,6 +96,18 @@ async function seedFutureEdition(sql: Sql): Promise<string> {
   return edition.id;
 }
 
+/**
+ * The fictional announced edition (WP-3.1a): published without dates or place,
+ * so its page shows "Por anunciar", no countdown and no RSVP form. It never
+ * becomes Home's featured edition while the dated 2027 one is upcoming.
+ */
+async function seedAnnouncedEdition(sql: Sql): Promise<void> {
+  await sql`
+    insert into cuencadas (year, slug, title, timezone, country, description, theme_color, is_published, first_published_at)
+    values (${ANNOUNCED_YEAR}, ${String(ANNOUNCED_YEAR)}, ${`Cuencada ${ANNOUNCED_YEAR}`}, 'America/Merida', 'México',
+            'Edición anunciada de prueba: la fecha y el lugar aún no se definen.', '#0b5e55', true, now())`;
+}
+
 /** Two people per project, the parent linked to Ana with a `parent_of` edge; the partner edge is left for journey 7. */
 async function seedFamily(sql: Sql, project: ProjectKey, anaUserId: string, betoUserId: string): Promise<void> {
   const names = familyNames(project);
@@ -172,6 +185,7 @@ export async function prepareE2eDatabase(target: E2eDatabaseTarget): Promise<voi
     await assertCurrentDatabase(guardQuery(fixtures), target.database);
     const hashes = { member: await hashPassword(MEMBER_PASSWORD), temp: await hashPassword(TEMP_ADMIN_PASSWORD) };
     const editionId = await seedFutureEdition(sql);
+    await seedAnnouncedEdition(sql);
     for (const project of PROJECT_KEYS) {
       const ids = new Map<CastRole, string>();
       for (const role of Object.values(CastRole)) ids.set(role, await insertUser(sql, project, role, hashes));

@@ -2,6 +2,7 @@ import type { CuencadaHome, CuencadaSummary, MemberCuencadaDetails, PublicCuenca
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestApp } from "../../../test/helpers/app.js";
 import {
+  insertAnnouncedCuencada,
   insertAnnouncement,
   insertCuencada,
   insertDailyMessage,
@@ -63,6 +64,25 @@ describe("GET /api/cuencadas/:year", () => {
     expect(body.publicItinerary[0]).toMatchObject({ startTime: "19:30", endTime: null, locationId: hotel.id });
     expect(body.publicLocations.map((location) => location.name)).toEqual(["Hotel público"]);
     expect(body.publicAnnouncements.map((announcement) => announcement.title)).toEqual(["Aviso público"]);
+  });
+
+  it("returns an announced edition with null dates and place", async () => {
+    await insertAnnouncedCuencada(2027);
+
+    const response = await app.inject({ method: "GET", url: "/api/cuencadas/2027" });
+    const list = (await app.inject({ method: "GET", url: "/api/cuencadas" })).json<CuencadaSummary[]>();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json<PublicCuencada>()).toMatchObject({
+      status: "announced",
+      startsAt: null,
+      endsAt: null,
+      city: null,
+      state: null,
+      publicItinerary: [],
+      todayMessage: null
+    });
+    expect(list).toEqual([expect.objectContaining({ year: 2027, status: "announced", startsAt: null, city: null })]);
   });
 
   it("answers 404 for drafts and unknown years, and 400 for a malformed year", async () => {
@@ -192,6 +212,37 @@ describe("GET /api/cuencadas/home", () => {
     expect(after.mode).toBe("memories");
     expect(after.featured).toBeNull();
     expect(after.latestPast?.year).toBe(2026);
+  });
+
+  it("features an announced edition (no dates, no place) once the previous one is over", async () => {
+    await insertCuencada({ year: 2026 });
+    await insertAnnouncedCuencada(2027);
+    clock.set("2026-10-07T18:00:00Z");
+
+    const response = await app.inject({ method: "GET", url: "/api/cuencadas/home" });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json<CuencadaHome>();
+    expect(body.mode).toBe("announced");
+    expect(body.featured).toMatchObject({
+      year: 2027,
+      status: "announced",
+      startsAt: null,
+      endsAt: null,
+      city: null,
+      state: null
+    });
+    expect(body.latestPast).toMatchObject({ year: 2026, status: "past" });
+  });
+
+  it("prefers a dated upcoming edition over an announced one", async () => {
+    await insertAnnouncedCuencada(2027);
+    await insertCuencada({ year: 2026 });
+
+    const body = (await app.inject({ method: "GET", url: "/api/cuencadas/home" })).json<CuencadaHome>();
+
+    expect(body.mode).toBe("upcoming");
+    expect(body.featured?.year).toBe(2026);
   });
 
   it("answers an empty memories home when nothing is published", async () => {

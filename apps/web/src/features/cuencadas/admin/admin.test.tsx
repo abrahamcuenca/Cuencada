@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
@@ -66,16 +66,42 @@ describe("AdminCuencadasPage", () => {
     await user.type(within(form).getByLabelText("Año"), "2027");
     await user.type(within(form).getByLabelText("Título"), "Cuencada 2027");
     await user.type(within(form).getByLabelText("Descripción"), "Nos vemos en Oaxaca.");
-    await user.type(within(form).getByLabelText("Ciudad"), "Oaxaca");
-    await user.type(within(form).getByLabelText("Estado"), "Oaxaca");
-    fireEvent.change(within(form).getByLabelText("Inicio"), { target: { value: "2027-07-10T10:00" } });
-    fireEvent.change(within(form).getByLabelText("Fin"), { target: { value: "2027-07-09T10:00" } });
+    await user.type(within(form).getByLabelText(/^Ciudad/), "Oaxaca");
+    await user.type(within(form).getByLabelText(/^Estado/), "Oaxaca");
+    fireEvent.change(within(form).getByLabelText(/^Inicio/), { target: { value: "2027-07-10T10:00" } });
+    fireEvent.change(within(form).getByLabelText(/^Fin/), { target: { value: "2027-07-09T10:00" } });
     await user.type(within(form).getByLabelText(/Grupo de WhatsApp/), "http://chat.whatsapp.com/x");
     await user.click(screen.getByRole("button", { name: "Crear borrador" }));
 
     expect(within(form).getByText("La fecha de fin debe ser posterior al inicio.")).toBeInTheDocument();
     expect(within(form).getByText("El enlace debe ser una dirección https:// válida.")).toBeInTheDocument();
     expect(requests).toHaveLength(0);
+  });
+
+  it("creates an announced edition with empty dates and place, and rejects one date alone", async () => {
+    const user = userEvent.setup();
+    renderApp("/admin/cuencadas", admin());
+
+    await user.click(await screen.findByRole("button", { name: "Nueva" }));
+    const form = screen.getByRole("form", { name: "Nueva Cuencada" });
+    expect(within(form).getByLabelText(/^Inicio/)).toHaveAccessibleDescription("Déjalo vacío si aún no se define");
+    expect(within(form).getByLabelText(/^Ciudad/)).toHaveAccessibleDescription("Déjalo vacío si aún no se define");
+    await user.type(within(form).getByLabelText("Año"), "2027");
+    await user.type(within(form).getByLabelText("Título"), "Cuencada 2027");
+    await user.type(within(form).getByLabelText("Descripción"), "Fecha y lugar por anunciar.");
+
+    // Only the start: the form asks for both before sending anything.
+    fireEvent.change(within(form).getByLabelText(/^Inicio/), { target: { value: "2027-07-10T10:00" } });
+    await user.click(screen.getByRole("button", { name: "Crear borrador" }));
+    expect(within(form).getByText("Escribe las dos fechas (inicio y fin) o deja ambas vacías.")).toBeInTheDocument();
+    expect(within(form).getByLabelText(/^Fin/)).toHaveAttribute("aria-invalid", "true");
+    expect(requests).toHaveLength(0);
+
+    fireEvent.change(within(form).getByLabelText(/^Inicio/), { target: { value: "" } });
+    await user.click(screen.getByRole("button", { name: "Crear borrador" }));
+
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]?.body).toMatchObject({ year: 2027, startsAt: null, endsAt: null, city: null, state: null });
   });
 
   it("sends wall-clock times in the edition's timezone and maps a duplicate year onto the field", async () => {
@@ -87,10 +113,10 @@ describe("AdminCuencadasPage", () => {
     await user.type(within(form).getByLabelText("Año"), "2026");
     await user.type(within(form).getByLabelText("Título"), "Otra 2026");
     await user.type(within(form).getByLabelText("Descripción"), "Duplicada.");
-    await user.type(within(form).getByLabelText("Ciudad"), "Mérida");
-    await user.type(within(form).getByLabelText("Estado"), "Yucatán");
-    fireEvent.change(within(form).getByLabelText("Inicio"), { target: { value: "2026-09-13T00:00" } });
-    fireEvent.change(within(form).getByLabelText("Fin"), { target: { value: "2026-09-18T23:59" } });
+    await user.type(within(form).getByLabelText(/^Ciudad/), "Mérida");
+    await user.type(within(form).getByLabelText(/^Estado/), "Yucatán");
+    fireEvent.change(within(form).getByLabelText(/^Inicio/), { target: { value: "2026-09-13T00:00" } });
+    fireEvent.change(within(form).getByLabelText(/^Fin/), { target: { value: "2026-09-18T23:59" } });
     await user.click(screen.getByRole("button", { name: "Crear borrador" }));
 
     expect(await within(form).findByText("Ya existe una Cuencada con ese año.")).toBeInTheDocument();

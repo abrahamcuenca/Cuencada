@@ -5,6 +5,7 @@ import type { InjectOptions } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestApp } from "../../../test/helpers/app.js";
 import {
+  insertAnnouncedCuencada,
   insertCuencada,
   insertDailyMessage,
   insertItineraryItem,
@@ -247,6 +248,66 @@ describe("cuencada CRUD", () => {
     const rows = await audits("cuencada.updated");
     expect(rows).toHaveLength(1);
     expect(rows[0]?.metadata).toEqual({ year: 2028, fields: ["title", "year"] });
+  });
+
+  it("creates and publishes an announced edition without dates or place", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/admin/cuencadas",
+      payload: { year: 2027, title: "Cuencada 2027", description: "Fecha y lugar por anunciar.", isPublished: true },
+      ...adminAuth
+    });
+
+    expect(created.statusCode).toBe(201);
+    expect(created.json<AdminCuencada>()).toMatchObject({
+      status: "announced",
+      startsAt: null,
+      endsAt: null,
+      city: null,
+      state: null,
+      isPublished: true
+    });
+    const [row] = await getTestDb().select().from(cuencadas).where(eq(cuencadas.year, 2027));
+    expect(row).toMatchObject({ startsAt: null, endsAt: null, city: null, state: null });
+    expect(row?.firstPublishedAt).not.toBeNull();
+  });
+
+  it("rejects one date without the other on create", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/admin/cuencadas",
+      payload: { year: 2027, title: "Cuencada 2027", description: "x", startsAt: "2027-09-12T00:00:00-06:00" },
+      ...adminAuth
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(errorOf(response.body).details?.[0]?.path).toBe("endsAt");
+  });
+
+  it("sets and clears the dates of an announced edition on PATCH, checking the merged row", async () => {
+    const edition = await insertAnnouncedCuencada(2027);
+    const url = `/api/admin/cuencadas/${edition.id}`;
+
+    // One date alone would leave the merged row half-dated.
+    const lonelyStart = await app.inject({ method: "PATCH", url, payload: { startsAt: "2027-09-12T00:00:00-06:00" }, ...adminAuth });
+    expect(lonelyStart.statusCode).toBe(400);
+    expect(errorOf(lonelyStart.body).details?.[0]).toMatchObject({ path: "endsAt" });
+
+    const dated = await app.inject({
+      method: "PATCH",
+      url,
+      payload: { startsAt: "2027-09-12T00:00:00-06:00", endsAt: "2027-09-17T23:59:59-06:00", city: "Valladolid", state: "Yucatán" },
+      ...adminAuth
+    });
+    expect(dated.statusCode).toBe(200);
+    expect(dated.json<AdminCuencada>()).toMatchObject({ status: "upcoming", city: "Valladolid" });
+
+    // Clearing only one date is refused by the contract; clearing both returns to announced.
+    const clearOne = await app.inject({ method: "PATCH", url, payload: { endsAt: null }, ...adminAuth });
+    expect(clearOne.statusCode).toBe(400);
+    const cleared = await app.inject({ method: "PATCH", url, payload: { startsAt: null, endsAt: null, city: "" }, ...adminAuth });
+    expect(cleared.statusCode).toBe(200);
+    expect(cleared.json<AdminCuencada>()).toMatchObject({ status: "announced", startsAt: null, endsAt: null, city: null });
   });
 
   it("refuses to change the year of a published edition with 409, but allows it after unpublishing", async () => {

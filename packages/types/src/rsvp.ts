@@ -29,6 +29,20 @@ export const RSVP_NOTES_MAX_LENGTH = 500;
  * Checked server-side; clients may mirror it for date pickers.
  */
 export const RSVP_DATE_WINDOW_DAYS = 14;
+
+/**
+ * Stable reason on the 409 `CONFLICT` answered to an RSVP write for an
+ * edition without dates (status `announced`, WP-3.1a). It travels as
+ * `error.details[0].code` (the open detail-code channel of ADR 0001 §4), so
+ * older clients still parse the error and show its `message`.
+ */
+export const RsvpIssueCode = {
+  DatesPending: "RSVP_DATES_PENDING"
+} as const;
+export type RsvpIssueCode = (typeof RsvpIssueCode)[keyof typeof RsvpIssueCode];
+
+/** Spanish note shown instead of the RSVP form, and the 409 message, while the date is not announced. */
+export const RSVP_DATES_PENDING_MESSAGE = "Las confirmaciones abren cuando se anuncie la fecha.";
 /** Max person ids in one attendance write. */
 export const ATTENDANCE_MAX_PEOPLE = 1000;
 

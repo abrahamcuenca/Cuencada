@@ -113,3 +113,5 @@ export function familyNames(project: ProjectKey): { parent: string; partner: str
 export const FUTURE_YEAR = 2027;
 /** The seeded (past) edition whose public programa the offline journey caches. */
 export const SEEDED_YEAR = 2026;
+/** A fictional announced edition (WP-3.1a): published, no dates and no place yet. */
+export const ANNOUNCED_YEAR = 2028;

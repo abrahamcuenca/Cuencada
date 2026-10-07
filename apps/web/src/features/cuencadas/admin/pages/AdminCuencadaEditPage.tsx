@@ -96,7 +96,8 @@ function Editor({ detail }: { detail: AdminCuencadaDetail }): ReactNode {
       });
   };
 
-  const firstDay = isoToZonedLocal(cuencada.startsAt, cuencada.timezone).slice(0, 10);
+  // An announced edition has no first day yet: a new activity starts with an empty date.
+  const firstDay = cuencada.startsAt === null ? "" : isoToZonedLocal(cuencada.startsAt, cuencada.timezone).slice(0, 10);
 
   return (
     <div className={`cu-container ${styles.page}`}>

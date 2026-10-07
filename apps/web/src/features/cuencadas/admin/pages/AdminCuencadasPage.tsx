@@ -110,11 +110,17 @@ function CuencadaCard({ cuencada }: { cuencada: AdminCuencada }): ReactNode {
       <Card padding="sm" className={styles.row}>
         <div className={styles.rowMain}>
           <h2 className={styles.rowTitle}>
-            {cuencada.year} · {cuencada.city}
+            {cuencada.year} · {cuencada.city ?? "Lugar por anunciar"}
           </h2>
           <p className={styles.rowMeta}>
-            {formatDate(cuencada.startsAt, cuencada.timezone, { day: "numeric", month: "short" })} –{" "}
-            {formatDate(cuencada.endsAt, cuencada.timezone, { day: "numeric", month: "short", year: "numeric" })}
+            {cuencada.startsAt !== null && cuencada.endsAt !== null ? (
+              <>
+                {formatDate(cuencada.startsAt, cuencada.timezone, { day: "numeric", month: "short" })} –{" "}
+                {formatDate(cuencada.endsAt, cuencada.timezone, { day: "numeric", month: "short", year: "numeric" })}
+              </>
+            ) : (
+              "Fecha por anunciar"
+            )}
           </p>
         </div>
         <Badge tone={cuencada.isPublished ? "success" : "neutral"}>{cuencada.isPublished ? "Publicada" : "Borrador"}</Badge>

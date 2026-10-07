@@ -1,4 +1,12 @@
-import type { MyRsvp, MyRsvpResponse, PublicCuencada, RsvpStatus } from "@cuencada/types";
+import {
+  type DatedCuencada,
+  hasDates,
+  type MyRsvp,
+  type MyRsvpResponse,
+  type PublicCuencada,
+  RSVP_DATES_PENDING_MESSAGE,
+  type RsvpStatus
+} from "@cuencada/types";
 import { type FormEvent, type ReactNode, useRef, useState } from "react";
 import { getApiErrorCode, getApiErrorMessage, isAbortError } from "../../../shared/api/errors";
 import { formatDate } from "../../../shared/lib/dates";
@@ -35,6 +43,7 @@ export interface RsvpCardProps {
 /**
  * The RSVP slot (`RsvpSlot`) on Home and `/cuencada/:year`.
  * - Visitors: nothing (the page already shows the lock card).
+ * - Announced edition (no dates yet): a note that RSVPs open once the date is announced.
  * - Upcoming/active edition: the "¿Vas a la Cuencada?" card.
  * - Past edition: a "Fuiste a esta Cuencada" badge when the member attended.
  */
@@ -44,8 +53,25 @@ export function RsvpCard({ year }: RsvpCardProps): ReactNode {
   if (member === null || cuencada.data === undefined) return null;
   if (cuencada.data.status === "past") return <AttendedBadge year={year} />;
   if (cuencada.data.status === "draft") return null;
+  // `hasDates` (not only `status`) so the form's stay window can never see a null date.
+  if (!hasDates(cuencada.data)) return <RsvpDatesPending />;
   return <RsvpPanel cuencada={cuencada.data} />;
 }
+
+/** Shown instead of the form while the edition has no dates (the server refuses RSVPs then). */
+function RsvpDatesPending(): ReactNode {
+  return (
+    <Card as="section" tone="default" padding="md" icon="✅" title="Confirmar asistencia" className={styles.card} data-slot="rsvp">
+      <p className={styles.closed} role="note">
+        <span aria-hidden="true">🗓️ </span>
+        {RSVP_DATES_PENDING_MESSAGE}
+      </p>
+    </Card>
+  );
+}
+
+/** An edition the RSVP form can work with: its stay window needs both dates. */
+type DatedEdition = DatedCuencada<PublicCuencada>;
 
 /** "Fuiste a esta Cuencada" for past editions the member attended. Silent otherwise. */
 function AttendedBadge({ year }: { year: number }): ReactNode {
@@ -60,7 +86,7 @@ function AttendedBadge({ year }: { year: number }): ReactNode {
   );
 }
 
-function RsvpPanel({ cuencada }: { cuencada: PublicCuencada }): ReactNode {
+function RsvpPanel({ cuencada }: { cuencada: DatedEdition }): ReactNode {
   const my = useGetMyRsvpQuery(cuencada.year);
   let body: ReactNode;
   if (my.data !== undefined) {
@@ -100,7 +126,7 @@ function sentence(text: string): string {
 }
 
 interface RsvpBodyProps {
-  cuencada: PublicCuencada;
+  cuencada: DatedEdition;
   data: MyRsvpResponse;
   /** Called on 409 `CONFLICT` (RSVP closed): reloads `editable` so the card locks. */
   onClosed: () => void;

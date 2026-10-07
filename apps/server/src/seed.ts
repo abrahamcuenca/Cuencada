@@ -308,6 +308,11 @@ async function seedAdmin(
   return { adminId, adminCreated, adminEmailVerified, profileCreated: insertedProfile.length > 0 };
 }
 
+/** An ISO instant from the parsed seed input as a `Date`, keeping `null`. */
+function toDateOrNull(value: string | null): Date | null {
+  return value === null ? null : new Date(value);
+}
+
 /** Insert the 2026 edition and any of its missing locations and itinerary items. */
 async function seedCuencada2026(
   tx: Transaction,
@@ -318,9 +323,9 @@ async function seedCuencada2026(
     .values({
       ...data.cuencada,
       slug: String(data.cuencada.year),
-      startsAt: new Date(data.cuencada.startsAt),
-      endsAt: new Date(data.cuencada.endsAt),
-      rsvpDeadline: data.cuencada.rsvpDeadline === null ? null : new Date(data.cuencada.rsvpDeadline),
+      startsAt: toDateOrNull(data.cuencada.startsAt),
+      endsAt: toDateOrNull(data.cuencada.endsAt),
+      rsvpDeadline: toDateOrNull(data.cuencada.rsvpDeadline),
       // Seeded already published: record it, like T2 does on a first publish.
       firstPublishedAt: data.cuencada.isPublished ? new Date() : null
     })

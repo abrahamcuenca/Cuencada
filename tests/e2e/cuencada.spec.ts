@@ -2,7 +2,7 @@
  * Journey 4: the year page, public vs member view, the RSVP save and the
  * attendees list.
  */
-import { FUTURE_YEAR } from "./harness/people.js";
+import { ANNOUNCED_YEAR, FUTURE_YEAR } from "./harness/people.js";
 import { CastRole, expect, journeyShot, login, setControl, test } from "./support/fixtures.js";
 
 test.describe("cuencada year page", () => {
@@ -45,5 +45,20 @@ test.describe("cuencada year page", () => {
     await expect(page.getByRole("button", { name: /confirmados?\s*:\s*ver la lista/ })).toBeVisible();
     await expect(page.getByText("¡Vas!")).toBeVisible();
     await expect(page.getByRole("button", { name: "Cambiar respuesta" })).toBeVisible();
+  });
+
+  test("4 · an announced edition shows Por anunciar, no countdown and no RSVP form", async ({ page, cast }) => {
+    await page.goto(`/cuencada/${ANNOUNCED_YEAR}`);
+    await expect(page.getByRole("heading", { name: `Cuencada ${ANNOUNCED_YEAR}`, level: 1 })).toBeVisible();
+    await expect(page.getByText("Fecha y lugar por anunciar")).toBeVisible();
+    await expect(page.getByTestId("pending-facts")).toContainText("Por anunciar");
+    await expect(page.getByRole("timer")).toHaveCount(0);
+    await expect(page.getByRole("region", { name: `Programa Cuencada ${ANNOUNCED_YEAR}` })).toHaveCount(0);
+
+    await login(page, cast(CastRole.Ana));
+    await page.goto(`/cuencada/${ANNOUNCED_YEAR}`);
+    const family = page.getByRole("region", { name: "Para la familia" });
+    await expect(family.getByText("Las confirmaciones abren cuando se anuncie la fecha.")).toBeVisible();
+    await expect(family.getByRole("radio")).toHaveCount(0);
   });
 });
