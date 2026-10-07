@@ -1,8 +1,8 @@
-import type { ApiError, Attendee, MyRsvp, MyRsvpResponse, RsvpSummary } from "@cuencada/types";
+import { type ApiError, type Attendee, type MyRsvp, type MyRsvpResponse, RSVP_DATES_PENDING_MESSAGE, type RsvpSummary } from "@cuencada/types";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestApp } from "../../../test/helpers/app.js";
-import { insertCuencada, insertLocation, type MutableClock, mutableClock } from "../../../test/helpers/cuencadas.js";
+import { insertAnnouncedCuencada, insertCuencada, insertLocation, type MutableClock, mutableClock } from "../../../test/helpers/cuencadas.js";
 import { getTestDb } from "../../../test/helpers/db.js";
 import { type AuthInjectOptions, createUser, loginAs, type TestUser } from "../../../test/helpers/factories.js";
 import type { App } from "../../app.js";
@@ -281,6 +281,22 @@ describe("PUT /api/cuencadas/:year/rsvp/me", () => {
     expect((await putRsvp(2026, { status: "yes" })).statusCode).toBe(200);
   });
 
+  it("answers 409 RSVP_DATES_PENDING for an announced edition, even with a future deadline, and writes nothing", async () => {
+    // A deadline without dates must not open RSVPs: there is no stay window yet.
+    await insertAnnouncedCuencada(2027, { rsvpDeadline: new Date("2027-08-31T12:00:00-06:00") });
+
+    const res = await putRsvp(2027, { status: "yes" });
+
+    expect(res.statusCode).toBe(409);
+    const error = errorOf(res.body);
+    expect(error).toMatchObject({ code: "CONFLICT", message: RSVP_DATES_PENDING_MESSAGE });
+    expect(error.details).toEqual([{ path: "cuencada", message: RSVP_DATES_PENDING_MESSAGE, code: "RSVP_DATES_PENDING" }]);
+    expect(await getTestDb().select().from(cuencadaRsvps)).toEqual([]);
+
+    const me = await app.inject({ method: "GET", url: "/api/cuencadas/2027/rsvp/me", ...memberAuth });
+    expect(me.json<MyRsvpResponse>()).toEqual({ rsvp: null, deadline: "2027-08-31T18:00:00.000Z", editable: false });
+  });
+
   it("answers 401 without a token and 404 for a draft", async () => {
     await insertCuencada({ year: 2027, isPublished: false });
     expect(
@@ -397,6 +413,20 @@ describe("GET /api/cuencadas/:year/rsvp/summary", () => {
 });
 
 describe("GET /api/cuencadas/:year/attendees", () => {
+  it("works for an announced edition: historical attendance and a zero summary", async () => {
+    const edition = await insertAnnouncedCuencada(2027);
+    const person = await insertPerson("Tía Lupe");
+    await getTestDb().insert(cuencadaAttendance).values({ cuencadaId: edition.id, personId: person });
+
+    const attendees = await app.inject({ method: "GET", url: "/api/cuencadas/2027/attendees", ...memberAuth });
+    const summary = await app.inject({ method: "GET", url: "/api/cuencadas/2027/rsvp/summary", ...memberAuth });
+
+    expect(attendees.statusCode).toBe(200);
+    expect(attendees.json<Attendee[]>().map((attendee) => attendee.displayName)).toEqual(["Tía Lupe"]);
+    expect(summary.statusCode).toBe(200);
+    expect(summary.json<RsvpSummary>()).toMatchObject({ cuencadaId: edition.id, yes: 0 });
+  });
+
   it("unions yes RSVPs with attendance, dedupes by person and exposes no contact fields", async () => {
     const edition = await insertCuencada();
     const memberPerson = await insertPerson("Alberto Morales", member.id);

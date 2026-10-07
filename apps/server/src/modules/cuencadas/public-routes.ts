@@ -80,7 +80,10 @@ const cuencadaPublicRoutes: FastifyPluginAsyncZod = async (app) => {
     }
   );
 
-  /** `GET /api/cuencadas/home`: featured edition (active, else upcoming), latest past and portal-wide public announcements. */
+  /**
+   * `GET /api/cuencadas/home`: featured edition (active, else upcoming, else
+   * announced without dates), latest past and portal-wide public announcements.
+   */
   app.get(
     "/cuencadas/home",
     { config: { auth: "public" }, schema: { response: { 200: cuencadaHomeSchema } } },
@@ -93,10 +96,12 @@ const cuencadaPublicRoutes: FastifyPluginAsyncZod = async (app) => {
       const candidates = editions.map((edition) => ({
         ...edition,
         status: computeCuencadaStatus(edition.row, now),
+        year: edition.row.year,
+        timezone: edition.row.timezone,
         startsAt: edition.row.startsAt,
         endsAt: edition.row.endsAt
       }));
-      const selection = selectHome(candidates);
+      const selection = selectHome(candidates, now);
       return {
         mode: selection.mode,
         featured: selection.featured === null ? null : await buildPublicCuencada(app.db, selection.featured.row, now),

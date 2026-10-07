@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeCuencadaStatus, localDateInZone, selectHome, type StatusInput } from "./status.js";
+import { computeCuencadaStatus, localDateInZone, localYearInZone, selectHome, type StatusInput } from "./status.js";
 
 const edition: StatusInput = {
   isPublished: true,
@@ -70,47 +70,123 @@ describe("computeCuencadaStatus", () => {
   });
 });
 
+describe("computeCuencadaStatus without dates", () => {
+  const undated: StatusInput = { isPublished: true, startsAt: null, endsAt: null, timezone: "America/Merida" };
+
+  it("returns announced for a published edition without dates, at any instant", () => {
+    expect(computeCuencadaStatus(undated, at("2026-10-07T12:00:00Z"))).toBe("announced");
+    expect(computeCuencadaStatus(undated, at("2030-01-01T00:00:00Z"))).toBe("announced");
+  });
+
+  it("returns draft for an unpublished edition without dates", () => {
+    expect(computeCuencadaStatus({ ...undated, isPublished: false }, at("2026-10-07T12:00:00Z"))).toBe("draft");
+  });
+
+  it("treats a single missing date as announced instead of throwing (the DB forbids it)", () => {
+    expect(computeCuencadaStatus({ ...edition, endsAt: null }, at("2026-10-07T12:00:00Z"))).toBe("announced");
+  });
+});
+
+describe("localYearInZone", () => {
+  it("uses the year in the zone, not in UTC, around New Year", () => {
+    // 2027-01-01T03:00Z is still 31 Dec 2026, 21:00 in Mérida (UTC-6).
+    expect(localYearInZone(at("2027-01-01T03:00:00Z"), "America/Merida")).toBe(2026);
+    expect(localYearInZone(at("2027-01-01T06:00:00Z"), "America/Merida")).toBe(2027);
+    // Tokyo is already in 2027 at 2026-12-31T15:00Z.
+    expect(localYearInZone(at("2026-12-31T15:00:00Z"), "Asia/Tokyo")).toBe(2027);
+  });
+});
+
 describe("selectHome", () => {
-  const edition = (
-    name: string,
-    status: "upcoming" | "active" | "past" | "draft",
-    startsAt: string,
-    endsAt: string
-  ): { name: string; status: typeof status; startsAt: Date; endsAt: Date } => ({
+  type Status = "upcoming" | "active" | "past" | "draft" | "announced";
+  interface Candidate {
+    name: string;
+    status: Status;
+    year: number;
+    timezone: string;
+    startsAt: Date | null;
+    endsAt: Date | null;
+  }
+  const edition = (name: string, status: Status, startsAt: string, endsAt: string): Candidate => ({
     name,
     status,
+    year: Number(name),
+    timezone: "America/Merida",
     startsAt: new Date(startsAt),
     endsAt: new Date(endsAt)
   });
+  const announcedEdition = (year: number, timezone = "America/Merida"): Candidate => ({
+    name: `${year} anunciada`,
+    status: "announced",
+    year,
+    timezone,
+    startsAt: null,
+    endsAt: null
+  });
 
+  const now = at("2026-10-07T12:00:00Z");
   const past2024 = edition("2024", "past", "2024-09-10T00:00:00Z", "2024-09-15T00:00:00Z");
   const past2025 = edition("2025", "past", "2025-09-10T00:00:00Z", "2025-09-15T00:00:00Z");
+  const past2026 = edition("2026", "past", "2026-09-13T00:00:00Z", "2026-09-18T00:00:00Z");
   const upcoming2026 = edition("2026", "upcoming", "2026-09-13T00:00:00Z", "2026-09-18T00:00:00Z");
   const upcoming2027 = edition("2027", "upcoming", "2027-09-13T00:00:00Z", "2027-09-18T00:00:00Z");
   const active2026 = edition("2026", "active", "2026-09-13T00:00:00Z", "2026-09-18T00:00:00Z");
 
-  it("features the active edition over upcoming ones", () => {
-    const result = selectHome([upcoming2027, active2026, past2025]);
+  it("features the active edition over upcoming and announced ones", () => {
+    const result = selectHome([upcoming2027, active2026, past2025, announcedEdition(2028)], now);
     expect(result.mode).toBe("active");
     expect(result.featured?.name).toBe("2026");
     expect(result.latestPast?.name).toBe("2025");
   });
 
-  it("features the soonest upcoming edition when none is active", () => {
-    const result = selectHome([upcoming2027, upcoming2026, past2024, past2025]);
+  it("features the soonest upcoming edition when none is active, even with an announced one", () => {
+    const result = selectHome([announcedEdition(2026), upcoming2027, upcoming2026, past2024, past2025], now);
     expect(result.mode).toBe("upcoming");
     expect(result.featured?.name).toBe("2026");
     expect(result.latestPast?.name).toBe("2025");
   });
 
+  it("features the announced edition when nothing is active or dated upcoming, keeping the previous memories", () => {
+    const announced2027 = announcedEdition(2027);
+    const result = selectHome([past2025, announced2027, past2026], now);
+    expect(result).toEqual({ mode: "announced", featured: announced2027, latestPast: past2026 });
+  });
+
+  it("picks the lowest announced year that is this year or later", () => {
+    const result = selectHome([announcedEdition(2029), announcedEdition(2027), announcedEdition(2028)], now);
+    expect(result.featured?.year).toBe(2027);
+  });
+
+  it("ignores an announced edition whose year is already over", () => {
+    const result = selectHome([announcedEdition(2025), past2026], now);
+    expect(result).toEqual({ mode: "memories", featured: null, latestPast: past2026 });
+    // A stale 2025 announcement never wins over a valid 2027 one, despite the lower year.
+    expect(selectHome([announcedEdition(2025), announcedEdition(2027)], now).featured?.year).toBe(2027);
+  });
+
+  it("keeps an announced edition of the current year through 31 December in its own timezone", () => {
+    const announced2026 = announcedEdition(2026);
+    // 2027-01-01T05:59Z is still 31 Dec 2026 in Mérida (UTC-6).
+    expect(selectHome([announced2026], at("2027-01-01T05:59:59Z")).mode).toBe("announced");
+    // From local midnight it is 2027 in Mérida and the 2026 announcement is stale.
+    expect(selectHome([announced2026], at("2027-01-01T06:00:00Z")).mode).toBe("memories");
+  });
+
+  it("uses each announced edition's own timezone for the year rollover", () => {
+    // At 2026-12-31T15:00Z it is already 2027 in Tokyo, but still 2026 in Mérida.
+    const instant = at("2026-12-31T15:00:00Z");
+    expect(selectHome([announcedEdition(2026, "Asia/Tokyo")], instant).mode).toBe("memories");
+    expect(selectHome([announcedEdition(2026, "America/Merida")], instant).mode).toBe("announced");
+  });
+
   it("falls back to memories mode with the most recently ended past edition", () => {
-    const result = selectHome([past2024, past2025]);
+    const result = selectHome([past2024, past2025], now);
     expect(result).toEqual({ mode: "memories", featured: null, latestPast: past2025 });
   });
 
   it("ignores drafts and handles an empty list", () => {
     const draft = edition("2028", "draft", "2028-09-13T00:00:00Z", "2028-09-18T00:00:00Z");
-    expect(selectHome([draft])).toEqual({ mode: "memories", featured: null, latestPast: null });
-    expect(selectHome([])).toEqual({ mode: "memories", featured: null, latestPast: null });
+    expect(selectHome([draft], now)).toEqual({ mode: "memories", featured: null, latestPast: null });
+    expect(selectHome([], now)).toEqual({ mode: "memories", featured: null, latestPast: null });
   });
 });

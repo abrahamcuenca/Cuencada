@@ -46,7 +46,7 @@ function sortItinerary(items: readonly ItineraryItem[]): ItineraryItem[] {
 export interface ItineraryEditorProps {
   cuencadaId: string;
   timeZone: string;
-  /** First day of the edition (`YYYY-MM-DD`), the default date of a new activity. */
+  /** First day of the edition (`YYYY-MM-DD`), the default date of a new activity; `""` while the edition has no dates. */
   defaultDate: string;
   items: readonly ItineraryItem[];
   locations: readonly LocationItem[];

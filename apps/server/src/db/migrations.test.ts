@@ -13,7 +13,8 @@ import { migrationsFolder } from "./migrate.js";
  * Upgrade tests. Migration 0001: a fresh database is migrated to 0000 only,
  * filled with seed-era rows, then migrated to the latest version. Migration
  * 0002: the same database is first taken 0000 → 0001, filled with rows in the
- * 0001 shape, then migrated to the latest version. The scratch database uses a
+ * 0001 shape, then migrated to the latest version. Migration 0003: likewise
+ * from 0002. The scratch database uses a
  * harness-style name so the global teardown also reclaims it.
  */
 
@@ -30,6 +31,9 @@ const scratchName = workerDatabaseName(currentRunId(), `90${process.env.VITEST_P
 let sql: postgres.Sql;
 let partialFolder: string;
 let upTo0001Folder: string;
+let upTo0002Folder: string;
+/** Number of migrations in the real journal (the "latest" version). */
+let latestCount: number;
 
 /** Copy the migrations folder keeping only the first `count` journal entries. */
 async function migrationsUpTo(count: number): Promise<string> {
@@ -70,6 +74,9 @@ async function dropScratch(): Promise<void> {
 beforeAll(async () => {
   partialFolder = await migrationsUpTo(1);
   upTo0001Folder = await migrationsUpTo(2);
+  upTo0002Folder = await migrationsUpTo(3);
+  const journal = JSON.parse(await readFile(join(migrationsFolder, "meta", "_journal.json"), "utf8")) as Journal; // drizzle-kit's own file shape
+  latestCount = journal.entries.length;
 });
 
 // Every test starts from a brand-new database migrated to 0000 only.
@@ -90,6 +97,7 @@ afterAll(async () => {
   await sql?.end();
   if (partialFolder) await rm(partialFolder, { recursive: true, force: true });
   if (upTo0001Folder) await rm(upTo0001Folder, { recursive: true, force: true });
+  if (upTo0002Folder) await rm(upTo0002Folder, { recursive: true, force: true });
   await dropScratch();
 });
 
@@ -270,7 +278,7 @@ describe("migration 0002", () => {
     ).toBe("23514");
 
     await migrate(drizzle(sql), { migrationsFolder });
-    expect(await sql`select count(*)::int as count from drizzle.__drizzle_migrations`).toEqual([{ count: 3 }]);
+    expect(await sql`select count(*)::int as count from drizzle.__drizzle_migrations`).toEqual([{ count: latestCount }]);
 
     // listed_in_directory defaults to true, for existing and new profiles.
     expect(await sql`select listed_in_directory from profiles`).toEqual([{ listed_in_directory: true }]);
@@ -339,5 +347,85 @@ describe("migration 0002", () => {
     await sql`update sessions set revoked_at = now(), revoked_reason = 'logout_all' where id = ${sessionId}`;
     await sql`update sessions set revoked_reason = 'refresh_reuse' where id = ${sessionId}`;
     expect(await sqlState(sql`update sessions set revoked_reason = 'bogus' where id = ${sessionId}`)).toBe("23514");
+  });
+});
+
+describe("migration 0003", () => {
+  it("upgrades a seeded 0002 database: existing editions unchanged, undated editions allowed, one date only rejected", async () => {
+    await migrate(drizzle(sql), { migrationsFolder: upTo0002Folder });
+
+    // Rows in the 0002 shape: a published and a draft edition, an RSVP with a deadline.
+    const userId = await insertId(sql`
+      insert into users (email, display_name) values ('tia@example.test', 'Tía') returning id
+    `);
+    const published = await insertId(sql`
+      insert into cuencadas (year, slug, title, starts_at, ends_at, city, state, description, is_published,
+                             rsvp_deadline, first_published_at)
+      values (2026, '2026', 'Cuencada 2026', '2026-09-13T19:30:00-06:00', '2026-09-18T12:00:00-06:00',
+              'Mérida', 'Yucatán', 'Reunión', true, '2026-08-31T23:59:00-06:00', '2026-01-15T12:00:00Z')
+      returning id
+    `);
+    await sql`insert into cuencada_rsvps (cuencada_id, user_id, status) values (${published}, ${userId}, 'yes')`;
+    // 0002 refuses an undated edition.
+    expect(
+      await sqlState(sql`
+        insert into cuencadas (year, slug, title, city, state, description) values (2027, '2027', 'Cuencada 2027', 'X', 'Y', 'Z')
+      `)
+    ).toBe("23502");
+    const before = await sql`select * from cuencadas order by year`;
+
+    await migrate(drizzle(sql), { migrationsFolder });
+    expect(await sql`select count(*)::int as count from drizzle.__drizzle_migrations`).toEqual([{ count: latestCount }]);
+
+    // Existing rows are byte-for-byte unchanged.
+    expect(await sql`select * from cuencadas order by year`).toEqual(before);
+    expect(await sql`select status from cuencada_rsvps`).toEqual([{ status: "yes" }]);
+
+    // An announced edition: no dates, no place, published.
+    const announced = await insertId(sql`
+      insert into cuencadas (year, slug, title, description, is_published, first_published_at)
+      values (2027, '2027', 'Cuencada 2027', 'Fecha y lugar por anunciar', true, now())
+      returning id
+    `);
+    expect(await sql`select starts_at, ends_at, city, state from cuencadas where id = ${announced}`).toEqual([
+      { starts_at: null, ends_at: null, city: null, state: null }
+    ]);
+    // A place without dates (and dates without a place) are fine.
+    await sql`update cuencadas set city = 'Valladolid', state = 'Yucatán' where id = ${announced}`;
+
+    // One date only is rejected, both on insert and on update.
+    expect(
+      await sqlState(sql`
+        insert into cuencadas (year, slug, title, description, starts_at)
+        values (2028, '2028', 'Cuencada 2028', 'x', '2028-09-13T00:00:00Z')
+      `)
+    ).toBe("23514");
+    expect(
+      await sqlState(sql`
+        insert into cuencadas (year, slug, title, description, ends_at)
+        values (2028, '2028', 'Cuencada 2028', 'x', '2028-09-13T00:00:00Z')
+      `)
+    ).toBe("23514");
+    expect(await sqlState(sql`update cuencadas set ends_at = null where id = ${published}`)).toBe("23514");
+    expect(
+      await sqlState(sql`update cuencadas set starts_at = '2027-09-13T00:00:00Z' where id = ${announced}`)
+    ).toBe("23514");
+    // The order rule still holds when both are set.
+    expect(
+      await sqlState(sql`
+        update cuencadas set starts_at = '2027-09-18T00:00:00Z', ends_at = '2027-09-13T00:00:00Z' where id = ${announced}
+      `)
+    ).toBe("23514");
+    // Setting both dates later works; clearing both works.
+    await sql`update cuencadas set starts_at = '2027-09-13T00:00:00Z', ends_at = '2027-09-18T00:00:00Z' where id = ${announced}`;
+    await sql`update cuencadas set starts_at = null, ends_at = null where id = ${announced}`;
+
+    // `year` is still required and unique on its own.
+    expect(
+      await sqlState(sql`insert into cuencadas (year, slug, title, description) values (2027, '2027b', 'Otra', 'x')`)
+    ).toBe("23505");
+    expect(await sqlState(sql`insert into cuencadas (slug, title, description) values ('sin-año', 'Otra', 'x')`)).toBe(
+      "23502"
+    );
   });
 });

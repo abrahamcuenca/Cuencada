@@ -4,7 +4,7 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { apiUrl, authenticatedState, errorBody, makeUser, statusState } from "../../../../test/auth";
 import { renderApp, warmRoutes } from "../../../../test/renderApp";
-import { LINKS, makeAnnouncement, makeMemberDetails, makePublicCuencada } from "../testing/fixtures";
+import { LINKS, makeAnnouncedCuencada, makeAnnouncement, makeMemberDetails, makePublicCuencada } from "../testing/fixtures";
 
 let memberRequests = 0;
 
@@ -53,6 +53,44 @@ describe("CuencadaYearPage", () => {
     expect(screen.queryByRole("link", { name: /Grupo WhatsApp/ })).not.toBeInTheDocument();
     expect(screen.queryByText("Cena familiar privada")).not.toBeInTheDocument();
     expect(memberRequests).toBe(0);
+  });
+
+  it("shows an announced edition with Por anunciar, no countdown and no empty programa, places or weather", async () => {
+    server.use(
+      http.get(apiUrl("/cuencadas/2027"), () => HttpResponse.json(makeAnnouncedCuencada({ weatherWidgetUrl: LINKS.weather })))
+    );
+    renderApp("/cuencada/2027", statusState("anonymous"));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Cuencada 2027" })).toBeInTheDocument();
+    expect(screen.getByText("Fecha y lugar por anunciar")).toBeInTheDocument();
+    const facts = screen.getByTestId("pending-facts");
+    expect(within(facts).getByText("Fechas:").nextElementSibling).toHaveTextContent("Por anunciar");
+    expect(within(facts).getByText("Lugar:").nextElementSibling).toHaveTextContent("Por anunciar");
+    expect(screen.queryByRole("timer")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Programa Cuencada 2027/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /¿Dónde estamos\?/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Ver programa/ })).not.toBeInTheDocument();
+    // No place yet, so no forecast to embed, even with a widget URL set.
+    expect(screen.queryByRole("heading", { name: /Clima/ })).not.toBeInTheDocument();
+    const nav = screen.getByRole("navigation", { name: "Secciones de la Cuencada" });
+    expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual(["Familia"]);
+    expect(screen.getByRole("region", { name: /Para la familia/ })).toBeInTheDocument();
+  });
+
+  it("shows the programa of an announced edition once it has items, and the place when set", async () => {
+    server.use(
+      http.get(apiUrl("/cuencadas/2027"), () =>
+        HttpResponse.json(
+          makeAnnouncedCuencada({ city: "Valladolid", state: "Yucatán", publicItinerary: makePublicCuencada().publicItinerary })
+        )
+      )
+    );
+    renderApp("/cuencada/2027", statusState("anonymous"));
+
+    expect(await screen.findByRole("heading", { name: /Programa Cuencada 2027/ })).toBeInTheDocument();
+    expect(screen.getByText("Valladolid · Yucatán · Fecha por anunciar")).toBeInTheDocument();
+    expect(within(screen.getByTestId("pending-facts")).getByText("Valladolid, Yucatán")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /¿Dónde estamos\?/ })).not.toBeInTheDocument();
   });
 
   it("shows WhatsApp, the album, members-only items and the T3/T4 slots to members", async () => {

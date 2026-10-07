@@ -17,6 +17,7 @@ import {
   myRsvpResponseSchema,
   myRsvpSchema,
   type RsvpSummary,
+  RsvpIssueCode,
   rsvpSummarySchema,
   upsertRsvpInputSchema,
   yearParamSchema
@@ -40,9 +41,30 @@ import {
   upsertRsvp,
   yesRsvpCandidates
 } from "./repository.js";
-import { RSVP_CLOSED_MESSAGES, rsvpDateProblems, rsvpDateWindow, rsvpEditability } from "./rules.js";
+import {
+  RSVP_CLOSED_MESSAGES,
+  RsvpClosedReason,
+  rsvpDateProblems,
+  rsvpDateWindow,
+  rsvpEditability
+} from "./rules.js";
 
 const HOTEL_INVALID = "Elige un hotel de esta Cuencada.";
+
+/**
+ * The 409 for an RSVP write the edition does not accept. An undated
+ * (`announced`) edition also carries the stable `RSVP_DATES_PENDING` detail
+ * code, so the web can tell it apart from "closed" without parsing the message.
+ *
+ * @param reason - Why the edition is closed.
+ */
+function rsvpClosed(reason: RsvpClosedReason): AppError {
+  const message = RSVP_CLOSED_MESSAGES[reason];
+  if (reason !== RsvpClosedReason.DatesPending) return new AppError("CONFLICT", message);
+  return new AppError("CONFLICT", message, {
+    details: [{ path: "cuencada", message, code: RsvpIssueCode.DatesPending }]
+  });
+}
 
 /** Map a stored RSVP to the contract. */
 function toMyRsvp(row: RsvpRow): MyRsvp {
@@ -84,8 +106,8 @@ const rsvpMemberRoutes: FastifyPluginAsyncZod = async (app) => {
 
   /**
    * `PUT /api/cuencadas/:year/rsvp/me`: create or replace the caller's RSVP.
-   * 409 when the edition is past or the deadline day is over (edition's
-   * timezone); 400 for a hotel that is not a `hotel` of this edition or
+   * 409 when the edition is past, has no dates yet (`RSVP_DATES_PENDING`) or
+   * the deadline day is over (edition's timezone); 400 for a hotel that is not a `hotel` of this edition or
    * dates outside the stay window.
    */
   app.put(
@@ -113,9 +135,15 @@ const rsvpMemberRoutes: FastifyPluginAsyncZod = async (app) => {
       return app.db.transaction(async (tx) => {
         const edition = await getPublishedByYear(tx, request.params.year);
         const editability = rsvpEditability(edition, now);
-        if (!editability.editable) throw new AppError("CONFLICT", RSVP_CLOSED_MESSAGES[editability.reason]);
+        if (!editability.editable) throw rsvpClosed(editability.reason);
+        // Editable implies dated; the explicit check narrows the types for the stay window.
+        const { startsAt, endsAt } = edition;
+        if (startsAt === null || endsAt === null) throw rsvpClosed(RsvpClosedReason.DatesPending);
 
-        const problems: ApiErrorDetail[] = rsvpDateProblems(input, rsvpDateWindow(edition));
+        const problems: ApiErrorDetail[] = rsvpDateProblems(
+          input,
+          rsvpDateWindow({ startsAt, endsAt, timezone: edition.timezone })
+        );
         if (input.hotelLocationId !== null) {
           const hotel = await findLocation(tx, input.hotelLocationId);
           if (!isHotelOf(hotel, edition.id)) problems.push({ path: "hotelLocationId", message: HOTEL_INVALID });

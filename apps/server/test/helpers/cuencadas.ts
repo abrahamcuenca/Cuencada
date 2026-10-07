@@ -65,6 +65,28 @@ export async function insertCuencada(overrides: Partial<CuencadaInsert> = {}): P
   return row;
 }
 
+/**
+ * Insert an announced edition (WP-3.1a): published, no dates and no place yet.
+ *
+ * @param year - Edition year (default 2027).
+ * @param overrides - Columns to replace.
+ */
+export async function insertAnnouncedCuencada(
+  year = 2027,
+  overrides: Partial<CuencadaInsert> = {}
+): Promise<CuencadaRow> {
+  return insertCuencada({
+    year,
+    startsAt: null,
+    endsAt: null,
+    city: null,
+    state: null,
+    description: "Fecha y lugar por anunciar.",
+    firstPublishedAt: new Date(`${year - 1}-10-01T12:00:00Z`),
+    ...overrides
+  });
+}
+
 /** Insert a location. */
 export async function insertLocation(
   cuencadaId: string,

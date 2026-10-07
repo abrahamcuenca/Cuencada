@@ -15,6 +15,7 @@ import {
   adminCuencadaDetailSchema,
   adminCuencadaSchema,
   apiErrorSchema,
+  CUENCADA_DATES_TOGETHER_MESSAGE,
   createCuencadaInputSchema,
   idParamSchema,
   type UpdateCuencadaInput,
@@ -49,6 +50,20 @@ function toDateOrNull(value: string | null): Date | null {
   return value === null ? null : new Date(value);
 }
 
+/**
+ * Why the merged dates of a PATCH are invalid, or `null`: both or neither
+ * (an undated, announced edition), and the end after the start. Mirrors
+ * `cuencadas_dates_check`, so the admin gets a Spanish 400 instead of a 500.
+ *
+ * @param startsAt - Merged start (patch value, else the stored one).
+ * @param endsAt - Merged end.
+ */
+function mergedDatesProblem(startsAt: Date | null, endsAt: Date | null): string | null {
+  if (startsAt === null && endsAt === null) return null;
+  if (startsAt === null || endsAt === null) return CUENCADA_DATES_TOGETHER_MESSAGE;
+  return endsAt.getTime() > startsAt.getTime() ? null : "La fecha de fin debe ser posterior al inicio.";
+}
+
 /** DB `set` object for a PATCH: only the keys that were sent. */
 function updateValues(input: UpdateCuencadaInput): Partial<typeof cuencadas.$inferInsert> {
   const { startsAt, endsAt, rsvpDeadline, year, ...rest } = input;
@@ -60,8 +75,8 @@ function updateValues(input: UpdateCuencadaInput): Partial<typeof cuencadas.$inf
     values.year = year;
     values.slug = String(year);
   }
-  if (startsAt !== undefined) values.startsAt = new Date(startsAt);
-  if (endsAt !== undefined) values.endsAt = new Date(endsAt);
+  if (startsAt !== undefined) values.startsAt = toDateOrNull(startsAt);
+  if (endsAt !== undefined) values.endsAt = toDateOrNull(endsAt);
   if (rsvpDeadline !== undefined) values.rsvpDeadline = toDateOrNull(rsvpDeadline);
   return values;
 }
@@ -99,8 +114,8 @@ const cuencadaAdminRoutes: FastifyPluginAsyncZod = async (app) => {
             .values({
               ...input,
               slug: String(input.year),
-              startsAt: new Date(input.startsAt),
-              endsAt: new Date(input.endsAt),
+              startsAt: toDateOrNull(input.startsAt),
+              endsAt: toDateOrNull(input.endsAt),
               rsvpDeadline: toDateOrNull(input.rsvpDeadline),
               firstPublishedAt: input.isPublished ? app.clock.now() : null
             })
@@ -186,11 +201,11 @@ const cuencadaAdminRoutes: FastifyPluginAsyncZod = async (app) => {
             });
           }
 
-          const startsAt = input.startsAt === undefined ? current.startsAt : new Date(input.startsAt);
-          const endsAt = input.endsAt === undefined ? current.endsAt : new Date(input.endsAt);
-          if (endsAt.getTime() <= startsAt.getTime()) {
-            const message = "La fecha de fin debe ser posterior al inicio.";
-            throw new AppError("VALIDATION", message, { details: [{ path: "endsAt", message }] });
+          const startsAt = input.startsAt === undefined ? current.startsAt : toDateOrNull(input.startsAt);
+          const endsAt = input.endsAt === undefined ? current.endsAt : toDateOrNull(input.endsAt);
+          const datesProblem = mergedDatesProblem(startsAt, endsAt);
+          if (datesProblem !== null) {
+            throw new AppError("VALIDATION", datesProblem, { details: [{ path: "endsAt", message: datesProblem }] });
           }
 
           // first_published_at is set on the first publish only; unpublish/republish keeps the original instant.

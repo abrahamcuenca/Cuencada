@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { apiUrl, authenticatedState, errorBody, statusState } from "../../../../test/auth";
 import { type FakeRsvpDb, HOTEL_A, HOTEL_B, ME, makeAttendee, makeMyRsvp, makeRsvpDb, rsvpHandlers } from "../testing/fakeApi";
 import { renderWithStore } from "../testing/render";
+import { makeAnnouncedCuencada } from "../../cuencadas/testing/fixtures";
 import { RsvpCard } from "./RsvpCard";
 
 const server = setupServer();
@@ -205,6 +206,15 @@ describe("RsvpCard", () => {
     expect(await screen.findByText(/Las confirmaciones cerraron el 15 de agosto de 2026/)).toBeInTheDocument();
     expect(screen.queryByRole("radio")).not.toBeInTheDocument();
     await waitFor(() => expect(db.log.filter((line) => line === "GET /cuencadas/2027/rsvp/me")).toHaveLength(2));
+  });
+
+  it("shows the dates-pending note instead of the form for an announced edition, without asking for the RSVP", async () => {
+    db.cuencadas[2027] = makeAnnouncedCuencada();
+    renderCard();
+
+    expect(await screen.findByText("Las confirmaciones abren cuando se anuncie la fecha.")).toBeInTheDocument();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(db.log.filter((line) => line.includes("/rsvp"))).toEqual([]);
   });
 
   it("shows the attended badge on a past edition when the server marks a row isMe", async () => {

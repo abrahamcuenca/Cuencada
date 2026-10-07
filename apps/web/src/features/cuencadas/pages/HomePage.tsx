@@ -1,4 +1,4 @@
-import type { Announcement, CuencadaHome, CuencadaSummary, PublicCuencada } from "@cuencada/types";
+import { type Announcement, type CuencadaHome, type CuencadaSummary, type DatedCuencada, hasDates, type PublicCuencada } from "@cuencada/types";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useAppSelector } from "../../../app/hooks";
@@ -16,7 +16,7 @@ import { Section } from "../components/Section";
 import { RsvpSlot } from "../components/slots";
 import { useNow } from "../hooks/useNow";
 import { useOnNewDay } from "../hooks/useZonedToday";
-import { countdownInstants, formatKicker, safeAssetUrl } from "../lib/format";
+import { countdownInstants, DATE_AND_PLACE_TO_BE_ANNOUNCED, formatKicker, formatPlace, safeAssetUrl } from "../lib/format";
 import styles from "./home.module.css";
 
 const TAGLINE = "Una familia. Una historia. Una celebración.";
@@ -29,6 +29,9 @@ const PORTAL_TIMEZONE = "America/Merida";
  * - `upcoming` / `active`: the next edition's hero with a live countdown
  *   (it becomes "¡YA LLEGÓ LA CUENCADA!" while active), "Ver programa" and the
  *   RSVP slot, plus today's message in the edition's timezone.
+ * - `announced`: the next edition has no dates yet. "Cuencada {year}" with
+ *   "Fecha y lugar por anunciar", **no countdown**, the RSVP slot (which only
+ *   says RSVPs open once the date is announced) and the last edition's memories.
  * - `memories`: thanks for the last edition, a link to its gallery and the
  *   list of past editions. With no edition at all, a "próximamente" hero.
  *
@@ -52,20 +55,34 @@ export function HomePage(): ReactNode {
     );
   }
 
+  const { featured, latestPast } = home.data;
   return (
     <>
-      {home.data.featured ? <UpcomingHero featured={home.data.featured} /> : <MemoriesHero latestPast={home.data.latestPast} />}
+      <FeaturedHero featured={featured} latestPast={latestPast} />
       <div className="cu-container">{home.error !== undefined ? <OfflineNotice onRetry={() => void home.refetch()} /> : null}</div>
-      {home.data.featured ? <TodayMessage featured={home.data.featured} onNewDay={() => void home.refetch()} /> : null}
+      {featured ? <TodayMessage featured={featured} onNewDay={() => void home.refetch()} /> : null}
       <HomeAnnouncements home={home.data} />
-      {home.data.featured ? null : <Memories latestPast={home.data.latestPast} />}
+      {featured === null ? <Memories latestPast={latestPast} /> : null}
+      {featured !== null && !hasDates(featured) && latestPast ? <MemoriesPhotosSection latestPast={latestPast} /> : null}
       <Highlights featuredYear={home.data.featured?.year ?? home.data.latestPast?.year ?? null} />
       <PastEditions />
     </>
   );
 }
 
-function UpcomingHero({ featured }: { featured: PublicCuencada }): ReactNode {
+/**
+ * Picks the hero: a dated edition gets the countdown, an announced one (no
+ * dates yet) a "Fecha y lugar por anunciar" hero without countdown, and no
+ * featured edition the memories hero. `hasDates` narrows the type, so the
+ * countdown can never receive a `null` date.
+ */
+function FeaturedHero({ featured, latestPast }: { featured: PublicCuencada | null; latestPast: CuencadaSummary | null }): ReactNode {
+  if (featured === null) return <MemoriesHero latestPast={latestPast} />;
+  if (hasDates(featured)) return <UpcomingHero featured={featured} />;
+  return <AnnouncedHero featured={featured} latestPast={latestPast} />;
+}
+
+function UpcomingHero({ featured }: { featured: DatedCuencada<PublicCuencada> }): ReactNode {
   const now = useNow(featured.endsAt);
   return (
     <CuencadaHero
@@ -81,6 +98,42 @@ function UpcomingHero({ featured }: { featured: PublicCuencada }): ReactNode {
       }
     >
       <Countdown {...countdownInstants(featured.status, featured.startsAt, featured.endsAt, now)} />
+      <RsvpSlot year={featured.year} />
+    </CuencadaHero>
+  );
+}
+
+/**
+ * The next edition is announced but has no dates yet: its year, what is
+ * still open ("Fecha y lugar por anunciar", or only the date when the place
+ * is known), no countdown, and the previous edition's memories.
+ */
+function AnnouncedHero({ featured, latestPast }: { featured: PublicCuencada; latestPast: CuencadaSummary | null }): ReactNode {
+  const place = formatPlace(featured);
+  return (
+    <CuencadaHero
+      kicker="La próxima Cuencada"
+      titleStyle="page"
+      title={`Cuencada ${featured.year}`}
+      lead={TAGLINE}
+      imageUrl={safeAssetUrl(featured.heroImageUrl)}
+      actions={
+        <>
+          <Button to={`/cuencada/${featured.year}`} surface="dark" icon="📅">
+            Ver Cuencada {featured.year}
+          </Button>
+          {latestPast ? (
+            <Button to={`/galeria/${latestPast.year}`} variant="secondary" surface="dark" icon="📸">
+              Ver recuerdos de {latestPast.year}
+            </Button>
+          ) : null}
+        </>
+      }
+    >
+      <p className={styles.thanks} data-testid="announced-pending">
+        <span aria-hidden="true">🗓️ </span>
+        {place === null ? DATE_AND_PLACE_TO_BE_ANNOUNCED : `${place} · Fecha por anunciar`}
+      </p>
       <RsvpSlot year={featured.year} />
     </CuencadaHero>
   );
@@ -110,7 +163,7 @@ function MemoriesHero({ latestPast }: { latestPast: CuencadaSummary | null }): R
       <p className={styles.thanks}>
         <span aria-hidden="true">💛 </span>
         {latestPast
-          ? `Gracias por acompañarnos. La ${latestPast.title} en ${latestPast.city} ya es parte de nuestra historia.`
+          ? `Gracias por acompañarnos. La ${latestPast.title}${latestPast.city ? ` en ${latestPast.city}` : ""} ya es parte de nuestra historia.`
           : "Muy pronto anunciaremos la próxima Cuencada."}
       </p>
     </CuencadaHero>
@@ -193,12 +246,19 @@ function MemoriesPhotos({ latestPast }: { latestPast: CuencadaSummary | null }):
   );
 }
 
+/** "Últimos momentos": the latest past edition's photos (members) or the login/verify teaser. */
+function MemoriesPhotosSection({ latestPast }: { latestPast: CuencadaSummary | null }): ReactNode {
+  return (
+    <Section id="recuerdos" icon="📸" title="Últimos momentos" intro="Los recuerdos de la última Cuencada, solo para la familia.">
+      <MemoriesPhotos latestPast={latestPast} />
+    </Section>
+  );
+}
+
 function Memories({ latestPast }: { latestPast: CuencadaSummary | null }): ReactNode {
   return (
     <>
-      <Section id="recuerdos" icon="📸" title="Últimos momentos" intro="Los recuerdos de la última Cuencada, solo para la familia.">
-        <MemoriesPhotos latestPast={latestPast} />
-      </Section>
+      <MemoriesPhotosSection latestPast={latestPast} />
       <div className="cu-container">
         <Card tone="accent" icon="🗓️" title="La próxima Cuencada" className={styles.next}>
           <p>Todavía no tiene fecha. Te avisaremos cuando se publique.</p>
@@ -255,7 +315,7 @@ function PastEditions(): ReactNode {
         {past.map((cuencada) => (
           <li key={cuencada.id}>
             <Link to={`/cuencada/${cuencada.year}`} className={styles.edition}>
-              <strong>{cuencada.year}</strong> · {cuencada.city}
+              <strong>{cuencada.year}</strong>{cuencada.city ? ` · ${cuencada.city}` : null}
             </Link>
           </li>
         ))}

@@ -191,6 +191,40 @@ export function makeAdminCuencada(overrides: Partial<AdminCuencada> = {}): Admin
   };
 }
 
+export const CUENCADA_2027_ID = fixtureId(2027);
+
+/**
+ * 2027 as the public API returns it once announced (WP-3.1a): published, no
+ * dates and no place yet, so no countdown and no RSVP form. Fictional data.
+ */
+export function makeAnnouncedCuencada(overrides: Partial<PublicCuencada> = {}): PublicCuencada {
+  return makePublicCuencada({
+    id: CUENCADA_2027_ID,
+    year: 2027,
+    slug: "2027",
+    title: "Cuencada 2027",
+    status: "announced",
+    startsAt: null,
+    endsAt: null,
+    city: null,
+    state: null,
+    description: "La familia vuelve a reunirse en 2027. Pronto anunciaremos la fecha y el lugar.",
+    songUrl: null,
+    weatherWidgetUrl: null,
+    rsvpDeadline: null,
+    publicItinerary: [],
+    publicLocations: [],
+    publicAnnouncements: [],
+    todayMessage: null,
+    ...overrides
+  });
+}
+
+/** `GET /cuencadas/home` in announced mode: 2027 featured without dates, 2026 as the latest past edition. */
+export function makeAnnouncedHome(overrides: Partial<CuencadaHome> = {}): CuencadaHome {
+  return makeMemoriesHome({ mode: "announced", featured: makeAnnouncedCuencada(), ...overrides });
+}
+
 /** `GET /admin/cuencadas/:id`. */
 export function makeAdminDetail(overrides: Partial<AdminCuencadaDetail> = {}): AdminCuencadaDetail {
   const members = makeMemberDetails();

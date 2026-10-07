@@ -74,6 +74,15 @@ Phase 1 builds frontend and backend tracks in parallel. They need one contract t
   - `INVALID_CREDENTIALS`, `INVITE_INVALID` and `TOKEN_INVALID` are deliberately generic.
 - Messages never contain stack traces, SQL, token material or other users' data. The server should call `z.config(z.locales.es())` for default messages. The contracts set explicit Spanish messages where the wording matters.
 
+### 5. Undated editions: status `announced` (WP-3.1a note)
+
+- An edition can be published before its date and place are decided (migration 0003). `startsAt`/`endsAt` are **both set or both `null`** (DB CHECK `cuencadas_dates_check`, the contract's both-or-neither refine, and a merged-row check on PATCH). `city`/`state` may be `null` independently.
+- `CuencadaStatus` gains **`announced`**: published with no dates. It is computed like the others, never stored: `draft` (unpublished) → `announced` (no dates) → `upcoming` / `active` / `past` (calendar days in the edition's timezone).
+- `HomeMode` gains `announced`. Home features, in order: an active edition, the soonest dated upcoming one, then the announced edition with the lowest year ≥ the current year **in that edition's timezone** (an announcement for a year already over is stale and ignored), else memories. `latestPast` is still returned so Home can link to the last edition's memories.
+- Read models (`CuencadaSummary`, `PublicCuencada`, `AdminCuencada`) type the four fields as nullable. `DatedCuencada<T>` and the `hasDates()` guard (exported from `cuencadas.ts`) narrow an edition before anything date-dependent; the web's countdown, `countdownInstants` and the RSVP form accept only the narrowed type, so a `null` date cannot reach them at compile time.
+- **RSVP:** writes for an announced edition answer 409 `CONFLICT` with the Spanish message "Las confirmaciones abren cuando se anuncie la fecha." and a stable reason in the open detail-code channel of §4: `details: [{ path: "cuencada", message, code: "RSVP_DATES_PENDING" }]` (`RsvpIssueCode.DatesPending` in `rsvp.ts`). `ErrorCode` itself is a closed enum that older clients validate, so no new top-level code was added. A future deadline does not open RSVPs without dates (there is no stay window to check against). `GET …/rsvp/me` answers `editable: false`; attendees and the RSVP summary keep working.
+- The admin dashboard's "next edition" (`AdminSummaryEdition.startsAt: string`) still lists only dated editions: an announced one has no RSVPs to count.
+
 ## Review response (PR #2, round 1)
 
 Changes made in response to the Security and Tech Lead reviews. Most are already reflected in the sections above.

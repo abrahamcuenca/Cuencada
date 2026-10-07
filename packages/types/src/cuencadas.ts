@@ -29,11 +29,13 @@ import { hasUnsafeChars } from "./common.js";
 
 /**
  * Computed (never stored) from `isPublished`, `startsAt`, `endsAt` and now, in
- * the Cuencada's timezone: unpublished → `draft`; before start → `upcoming`;
- * between start and end → `active`; after end → `past`.
+ * the Cuencada's timezone: unpublished → `draft`; published without dates →
+ * `announced` (WP-3.1a: "Fecha y lugar por anunciar", no countdown, no RSVP);
+ * before start → `upcoming`; between start and end → `active`; after end → `past`.
  */
 export const CuencadaStatus = {
   Draft: "draft",
+  Announced: "announced",
   Upcoming: "upcoming",
   Active: "active",
   Past: "past"
@@ -50,8 +52,12 @@ export const LocationKind = {
 export type LocationKind = (typeof LocationKind)[keyof typeof LocationKind];
 export const locationKindSchema = z.enum(LocationKind);
 
-/** What the home page shows: the next edition's hero or "memories" of the last one. */
+/**
+ * What the home page shows: the next edition's hero (`active`/`upcoming` with
+ * a countdown, `announced` without dates), or "memories" of the last one.
+ */
 export const HomeMode = {
+  Announced: "announced",
   Upcoming: "upcoming",
   Active: "active",
   Memories: "memories"
@@ -235,12 +241,14 @@ export interface CuencadaSummary {
   slug: string;
   title: string;
   status: CuencadaStatus;
-  startsAt: string;
-  endsAt: string;
+  /** `null` (with `endsAt`) while the date is not decided: status `announced` when published. */
+  startsAt: string | null;
+  endsAt: string | null;
   /** IANA zone used for status and date display. Contract amendment (T2-BE, for T4-FE). */
   timezone: string;
-  city: string;
-  state: string;
+  /** `null` while the place is not decided ("Por anunciar"). */
+  city: string | null;
+  state: string | null;
   heroImageUrl: string | null;
   themeColor: string;
   /**
@@ -257,11 +265,11 @@ export const cuencadaSummarySchema = z.object({
   slug: z.string().max(32),
   title: z.string().max(200),
   status: cuencadaStatusSchema,
-  startsAt: dateTimeSchema,
-  endsAt: dateTimeSchema,
+  startsAt: dateTimeSchema.nullable(),
+  endsAt: dateTimeSchema.nullable(),
   timezone: z.string().max(64),
-  city: z.string().max(120),
-  state: z.string().max(120),
+  city: z.string().max(120).nullable(),
+  state: z.string().max(120).nullable(),
   heroImageUrl: z.string().max(2048).nullable(),
   themeColor: z.string().max(7),
   hasMedia: z.boolean()
@@ -274,12 +282,14 @@ export interface PublicCuencada {
   slug: string;
   title: string;
   status: CuencadaStatus;
-  startsAt: string;
-  endsAt: string;
+  /** `null` (with `endsAt`) while the date is not decided: status `announced` when published. */
+  startsAt: string | null;
+  endsAt: string | null;
   /** IANA zone used for status, countdown and date display. */
   timezone: string;
-  city: string;
-  state: string;
+  /** `null` while the place is not decided ("Por anunciar"). */
+  city: string | null;
+  state: string | null;
   country: string;
   description: string;
   heroImageUrl: string | null;
@@ -300,11 +310,11 @@ export const publicCuencadaSchema = z.object({
   slug: z.string().max(32),
   title: z.string().max(200),
   status: cuencadaStatusSchema,
-  startsAt: dateTimeSchema,
-  endsAt: dateTimeSchema,
+  startsAt: dateTimeSchema.nullable(),
+  endsAt: dateTimeSchema.nullable(),
   timezone: z.string().max(64),
-  city: z.string().max(120),
-  state: z.string().max(120),
+  city: z.string().max(120).nullable(),
+  state: z.string().max(120).nullable(),
   country: z.string().max(120),
   description: z.string().max(5000),
   heroImageUrl: z.string().max(2048).nullable(),
@@ -321,9 +331,12 @@ export const publicCuencadaSchema = z.object({
 /** `GET /api/cuencadas/home`: drives the home page hero vs memories mode. */
 export interface CuencadaHome {
   mode: HomeMode;
-  /** The upcoming/active edition, or `null` in memories mode. */
+  /**
+   * The active/upcoming/announced edition, or `null` in memories mode. In
+   * `announced` mode its `startsAt`/`endsAt` are `null` (no countdown).
+   */
   featured: PublicCuencada | null;
-  /** Most recent past edition, for memories mode. */
+  /** Most recent past edition, for memories mode and the "previous edition" link when announced. */
   latestPast: CuencadaSummary | null;
   /**
    * Portal-wide (`cuencadaId: null`) announcements with `visibility: "public"`.
@@ -402,6 +415,35 @@ export const adminCuencadaDetailSchema = z.object({
 }) satisfies z.ZodType<AdminCuencadaDetail>;
 
 /* -------------------------------------------------------------------------- */
+/* Dated editions                                                              */
+/* -------------------------------------------------------------------------- */
+
+/** The date fields every edition read model carries. */
+type EditionDates = { startsAt: string | null; endsAt: string | null };
+
+/**
+ * An edition whose dates are known. Countdown, date ranges and RSVP stay
+ * windows accept only this shape, so the compiler refuses an undated
+ * (`announced`) edition there (WP-3.1a).
+ */
+export type DatedCuencada<TEdition extends EditionDates> = Omit<TEdition, "startsAt" | "endsAt"> & {
+  startsAt: string;
+  endsAt: string;
+};
+
+/**
+ * Narrow an edition to {@link DatedCuencada}. The DB sets both dates or
+ * neither (`cuencadas_dates_check`), but each is checked so a malformed
+ * response can never reach a countdown.
+ *
+ * @param edition - Any edition read model.
+ * @returns `true` when both `startsAt` and `endsAt` are set.
+ */
+export function hasDates<TEdition extends EditionDates>(edition: TEdition): edition is TEdition & DatedCuencada<TEdition> {
+  return edition.startsAt !== null && edition.endsAt !== null;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Admin inputs                                                                */
 /* -------------------------------------------------------------------------- */
 
@@ -410,19 +452,24 @@ const optionalHttpsUrl = httpsUrlSchema.nullable();
 /**
  * Fields shared by create and update, without defaults (so PATCH never resets).
  *
+ * `startsAt`/`endsAt` are both set or both `null` (an undated, "announced"
+ * edition, WP-3.1a). `city`/`state` may be `null` (blank → `null`) while the
+ * place is not decided.
+ *
  * PATCH refines can only check fields present in the patch. Services MUST
- * re-validate the merged row before writing: `endsAt > startsAt` (cuencada),
+ * re-validate the merged row before writing: both dates or neither and
+ * `endsAt > startsAt` (cuencada),
  * `endTime > startTime` (itinerary), lat/lng both set or both null (location),
  * `deathYear >= birthYear` (person).
  */
 const cuencadaFields = {
   year: yearSchema,
   title: requiredTextSchema(200),
-  startsAt: dateTimeSchema,
-  endsAt: dateTimeSchema,
+  startsAt: dateTimeSchema.nullable(),
+  endsAt: dateTimeSchema.nullable(),
   timezone: timezoneSchema,
-  city: requiredTextSchema(120),
-  state: requiredTextSchema(120),
+  city: nullableTextSchema(120),
+  state: nullableTextSchema(120),
   country: requiredTextSchema(120),
   description: requiredTextSchema(5000),
   heroImageUrl: assetUrlSchema.nullable(),
@@ -435,17 +482,44 @@ const cuencadaFields = {
   isPublished: z.boolean()
 };
 
-function endsAfterStart(value: { startsAt?: string | undefined; endsAt?: string | undefined }): boolean {
-  if (value.startsAt === undefined || value.endsAt === undefined) return true;
+type DateInput = { startsAt?: string | null | undefined; endsAt?: string | null | undefined };
+
+function endsAfterStart(value: DateInput): boolean {
+  if (value.startsAt === undefined || value.startsAt === null || value.endsAt === undefined || value.endsAt === null) return true;
   return Date.parse(value.endsAt) > Date.parse(value.startsAt);
 }
 
-const endsAfterStartIssue = { error: "La fecha de fin debe ser posterior al inicio.", path: ["endsAt"] };
+/**
+ * Both dates or neither. In a PATCH a lone date may move one end of an
+ * already dated edition (the service checks the merged row), but a lone
+ * `null` would leave the other date set, so it must come with the other `null`.
+ */
+function datesTogether(value: DateInput): boolean {
+  const hasStart = value.startsAt !== undefined;
+  const hasEnd = value.endsAt !== undefined;
+  if (hasStart && hasEnd) return (value.startsAt === null) === (value.endsAt === null);
+  if (hasStart) return value.startsAt !== null;
+  if (hasEnd) return value.endsAt !== null;
+  return true;
+}
 
-/** `POST /api/admin/cuencadas`. The slug is derived from `year`. */
+/** Spanish message for one date without the other (contract refine and the server's merged-row check). */
+export const CUENCADA_DATES_TOGETHER_MESSAGE = "Escribe las dos fechas (inicio y fin) o deja ambas vacías.";
+
+const endsAfterStartIssue = { error: "La fecha de fin debe ser posterior al inicio.", path: ["endsAt"] };
+const datesTogetherIssue = { error: CUENCADA_DATES_TOGETHER_MESSAGE, path: ["endsAt"] };
+
+/**
+ * `POST /api/admin/cuencadas`. The slug is derived from `year`. Dates and
+ * place may be omitted (or `null`) for an edition that is only announced.
+ */
 export const createCuencadaInputSchema = z
   .object({
     ...cuencadaFields,
+    startsAt: dateTimeSchema.nullable().default(null),
+    endsAt: dateTimeSchema.nullable().default(null),
+    city: nullableTextSchema(120).default(null),
+    state: nullableTextSchema(120).default(null),
     timezone: timezoneSchema.default("America/Merida"),
     country: requiredTextSchema(120).default("México"),
     heroImageUrl: assetUrlSchema.nullable().default(null),
@@ -457,6 +531,7 @@ export const createCuencadaInputSchema = z
     rsvpDeadline: dateTimeSchema.nullable().default(null),
     isPublished: z.boolean().default(false)
   })
+  .refine(datesTogether, datesTogetherIssue)
   .refine(endsAfterStart, endsAfterStartIssue);
 export type CreateCuencadaInput = z.infer<typeof createCuencadaInputSchema>;
 export type CreateCuencadaRequest = z.input<typeof createCuencadaInputSchema>;
@@ -465,6 +540,7 @@ export type CreateCuencadaRequest = z.input<typeof createCuencadaInputSchema>;
 export const updateCuencadaInputSchema = z
   .object(cuencadaFields)
   .partial()
+  .refine(datesTogether, datesTogetherIssue)
   .refine(endsAfterStart, endsAfterStartIssue)
   .refine((value) => Object.keys(value).length > 0, { error: "No hay cambios que guardar." });
 export type UpdateCuencadaInput = z.infer<typeof updateCuencadaInputSchema>;

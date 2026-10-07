@@ -44,14 +44,14 @@ async function summary(admin: Member): Promise<AdminSummary> {
 }
 
 /** Insert an edition with explicit times and a year no other row uses. */
-async function insertEdition(startsAt: Date, endsAt: Date, isPublished = true): Promise<typeof cuencadas.$inferSelect> {
+async function insertEdition(startsAt: Date | null, endsAt: Date | null, isPublished = true): Promise<typeof cuencadas.$inferSelect> {
   return insertEditionWith(getTestDb(), startsAt, endsAt, isPublished);
 }
 
 async function insertEditionWith(
   db: DbOrTx,
-  startsAt: Date,
-  endsAt: Date,
+  startsAt: Date | null,
+  endsAt: Date | null,
   isPublished = true
 ): Promise<typeof cuencadas.$inferSelect> {
   const year = 1900 + Math.floor(Math.random() * 300);
@@ -144,7 +144,7 @@ describe("GET /api/admin/summary", () => {
       cuencadaId: next.id,
       year: next.year,
       title: next.title,
-      startsAt: next.startsAt.toISOString(),
+      startsAt: next.startsAt?.toISOString(),
       rsvpYes: 2,
       rsvpMaybe: 1,
       rsvpNo: 0,
@@ -159,6 +159,8 @@ describe("GET /api/admin/summary", () => {
       getTestDb().transaction(async (tx) => {
         await tx.delete(cuencadas);
         await insertEditionWith(tx, new Date(NOW.getTime() - 3 * DAY_MS), new Date(NOW.getTime() - 2 * DAY_MS));
+        // An announced edition (no dates yet, WP-3.1a) has no RSVPs to count: not reported.
+        await insertEditionWith(tx, null, null);
         expect((await loadAdminSummary(tx, NOW)).upcomingEdition).toBeNull();
         throw rollback;
       })

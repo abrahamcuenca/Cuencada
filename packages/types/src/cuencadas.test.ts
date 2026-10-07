@@ -2,12 +2,16 @@ import { describe, expect, it } from "vitest";
 import { API_ERROR_DETAILS_MAX, apiErrorSchema } from "./common.js";
 import {
   adminAnnouncementQuerySchema,
+  CUENCADA_DATES_TOGETHER_MESSAGE,
+  CuencadaStatus,
+  cuencadaSummarySchema,
   createAnnouncementInputSchema,
   createCuencadaInputSchema,
   createItineraryItemInputSchema,
   createLocationInputSchema,
   dailyMessageLineSchema,
   dailyMessagesImportInputSchema,
+  hasDates,
   parseDailyMessagesText,
   reorderInputSchema,
   updateAnnouncementInputSchema,
@@ -105,6 +109,83 @@ describe("createCuencadaInputSchema", () => {
   it("accepts a site-relative hero image but rejects path traversal", () => {
     expect(createCuencadaInputSchema.safeParse({ ...base, heroImageUrl: "/images/Logo_Cuencada2026.jpg" }).success).toBe(true);
     expect(createCuencadaInputSchema.safeParse({ ...base, heroImageUrl: "/images/../secret" }).success).toBe(false);
+  });
+});
+
+describe("createCuencadaInputSchema for an announced edition", () => {
+  const announced = { year: 2027, title: "Cuencada 2027", description: "Fecha y lugar por anunciar." };
+
+  it("accepts omitted dates and place and defaults them to null", () => {
+    const parsed = createCuencadaInputSchema.parse(announced);
+    expect(parsed).toMatchObject({ startsAt: null, endsAt: null, city: null, state: null });
+  });
+
+  it("accepts explicit nulls and turns a blank place into null", () => {
+    const parsed = createCuencadaInputSchema.parse({ ...announced, startsAt: null, endsAt: null, city: "  ", state: "" });
+    expect(parsed).toMatchObject({ startsAt: null, endsAt: null, city: null, state: null });
+  });
+
+  it("rejects one date without the other", () => {
+    const onlyStart = createCuencadaInputSchema.safeParse({ ...announced, startsAt: "2027-09-13T00:00:00-06:00" });
+    expect(onlyStart.success).toBe(false);
+    expect(onlyStart.error?.issues[0]).toMatchObject({ path: ["endsAt"], message: CUENCADA_DATES_TOGETHER_MESSAGE });
+    expect(createCuencadaInputSchema.safeParse({ ...announced, endsAt: "2027-09-18T00:00:00-06:00" }).success).toBe(false);
+    expect(
+      createCuencadaInputSchema.safeParse({ ...announced, startsAt: "2027-09-13T00:00:00-06:00", endsAt: null }).success
+    ).toBe(false);
+  });
+});
+
+describe("updateCuencadaInputSchema dates", () => {
+  it("accepts clearing both dates, or setting both", () => {
+    expect(updateCuencadaInputSchema.safeParse({ startsAt: null, endsAt: null }).success).toBe(true);
+    expect(
+      updateCuencadaInputSchema.safeParse({ startsAt: "2027-09-13T00:00:00-06:00", endsAt: "2027-09-18T00:00:00-06:00" })
+        .success
+    ).toBe(true);
+  });
+
+  it("accepts moving one end alone (the server checks the merged row)", () => {
+    expect(updateCuencadaInputSchema.safeParse({ endsAt: "2027-09-19T00:00:00-06:00" }).success).toBe(true);
+  });
+
+  it("rejects clearing one date alone or mixing null and a date", () => {
+    expect(updateCuencadaInputSchema.safeParse({ startsAt: null }).success).toBe(false);
+    expect(updateCuencadaInputSchema.safeParse({ endsAt: null }).success).toBe(false);
+    expect(updateCuencadaInputSchema.safeParse({ startsAt: null, endsAt: "2027-09-18T00:00:00-06:00" }).success).toBe(false);
+  });
+
+  it("accepts clearing the place", () => {
+    expect(updateCuencadaInputSchema.parse({ city: null, state: "" })).toEqual({ city: null, state: null });
+  });
+});
+
+describe("hasDates", () => {
+  it("narrows only when both dates are set", () => {
+    expect(hasDates({ startsAt: "2027-09-13T00:00:00Z", endsAt: "2027-09-18T00:00:00Z" })).toBe(true);
+    expect(hasDates({ startsAt: null, endsAt: null })).toBe(false);
+    expect(hasDates({ startsAt: "2027-09-13T00:00:00Z", endsAt: null })).toBe(false);
+  });
+});
+
+describe("cuencadaSummarySchema", () => {
+  it("accepts an announced edition with null dates and place", () => {
+    const summary = {
+      id: "6f1b2a3c-4d5e-4f60-8a7b-9c0d1e2f3a4b",
+      year: 2027,
+      slug: "2027",
+      title: "Cuencada 2027",
+      status: CuencadaStatus.Announced,
+      startsAt: null,
+      endsAt: null,
+      timezone: "America/Merida",
+      city: null,
+      state: null,
+      heroImageUrl: null,
+      themeColor: "#0b5e55",
+      hasMedia: false
+    };
+    expect(cuencadaSummarySchema.parse(summary)).toEqual(summary);
   });
 });
 

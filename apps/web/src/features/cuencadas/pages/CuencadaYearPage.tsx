@@ -1,4 +1,4 @@
-import { type PublicCuencada, yearParamSchema } from "@cuencada/types";
+import { hasDates, type PublicCuencada, yearParamSchema } from "@cuencada/types";
 import { type ReactNode, useEffect } from "react";
 import { useLocation, useParams } from "react-router-dom";
 import { useAppSelector } from "../../../app/hooks";
@@ -21,7 +21,7 @@ import { forecastUrl, WeatherWidget } from "../components/WeatherWidget";
 import styles from "../components/content.module.css";
 import { useNow } from "../hooks/useNow";
 import { useOnNewDay } from "../hooks/useZonedToday";
-import { countdownInstants, formatKicker, idFromHash, safeAssetUrl } from "../lib/format";
+import { countdownInstants, formatEditionDates, formatKicker, formatPlace, idFromHash, safeAssetUrl, TO_BE_ANNOUNCED } from "../lib/format";
 
 /**
  * Parses the `:year` route param with the contract schema.
@@ -113,12 +113,17 @@ function CuencadaYearContent({ cuencada, members, stale, onRetry }: ContentProps
   // After local midnight the server has the new day's message: refetch the page data.
   const today = useOnNewDay(cuencada.timezone, onRetry);
   const todayMessage = cuencada.todayMessage?.date === today ? cuencada.todayMessage : null;
-  const weatherUrl = forecastUrl(cuencada.weatherWidgetUrl);
+  // The weather widget needs a place; without one there is no forecast to show.
+  const weatherUrl = cuencada.city === null ? null : forecastUrl(cuencada.weatherWidgetUrl);
   const songUrl = safeAssetUrl(cuencada.songUrl);
+  // An announced edition (no dates yet) hides the programa and places until there is something in them.
+  const dated = hasDates(cuencada);
+  const showPrograma = dated || itinerary.length > 0;
+  const showLugares = dated || locations.length > 0;
 
   const sectionLinks = [
-    { id: "programa", label: "Programa" },
-    { id: "lugares", label: "Lugares" },
+    ...(showPrograma ? [{ id: "programa", label: "Programa" }] : []),
+    ...(showLugares ? [{ id: "lugares", label: "Lugares" }] : []),
     ...(weatherUrl ? [{ id: "clima", label: "Clima" }] : []),
     ...(songUrl ? [{ id: "cancion", label: "Canción" }] : []),
     { id: "familia", label: "Familia" }
@@ -133,20 +138,30 @@ function CuencadaYearContent({ cuencada, members, stale, onRetry }: ContentProps
         lead={cuencada.description}
         imageUrl={safeAssetUrl(cuencada.heroImageUrl)}
         actions={
-          <>
-            <Button href="#programa" surface="dark" icon="📅">
-              Ver programa
-            </Button>
-            <Button href="#lugares" variant="secondary" surface="dark" icon="🗺️">
-              Ver lugares
-            </Button>
-          </>
+          showPrograma || showLugares ? (
+            <>
+              {showPrograma ? (
+                <Button href="#programa" surface="dark" icon="📅">
+                  Ver programa
+                </Button>
+              ) : null}
+              {showLugares ? (
+                <Button href="#lugares" variant="secondary" surface="dark" icon="🗺️">
+                  Ver lugares
+                </Button>
+              ) : null}
+            </>
+          ) : null
         }
       >
-        <Countdown
-          {...countdownInstants(cuencada.status, cuencada.startsAt, cuencada.endsAt, now)}
-          pastMessage={`La Cuencada ${cuencada.year} en ${cuencada.city} ya es parte de nuestra historia. ¡Gracias por acompañarnos!`}
-        />
+        {hasDates(cuencada) ? (
+          <Countdown
+            {...countdownInstants(cuencada.status, cuencada.startsAt, cuencada.endsAt, now)}
+            pastMessage={`La Cuencada ${cuencada.year}${cuencada.city ? ` en ${cuencada.city}` : ""} ya es parte de nuestra historia. ¡Gracias por acompañarnos!`}
+          />
+        ) : (
+          <PendingFacts cuencada={cuencada} />
+        )}
       </CuencadaHero>
 
       <div className="cu-container">
@@ -171,22 +186,26 @@ function CuencadaYearContent({ cuencada, members, stale, onRetry }: ContentProps
         </Section>
       ) : null}
 
-      <Section id="programa" icon="📅" title={`Programa ${cuencada.title}`}>
-        <ProgramaTimeline items={itinerary} timeZone={cuencada.timezone} />
-      </Section>
+      {showPrograma ? (
+        <Section id="programa" icon="📅" title={`Programa ${cuencada.title}`}>
+          <ProgramaTimeline items={itinerary} timeZone={cuencada.timezone} />
+        </Section>
+      ) : null}
 
-      <Section id="lugares" icon="🗺️" title="¿Dónde estamos?" intro="Accesos rápidos a hoteles y lugares del recorrido.">
-        <LocationCards locations={locations} />
-      </Section>
+      {showLugares ? (
+        <Section id="lugares" icon="🗺️" title="¿Dónde estamos?" intro="Accesos rápidos a hoteles y lugares del recorrido.">
+          <LocationCards locations={locations} />
+        </Section>
+      ) : null}
 
       {weatherUrl || songUrl ? (
         <div className={`cu-container ${styles.media}`}>
-          {weatherUrl ? (
+          {weatherUrl && cuencada.city !== null ? (
             <section id="clima" aria-labelledby="clima-titulo" className={styles.section}>
               <h2 id="clima-titulo" className={styles.sectionTitle}>
                 <span aria-hidden="true">🌤️ </span>Clima en {cuencada.city}
               </h2>
-              <WeatherWidget href={weatherUrl} city={cuencada.city} state={cuencada.state} />
+              <WeatherWidget href={weatherUrl} city={cuencada.city} state={cuencada.state ?? ""} />
             </section>
           ) : null}
           {songUrl ? (
@@ -202,5 +221,24 @@ function CuencadaYearContent({ cuencada, members, stale, onRetry }: ContentProps
 
       <MembersBlock year={cuencada.year} timeZone={cuencada.timezone} state={members} />
     </>
+  );
+}
+
+/**
+ * In place of the countdown while the edition has no dates (status
+ * `announced`): "Fechas" and "Lugar", each "Por anunciar" until it is set.
+ */
+function PendingFacts({ cuencada }: { cuencada: PublicCuencada }): ReactNode {
+  return (
+    <dl className={styles.pendingFacts} data-testid="pending-facts">
+      <div className={styles.pendingFact}>
+        <dt>Fechas:</dt>
+        <dd>{formatEditionDates(cuencada)}</dd>
+      </div>
+      <div className={styles.pendingFact}>
+        <dt>Lugar:</dt>
+        <dd>{formatPlace(cuencada) ?? TO_BE_ANNOUNCED}</dd>
+      </div>
+    </dl>
   );
 }
