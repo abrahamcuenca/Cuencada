@@ -78,9 +78,10 @@ describe("person years", () => {
 });
 
 describe("familyTreeQuerySchema", () => {
-  it("coerces depth and clamps it to 3 (T6 amendment)", () => {
+  it("coerces depth and clamps it to FAMILY_TREE_MAX_DEPTH = 4 (WP-4.0)", () => {
     expect(familyTreeQuerySchema.parse({ depth: "2" })).toEqual({ depth: 2 });
-    expect(familyTreeQuerySchema.parse({ depth: "4" })).toEqual({ depth: 3 });
+    expect(familyTreeQuerySchema.parse({ depth: "4" })).toEqual({ depth: 4 });
+    expect(familyTreeQuerySchema.parse({ depth: "9" })).toEqual({ depth: 4 });
     expect(familyTreeQuerySchema.parse({})).toEqual({ depth: 1 });
     expect(familyTreeQuerySchema.safeParse({ depth: "0" }).success).toBe(false);
     expect(familyTreeQuerySchema.safeParse({ depth: "1.5" }).success).toBe(false);

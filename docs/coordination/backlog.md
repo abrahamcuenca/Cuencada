@@ -143,6 +143,13 @@ Still open:
   - Option 2: HIBP range queries (k-anonymity) with a timeout that fails open.
   - It is on the pre-launch list in the cutover checklist.
 
+### WP-4.0 follow-ups
+- Backfill `profiles.phone` to E.164 with `normalizePhoneE164` (contract from WP-4.0); until then every non-E.164 phone is left out of the `ContactCard` (no `tel:` guess at read time, Security L1); unreadable values stay as-is for an admin to fix. Then add a CHECK. Supersedes the two T5 E.164 items above.
+- `person_revisions` 1-year retention job (WP-4.1).
+- Future (Security M1 follow-up): "member proposes a link between two existing people, an admin approves" (a pending-proposal table and an admin queue). Until then only admins relate existing people.
+- Avatars have 256/64 px derivatives only; consider a 512 px derivative so `PersonDetails.photoUrl` is sharp on large screens (WP-4.3).
+- Remove the deprecated `createPersonInputSchema`/`updatePersonInputSchema` once the admin form uses the WP-4 schemas (WP-4.1).
+
 ## Post-launch (after the 2026-10-07 deploy)
 
 First production deploy and seed: 2026-10-07 (WP-3.2 recorded the lessons in

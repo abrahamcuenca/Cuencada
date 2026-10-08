@@ -1,6 +1,7 @@
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CONTACT_HANDLE_RULES, type HandleNetwork, PersonRevisionAction, isE164, isValidHandle } from "@cuencada/types";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
@@ -14,7 +15,7 @@ import { migrationsFolder } from "./migrate.js";
  * filled with seed-era rows, then migrated to the latest version. Migration
  * 0002: the same database is first taken 0000 → 0001, filled with rows in the
  * 0001 shape, then migrated to the latest version. Migration 0003: likewise
- * from 0002. The scratch database uses a
+ * from 0002, and migration 0004 from 0003. The scratch database uses a
  * harness-style name so the global teardown also reclaims it.
  */
 
@@ -32,6 +33,7 @@ let sql: postgres.Sql;
 let partialFolder: string;
 let upTo0001Folder: string;
 let upTo0002Folder: string;
+let upTo0003Folder: string;
 /** Number of migrations in the real journal (the "latest" version). */
 let latestCount: number;
 
@@ -75,6 +77,7 @@ beforeAll(async () => {
   partialFolder = await migrationsUpTo(1);
   upTo0001Folder = await migrationsUpTo(2);
   upTo0002Folder = await migrationsUpTo(3);
+  upTo0003Folder = await migrationsUpTo(4);
   const journal = JSON.parse(await readFile(join(migrationsFolder, "meta", "_journal.json"), "utf8")) as Journal; // drizzle-kit's own file shape
   latestCount = journal.entries.length;
 });
@@ -98,6 +101,7 @@ afterAll(async () => {
   if (partialFolder) await rm(partialFolder, { recursive: true, force: true });
   if (upTo0001Folder) await rm(upTo0001Folder, { recursive: true, force: true });
   if (upTo0002Folder) await rm(upTo0002Folder, { recursive: true, force: true });
+  if (upTo0003Folder) await rm(upTo0003Folder, { recursive: true, force: true });
   await dropScratch();
 });
 
@@ -427,5 +431,297 @@ describe("migration 0003", () => {
     expect(await sqlState(sql`insert into cuencadas (slug, title, description) values ('sin-año', 'Otra', 'x')`)).toBe(
       "23502"
     );
+  });
+});
+
+describe("migration 0004", () => {
+  /** Old-shape columns that must be byte-for-byte unchanged by 0004. */
+  const selectOldPeople =
+    "select id, user_id, full_name, nickname, family_branch, birth_year, death_year, deceased, created_by_user_id, " +
+    "created_at, updated_at from people order by full_name";
+  const selectOldProfiles =
+    "select id, user_id, full_name, family_branch, city, phone, avatar_key, bio, show_email, show_phone, show_city, " +
+    "listed_in_directory, created_at, updated_at from profiles order by full_name";
+
+  it("upgrades a seeded 0003 database: existing people and profiles unchanged, new columns empty", async () => {
+    await migrate(drizzle(sql), { migrationsFolder: upTo0003Folder });
+
+    // Rows in the 0003 shape.
+    const userId = await insertId(sql`
+      insert into users (email, display_name) values ('ana@example.test', 'Ana') returning id
+    `);
+    await sql`
+      insert into profiles (user_id, full_name, city, phone, show_email, show_phone, show_city)
+      values (${userId}, 'Ana Morales Vega', 'Mérida', '555 010 0101', true, false, true)
+    `;
+    const ana = await insertId(sql`
+      insert into people (user_id, full_name, family_branch, birth_year, created_by_user_id)
+      values (${userId}, 'Ana Morales Vega', 'Rama Norte', 1990, ${userId}) returning id
+    `);
+    const bisabuelo = await insertId(sql`
+      insert into people (full_name, birth_year, death_year, deceased) values ('Bisabuelo Vega', 1901, 1980, true) returning id
+    `);
+    await sql`insert into person_relationships (kind, from_person_id, to_person_id) values ('parent_of', ${bisabuelo}, ${ana})`;
+    const peopleBefore = await sql.unsafe(selectOldPeople);
+    const profilesBefore = await sql.unsafe(selectOldProfiles);
+
+    await migrate(drizzle(sql), { migrationsFolder });
+    expect(await sql`select count(*)::int as count from drizzle.__drizzle_migrations`).toEqual([{ count: latestCount }]);
+
+    expect(await sql.unsafe(selectOldPeople)).toEqual(peopleBefore);
+    // Every pre-0004 edge came from the admin-only routes: it is not member-created (Security M1).
+    expect(await sql`select kind, created_by_member from person_relationships`).toEqual([
+      { kind: "parent_of", created_by_member: false }
+    ]);
+    expect(await sql.unsafe(selectOldProfiles)).toEqual(profilesBefore);
+    expect(
+      await sql`
+        select birth_date, death_date, birthplace, bio, photo_key, photo_updated_at, updated_by_user_id
+        from people where id = ${ana}
+      `
+    ).toEqual([
+      {
+        birth_date: null,
+        death_date: null,
+        birthplace: null,
+        bio: null,
+        photo_key: null,
+        photo_updated_at: null,
+        updated_by_user_id: null
+      }
+    ]);
+    // The phone is not rewritten to E.164 by the migration (a later WP backfills it).
+    expect(
+      await sql`
+        select phone, whatsapp, instagram, facebook, tiktok, linkedin, github, website, contact_visibility
+        from profiles where user_id = ${userId}
+      `
+    ).toEqual([
+      {
+        phone: "555 010 0101",
+        whatsapp: null,
+        instagram: null,
+        facebook: null,
+        tiktok: null,
+        linkedin: null,
+        github: null,
+        website: null,
+        contact_visibility: {}
+      }
+    ]);
+    // An old-style insert (0003 column set) still works.
+    await sql`insert into people (full_name, birth_year) values ('Nueva Persona', 2001)`;
+  });
+
+  it("enforces the people date, length and photo CHECKs", async () => {
+    await migrate(drizzle(sql), { migrationsFolder });
+    const person = await insertId(sql`insert into people (full_name) values ('Luis Vega') returning id`);
+    const update = (fragment: postgres.PendingQuery<postgres.Row[]>): Promise<string | undefined> =>
+      sqlState(sql`update people set ${fragment} where id = ${person}`);
+
+    // A date needs its year, and must fall in it.
+    expect(await update(sql`birth_date = '1950-03-04'`)).toBe("23514");
+    expect(await update(sql`birth_year = 1951, birth_date = '1950-03-04'`)).toBe("23514");
+    expect(await update(sql`birth_year = 1950, birth_date = '1950-03-04'`)).toBeUndefined();
+    // Changing the year away from a stored date is refused; clearing the date first works.
+    expect(await update(sql`birth_year = 1949`)).toBe("23514");
+    expect(await update(sql`birth_year = null`)).toBe("23514");
+
+    // Death date: needs its year, deceased, and not before birth.
+    expect(await update(sql`death_date = '1990-01-01'`)).toBe("23514");
+    expect(await update(sql`death_year = 1990, death_date = '1990-01-01'`)).toBe("23514"); // not deceased
+    expect(await update(sql`death_year = 1950, death_date = '1950-01-01', deceased = true`)).toBe("23514"); // before birth
+    expect(await update(sql`death_year = 1950, death_date = '1950-03-04', deceased = true`)).toBeUndefined(); // same day
+    expect(await update(sql`death_year = 1990, death_date = '1990-01-01', deceased = true`)).toBeUndefined();
+
+    // Year-only people are still fine.
+    expect(await update(sql`birth_date = null, death_date = null, birth_year = 1930, death_year = 1931`)).toBeUndefined();
+
+    // Lengths are counted in characters, not bytes.
+    expect(await update(sql`birthplace = ${"é".repeat(120)}`)).toBeUndefined();
+    expect(await update(sql`birthplace = ${"é".repeat(121)}`)).toBe("23514");
+    expect(await update(sql`bio = ${"ñ".repeat(1000)}`)).toBeUndefined();
+    expect(await update(sql`bio = ${"ñ".repeat(1001)}`)).toBe("23514");
+
+    // A photo key needs its timestamp.
+    expect(await update(sql`photo_key = 'people/x/photo-512.webp'`)).toBe("23514");
+    expect(await update(sql`photo_key = 'people/x/photo-512.webp', photo_updated_at = now()`)).toBeUndefined();
+  });
+
+  it("enforces the contact CHECKs with exactly the contract's handle rules", async () => {
+    await migrate(drizzle(sql), { migrationsFolder });
+    const userId = await insertId(sql`insert into users (email, display_name) values ('beto@example.test', 'Beto') returning id`);
+    await sql`insert into profiles (user_id, full_name) values (${userId}, 'Beto Morales')`;
+    const store = (column: string, value: string): Promise<string | undefined> =>
+      sqlState(sql`update profiles set ${sql(column)} = ${value} where user_id = ${userId}`);
+
+    const corpus = [
+      "ana.morales",
+      "ana_morales",
+      "Ana-Morales",
+      "a",
+      "ab",
+      "abcde",
+      "x".repeat(24),
+      "x".repeat(25),
+      "x".repeat(30),
+      "x".repeat(31),
+      "x".repeat(39),
+      "x".repeat(40),
+      "x".repeat(50),
+      "x".repeat(51),
+      "x".repeat(100),
+      "x".repeat(101),
+      ".ana",
+      "ana.",
+      "-ana",
+      "ana-",
+      "an--a",
+      "a-b-c",
+      "javascript:alert(1)",
+      "ana/../../evil",
+      "ana%2F..%2Fevil",
+      "ana@evil.com",
+      "evil.com@ana",
+      "ana?x=1",
+      "ana#x",
+      "ana morales",
+      "ana\nmorales",
+      "ana\n",
+      "аna", // Cyrillic а
+      "ａｎａ", // full-width
+      "ana\u200B", // zero-width space
+      ""
+    ];
+    // Object.keys of the rules object is exactly its HandleNetwork keys.
+    for (const network of Object.keys(CONTACT_HANDLE_RULES) as HandleNetwork[]) {
+      for (const value of corpus) {
+        const accepted = (await store(network, value)) === undefined;
+        expect(accepted, `${network}: ${JSON.stringify(value)}`).toBe(isValidHandle(network, value));
+      }
+    }
+
+    const phones = ["+525512345678", "+15551234567", "+1234567", "+123456", "+1234567890123456", "+052", "5512345678", "+52 55 1234 5678", "+52551234567\n"];
+    for (const value of phones) {
+      const accepted = (await store("whatsapp", value)) === undefined;
+      expect(accepted, `whatsapp: ${JSON.stringify(value)}`).toBe(isE164(value));
+    }
+
+    expect(await store("website", "https://example.com/ana")).toBeUndefined();
+    expect(await store("website", `https://example.com/${"a".repeat(180)}`)).toBeUndefined(); // 200 chars
+    expect(await store("website", `https://example.com/${"a".repeat(181)}`)).toBe("23514");
+    expect(await store("website", "http://example.com")).toBe("23514");
+    expect(await store("website", "javascript:alert(1)")).toBe("23514");
+    expect(await store("website", " https://example.com")).toBe("23514");
+
+    // The visibility map: an object of booleans over the seven stored kinds only.
+    const visibility = (json: string): Promise<string | undefined> =>
+      sqlState(sql`update profiles set contact_visibility = ${json}::jsonb where user_id = ${userId}`);
+    expect(await visibility(`{"whatsapp": true, "instagram": false, "website": true}`)).toBeUndefined();
+    expect(await visibility("{}")).toBeUndefined();
+    expect(await visibility(`{"email": true}`)).toBe("23514"); // show_email is the source of truth
+    expect(await visibility(`{"phone": false}`)).toBe("23514");
+    expect(await visibility(`{"whatsapp": "yes"}`)).toBe("23514");
+    expect(await visibility(`{"whatsapp": null}`)).toBe("23514");
+    expect(await visibility(`{"whatsapp": {"x": true}}`)).toBe("23514");
+    expect(await visibility("[]")).toBe("23514");
+    expect(await visibility("null")).toBe("23514");
+    expect(await sqlState(sql`update profiles set contact_visibility = null where user_id = ${userId}`)).toBe("23502");
+  });
+
+  it("cascades photo uploads, keeps revisions through deletes and checks revision actions", async () => {
+    await migrate(drizzle(sql), { migrationsFolder });
+    const adminId = await insertId(sql`insert into users (email, display_name) values ('admin@example.test', 'Admin') returning id`);
+    const editorId = await insertId(sql`insert into users (email, display_name) values ('tia@example.test', 'Tía') returning id`);
+    const person = await insertId(sql`
+      insert into people (full_name, updated_by_user_id, created_by_user_id) values ('Abuela Vega', ${editorId}, ${adminId}) returning id
+    `);
+
+    // Photo uploads: mime/size CHECKs like avatar_uploads.
+    const upload = (mime: string, size: number, key: string): Promise<string | undefined> =>
+      sqlState(sql`
+        insert into person_photo_uploads (person_id, uploaded_by_user_id, object_key, mime_type, byte_size, expires_at)
+        values (${person}, ${editorId}, ${key}, ${mime}, ${size}, now() + interval '15 minutes')
+      `);
+    expect(await upload("image/jpeg", 1024, "people/p/u1")).toBeUndefined();
+    expect(await upload("image/heic", 1024, "people/p/u2")).toBe("23514");
+    expect(await upload("image/png", 0, "people/p/u3")).toBe("23514");
+    expect(await upload("image/png", 10 * 1024 * 1024 + 1, "people/p/u4")).toBe("23514");
+    expect(await upload("image/webp", 10, "people/p/u1")).toBe("23505"); // object key unique
+
+    // Revisions: action CHECK, object snapshots that name the person, no self-revert.
+    const snapshot = (fields: Record<string, unknown> = {}): string => JSON.stringify({ type: "person", personId: person, ...fields });
+    const revision = (action: string, before: string | null = snapshot(), after: string | null = null): Promise<string | undefined> =>
+      sqlState(sql`
+        insert into person_revisions (person_id, actor_user_id, action, before, after)
+        values (${person}, ${editorId}, ${action}, ${before}::jsonb, ${after}::jsonb)
+      `);
+    for (const action of Object.values(PersonRevisionAction)) expect(await revision(action), action).toBeUndefined();
+    expect(await revision("person.bogus")).toBe("23514");
+    expect(await revision("person.update", "[1, 2]")).toBe("23514");
+    expect(await revision("person.update", JSON.stringify("text"))).toBe("23514");
+    // Security L2: every snapshot must carry personId (a string), and a revision needs one snapshot.
+    expect(await revision("person.update", JSON.stringify({ type: "person", fullName: "x" }))).toBe("23514");
+    expect(await revision("person.update", snapshot(), JSON.stringify({ type: "person" }))).toBe("23514");
+    expect(await revision("person.update", JSON.stringify({ type: "person", personId: 42 }))).toBe("23514");
+    expect(await revision("person.update", JSON.stringify({ type: "person", personId: null }))).toBe("23514");
+    expect(await revision("person.update", null, null)).toBe("23514");
+    expect(await revision("person.create", null, snapshot())).toBeUndefined();
+    const original = await insertId(sql`
+      insert into person_revisions (person_id, actor_user_id, action, before, after)
+      values (${person}, ${editorId}, 'person.update', ${snapshot({ fullName: "Abuela" })}::jsonb,
+              ${snapshot({ fullName: "Abuela Vega" })}::jsonb)
+      returning id
+    `);
+    expect(await sqlState(sql`update person_revisions set reverted_by_revision_id = id where id = ${original}`)).toBe("23514");
+    const revert = await insertId(sql`
+      insert into person_revisions (person_id, actor_user_id, action, after)
+      values (${person}, ${adminId}, 'person.revert', ${snapshot()}::jsonb) returning id
+    `);
+    await sql`update person_revisions set reverted_by_revision_id = ${revert} where id = ${original}`;
+    // Retention cleanup deleting the revert row unlinks the original instead of failing.
+    await sql`delete from person_revisions where id = ${revert}`;
+    expect(await sql`select reverted_by_revision_id from person_revisions where id = ${original}`).toEqual([
+      { reverted_by_revision_id: null }
+    ]);
+    const relationshipRevision = await insertId(sql`
+      insert into person_revisions (relationship_id, actor_user_id, action, after)
+      values (gen_random_uuid(), ${editorId}, 'relationship.create',
+              ${JSON.stringify({ type: "relationship", personId: person, fromPersonId: adminId, toPersonId: person })}::jsonb)
+      returning id
+    `);
+
+    // Deleting the editor's account: set null everywhere, nothing lost.
+    await sql`delete from users where id = ${editorId}`;
+    expect(await sql`select updated_by_user_id from people where id = ${person}`).toEqual([{ updated_by_user_id: null }]);
+    expect(await sql`select uploaded_by_user_id from person_photo_uploads`).toEqual([{ uploaded_by_user_id: null }]);
+    expect(await sql`select count(*)::int as count from person_revisions where actor_user_id is null`).toEqual([
+      { count: Object.values(PersonRevisionAction).length + 3 }
+    ]);
+
+    // Deleting the person: uploads cascade, revisions survive with person_id null.
+    const revisionCount = await sql`select count(*)::int as count from person_revisions`;
+    await sql`delete from people where id = ${person}`;
+    expect(await sql`select count(*)::int as count from person_photo_uploads`).toEqual([{ count: 0 }]);
+    expect(await sql`select count(*)::int as count from person_revisions`).toEqual(revisionCount);
+    expect(await sql`select count(*)::int as count from person_revisions where person_id is not null`).toEqual([{ count: 0 }]);
+    expect(await sql`select before from person_revisions where id = ${original}`).toEqual([
+      { before: { type: "person", personId: person, fullName: "Abuela" } }
+    ]);
+    expect(await sql`select relationship_id is not null as kept from person_revisions where id = ${relationshipRevision}`).toEqual([
+      { kept: true }
+    ]);
+    // A removal request can still find all history about the deleted person (the WP-4.1 purge query).
+    const aboutPerson = sql`
+      select count(*)::int as count from person_revisions
+      where person_id = ${person} or ${person} in (before ->> 'personId', after ->> 'personId',
+        before ->> 'fromPersonId', before ->> 'toPersonId', after ->> 'fromPersonId', after ->> 'toPersonId')
+    `;
+    expect(await aboutPerson).toEqual(revisionCount);
+
+    // The PII comment is on the table.
+    expect(await sql`select obj_description('person_revisions'::regclass, 'pg_class') like '%PII%' as commented`).toEqual([
+      { commented: true }
+    ]);
   });
 });
