@@ -26,6 +26,7 @@ import {
   toContactFormValues,
   websiteWarning
 } from "../lib/contactForm";
+import { CONTACT_SECTION_ID } from "../paths";
 import styles from "../profile.module.css";
 
 /** Toast after the contacts are saved. */
@@ -129,8 +130,16 @@ export function ContactSection({ profile }: ContactSectionProps): ReactNode {
   const site = websiteWarning(values.website);
 
   return (
-    <form ref={formRef} className={cx(styles.form, styles.contactForm)} noValidate onSubmit={onSubmit} aria-labelledby={titleId}>
-      <h2 id={titleId} className={styles.sectionTitle}>
+    <form
+      ref={formRef}
+      id={CONTACT_SECTION_ID}
+      className={cx(styles.form, styles.contactForm)}
+      noValidate
+      onSubmit={onSubmit}
+      aria-labelledby={titleId}
+    >
+      {/* Focus target of /perfil#contacto (useScrollToSection). */}
+      <h2 id={titleId} className={styles.sectionTitle} tabIndex={-1} data-section-heading>
         Contacto
       </h2>
       <p className={styles.sectionHint}>

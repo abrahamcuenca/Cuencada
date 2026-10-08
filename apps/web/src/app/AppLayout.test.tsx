@@ -1,16 +1,17 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
-import { setupServer } from "msw/node";
+import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { makeMemoriesHome, makePublicCuencada } from "../features/cuencadas/testing/fixtures";
 import { tokenRefreshed } from "../features/auth/authSlice";
 import { apiUrl, authenticatedState, makeUser, statusState } from "../../test/auth";
+import { createTestServer } from "../../test/msw";
 import { renderApp } from "../../test/renderApp";
 
-const server = setupServer(
-  http.get(apiUrl("/cuencadas/home"), () => HttpResponse.json(makeMemoriesHome())),
-  http.get(apiUrl("/cuencadas"), () => HttpResponse.json([]))
-);
+const server = createTestServer();
+
+/** The account menu button ("Mi cuenta: Prima"). */
+const ACCOUNT_BUTTON = { name: /^Mi cuenta/ };
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => server.resetHandlers());
@@ -37,7 +38,7 @@ describe("AppLayout", () => {
     expect(within(bottom).getByRole("link", { name: /Entrar/ })).toHaveAttribute("href", "/entrar");
     // The header action, outside both navs.
     expect(within(screen.getByRole("banner")).getAllByRole("link", { name: "Entrar" })).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: "Salir" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", ACCOUNT_BUTTON)).not.toBeInTheDocument();
   });
 
   it.each([
@@ -52,18 +53,19 @@ describe("AppLayout", () => {
     expect(linkNames(bottom)).toEqual(["Inicio", "Programa", "Fotos", "Chat", "Más"]);
     expect(within(bottom).getByRole("link", { name: /Más/ })).toHaveAttribute("href", "/mas");
     expect(within(top).queryByRole("link", { name: "Panel" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Salir" })).toBeInTheDocument();
+    expect(screen.getByRole("button", ACCOUNT_BUTTON)).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Entrar" })).not.toBeInTheDocument();
   });
 
-  it("adds the Panel link and a Salir button for an admin", async () => {
+  it("gives an admin the member links, with Panel only in the account menu (WP-4.7)", async () => {
     renderApp("/", authenticatedState(makeUser({ role: "admin" })));
 
     const top = await screen.findByRole("navigation", { name: "Navegación principal" });
-    expect(linkNames(top)).toEqual(["Programa", "Galería", "Directorio", "Árbol", "Chat", "Panel"]);
-    expect(within(top).getByRole("link", { name: "Panel" })).toHaveAttribute("href", "/admin");
+    expect(linkNames(top)).toEqual(["Programa", "Galería", "Directorio", "Árbol", "Chat"]);
     expect(linkNames(screen.getByRole("navigation", { name: "Navegación inferior" }))).toEqual(["Inicio", "Programa", "Fotos", "Chat", "Más"]);
-    expect(screen.getByRole("button", { name: "Salir" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", ACCOUNT_BUTTON));
+    expect(screen.getAllByRole("link", { name: /Panel/ })).toHaveLength(1);
+    expect(screen.getByRole("link", { name: /Panel/ })).toHaveAttribute("href", "/admin");
   });
 
   it.each(["idle", "restoring"] as const)("shows only the public destinations and no session action while %s", async (status) => {
@@ -73,7 +75,7 @@ describe("AppLayout", () => {
     expect(linkNames(top)).toEqual(["Programa"]);
     expect(linkNames(screen.getByRole("navigation", { name: "Navegación inferior" }))).toEqual(["Inicio", "Programa"]);
     expect(screen.queryByRole("link", { name: "Entrar" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Salir" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", ACCOUNT_BUTTON)).not.toBeInTheDocument();
   });
 
   it("goes straight from the restoring nav to the member nav, never through the anonymous one", async () => {

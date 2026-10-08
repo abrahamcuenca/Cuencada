@@ -4,7 +4,9 @@
  *   "Inicia sesión…" teaser.
  * - Member: the member nav; `/admin` says "Acceso restringido" instead of
  *   silently bouncing home; `/mas` has no admin entry.
- * - Admin: the member nav plus "Panel".
+ * - Admin: the member nav; "Panel" lives in the account menu (WP-4.7).
+ * - WP-4.7: desktop reaches /perfil#contacto from the account menu; phones
+ *   reach Mi perfil from Más. Directorio links to "Editar mi perfil".
  */
 import type { Locator, Page } from "@playwright/test";
 import { CastRole, docShot, expect, login, test } from "./support/fixtures.js";
@@ -33,6 +35,7 @@ function isDesktop(page: Page): boolean {
 
 const topNav = (page: Page): Locator => page.getByRole("navigation", { name: "Navegación principal" });
 const bottomNav = (page: Page): Locator => page.getByRole("navigation", { name: "Navegación inferior" });
+const accountButton = (page: Page): Locator => page.getByRole("banner").getByRole("button", { name: /^Mi cuenta/ });
 
 test.describe("navigation by session", () => {
   test("11 · anonymous visitors get Inicio, Programa and Entrar, and a login teaser on Home @desktop", async ({ page }, testInfo) => {
@@ -85,9 +88,10 @@ test.describe("navigation by session", () => {
     await page.goto("/");
 
     if (isDesktop(page)) {
-      await expect.poll(() => linkLabels(topNav(page))).toEqual([...MEMBER_TOP, "Panel"]);
+      await expect.poll(() => linkLabels(topNav(page))).toEqual(MEMBER_TOP);
+      await accountButton(page).click();
       await docShot(page, testInfo, "nav", "admin");
-      await topNav(page).getByRole("link", { name: "Panel" }).click();
+      await page.getByRole("banner").getByRole("link", { name: /Panel/ }).click();
     } else {
       await expect.poll(() => linkLabels(bottomNav(page))).toEqual(MEMBER_BOTTOM);
       await bottomNav(page).getByRole("link", { name: /Más/ }).click();
@@ -95,5 +99,50 @@ test.describe("navigation by session", () => {
       await page.getByRole("main").getByRole("link", { name: /Panel de administración/ }).click();
     }
     await expect(page.getByRole("heading", { name: "Panel de administración", level: 1 })).toBeVisible();
+  });
+
+  test("11d · a member reaches Contacto of Mi perfil from the account menu (desktop) or Más (phones) @desktop", async ({ page, cast }, testInfo) => {
+    await login(page, cast(CastRole.Ana));
+    await page.goto("/");
+    const contacto = page.getByRole("heading", { name: "Contacto", level: 2 });
+
+    if (isDesktop(page)) {
+      const button = accountButton(page);
+      await button.click();
+      await expect(button).toHaveAttribute("aria-expanded", "true");
+      const menu = page.getByRole("banner").getByRole("list").filter({ has: page.getByRole("link", { name: /Mi perfil/ }) });
+      await expect(menu.getByRole("link", { name: /Mi perfil/ })).toBeVisible();
+      await expect(menu.getByRole("link", { name: /Panel/ })).toHaveCount(0);
+      await docShot(page, testInfo, "nav", "account-menu");
+      // Escape closes and gives focus back; the arrow key reopens on the first entry.
+      await page.keyboard.press("Escape");
+      await expect(button).toHaveAttribute("aria-expanded", "false");
+      await expect(button).toBeFocused();
+      await page.keyboard.press("ArrowDown");
+      await expect(menu.getByRole("link", { name: /Mi perfil/ })).toBeFocused();
+      await menu.getByRole("link", { name: /Contacto/ }).click();
+      await expect(page).toHaveURL(/\/perfil#contacto$/);
+      await expect(contacto).toBeInViewport();
+      await expect(contacto).toBeFocused();
+    } else {
+      await accountButton(page).click();
+      await docShot(page, testInfo, "nav", "account-menu");
+      await page.keyboard.press("Escape");
+      await bottomNav(page).getByRole("link", { name: /Más/ }).click();
+      await page.getByRole("main").getByRole("link", { name: /Mi perfil/ }).click();
+      await expect(page).toHaveURL(/\/perfil$/);
+      await expect(page.getByRole("heading", { name: "Mi perfil", level: 1 })).toBeVisible();
+      await page.goBack();
+      await page.getByRole("main").getByRole("link", { name: /Contacto/ }).click();
+      await expect(page).toHaveURL(/\/perfil#contacto$/);
+      await expect(contacto).toBeInViewport();
+    }
+
+    await page.goto("/directorio");
+    const edit = page.getByRole("main").getByRole("link", { name: /Editar mi perfil/ }).first();
+    await expect(edit).toBeVisible();
+    await docShot(page, testInfo, "nav", "directorio-editar-perfil", edit);
+    await edit.click();
+    await expect(page).toHaveURL(/\/perfil$/);
   });
 });

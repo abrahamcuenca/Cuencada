@@ -5,7 +5,9 @@ import { Button } from "../../../shared/ui/Button";
 import { cx } from "../../../shared/ui/cx";
 import { EmptyState } from "../../../shared/ui/EmptyState";
 import { useExpiredUrlRefetch } from "../../gallery";
-import { useAppDispatch } from "../../../app/hooks";
+import { useAppDispatch, useAppSelector } from "../../../app/hooks";
+import { selectCurrentUser } from "../../auth/authSlice";
+import { PROFILE_PATH } from "../../profile/paths";
 import { directoryApi, useListDirectoryInfiniteQuery } from "../api";
 import { DirectoryError } from "../components/AccessStates";
 import { DirectoryDetail } from "../components/DirectoryDetail";
@@ -23,6 +25,25 @@ import {
 } from "../lib/filters";
 import { useDebouncedValue } from "../lib/useDebouncedValue";
 
+/** Copy of the "your own card" banner above the search (WP-4.7). */
+export const OWN_PROFILE_BANNER_TEXT = "¿Cambió tu foto, tu teléfono o tus redes? Actualízalos en tu perfil.";
+
+/**
+ * WP-4.7: a compact banner over the list with "Editar mi perfil", so the
+ * member finds where their own card's data (photo, contacts, visibility) is
+ * edited without hunting for their row.
+ */
+function OwnProfileBanner(): ReactNode {
+  return (
+    <div className={styles.ownBanner}>
+      <p className={styles.ownBannerText}>{OWN_PROFILE_BANNER_TEXT}</p>
+      <Button to={PROFILE_PATH} variant="secondary" size="sm" icon="✏️">
+        Editar mi perfil
+      </Button>
+    </div>
+  );
+}
+
 /**
  * `/directorio/:userId?` (members). One route for the list and the detail, so
  * opening a person keeps the search, filters and loaded pages:
@@ -34,6 +55,7 @@ import { useDebouncedValue } from "../lib/useDebouncedValue";
 export function DirectoryPage(): ReactNode {
   const { userId } = useParams();
   const dispatch = useAppDispatch();
+  const ownUserId = useAppSelector(selectCurrentUser)?.id;
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<DirectorySheetFilters>(NO_FILTERS);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -101,6 +123,7 @@ export function DirectoryPage(): ReactNode {
       <DirectoryList
         entries={entries}
         selectedId={userId}
+        ownUserId={ownUserId}
         hasMore={hasNextPage}
         loadingMore={isFetchingNextPage}
         onLoadMore={loadMore}
@@ -114,6 +137,7 @@ export function DirectoryPage(): ReactNode {
         <h1 id={`${searchId}-title`} className={styles.title}>
           Directorio familiar
         </h1>
+        <OwnProfileBanner />
         <div className={styles.searchBar}>
           <label htmlFor={searchId} className="visually-hidden">
             Buscar por nombre o ciudad

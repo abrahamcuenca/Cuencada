@@ -1,0 +1,112 @@
+/* TopNav account menu (WP-4.7). Mobile-first: min-width queries only. */
+.root {
+  position: relative;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  min-height: var(--tap-min, 44px);
+  min-width: var(--tap-min, 44px);
+  max-width: 13rem;
+  padding: 0 var(--space-3, 12px) 0 var(--space-1, 4px);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-weight: var(--weight-bold, 700);
+  cursor: pointer;
+}
+
+.trigger[aria-expanded="true"] {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary);
+}
+
+@media (hover: hover) {
+  .trigger:hover {
+    background: var(--color-primary-soft);
+  }
+}
+
+/* Phones: the avatar alone keeps the brand bar on one line at 320px (the accessible name keeps the label). */
+.name {
+  display: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.caret {
+  font-size: 0.75em;
+  line-height: 1;
+}
+
+.list {
+  position: absolute;
+  top: calc(100% + var(--space-2, 8px));
+  right: 0;
+  z-index: var(--z-raised, 10);
+  width: max-content;
+  min-width: 15rem;
+  max-width: calc(100vw - 2 * var(--gutter, 16px));
+  margin: 0;
+  padding: var(--space-2, 8px);
+  list-style: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md, 18px);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3, 12px);
+  width: 100%;
+  min-height: var(--tap-min, 44px);
+  padding: 0 var(--space-3, 12px);
+  border: 0;
+  border-radius: var(--radius-sm, 12px);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-weight: var(--weight-bold, 700);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.item:focus-visible {
+  outline-offset: -2px;
+}
+
+@media (hover: hover) {
+  .item:hover {
+    background: var(--color-primary-soft);
+  }
+}
+
+.icon {
+  width: 1.5em;
+  text-align: center;
+}
+
+.separated {
+  margin-top: var(--space-2, 8px);
+  padding-top: var(--space-2, 8px);
+  border-top: 1px solid var(--color-border);
+}
+
+.separated .item {
+  color: var(--color-danger);
+}
+
+@media (min-width: 480px) {
+  .name {
+    display: inline;
+  }
+}

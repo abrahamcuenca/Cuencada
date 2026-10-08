@@ -101,7 +101,7 @@ export async function login(page: Page, member: Pick<CastMember, "email" | "pass
   await page.getByRole("textbox", { name: "Contraseña", exact: true }).fill(member.password);
   await page.getByRole("button", { name: "Entrar", exact: true }).click();
   await expect(page).not.toHaveURL(/\/entrar/);
-  await expect(page.getByRole("button", { name: "Salir" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Mi cuenta/ })).toBeVisible();
 }
 
 /**

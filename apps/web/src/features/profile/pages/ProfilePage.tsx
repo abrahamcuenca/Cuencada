@@ -25,7 +25,12 @@ import {
   type ProfileTextField,
   toFormValues
 } from "../lib/profileForm";
+import { useScrollToSection } from "../lib/useScrollToSection";
+import { CONTACT_SECTION_ID } from "../paths";
 import styles from "../profile.module.css";
+
+/** Sections a `/perfil#…` link may scroll to. */
+const PROFILE_SECTIONS = [CONTACT_SECTION_ID] as const;
 
 /** Toast after a successful save (wireframe copy). */
 export const PROFILE_SAVED_MESSAGE = "Cambios guardados.";
@@ -116,6 +121,8 @@ function ProfileForm({ profile }: { profile: OwnProfile }): ReactNode {
   const [formError, setFormError] = useState<string | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const submitting = useRef(false);
+  // WP-4.7: /perfil#contacto (account menu, /mas, tree, Home) lands on the Contacto section.
+  useScrollToSection(true, PROFILE_SECTIONS);
 
   const baseline = useMemo(() => toFormValues(profile), [profile]);
   const values: ProfileFormValues = { ...baseline, ...edits };
