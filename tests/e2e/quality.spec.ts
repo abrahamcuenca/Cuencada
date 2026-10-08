@@ -55,6 +55,18 @@ const MEMBER_ROUTES: RouteCheck[] = [
   { name: "perfil", open: "/perfil" },
   { name: "sesiones", open: "/perfil/sesiones" },
   { name: "mas", open: "/mas" },
+  // WP-4.7: the profile's Contacto section from a link, and the open account menu.
+  { name: "perfil-contacto", open: "/perfil#contacto", ready: "Contacto" },
+  {
+    name: "menu-cuenta",
+    open: async (page) => {
+      await page.goto("/directorio");
+      const button = page.getByRole("banner").getByRole("button", { name: /^Mi cuenta/ });
+      await button.click();
+      await expect(button).toHaveAttribute("aria-expanded", "true");
+      await expect(page.getByRole("banner").getByRole("link", { name: /Contacto/ })).toBeVisible();
+    }
+  },
   // A member on /admin: the "Acceso restringido" screen (WP-3.1b).
   { name: "admin-restringido", open: "/admin", ready: "Acceso restringido" }
 ];

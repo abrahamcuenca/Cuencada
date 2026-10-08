@@ -73,7 +73,7 @@ test.describe("auth journeys", () => {
     await phone.getByRole("button", { name: /Crear (mi )?cuenta/ }).click();
 
     await expect(phone).toHaveURL(/\/$/);
-    await expect(phone.getByRole("button", { name: "Salir" })).toBeVisible();
+    await expect(phone.getByRole("button", { name: /^Mi cuenta/ })).toBeVisible();
     // An emailed invite proves the address: no "Verifica tu correo" banner.
     await expect(phone.getByRole("region", { name: "Verifica tu correo" })).toHaveCount(0);
 
@@ -102,7 +102,7 @@ test.describe("auth journeys", () => {
     await phone.getByRole("textbox", { name: "Crea una contraseña" }).fill("Enlace-e2e-segura-2027");
     await phone.getByRole("textbox", { name: "Confirma tu contraseña" }).fill("Enlace-e2e-segura-2027");
     await phone.getByRole("button", { name: /Crear (mi )?cuenta/ }).click();
-    await expect(phone.getByRole("button", { name: "Salir" })).toBeVisible();
+    await expect(phone.getByRole("button", { name: /^Mi cuenta/ })).toBeVisible();
 
     const banner = phone.getByRole("region", { name: "Verifica tu correo" });
     await expect(banner).toBeVisible();
@@ -139,7 +139,7 @@ test.describe("auth journeys", () => {
     await expect(page).toHaveURL(/\/entrar\/enlace$/);
     await journeyShot(page, testInfo, "03-magic-link-entrar");
     await page.getByRole("button", { name: "Entrar", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Salir" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Mi cuenta/ })).toBeVisible();
     await expect(page).toHaveURL(/\/$/);
 
     // The link is single-use.
@@ -167,7 +167,7 @@ test.describe("auth journeys", () => {
     await journeyShot(phone, testInfo, "03-session-open-interstitial");
     await phone.getByRole("button", { name: `Seguir como ${carla.displayName}` }).click();
     await expect(phone).toHaveURL(/\/$/);
-    await expect(phone.getByRole("button", { name: "Salir" })).toBeVisible();
+    await expect(phone.getByRole("button", { name: /^Mi cuenta/ })).toBeVisible();
   });
 
   test("9 · logout everywhere ends the session on the other phone too @desktop", async ({ page, cast, newPhone }, testInfo) => {
@@ -188,7 +188,7 @@ test.describe("auth journeys", () => {
     // call (an in-app navigation, no reload) is refused and it ends up anonymous.
     await other.getByRole("link", { name: /^Directorio/ }).first().click();
     await expect(other).toHaveURL(/\/entrar/);
-    await expect(other.getByRole("button", { name: "Salir" })).toHaveCount(0);
+    await expect(other.getByRole("button", { name: /^Mi cuenta/ })).toHaveCount(0);
   });
 
   test("9b · a reload that cuts a refresh short keeps the session (grace re-issue) @desktop", async ({ page, cast }) => {
@@ -219,17 +219,17 @@ test.describe("auth journeys", () => {
     // reuse detection revoked the session and the member was logged out).
     const started = Date.now();
     await page.reload();
-    await expect(page.getByRole("button", { name: "Salir" })).toBeVisible({ timeout: 5_000 });
+    await expect(page.getByRole("button", { name: /^Mi cuenta/ })).toBeVisible({ timeout: 5_000 });
     expect(Date.now() - started).toBeLessThan(5_000);
     const reissued = await refreshCookie(page);
     expect(reissued.value).not.toBe(before.value);
 
     // The re-issued cookie is an ordinary one: further reloads and member pages keep working.
     await page.reload();
-    await expect(page.getByRole("button", { name: "Salir" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Mi cuenta/ })).toBeVisible();
     await page.goto("/directorio");
     await expect(page).toHaveURL(/\/directorio$/);
-    await expect(page.getByRole("button", { name: "Salir" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Mi cuenta/ })).toBeVisible();
   });
 });
 

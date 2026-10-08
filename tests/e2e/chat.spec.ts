@@ -58,7 +58,7 @@ test.describe("chat", () => {
     // Beto leaves the room; a new message from Ana shows up as unread on his Chat tab.
     // Outside /chat the badge comes from the rooms list (fetched on load, then polled every 2 min).
     await betoPhone.goto("/");
-    await expect(betoPhone.getByRole("button", { name: "Salir" })).toBeVisible();
+    await expect(betoPhone.getByRole("button", { name: /^Mi cuenta/ })).toBeVisible();
     const later = `¿Ya llegaron? (${project} · ${Date.now() % 100_000})`;
     await send(page, later);
     await expect(page.getByRole("log").getByText(later)).toBeVisible();

@@ -63,7 +63,7 @@ test.describe("merge duplicate people", () => {
     await phone.getByRole("textbox", { name: "Crea una contraseña" }).fill("Lucia-e2e-segura-2027");
     await phone.getByRole("textbox", { name: "Confirma tu contraseña" }).fill("Lucia-e2e-segura-2027");
     await phone.getByRole("button", { name: /Crear (mi )?cuenta/ }).click();
-    await expect(phone.getByRole("button", { name: "Salir" })).toBeVisible();
+    await expect(phone.getByRole("button", { name: /^Mi cuenta/ })).toBeVisible();
 
     // An admin relates the new (duplicate) person: her partner.
     await openInTree(page, names.typedName);
