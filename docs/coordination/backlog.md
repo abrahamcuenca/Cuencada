@@ -62,7 +62,7 @@ family, profile, admin, chat, media, cuencadas) · **0.8c** web features
 
 ### 0.8c (web features)
 - Centralize the "verify your email" handling on 403 `EMAIL_UNVERIFIED`. WP-0.8a already made the directory (`AccessStates.tsx`) and family tree (`FamilyTreePage.tsx`) accept it alongside `FORBIDDEN`; chat and RSVP branch on the 403 status. Then drop the `FORBIDDEN` fallbacks and update fixtures.
-- T1-FE: switch "cerrar en todos" to `logout-all`; on a second `REFRESH_RACE` wait past the grace (~10 s) and retry once; "vuelve a pedirlo" copy for lost emails.
+- T1-FE: switch "cerrar en todos" to `logout-all`; "vuelve a pedirlo" copy for lost emails. (The "wait past the grace and retry" on a second `REFRESH_RACE` was done in WP-0.8c and **reverted in WP-4.6**: it logged out members who reloaded mid-refresh; the server now re-issues inside the grace.)
 - T2-FE: `useScrollToHash` try/catch on a malformed fragment; Home daily message refreshes past midnight (`useNow` tick); admin Mensajes Select label truncation at 375 px; forecast URL format hint (`www.` rejected); record the section-order decision; R2 tips/extras content model; R1 itinerary tags; R4 song lyrics URL; R8 admin-picked highlights (needs T4).
 - T3-FE: hotel re-save while members load; deadline lock re-evaluates at midnight; R2 attendance link from the T2 edit page + T8 shell.
 - T4-FE: switch `/galeria` probing to `CuencadaSummary.hasMedia`; Vite `envDir` (root `.env`) or `apps/web/.env.local` docs + dev bucket example; check `VITE_MEDIA_UPLOAD_ORIGIN` before the intent (disabled button + Spanish copy + dev hint) to avoid orphan rows.
@@ -165,6 +165,11 @@ Still open:
 - Account merge (two linked people, `MERGE_BOTH_LINKED`) is out of scope (owner decision: people only). An admin unlinks one first.
 - The duplicates scan reads the whole tree in memory (family scale); move the name normalization to SQL (`unaccent` + a trigram index) if the tree grows to thousands of people.
 - A merge undo refuses (409) after **any** later change about either person, even an unrelated one; an admin undoes newer changes first. A losing tree photo (both had one) and dropped pending uploads are not restored by the undo.
+- [x] Invite accept racing a merge (TL note 2, PR #49): the accept re-reads the invite's `person_id` under the invite lock and retries once on the kept person (done in WP-4.6).
+
+### WP-4.6 follow-ups
+- `AuditAction.RefreshRace` (`auth.refresh_race`) is no longer written; keep it for old rows. `REFRESH_RACE` stays in `ErrorCode` for older clients; drop the client's 409 retry once no pre-4.6 server can answer.
+- Grace re-issue is spent after one use: a member whose reload aborts **two** refreshes in a row inside 10 s is logged out (reuse). Not seen in e2e; revisit only if `auth.refresh_reuse_detected` rows with `reason: successor_used` show up for real members.
 
 ### WP-4.1 follow-ups
 - [x] **WP-4.3 merge:** `modules/family/personPhotoObjects.ts` is an interim helper for the admin person delete (current photo derivatives by the `people/…-<size>.webp` key layout + pending `person_photo_uploads` keys). Replace it with WP-4.3's helper once merged, and have WP-4.3 photo writes call `insertRevision(... "person.photo" ...)`.
