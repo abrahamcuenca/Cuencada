@@ -25,6 +25,7 @@ import { recordAudit } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
 import { authUser } from "../../plugins/auth.js";
 import { deletePersonPhotoObjects, personPhotoObjectKeys } from "./personPhotoObjects.js";
+import { lockFamilyTree } from "./relationships.js";
 import { findPerson, type PersonViewRow, toPersonWithAvatar } from "./repository.js";
 import { purgePersonRevisions } from "./revisions.js";
 import {
@@ -115,6 +116,8 @@ const adminFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
       const admin = authUser(request);
       const { id } = request.params;
       const saved = await app.db.transaction(async (tx) => {
+        // Lock order everywhere: tree → person → invite (see `writes.ts`).
+        await lockFamilyTree(tx);
         const before = await lockPersonRow(tx, id);
         if (before === undefined) throw new AppError("NOT_FOUND", PERSON_NOT_FOUND);
         const row = await updatePersonTx(tx, before, adminPatch(request.body), { id: admin.id, ip: request.ip });
@@ -146,6 +149,10 @@ const adminFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
       const id = request.params.id.toLowerCase();
       const { purgeHistory } = request.query;
       const keys = await app.db.transaction(async (tx) => {
+        // Lock order everywhere: tree → person → invite. The tree lock first
+        // (deletePersonTx takes it again, re-entrantly) so a concurrent member
+        // write (tree, then person) cannot deadlock with this delete.
+        await lockFamilyTree(tx);
         // Locked: a concurrent link cannot slip between check and delete.
         const row = await lockPersonRow(tx, id);
         const view = row === undefined ? undefined : await findPerson(tx, id);

@@ -172,6 +172,34 @@ describe("POST /api/admin/revisions/:revisionId/revert", () => {
     expect(all[0]).toMatchObject({ action: "person.revert", personName: "Hija Nueva", personId: null });
   });
 
+  it("undoing an addition cleans up like a delete: pending invites revoked, photo objects removed", async () => {
+    const self = await insertPerson({ userId: member.id });
+    const created = await call("POST", "/api/family/people", { fullName: "Hija Con Foto", relateTo: { personId: self.id, kind: "child_of" } }, memberAuth);
+    const childId = created.json<PersonDetails>().id;
+    const base = `people/${childId}/foto`;
+    for (const size of [512, 256, 64]) await storage.put({ key: `${base}-${size}.webp`, body: new Uint8Array([1]), contentType: "image/webp" });
+    await storage.put({ key: `people/${childId}/pendiente.jpg`, body: new Uint8Array([1]), contentType: "image/jpeg" });
+    await getTestDb().update(people).set({ photoKey: `${base}-256.webp`, photoUpdatedAt: new Date() }).where(eq(people.id, childId));
+    await getTestDb()
+      .insert(personPhotoUploads)
+      .values({ personId: childId, objectKey: `people/${childId}/pendiente.jpg`, mimeType: "image/jpeg", byteSize: 1, expiresAt: new Date(Date.now() + 60_000) });
+    const [invite] = await getTestDb()
+      .insert(invites)
+      .values({ tokenHash: "d".repeat(64), email: "hija@example.com", personId: childId, expiresAt: new Date(Date.now() + 86_400_000) })
+      .returning();
+    // The photo/invite writes changed nothing the snapshot covers, so the undo is not stale.
+    const create = (await history(childId)).find((item) => item.action === "person.create");
+    if (create === undefined || invite === undefined) throw new Error("fixture");
+    const response = await revert(create.id);
+    expect(response.statusCode, response.body).toBe(200);
+    expect(await personRow(childId)).toBeUndefined();
+    const [after] = await getTestDb().select().from(invites).where(eq(invites.id, invite.id));
+    expect(after).toMatchObject({ status: "revoked", personId: null });
+    const audits = await getTestDb().select().from(auditLogs).where(eq(auditLogs.action, "invite.revoked"));
+    expect(audits[0]).toMatchObject({ entityId: invite.id, metadata: { personId: childId, reason: "person_deleted" } });
+    expect([...storage.objects.keys()].filter((key) => key.startsWith(`people/${childId}/`))).toEqual([]);
+  });
+
   it("refuses to undo an addition that has other edges since", async () => {
     const anchor = await insertPerson();
     const created = (await call("POST", "/api/admin/people", { fullName: "Nueva", relateTo: { personId: anchor.id, kind: "child_of" } })).json<PersonDetails>();
@@ -365,6 +393,24 @@ describe("history purge and person delete", () => {
     expect((await call("DELETE", `/api/family/people/${mine.id}`, undefined, memberAuth)).statusCode).toBe(204);
     const [afterMine] = await getTestDb().select().from(invites).where(eq(invites.id, mineInvite?.id ?? ""));
     expect(afterMine?.status).toBe("revoked");
+  });
+
+  it("never deadlocks (no 500) when an admin delete races a member edit of the same person (lock order tree → person)", async () => {
+    const self = await insertPerson({ userId: member.id });
+    for (let round = 0; round < 8; round += 1) {
+      const created = await call("POST", "/api/family/people", { fullName: `Carrera ${round}`, relateTo: { personId: self.id, kind: "child_of" } }, memberAuth);
+      expect(created.statusCode, created.body).toBe(201);
+      const id = created.json<PersonDetails>().id;
+      const [removed, edited, selfEdit] = await Promise.all([
+        call("DELETE", `/api/admin/people/${id}`),
+        call("PATCH", `/api/family/people/${id}`, { nickname: `N${round}` }, memberAuth),
+        call("PATCH", "/api/family/me", { nickname: `Yo ${round}` }, memberAuth)
+      ]);
+      expect(removed.statusCode, removed.body).toBe(204);
+      expect([200, 404], edited.body).toContain(edited.statusCode);
+      expect(selfEdit.statusCode, selfEdit.body).toBe(200);
+      expect(await personRow(id)).toBeUndefined();
+    }
   });
 
   it("keeps the 409 for linked people", async () => {

@@ -291,6 +291,34 @@ export async function updatePersonTx(
   return row;
 }
 
+/**
+ * Revoke the pending invites of a person that is about to be deleted (the FK
+ * would only null `person_id`, leaving a live invite that no longer says who
+ * it is for). Audited per invite with ids only. Call it **after** locking the
+ * person row (lock order: tree → person → invite, like invite accept).
+ *
+ * @param tx - Open transaction.
+ * @param personId - The person being deleted.
+ * @param actor - Who deletes.
+ */
+export async function revokePendingInvites(tx: Transaction, personId: string, actor: WriteActor): Promise<void> {
+  const revoked = await tx
+    .update(invites)
+    .set({ status: InviteStatus.Revoked, revokedAt: sql`now()` })
+    .where(and(eq(invites.personId, personId), eq(invites.status, InviteStatus.Pending)))
+    .returning({ id: invites.id });
+  for (const invite of revoked) {
+    await recordAudit(tx, {
+      actorUserId: actor.id,
+      action: AuditAction.InviteRevoked,
+      entityType: "invite",
+      entityId: invite.id,
+      metadata: { personId, reason: "person_deleted" },
+      ip: actor.ip
+    });
+  }
+}
+
 /** Options of {@link deletePersonTx}. */
 export interface DeletePersonOptions {
   /** Write revisions (default). `false` after a history purge (removal request). */
@@ -341,23 +369,7 @@ export async function deletePersonTx(
       after: null
     });
   }
-  // Pending invites for this person die with it (the FK would only null `person_id`,
-  // leaving a live invite that no longer says who it is for).
-  const revoked = await tx
-    .update(invites)
-    .set({ status: InviteStatus.Revoked, revokedAt: sql`now()` })
-    .where(and(eq(invites.personId, person.id), eq(invites.status, InviteStatus.Pending)))
-    .returning({ id: invites.id });
-  for (const invite of revoked) {
-    await recordAudit(tx, {
-      actorUserId: actor.id,
-      action: AuditAction.InviteRevoked,
-      entityType: "invite",
-      entityId: invite.id,
-      metadata: { personId: person.id, reason: "person_deleted" },
-      ip: actor.ip
-    });
-  }
+  await revokePendingInvites(tx, person.id, actor);
   const [deleted] = await tx.delete(people).where(eq(people.id, person.id)).returning({ id: people.id });
   if (deleted === undefined) throw new AppError("NOT_FOUND", PERSON_NOT_FOUND);
   await recordAudit(tx, {

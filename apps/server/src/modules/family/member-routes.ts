@@ -374,6 +374,8 @@ const memberFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
 
   const selfEditHandler = async (user: AuthUser, input: SelfEditPersonInput, ip: string): Promise<Person> => {
     const saved = await app.db.transaction(async (tx) => {
+      // Lock order everywhere: tree → person → invite.
+      await lockFamilyTree(tx);
       const own = await findPersonByUserId(tx, user.id);
       const before = own === undefined ? undefined : await lockPersonRow(tx, own.id);
       if (before === undefined || before.userId !== user.id) throw new AppError("NOT_FOUND", NOT_LINKED_MESSAGE);

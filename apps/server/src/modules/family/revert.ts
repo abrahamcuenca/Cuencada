@@ -27,7 +27,8 @@ import { people, personRelationships, personRevisions } from "../../db/schema/in
 import { recordAudit, type Transaction } from "../../lib/audit.js";
 import { AppError, isAppError } from "../../lib/errors.js";
 import { lockFamilyTree } from "./relationships.js";
-import { type PersonRow, personColumns, relationshipColumns, toRelationship } from "./repository.js";
+import { personPhotoObjectKeys } from "./personPhotoObjects.js";
+import { findPerson, type PersonRow, personColumns, relationshipColumns, toRelationship } from "./repository.js";
 import { insertRevision, isRevertibleAction, personSnapshot, relationshipSnapshot } from "./revisions.js";
 import {
   FamilyAuditAction,
@@ -37,7 +38,8 @@ import {
   assertPersonDates,
   createRelationshipTx,
   lockPersonRow,
-  mapPersonWriteError
+  mapPersonWriteError,
+  revokePendingInvites
 } from "./writes.js";
 
 const NOT_FOUND = "No encontramos ese cambio.";
@@ -252,10 +254,12 @@ async function undoRelationshipDelete(tx: Transaction, revision: LockedRevision,
  * @param tx - Open transaction.
  * @param revisionId - The revision to undo.
  * @param actor - The admin.
- * @returns The id of the new `person.revert` revision.
+ * @returns The id of the new `person.revert` revision, and the tree-photo
+ *   object keys of a person the undo deleted (the caller deletes them after
+ *   the commit, like the admin person delete).
  * @throws AppError `NOT_FOUND` (unknown revision), `CONFLICT` (already reverted, not revertible, or stale), `VALIDATION`.
  */
-export async function revertRevisionTx(tx: Transaction, revisionId: string, actor: WriteActor): Promise<string> {
+export async function revertRevisionTx(tx: Transaction, revisionId: string, actor: WriteActor): Promise<RevertResult> {
   await lockFamilyTree(tx);
   const [revision] = await tx
     .select({
@@ -310,7 +314,16 @@ export async function revertRevisionTx(tx: Transaction, revisionId: string, acto
   });
   const undone = [revision.id, ...record.alsoReverted];
   await tx.update(personRevisions).set({ revertedByRevisionId: revertId }).where(inArray(personRevisions.id, undone));
-  if (deleteId !== null) await tx.delete(people).where(eq(people.id, deleteId));
+  let photoKeys: string[] = [];
+  if (deleteId !== null) {
+    // Same cleanup as any person delete (PR #46 TL): pending invites revoked
+    // in this transaction (row already locked: tree → person → invite), photo
+    // objects collected for deletion after the commit.
+    const view = await findPerson(tx, deleteId);
+    photoKeys = await personPhotoObjectKeys(tx, deleteId, view?.photoKey ?? null);
+    await revokePendingInvites(tx, deleteId, actor);
+    await tx.delete(people).where(eq(people.id, deleteId));
+  }
   await recordAudit(tx, {
     actorUserId: actor.id,
     action: FamilyAuditAction.RevisionReverted,
@@ -319,5 +332,15 @@ export async function revertRevisionTx(tx: Transaction, revisionId: string, acto
     metadata: { revisionId: revision.id, revertRevisionId: revertId, action: revision.action, undone: undone.length },
     ip: actor.ip
   });
-  return revertId;
+  return { revertId, photoKeys, deletedPersonId: deleteId };
+}
+
+/** What {@link revertRevisionTx} did. */
+export interface RevertResult {
+  /** The new `person.revert` revision. */
+  revertId: string;
+  /** Bucket objects of a person the undo deleted; delete them after the commit. */
+  photoKeys: string[];
+  /** The person the undo deleted (undo of a `person.create`), if any. */
+  deletedPersonId: string | null;
 }

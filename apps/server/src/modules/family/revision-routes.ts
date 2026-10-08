@@ -30,6 +30,7 @@ import { personRevisions } from "../../db/schema/index.js";
 import { recordAudit } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
 import { authUser } from "../../plugins/auth.js";
+import { deletePersonPhotoObjects } from "./personPhotoObjects.js";
 import { revertRevisionTx } from "./revert.js";
 import {
   activityNames,
@@ -135,17 +136,20 @@ const revisionRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request): Promise<PersonRevision> => {
       const admin = authUser(request);
-      return app.db.transaction(async (tx) => {
-        const revertId = await revertRevisionTx(tx, request.params.revisionId, { id: admin.id, ip: request.ip });
+      const { revision, result } = await app.db.transaction(async (tx) => {
+        const outcome = await revertRevisionTx(tx, request.params.revisionId, { id: admin.id, ip: request.ip });
         const [row] = await tx
           .select(revisionViewColumns)
           .from(personRevisions)
           .leftJoin(users, eq(users.id, personRevisions.actorUserId))
-          .where(eq(personRevisions.id, revertId))
+          .where(eq(personRevisions.id, outcome.revertId))
           .limit(1);
         if (row === undefined) throw new Error("revert revision vanished inside its transaction");
-        return toPersonRevision(row);
+        return { revision: toPersonRevision(row), result: outcome };
       });
+      // An undone addition goes like any deleted person: its photo objects after the commit.
+      if (result.deletedPersonId !== null) await deletePersonPhotoObjects(app, result.deletedPersonId, result.photoKeys);
+      return revision;
     }
   );
 
