@@ -1,4 +1,4 @@
-import { type AdminInviteCreated, type AdminInviteListItem, type InviteStatus, inviteStatusSchema } from "@cuencada/types";
+import { type AdminInviteCreated, type AdminInviteListItem, idSchema, type InviteStatus, inviteStatusSchema } from "@cuencada/types";
 import { type ReactNode, useId, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { getApiErrorMessage, isAbortError } from "../../../shared/api/errors";
@@ -6,13 +6,21 @@ import { Badge } from "../../../shared/ui/Badge";
 import { Button } from "../../../shared/ui/Button";
 import { Card } from "../../../shared/ui/Card";
 import { Select } from "../../../shared/ui/Select";
+import { Skeleton } from "../../../shared/ui/Skeleton";
 import { useToast } from "../../../shared/ui/Toast";
 import styles from "../admin.module.css";
-import { type InviteListFilter, useListAdminInvitesInfiniteQuery, useResendAdminInviteMutation, useRevokeAdminInviteMutation } from "../api";
-import { ConfirmDialog, ListFooter } from "../components/common";
+import {
+  type InviteListFilter,
+  useGetInviteCandidateQuery,
+  useListAdminInvitesInfiniteQuery,
+  useResendAdminInviteMutation,
+  useRevokeAdminInviteMutation
+} from "../api";
+import { ConfirmDialog, ListFooter, Notice } from "../components/common";
 import { InviteForm } from "../components/InviteForm";
 import { InviteLinkBox } from "../components/InviteLinkBox";
 import { formatInstant } from "../lib/format";
+import { candidateBlockedReason, type InviteFormPerson } from "../lib/inviteForm";
 import { INVITE_STATUS, ROLE_LABEL } from "../lib/labels";
 
 const STATUS_OPTIONS = [
@@ -20,20 +28,38 @@ const STATUS_OPTIONS = [
   ...inviteStatusSchema.options.map((status) => ({ value: status, label: INVITE_STATUS[status].label }))
 ];
 
-/** `/admin/invitaciones`: create, list, revoke and resend invites. */
+/** Query parameter that opens the form pre-filled for a tree person (`InvitePersonButton`). */
+export const INVITE_PERSON_PARAM = "persona";
+
+/**
+ * `/admin/invitaciones`: create, list, revoke and resend invites.
+ * `?persona=<id>` opens the form for an email invite linked to that person.
+ */
 export function InvitesPage(): ReactNode {
   const [params, setParams] = useSearchParams();
   const parsedStatus = inviteStatusSchema.safeParse(params.get("estado"));
   const status: InviteStatus | null = parsedStatus.success ? parsedStatus.data : null;
   const filter = useMemo<InviteListFilter>(() => (status === null ? {} : { status }), [status]);
-  const [creating, setCreating] = useState(false);
+  const parsedPerson = idSchema.safeParse(params.get(INVITE_PERSON_PARAM));
+  const personaId = parsedPerson.success ? parsedPerson.data : null;
+  const [creatingManually, setCreating] = useState(false);
+  const creating = creatingManually || personaId !== null;
   // The one-time URL lives only in this state; "Listo" or leaving the page drops it.
   const [inviteUrl, setInviteUrl] = useState<string | null>(null);
   const toast = useToast();
   const statusId = useId();
 
-  const onCreated = (created: AdminInviteCreated): void => {
+  /** Close the form and drop `?persona=` so a reload does not reopen it. */
+  const closeForm = (): void => {
     setCreating(false);
+    if (personaId === null) return;
+    const next = new URLSearchParams(params);
+    next.delete(INVITE_PERSON_PARAM);
+    setParams(next, { replace: true });
+  };
+
+  const onCreated = (created: AdminInviteCreated): void => {
+    closeForm();
     if (created.inviteUrl !== null) {
       setInviteUrl(created.inviteUrl);
       return;
@@ -60,7 +86,11 @@ export function InvitesPage(): ReactNode {
             Nueva invitación
           </h2>
           <Card>
-            <InviteForm onCreated={onCreated} onCancel={() => setCreating(false)} />
+            {personaId === null ? (
+              <InviteForm onCreated={onCreated} onCancel={closeForm} />
+            ) : (
+              <PersonInviteForm personId={personaId} onCreated={onCreated} onCancel={closeForm} />
+            )}
           </Card>
         </section>
       ) : null}
@@ -84,6 +114,30 @@ export function InvitesPage(): ReactNode {
         </div>
         <InviteList filter={filter} />
       </section>
+    </>
+  );
+}
+
+interface PersonInviteFormProps {
+  personId: string;
+  onCreated: (created: AdminInviteCreated) => void;
+  onCancel: () => void;
+}
+
+/** The form pre-filled with a tree person, once their invite status is known. */
+function PersonInviteForm({ personId, onCreated, onCancel }: PersonInviteFormProps): ReactNode {
+  const candidate = useGetInviteCandidateQuery(personId);
+  if (candidate.currentData === undefined && !candidate.isError) return <Skeleton shape="block" height="12rem" />;
+  const data = candidate.currentData;
+  const blocked = data === undefined ? null : candidateBlockedReason(data);
+  const initialPerson: InviteFormPerson | null = data !== undefined && blocked === null ? { id: data.id, fullName: data.fullName } : null;
+  let message: string | null = null;
+  if (data === undefined) message = "No encontramos a esa persona en el árbol.";
+  else if (blocked !== null) message = `No se puede vincular a ${data.fullName}: ${blocked.toLowerCase()}.`;
+  return (
+    <>
+      <Notice tone="info" message={message} />
+      <InviteForm key={personId} initialPerson={initialPerson} onCreated={onCreated} onCancel={onCancel} />
     </>
   );
 }
@@ -185,6 +239,9 @@ function InviteCard({ invite, resending, onResend, onRevoke }: InviteCardProps):
           {invite.role === "admin" ? <Badge tone="festive">{ROLE_LABEL.admin}</Badge> : null}
         </div>
       </div>
+      {invite.person === undefined || invite.person === null ? null : (
+        <p className={styles.invitePerson}>Para: {invite.person.fullName}</p>
+      )}
       <p className={styles.muted}>
         {pending ? "Vence" : "Vencía"} el {formatInstant(invite.expiresAt)} · Usos: {invite.useCount} de {invite.maxUses}
       </p>

@@ -4,6 +4,7 @@
  * on every rule (admin ⇒ email + sent by email; open ⇒ ≤ 10 uses, ≤ 72 h).
  */
 import {
+  type AdminInviteCandidate,
   type AdminInviteCreateRequest,
   adminInviteCreateInputSchema,
   BOUND_INVITE_DEFAULT_DAYS,
@@ -19,6 +20,9 @@ import {
 /** How the invite reaches the person. */
 export type InviteDelivery = "email" | "link";
 
+/** The tree person an email invite is for (WP-4.2). */
+export type InviteFormPerson = Pick<AdminInviteCandidate, "id" | "fullName">;
+
 /** Raw form values (text inputs keep strings until validation). */
 export interface InviteFormValues {
   delivery: InviteDelivery;
@@ -27,10 +31,12 @@ export interface InviteFormValues {
   maxUses: string;
   expiresInDays: string;
   note: string;
+  /** "Persona en el árbol": email invites only; switching to a link clears it. */
+  person: InviteFormPerson | null;
 }
 
 /** Field names that can carry an error. */
-export type InviteFormField = "email" | "maxUses" | "expiresInDays" | "note" | "form";
+export type InviteFormField = "email" | "maxUses" | "expiresInDays" | "note" | "personId" | "form";
 
 /** Per-field Spanish errors. */
 export type InviteFormErrors = Partial<Record<InviteFormField, string>>;
@@ -45,8 +51,39 @@ export const INVITE_FORM_DEFAULTS: InviteFormValues = {
   email: "",
   maxUses: String(OPEN_INVITE_DEFAULT_USES),
   expiresInDays: String(BOUND_INVITE_DEFAULT_DAYS),
-  note: ""
+  note: "",
+  person: null
 };
+
+/** Why the tree-person picker is not offered on an open link (the server answers `INVITE_PERSON_REQUIRES_BOUND`). */
+export const OPEN_INVITE_PERSON_NOTE = "Para vincular a una persona del árbol, usa una invitación por correo.";
+
+/**
+ * One line that tells namesakes apart in the picker: years and branch, e.g.
+ * "n. 1990 · Rama Norte" (empty when neither is known).
+ *
+ * @param candidate - The picker row.
+ */
+export function describeCandidate(candidate: Pick<AdminInviteCandidate, "birthYear" | "familyBranch" | "nickname">): string {
+  const parts: string[] = [];
+  if (candidate.nickname !== null) parts.push(`«${candidate.nickname}»`);
+  if (candidate.birthYear !== null) parts.push(`n. ${candidate.birthYear}`);
+  if (candidate.familyBranch !== null) parts.push(candidate.familyBranch);
+  return parts.join(" · ");
+}
+
+/**
+ * Why a person cannot be picked, or `null` when they can (living, no account,
+ * nothing pending). The server re-checks every rule.
+ *
+ * @param candidate - The picker row.
+ */
+export function candidateBlockedReason(candidate: Pick<AdminInviteCandidate, "deceased" | "linked" | "pendingInvite">): string | null {
+  if (candidate.linked) return "Ya tiene cuenta";
+  if (candidate.deceased) return "Falleció";
+  if (candidate.pendingInvite) return "Invitación pendiente";
+  return null;
+}
 
 /** Why open links are short-lived (shown under the link fields). */
 export const OPEN_INVITE_SECURITY_HELP =
@@ -68,12 +105,14 @@ export function changeInviteDelivery(values: InviteFormValues, delivery: InviteD
   return {
     ...values,
     delivery,
+    // Open links never carry a person (contract rule `INVITE_PERSON_REQUIRES_BOUND`).
+    person: open ? null : values.person,
     maxUses: String(OPEN_INVITE_DEFAULT_USES),
     expiresInDays: String(open ? OPEN_INVITE_DEFAULT_DAYS : BOUND_INVITE_DEFAULT_DAYS)
   };
 }
 
-const FIELDS: readonly InviteFormField[] = ["email", "maxUses", "expiresInDays", "note"];
+const FIELDS: readonly InviteFormField[] = ["email", "maxUses", "expiresInDays", "note", "personId"];
 
 function isField(value: unknown): value is InviteFormField {
   return typeof value === "string" && FIELDS.some((field) => field === value);
@@ -120,7 +159,8 @@ export function validateInviteForm(input: InviteFormValues): InviteFormResult {
     maxUses: byEmail ? 1 : toInt(values.maxUses),
     expiresInDays: toInt(values.expiresInDays),
     sendEmail: byEmail,
-    note: note === "" ? null : note
+    note: note === "" ? null : note,
+    ...(byEmail && values.person !== null ? { personId: values.person.id } : {})
   };
   const parsed = adminInviteCreateInputSchema.safeParse(request);
   if (parsed.success) return { ok: true, request };

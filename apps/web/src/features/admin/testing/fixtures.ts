@@ -4,7 +4,11 @@
  * contract schema, so a drifting fixture fails loudly.
  */
 import {
+  type AdminInviteCandidate,
   type AdminInviteListItem,
+  adminInviteCandidateSchema,
+  adminInviteCandidatesSchema,
+  InviteIssueCode,
   type AdminSummary,
   type AdminUserListItem,
   type AuditLogEntry,
@@ -30,8 +34,31 @@ export const IDS = {
   inviteBound: "1c0d3e8f-2e3b-4d4c-9f50-6b7c8d9e0f01",
   inviteOpen: "1c0d3e8f-2e3b-4d4c-9f50-6b7c8d9e0f02",
   inviteNew: "1c0d3e8f-2e3b-4d4c-9f50-6b7c8d9e0f03",
-  edition: "2d1e4f90-3f4c-4e5d-a061-7c8d9e0f1a01"
+  edition: "2d1e4f90-3f4c-4e5d-a061-7c8d9e0f1a01",
+  personAnaNorte: "3e2f5a01-4a5d-4f6e-b172-8d9e0f1a2b01",
+  personAnaSur: "3e2f5a01-4a5d-4f6e-b172-8d9e0f1a2b02",
+  personBruno: "3e2f5a01-4a5d-4f6e-b172-8d9e0f1a2b03"
 } as const;
+
+/**
+ * Invite-picker people (WP-4.2): two namesakes told apart by year and branch
+ * (one with a pending invite) and one who already has an account.
+ */
+export function makeCandidates(): AdminInviteCandidate[] {
+  const base = { nickname: null, deathYear: null, deceased: false, linked: false, pendingInvite: false };
+  return [
+    adminInviteCandidateSchema.parse({ ...base, id: IDS.personAnaNorte, fullName: "Ana Ejemplo", familyBranch: "Rama Norte", birthYear: 1990 }),
+    adminInviteCandidateSchema.parse({
+      ...base,
+      id: IDS.personAnaSur,
+      fullName: "Ana Ejemplo",
+      familyBranch: "Rama Sur",
+      birthYear: 1962,
+      pendingInvite: true
+    }),
+    adminInviteCandidateSchema.parse({ ...base, id: IDS.personBruno, fullName: "Bruno Ejemplo", familyBranch: null, birthYear: 1985, linked: true })
+  ];
+}
 
 /** The signed-in admin (fictional). */
 export const ADMIN_USER: CurrentUser = makeUser({
@@ -188,6 +215,8 @@ export interface LoggedRequest {
 export interface AdminDb {
   users: AdminUserListItem[];
   invites: AdminInviteListItem[];
+  /** Tree people the invite picker can see (WP-4.2). */
+  candidates: AdminInviteCandidate[];
   audit: AuditLogEntry[];
   summary: AdminSummary;
   log: LoggedRequest[];
@@ -197,7 +226,7 @@ export interface AdminDb {
 
 /** @returns A fresh store. */
 export function makeAdminDb(): AdminDb {
-  return { users: makeUsers(), invites: makeInvites(), audit: makeAuditEntries(30), summary: makeSummary(), log: [], emailQueued: true };
+  return { users: makeUsers(), invites: makeInvites(), candidates: makeCandidates(), audit: makeAuditEntries(30), summary: makeSummary(), log: [], emailQueued: true };
 }
 
 async function record(db: AdminDb, request: Request): Promise<LoggedRequest> {
@@ -253,6 +282,24 @@ export function adminHandlers(db: AdminDb): HttpHandler[] {
       const { body } = await record(db, request);
       const input = adminInviteCreateInputSchema.safeParse(body);
       if (!input.success) return HttpResponse.json(errorBody("VALIDATION", "Datos inválidos."), { status: 400 });
+      const person = input.data.personId === null ? null : db.candidates.find((candidate) => candidate.id === input.data.personId);
+      if (input.data.personId !== null && input.data.email === null) {
+        const message = "Para vincular a una persona del árbol, usa una invitación por correo.";
+        return HttpResponse.json(
+          { error: { code: "VALIDATION", message: "Revisa los datos enviados.", details: [{ path: "personId", message, code: InviteIssueCode.PersonRequiresBound }] } },
+          { status: 400 }
+        );
+      }
+      if (person?.pendingInvite === true) {
+        const message = "Esa persona ya tiene una invitación pendiente. Reenvíala o revócala antes de crear otra.";
+        return HttpResponse.json(
+          { error: { code: "CONFLICT", message, details: [{ path: "personId", message, code: InviteIssueCode.PersonHasPendingInvite }] } },
+          { status: 409 }
+        );
+      }
+      if (person !== null && person !== undefined) {
+        db.candidates = db.candidates.map((candidate) => (candidate.id === person.id ? { ...candidate, pendingInvite: true } : candidate));
+      }
       const invite = adminInviteListItemSchema.parse({
         id: IDS.inviteNew,
         email: input.data.email,
@@ -263,12 +310,28 @@ export function adminHandlers(db: AdminDb): HttpHandler[] {
         expiresAt: "2026-10-13T18:00:00.000Z",
         createdAt: "2026-10-06T18:00:00.000Z",
         createdByName: ADMIN_USER.displayName,
-        personId: null,
+        personId: person?.id ?? null,
+        person: person === null || person === undefined ? null : { id: person.id, fullName: person.fullName },
         note: input.data.note,
         lastSentAt: input.data.sendEmail ? "2026-10-06T18:00:00.000Z" : null
       });
       db.invites = [invite, ...db.invites];
       return HttpResponse.json(adminInviteCreatedSchema.parse({ invite, inviteUrl: input.data.sendEmail ? null : ONE_TIME_URL }), { status: 201 });
+    }),
+    http.get(apiUrl("/admin/invites/people"), async ({ request }) => {
+      const { query } = await record(db, request);
+      const q = (query.q ?? "").trim().toLowerCase();
+      if (q === "") return HttpResponse.json(errorBody("VALIDATION"), { status: 400 });
+      const items = db.candidates.filter(
+        (candidate) => !candidate.linked && !candidate.deceased && candidate.fullName.toLowerCase().includes(q)
+      );
+      return HttpResponse.json(adminInviteCandidatesSchema.parse({ items: items.slice(0, Number(query.limit ?? "8")) }));
+    }),
+    http.get(apiUrl("/admin/invites/people/:id"), async ({ request, params }) => {
+      await record(db, request);
+      const candidate = db.candidates.find((row) => row.id === params.id);
+      if (candidate === undefined) return HttpResponse.json(errorBody("NOT_FOUND"), { status: 404 });
+      return HttpResponse.json(adminInviteCandidateSchema.parse(candidate));
     }),
     http.post(apiUrl("/admin/invites/:id/revoke"), async ({ request, params }) => {
       await record(db, request);

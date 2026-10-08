@@ -3,6 +3,11 @@
  * is audited in its transaction. Token hashes never leave the server.
  */
 import {
+  type AdminInviteCandidate,
+  type AdminInviteCandidates,
+  adminInviteCandidateSchema,
+  adminInviteCandidatesQuerySchema,
+  adminInviteCandidatesSchema,
   type AdminInviteCreated,
   type AdminInviteListItem,
   AuditAction,
@@ -40,6 +45,12 @@ import {
   sendInviteEmail,
   toAdminInviteListItem
 } from "./service.js";
+import {
+  assertInvitablePerson,
+  assertPersonInviteIsBound,
+  findInviteCandidate,
+  searchInviteCandidates
+} from "./invitePerson.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -52,6 +63,18 @@ const errorResponses = {
 
 /** Invite creation time truncated to ms, so keyset comparisons match JS `Date` cursors. */
 const createdAtMs = sql<Date>`date_trunc('milliseconds', ${invites.createdAt})`;
+
+/** List columns: the invite, its creator's name and the tree person it is for (WP-4.2). */
+const listColumns = {
+  invite: invites,
+  createdByName: users.displayName,
+  personFullName: people.fullName
+};
+
+/** `{ id, fullName }` of the joined person, or `null` (none, or deleted). */
+function joinedPerson(row: { invite: InviteRow; personFullName: string | null }): { id: string; fullName: string } | null {
+  return row.invite.personId === null || row.personFullName === null ? null : { id: row.invite.personId, fullName: row.personFullName };
+}
 
 /**
  * Status filter matching `effectiveInviteStatus` (WP-2.3b): a stored pending
@@ -112,13 +135,14 @@ const adminInviteRoutes: FastifyPluginAsyncZod = async (app) => {
 
   async function loadListItem(inviteId: string): Promise<AdminInviteListItem> {
     const [row] = await app.db
-      .select({ invite: invites, createdByName: users.displayName })
+      .select(listColumns)
       .from(invites)
       .leftJoin(users, eq(users.id, invites.createdByUserId))
+      .leftJoin(people, eq(people.id, invites.personId))
       .where(eq(invites.id, inviteId))
       .limit(1);
     if (row === undefined) throw new AppError("NOT_FOUND");
-    return toAdminInviteListItem(row.invite, row.createdByName, app.clock.now());
+    return toAdminInviteListItem(row.invite, row.createdByName, app.clock.now(), joinedPerson(row));
   }
 
   /** `GET /api/admin/invites`: newest first, keyset-paginated, optional status filter. */
@@ -140,16 +164,17 @@ const adminInviteRoutes: FastifyPluginAsyncZod = async (app) => {
         );
       }
       const rows = await app.db
-        .select({ invite: invites, createdByName: users.displayName })
+        .select(listColumns)
         .from(invites)
         .leftJoin(users, eq(users.id, invites.createdByUserId))
+        .leftJoin(people, eq(people.id, invites.personId))
         .where(and(...conditions))
         .orderBy(desc(createdAtMs), desc(invites.id))
         .limit(limit + 1);
       const page = rows.slice(0, limit);
       const last = page.at(-1);
       return {
-        items: page.map((row) => toAdminInviteListItem(row.invite, row.createdByName, now)),
+        items: page.map((row) => toAdminInviteListItem(row.invite, row.createdByName, now, joinedPerson(row))),
         nextCursor:
           rows.length > limit && last !== undefined
             ? encodeInviteCursor({ createdAt: last.invite.createdAt, id: last.invite.id })
@@ -177,20 +202,8 @@ const adminInviteRoutes: FastifyPluginAsyncZod = async (app) => {
       const input = request.body;
       const now = app.clock.now();
 
-      let suggestedName: string | null = null;
-      if (input.personId !== null) {
-        const [person] = await app.db
-          .select({ fullName: people.fullName, userId: people.userId })
-          .from(people)
-          .where(eq(people.id, input.personId))
-          .limit(1);
-        if (person === undefined || person.userId !== null) {
-          throw new AppError("VALIDATION", undefined, {
-            details: [{ path: "personId", message: "La persona no existe o ya tiene una cuenta." }]
-          });
-        }
-        suggestedName = person.fullName;
-      }
+      // Open links never carry a person (checked before any lookup).
+      if (input.personId !== null) assertPersonInviteIsBound(input.email);
       if (input.email !== null) {
         const [existing] = await app.db
           .select({ id: users.id })
@@ -207,13 +220,15 @@ const adminInviteRoutes: FastifyPluginAsyncZod = async (app) => {
       if (input.sendEmail) await assertInviteMailAllowed(now);
 
       const token = createOpaqueToken();
-      const invite = await app.db.transaction(async (tx): Promise<InviteRow> => {
+      const { invite, suggestedName } = await app.db.transaction(async (tx) => {
+        // Locks the person until commit: concurrent creates for one person serialize here.
+        const name = input.personId === null ? null : await assertInvitablePerson(tx, input.personId, now);
         const [row] = await tx
           .insert(invites)
           .values({
             tokenHash: hashToken(token),
             email: input.email,
-            displayName: suggestedName,
+            displayName: name,
             role: input.role,
             maxUses,
             personId: input.personId,
@@ -240,7 +255,7 @@ const adminInviteRoutes: FastifyPluginAsyncZod = async (app) => {
           },
           ip: request.ip
         });
-        return row;
+        return { invite: row satisfies InviteRow, suggestedName: name };
       });
 
       if (input.sendEmail && invite.email !== null) {
@@ -261,6 +276,38 @@ const adminInviteRoutes: FastifyPluginAsyncZod = async (app) => {
         inviteUrl: input.sendEmail ? null : appLink(app.config, AppLinkPath.Invite, token)
       };
       return reply.code(201).send(body);
+    }
+  );
+
+  /**
+   * `GET /api/admin/invites/people?q=`: invite picker (WP-4.2). Living people
+   * without an account matching `q`; a pending invite is flagged, not hidden.
+   */
+  app.get(
+    "/admin/invites/people",
+    {
+      config: { auth: "admin", rateLimit: rateLimitByIp({ max: 120, timeWindow: "1 minute" }) },
+      schema: { querystring: adminInviteCandidatesQuerySchema, response: { 200: adminInviteCandidatesSchema, ...errorResponses } }
+    },
+    async (request): Promise<AdminInviteCandidates> => ({
+      items: await searchInviteCandidates(app.db, request.query.q, request.query.limit, app.clock.now())
+    })
+  );
+
+  /**
+   * `GET /api/admin/invites/people/:id`: one person's invite status (any
+   * person), for the "Invitar" button on a person page and a pre-filled form.
+   */
+  app.get(
+    "/admin/invites/people/:id",
+    {
+      config: { auth: "admin" },
+      schema: { params: idParamSchema, response: { 200: adminInviteCandidateSchema, ...errorResponses, 404: apiErrorSchema } }
+    },
+    async (request): Promise<AdminInviteCandidate> => {
+      const candidate = await findInviteCandidate(app.db, request.params.id, app.clock.now());
+      if (candidate === undefined) throw new AppError("NOT_FOUND", "No encontramos a esa persona en el árbol.");
+      return candidate;
     }
   );
 

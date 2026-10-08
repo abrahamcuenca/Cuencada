@@ -557,6 +557,7 @@ describe("WP-4 issue codes", () => {
       "NOT_CREATOR",
       "INVITE_PERSON_DECEASED",
       "INVITE_PERSON_REQUIRES_BOUND",
+      "PERSON_HAS_PENDING_INVITE",
     ]);
     for (const code of codes)
       expect(code.length).toBeLessThanOrEqual(API_ERROR_DETAIL_CODE_MAX);

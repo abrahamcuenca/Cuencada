@@ -573,3 +573,101 @@
   background: var(--color-warning-soft);
   color: var(--color-text);
 }
+
+/* ------------------------------------------------- invite person (WP-4.2) */
+
+.personPicker,
+.personPicked {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.personPicked {
+  margin: 0;
+  justify-items: start;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-primary-soft);
+}
+
+.personPicked legend {
+  float: left;
+  padding: 0;
+}
+
+.personPicked legend + * {
+  clear: both;
+}
+
+.personPickedName {
+  margin: 0;
+  font-weight: var(--weight-bold);
+  overflow-wrap: anywhere;
+}
+
+.personResults {
+  display: grid;
+  gap: var(--space-1);
+  max-height: 20rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: var(--space-2);
+  list-style: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.personResult {
+  display: grid;
+  gap: var(--space-1);
+  width: 100%;
+  min-height: var(--tap-min);
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.personResult:hover:not(:disabled) {
+  background: var(--color-primary-soft);
+}
+
+.personResult:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: calc(-1 * var(--focus-offset));
+}
+
+.personResult:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.personResultName {
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.personResultNote {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.fieldError {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.invitePerson {
+  margin: 0;
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}

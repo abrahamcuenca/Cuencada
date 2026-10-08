@@ -15,9 +15,9 @@ import {
   UserRole
 } from "@cuencada/types";
 import { AdminAccountChange } from "@cuencada/emails";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import { invites, people, profiles, users } from "../../db/schema/index.js";
+import { invites, profiles, users } from "../../db/schema/index.js";
 import { recordAudit, type Transaction } from "../../lib/audit.js";
 import { assertPasswordNotBreached } from "../../lib/breachedPasswords.js";
 import { AppError } from "../../lib/errors.js";
@@ -40,6 +40,7 @@ import {
   planInviteAcceptedAlert,
   queueInviteAcceptedAlerts
 } from "./acceptAlerts.js";
+import { linkAcceptedPerson, lockPerson, PersonLinkOutcome } from "./invitePerson.js";
 import { effectiveInviteExpiresAt, effectiveInviteMaxUses, isInviteUsable, personName } from "./service.js";
 
 const errorResponses = {
@@ -72,22 +73,6 @@ type AcceptOutcome =
     }
   | { kind: "invalid" }
   | { kind: "exists" };
-
-/**
- * Link the new account to the invite's family-tree person when that person is
- * still unlinked; otherwise create a person for the account.
- */
-async function linkPerson(tx: Transaction, personId: string | null, userId: string, fullName: string): Promise<void> {
-  if (personId !== null) {
-    const linked = await tx
-      .update(people)
-      .set({ userId })
-      .where(and(eq(people.id, personId), isNull(people.userId)))
-      .returning({ id: people.id });
-    if (linked.length > 0) return;
-  }
-  await tx.insert(people).values({ userId, fullName, createdByUserId: userId });
-}
 
 /** Display name of the admin who created the invite (`null` once that account is gone). */
 async function inviterName(tx: Transaction, userId: string | null): Promise<string> {
@@ -153,12 +138,24 @@ const publicInviteRoutes: FastifyPluginAsyncZod = async (app) => {
       // Hash before taking the row lock: argon2 is slow by design.
       const passwordHash = await hashPassword(password);
       const now = app.clock.now();
+      const tokenHash = hashToken(token);
+      // Which person the invite names, read before the transaction so the person
+      // row can be locked BEFORE the invite row: a person delete locks the person
+      // and then (FK action) the invite, so the reverse order could deadlock.
+      const [named] = await app.db
+        .select({ personId: invites.personId })
+        .from(invites)
+        .where(eq(invites.tokenHash, tokenHash))
+        .limit(1);
+      const requestedPersonId = named?.personId ?? null;
 
       const outcome = await app.db.transaction(async (tx): Promise<AcceptOutcome> => {
+        // WP-4.2: held until commit, so no admin link, delete or death can slip in.
+        const locked = requestedPersonId === null ? undefined : await lockPerson(tx, requestedPersonId);
         const [invite] = await tx
           .select()
           .from(invites)
-          .where(eq(invites.tokenHash, hashToken(token)))
+          .where(eq(invites.tokenHash, tokenHash))
           .limit(1)
           .for("update");
         if (invite === undefined || !isInviteUsable(invite, now)) return { kind: "invalid" };
@@ -192,7 +189,14 @@ const publicInviteRoutes: FastifyPluginAsyncZod = async (app) => {
         if (user === undefined) return { kind: "exists" };
 
         await tx.insert(profiles).values({ userId: user.id, fullName: displayName });
-        await linkPerson(tx, invite.personId, user.id, displayName);
+        const link = await linkAcceptedPerson(tx, {
+          requestedPersonId,
+          invitePersonId: invite.personId,
+          inviteEmail: invite.email,
+          locked,
+          userId: user.id,
+          fullName: displayName
+        });
 
         const useCount = invite.useCount + 1;
         // Effective limit: open invites created before WP-2.3b stop at 10 uses.
@@ -220,6 +224,12 @@ const publicInviteRoutes: FastifyPluginAsyncZod = async (app) => {
             open,
             useCount,
             maxUses,
+            // Ids and an enum only (no names): which person the account got.
+            personId: link.personId,
+            personLink: link.outcome,
+            ...(link.outcome === PersonLinkOutcome.Fallback
+              ? { requestedPersonId: link.requestedPersonId, personFallbackReason: link.reason }
+              : {}),
             ...(plan === null ? {} : inviteAlertMetadata(plan)),
             ...(adminPlan === null ? {} : adminAlertMetadata(adminPlan))
           },

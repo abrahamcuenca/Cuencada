@@ -360,7 +360,12 @@ export const InviteIssueCode = {
   /** The person is deceased: nobody can accept an invite for them. */
   PersonDeceased: "INVITE_PERSON_DECEASED",
   /** `personId` needs an email-bound, single-use invite (never an open multi-use link). */
-  PersonRequiresBound: "INVITE_PERSON_REQUIRES_BOUND"
+  PersonRequiresBound: "INVITE_PERSON_REQUIRES_BOUND",
+  /**
+   * 409 `CONFLICT` (WP-4.2): the person already has a **pending** invite
+   * (revoke it, or resend it, instead of creating a second one).
+   */
+  PersonHasPendingInvite: "PERSON_HAS_PENDING_INVITE"
 } as const;
 export type InviteIssueCode = (typeof InviteIssueCode)[keyof typeof InviteIssueCode];
 
@@ -435,6 +440,17 @@ export const adminInviteListQuerySchema = cursorQuerySchema.extend({
 export type AdminInviteListQuery = z.infer<typeof adminInviteListQuerySchema>;
 export type AdminInviteListQueryRequest = z.input<typeof adminInviteListQuerySchema>;
 
+/** Who an invite is for (WP-4.2): the linked family-tree person. Admin-only. */
+export interface AdminInvitePerson {
+  id: string;
+  fullName: string;
+}
+
+export const adminInvitePersonSchema = z.object({
+  id: idSchema,
+  fullName: z.string().max(200)
+}) satisfies z.ZodType<AdminInvitePerson>;
+
 /** Invite as seen by admins. Never includes the token or its hash. */
 export interface AdminInviteListItem {
   id: string;
@@ -450,6 +466,12 @@ export interface AdminInviteListItem {
   note: string | null;
   /** When the invite email was last sent (create or resend); `null` for copy-link invites (T1 amendment). */
   lastSentAt: string | null;
+  /**
+   * The tree person the invite is for (WP-4.2), or `null`. Optional on the
+   * wire so responses from servers before WP-4.2 still parse; `null` once the
+   * person is deleted (the invite's `personId` is set null by the FK).
+   */
+  person?: AdminInvitePerson | null;
 }
 
 export const adminInviteListItemSchema = z.object({
@@ -464,8 +486,75 @@ export const adminInviteListItemSchema = z.object({
   createdByName: z.string().max(80).nullable(),
   personId: idSchema.nullable(),
   note: z.string().max(200).nullable(),
-  lastSentAt: dateTimeSchema.nullable()
+  lastSentAt: dateTimeSchema.nullable(),
+  person: adminInvitePersonSchema.nullable().exactOptional()
 }) satisfies z.ZodType<AdminInviteListItem>;
+
+/**
+ * A family-tree person as the invite picker sees it (WP-4.2, admin-only):
+ * enough to tell namesakes apart (years, branch, nickname) and whether an
+ * invite can be created for them. Never carries the linked account's id.
+ */
+export interface AdminInviteCandidate {
+  id: string;
+  fullName: string;
+  nickname: string | null;
+  familyBranch: string | null;
+  birthYear: number | null;
+  deathYear: number | null;
+  deceased: boolean;
+  /** Already linked to an account (never invitable). */
+  linked: boolean;
+  /** Has a pending invite (create answers 409 `PERSON_HAS_PENDING_INVITE`). */
+  pendingInvite: boolean;
+}
+
+export const adminInviteCandidateSchema = z.object({
+  id: idSchema,
+  fullName: z.string().max(200),
+  nickname: z.string().max(80).nullable(),
+  familyBranch: z.string().max(120).nullable(),
+  birthYear: z.number().int().nullable(),
+  deathYear: z.number().int().nullable(),
+  deceased: z.boolean(),
+  linked: z.boolean(),
+  pendingInvite: z.boolean()
+}) satisfies z.ZodType<AdminInviteCandidate>;
+
+/**
+ * Whether an invite can be created for this person right now: living, no
+ * account and no pending invite. The server re-checks under lock.
+ *
+ * @param candidate - The picker row.
+ */
+export function isInvitableCandidate(candidate: Pick<AdminInviteCandidate, "deceased" | "linked" | "pendingInvite">): boolean {
+  return !candidate.deceased && !candidate.linked && !candidate.pendingInvite;
+}
+
+/** Most rows `GET /api/admin/invites/people` returns (the admin narrows by typing). */
+export const ADMIN_INVITE_CANDIDATES_MAX = 20;
+
+/**
+ * `GET /api/admin/invites/people` query: living people **without an account**
+ * whose name, nickname or branch matches `q` (people with a pending invite are
+ * included, flagged `pendingInvite`). Not paginated: at most `limit` rows,
+ * ordered by name.
+ */
+export const adminInviteCandidatesQuerySchema = z.object({
+  q: z.string().trim().min(1).max(100),
+  limit: z.coerce.number<number | string>().int().min(1).max(ADMIN_INVITE_CANDIDATES_MAX).default(8)
+});
+export type AdminInviteCandidatesQuery = z.infer<typeof adminInviteCandidatesQuerySchema>;
+export type AdminInviteCandidatesQueryRequest = z.input<typeof adminInviteCandidatesQuerySchema>;
+
+/** `GET /api/admin/invites/people` response. */
+export interface AdminInviteCandidates {
+  items: AdminInviteCandidate[];
+}
+
+export const adminInviteCandidatesSchema = z.object({
+  items: z.array(adminInviteCandidateSchema).max(ADMIN_INVITE_CANDIDATES_MAX)
+}) satisfies z.ZodType<AdminInviteCandidates>;
 
 /**
  * Response to invite creation. `inviteUrl` (`…/invitacion#t=…`) is shown
