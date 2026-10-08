@@ -7,8 +7,10 @@
  *   family branch always; city only when `show_city` is on; **never** email
  *   or phone. Otherwise search would be an oracle for hidden contact data.
  * - `city` filters only members with `show_city` on.
+ * - Social contacts (WP-4.4) are never searched; they reach the response only
+ *   through `buildContactCard`, which applies each per-field switch.
  */
-import { type DirectoryEntry, toDirectoryEntry } from "@cuencada/types";
+import { buildContactCard, type DirectoryEntry, toContactVisibility, toDirectoryEntry } from "@cuencada/types";
 import { type AnyColumn, and, eq, or, type SQL, sql } from "drizzle-orm";
 import { people, profiles, users } from "../../db/schema/index.js";
 import type { DbOrTx } from "../../lib/audit.js";
@@ -42,6 +44,14 @@ const directorySelection = {
   showEmail: profiles.showEmail,
   showPhone: profiles.showPhone,
   showCity: profiles.showCity,
+  whatsapp: profiles.whatsapp,
+  instagram: profiles.instagram,
+  facebook: profiles.facebook,
+  tiktok: profiles.tiktok,
+  linkedin: profiles.linkedin,
+  github: profiles.github,
+  website: profiles.website,
+  contactVisibility: profiles.contactVisibility,
   sortName: sortNameSql
 };
 
@@ -60,6 +70,15 @@ export interface DirectoryRow {
   showEmail: boolean;
   showPhone: boolean;
   showCity: boolean;
+  whatsapp: string | null;
+  instagram: string | null;
+  facebook: string | null;
+  tiktok: string | null;
+  linkedin: string | null;
+  github: string | null;
+  website: string | null;
+  /** `profiles.contact_visibility` (read fail-closed by `toContactVisibility`). */
+  contactVisibility: unknown;
   sortName: string;
 }
 
@@ -160,13 +179,16 @@ export async function findDirectoryMember(db: DbOrTx, userId: string): Promise<D
 
 /**
  * Apply the owner's visibility through `toDirectoryEntry` (hidden contact
- * fields are omitted, not `null`) and presign the avatar.
+ * fields are omitted, not `null`), add the server-built contact card (only
+ * switched-on contacts; an empty array when none) and presign the avatar.
+ * Callers only pass rows of listed, active members (the queries above), and
+ * the routes require a verified viewer.
  *
  * @param app - Storage and logger for the avatar URL.
  * @param row - A listed member's row.
  */
 export async function toEntry(app: AvatarUrlDeps, row: DirectoryRow): Promise<DirectoryEntry> {
-  return toDirectoryEntry({
+  const entry = toDirectoryEntry({
     userId: row.userId,
     personId: row.personId,
     displayName: row.displayName,
@@ -183,4 +205,6 @@ export async function toEntry(app: AvatarUrlDeps, row: DirectoryRow): Promise<Di
       showCity: row.showCity
     }
   });
+  entry.contacts = buildContactCard(row, toContactVisibility(row.showEmail, row.showPhone, row.contactVisibility));
+  return entry;
 }
