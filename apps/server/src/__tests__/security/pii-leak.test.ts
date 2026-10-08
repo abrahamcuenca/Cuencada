@@ -427,7 +427,9 @@ describe("member-facing reads never leak PII", () => {
     expect(JSON.stringify(await get(`/api/family/people/${personId}`, admin.auth))).toContain(HIDDEN.birthDate);
     for (const url of [
       "/api/admin/family/activity",
-      `/api/admin/people/${personId}/revisions`
+      `/api/admin/people/${personId}/revisions`,
+      "/api/admin/family/duplicates",
+      `/api/admin/people/${personId}/merge-preview?duplicateId=00000000-0000-4000-8000-000000000001`
     ]) {
       const response = await app.inject({ method: "GET", url, remoteAddress: "203.0.113.50", ...viewer.auth });
       expect(response.statusCode, url).toBe(403);
@@ -532,6 +534,8 @@ describe("admin console never serializes secrets", () => {
       ...admin.auth
     });
     expect(edit.statusCode).toBe(200);
+    // WP-4.5: a possible duplicate of the hidden member's person (admin-only preview and pairs).
+    const duplicate = await insertPerson({ fullName: "Persona Reservada" });
     const bodies: Array<[string, unknown]> = [
       ["GET /api/admin/users", await get("/api/admin/users", admin.auth)],
       ["GET /api/admin/invites", await get("/api/admin/invites", admin.auth)],
@@ -543,7 +547,12 @@ describe("admin console never serializes secrets", () => {
       ["GET attendance", await get(`/api/admin/cuencadas/${editionId}/attendance`, admin.auth)],
       ["GET /api/admin/summary", await get("/api/admin/summary", admin.auth)],
       ["GET /api/admin/family/activity", await get("/api/admin/family/activity", admin.auth)],
-      ["GET /api/admin/people/:id/revisions", await get(`/api/admin/people/${personId}/revisions`, admin.auth)]
+      ["GET /api/admin/people/:id/revisions", await get(`/api/admin/people/${personId}/revisions`, admin.auth)],
+      ["GET /api/admin/family/duplicates", await get("/api/admin/family/duplicates", admin.auth)],
+      [
+        "GET /api/admin/people/:id/merge-preview",
+        await get(`/api/admin/people/${personId}/merge-preview?duplicateId=${duplicate.id}`, admin.auth)
+      ]
     ];
     expect(bodies.flatMap(([label, body]) => scan(label, body, { admin: true }))).toEqual([]);
   });

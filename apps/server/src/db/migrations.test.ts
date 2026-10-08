@@ -15,8 +15,8 @@ import { migrationsFolder } from "./migrate.js";
  * filled with seed-era rows, then migrated to the latest version. Migration
  * 0002: the same database is first taken 0000 → 0001, filled with rows in the
  * 0001 shape, then migrated to the latest version. Migration 0003: likewise
- * from 0002, migration 0004 from 0003, and migration 0005 (data only) from
- * 0004. The scratch database uses a
+ * from 0002, migration 0004 from 0003, migration 0005 (data only) from
+ * 0004, and migration 0006 (wider revision action CHECK) from 0005. The scratch database uses a
  * harness-style name so the global teardown also reclaims it.
  */
 
@@ -36,6 +36,7 @@ let upTo0001Folder: string;
 let upTo0002Folder: string;
 let upTo0003Folder: string;
 let upTo0004Folder: string;
+let upTo0005Folder: string;
 /** Number of migrations in the real journal (the "latest" version). */
 let latestCount: number;
 
@@ -81,6 +82,7 @@ beforeAll(async () => {
   upTo0002Folder = await migrationsUpTo(3);
   upTo0003Folder = await migrationsUpTo(4);
   upTo0004Folder = await migrationsUpTo(5);
+  upTo0005Folder = await migrationsUpTo(6);
   const journal = JSON.parse(await readFile(join(migrationsFolder, "meta", "_journal.json"), "utf8")) as Journal; // drizzle-kit's own file shape
   latestCount = journal.entries.length;
 });
@@ -106,6 +108,7 @@ afterAll(async () => {
   if (upTo0002Folder) await rm(upTo0002Folder, { recursive: true, force: true });
   if (upTo0003Folder) await rm(upTo0003Folder, { recursive: true, force: true });
   if (upTo0004Folder) await rm(upTo0004Folder, { recursive: true, force: true });
+  if (upTo0005Folder) await rm(upTo0005Folder, { recursive: true, force: true });
   await dropScratch();
 });
 
@@ -812,5 +815,29 @@ describe("migration 0005 (WhatsApp carry-over, data only)", () => {
     const result = await sql.unsafe(statement);
     expect(result.count).toBe(0);
     expect(await sql.unsafe(all)).toEqual(once);
+  });
+});
+
+describe("migration 0006 (person.merge revision action, expand-only)", () => {
+  it("keeps every existing revision, accepts person.merge afterwards, and still rejects unknown actions", async () => {
+    await migrate(drizzle(sql), { migrationsFolder: upTo0005Folder });
+    const person = await insertId(sql`insert into people (full_name) values ('Abuela Vega') returning id`);
+    const snapshot = JSON.stringify({ type: "person", personId: person });
+    const revision = (action: string): Promise<string | undefined> =>
+      sqlState(sql`insert into person_revisions (person_id, action, before) values (${person}, ${action}, ${snapshot}::jsonb)`);
+    const oldActions = Object.values(PersonRevisionAction).filter((action) => action !== PersonRevisionAction.PersonMerge);
+    for (const action of oldActions) expect(await revision(action), action).toBeUndefined();
+    expect(await revision(PersonRevisionAction.PersonMerge)).toBe("23514");
+    const before = await sql`select id, action, before, after, created_at from person_revisions order by id`;
+
+    await migrate(drizzle(sql), { migrationsFolder });
+    expect(await sql`select count(*)::int as count from drizzle.__drizzle_migrations`).toEqual([{ count: latestCount }]);
+    expect(await sql`select id, action, before, after, created_at from person_revisions order by id`).toEqual(before);
+    const merged = JSON.stringify({ type: "merge", personId: person, id: person, duplicatePersonId: person });
+    expect(await sqlState(sql`insert into person_revisions (person_id, action, before) values (${person}, 'person.merge', ${merged}::jsonb)`)).toBeUndefined();
+    expect(await revision("person.bogus")).toBe("23514");
+    expect(
+      await sql`select convalidated from pg_constraint where conname = 'person_revisions_action_check'`
+    ).toEqual([{ convalidated: true }]);
   });
 });

@@ -47,7 +47,7 @@ import { authUser } from "../../plugins/auth.js";
 import type { AvatarUrlDeps } from "../profile/avatar.js";
 import { findPossibleDuplicates } from "./duplicates.js";
 import { type MergePlan, mergePeopleTx, mergeValuesOf } from "./merge.js";
-import { deletePersonPhotoObjects } from "./personPhotoObjects.js";
+import { deleteLosingPhotoObjects } from "./mergePhoto.js";
 import { findPerson, type PersonViewRow, toPersonWithAvatar, type Viewer } from "./repository.js";
 
 /** Thrown to roll the preview's transaction back. */
@@ -240,7 +240,7 @@ const mergeRoutes: FastifyPluginAsyncZod = async (app) => {
         return { result, view };
       });
       // The duplicate's losing tree photo goes after the commit (best effort, like a person delete).
-      await deletePersonPhotoObjects(app, outcome.result.duplicateId, outcome.result.photoKeys);
+      await deleteLosingPhotoObjects(app, outcome.result.duplicateId, outcome.result.photoKeys);
       return {
         person: await toPersonWithAvatar(app, outcome.view, admin),
         revisionId: outcome.result.revisionId,

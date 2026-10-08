@@ -17,11 +17,12 @@
  *   dropped. Any rule failure → 409 `MERGE_CONFLICT`, one detail per edge.
  * - **Photo:** keep's tree photo stays; else the duplicate's moves. When
  *   both had one, the duplicate's objects are returned for deletion after
- *   the commit (`personPhotoObjects.ts`). Pending `person_photo_uploads`
+ *   the commit (`mergePhoto.ts`). Pending `person_photo_uploads`
  *   move to keep.
  * - **Other references to `people.id`:** invites (pending ones move only
  *   when keep can still be invited: unlinked, living, no pending invite of
- *   its own; otherwise they are revoked; non-pending ones move as history)
+ *   its own; otherwise they are revoked; every invite ends up naming keep,
+ *   as history)
  *   and `cuencada_attendance` (moved, or dropped where keep already has that
  *   edition). `person_revisions` rows keep pointing at the duplicate's id
  *   through their snapshots (the FK nulls `person_id`); a merge undo re-points
@@ -59,7 +60,7 @@ import { cuencadaAttendance, invites, people, personPhotoUploads, personRelation
 import { recordAudit, type Transaction } from "../../lib/audit.js";
 import { AppError, isAppError } from "../../lib/errors.js";
 import { invitePendingSql } from "../invites/service.js";
-import { personPhotoObjectKeys } from "./personPhotoObjects.js";
+import { losingPhotoKeys } from "./mergePhoto.js";
 import { MAX_PARENTS, insertRelationship, isAncestorOrSelf, lockFamilyTree } from "./relationships.js";
 import { type PersonRow, personColumns } from "./repository.js";
 import { insertRevision, personSnapshot, revisionsAboutPerson } from "./revisions.js";
@@ -392,7 +393,7 @@ async function applyMerge(
   const { keep, duplicate } = plan;
   // Pending uploads follow the person; then only the duplicate's current photo can lose.
   await tx.update(personPhotoUploads).set({ personId: keep.id }).where(eq(personPhotoUploads.personId, duplicate.id));
-  const photoKeys = plan.photo.keep && plan.photo.duplicate ? await personPhotoObjectKeys(tx, duplicate.id, duplicateInternals.photoKey) : [];
+  const photoKeys = plan.photo.keep && plan.photo.duplicate ? await losingPhotoKeys(tx, duplicate.id, duplicateInternals.photoKey) : [];
 
   if (plan.linkMoves) {
     await tx.update(people).set({ userId: null, updatedByUserId: actor.id }).where(eq(people.id, duplicate.id));
@@ -439,7 +440,7 @@ async function applyMerge(
   if (plan.invites.revoke.length > 0) {
     await tx
       .update(invites)
-      .set({ status: InviteStatus.Revoked, revokedAt: sql`now()` })
+      .set({ status: InviteStatus.Revoked, revokedAt: sql`now()`, personId: keep.id })
       .where(inArray(invites.id, plan.invites.revoke));
     for (const id of plan.invites.revoke) {
       await recordAudit(tx, {
@@ -681,11 +682,13 @@ export async function undoMergeTx(
       .values(merge.attendance.droppedCuencadaIds.map((cuencadaId) => ({ cuencadaId, personId: duplicateId, createdByUserId: actor.id })))
       .onConflictDoNothing();
   }
-  if (merge.invites.moved.length > 0) {
+  const invitesBack = [...merge.invites.moved, ...merge.invites.revoked];
+  if (invitesBack.length > 0) {
+    // Revoked ones go back as history and stay revoked.
     await tx
       .update(invites)
       .set({ personId: duplicateId })
-      .where(and(inArray(invites.id, merge.invites.moved), eq(invites.personId, keepId)));
+      .where(and(inArray(invites.id, invitesBack), eq(invites.personId, keepId)));
   }
   // The duplicate's own history points at it again (the delete had nulled `person_id`).
   await tx
