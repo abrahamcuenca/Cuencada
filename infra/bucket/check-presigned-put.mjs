@@ -5,9 +5,13 @@
  * production does.
  *
  *   pnpm build
+ *   # keys pasted without echo (zsh and bash; never `read -p`, it fails in zsh)
+ *   printf 'runtime access key: '; read -rs S3_ACCESS_KEY_ID; echo
+ *   printf 'runtime secret key: '; read -rs S3_SECRET_ACCESS_KEY; echo
+ *   export S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY
  *   S3_ENDPOINT=https://us-east-1.linodeobjects.com S3_REGION=us-east-1 \
- *   S3_BUCKET=<bucket> S3_ACCESS_KEY_ID=… S3_SECRET_ACCESS_KEY=… \
- *   node infra/bucket/check-presigned-put.mjs
+ *   S3_BUCKET=cuencada node infra/bucket/check-presigned-put.mjs
+ *   unset S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY
  *
  * Checks, against the real bucket:
  *   1. control: the signed type and length upload (200)

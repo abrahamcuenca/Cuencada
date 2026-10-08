@@ -1,8 +1,9 @@
 # Cutover runbook: first production deploy of cuencada.com
 
-WP-2.4 · Tech Lead · 2026-10-06, revised after the PR #38 review. Decisions
-and open questions are in [`WP-2.4.md`](../coordination/WP-2.4.md). The nginx
-details are in [`nginx.md`](nginx.md).
+WP-2.4 · Tech Lead · 2026-10-06, revised after the PR #38 review, and again
+after the first production deploy and seed on **2026-10-07** (WP-3.2).
+Decisions and open questions are in [`WP-2.4.md`](../coordination/WP-2.4.md).
+The nginx details are in [`nginx.md`](nginx.md).
 
 **Who does what**
 
@@ -25,8 +26,9 @@ details are in [`nginx.md`](nginx.md).
 - **Media:** a Linode Object Storage bucket in `us-east-1`.
 - **Email:** Resend.
 - **No Cloudflare:** DNS points straight at `server_1`.
-- **Deploy:** Acleron bundle mode, on the platform branch
-  `cuencada-nginx-credentials`. Build, verify and migrations run on the
+- **Deploy:** Acleron bundle mode, with the platform's `nginx.site_template`
+  and `server.credentials` (branch `cuencada-nginx-credentials`, now merged
+  into the platform). Build, verify and migrations run on the
   operator's machine, and the VPS only runs `pnpm install --prod`.
 - **Secrets:** they are not in the unit's `Environment=` lines. Each one is a
   root-only file in `/etc/credstore/cuencada-server/`, loaded with
@@ -34,20 +36,26 @@ details are in [`nginx.md`](nginx.md).
 
 **Shell hygiene for every secret below (Security L1):**
 
-- Paste secrets into `read -rsp`, which never echoes them and keeps them out
-  of shell history.
+- Paste secrets into `read -rs`, which never echoes them and keeps them out
+  of shell history. Print the prompt with `printf` first.
 - Never put a secret on a command line or in a file inside the repo.
 - `unset` each one when done.
 
 ```sh
-read -rsp 'paste <name>: ' VAR; echo
+printf 'paste <name>: '; read -rs VAR; echo
 # … use "$VAR" …
 unset VAR
 ```
 
+**Shell compatibility:** every snippet works in both zsh and bash. Don't use
+`read -rsp 'prompt: ' VAR`: in zsh `-p` means "read from the coprocess" and
+fails with `read: -p: no coprocess` (it broke the first seed).
+
 ---
 
 ## 0. Pre-launch gates (must be closed or explicitly waived by O)
+
+Launched on 2026-10-07 with every gate below closed or explicitly deferred by O.
 
 | Item | Status | Owner |
 |---|---|---|
@@ -56,9 +64,10 @@ unset VAR
 | **Breached-password check** on set, change and reset (WP-2.3 L5, ASVS 2.1.7) | Done in WP-2.3c (#39). Needs egress to `api.pwnedpasswords.com` (§ 1 step 10) | — |
 | Threat model updated for #35/#36 and WP-2.4 | Done in WP-2.4 | — |
 | WP-2.3 open findings: L1 (zod `jitless`, web), L4 (CI image digest) | Low. Not blocking, backlog | — |
-| **Acleron platform:** `nginx.site_template` and `server.credentials`, on branch `cuencada-nginx-credentials` in the local `acleron-platform` checkout (head `46d71eb`) | Written and tested (66/66); Security and TL approved. **O reviews it, merges or checks it out, and pushes it** | O |
-| Bucket name filled in (`<bucket>` in `infra/project.yml`: 2 lines; `infra/nginx/cuencada.conf`: 3 CSP lines) | **Open** | O gives the name; A edits it in a PR |
-| `server_1` resized to 2 GB | **Open** (owner decision) | O |
+| **Acleron platform:** `nginx.site_template` and `server.credentials`, branch `cuencada-nginx-credentials` (head `46d71eb`, tests 66/66, Security and TL approved) | Done: merged into the platform | — |
+| Bucket name and region in `infra/project.yml` and the `infra/nginx/cuencada.conf` CSP | Done: `cuencada` in `us-east-1` | — |
+| `server_1` resized to 2 GB | Done | — |
+| Legacy WhatsApp/OneDrive links rotated (§ 2) | **Deferred by O.** The seed used the existing links. Rotate later, then update them in Panel → edit the 2026 edition. Accepted risk A10 in the threat model | O |
 | Video cap 150 MB (it can return to 300 MB after the resize; see the runtime notes) | Done in WP-2.4 | — |
 | Minimum client version mechanism (force-update stale PWAs) | **Open** (backlog WP-2.x). Not needed for the first deploy: there are no old clients yet | — |
 
@@ -81,8 +90,8 @@ unset VAR
      - the bucket is still a placeholder;
      - anything drifted.
    - Point `ACLERON_PLATFORM_DIR` at the platform if it isn't at
-     `../acleron-platform/acleron-platform`. That checkout must be on
-     `cuencada-nginx-credentials`, or on `main` after the merge.
+     `../acleron-platform/acleron-platform`. That checkout must be on the
+     platform's `main`, which now includes `cuencada-nginx-credentials`.
 2. **O:** systemd version on `server_1`, read-only: `ssh server_1 systemctl --version | head -1`.
    It must be **≥ 247** for `LoadCredential=`. Ubuntu 22.04 ships 249 and
    24.04 ships 255. The platform also asserts it at deploy time whenever
@@ -106,13 +115,13 @@ unset VAR
 
    | Vault key | Used by | Value |
    |---|---|---|
-   | `vault_cuencada_database_url` | VPS credential `DATABASE_URL` | `postgresql://cuencada_app:<app pw>@db.cuencada.internal:5432/cuencada?sslmode=verify-full`: the **runtime** role over the VPC, with the server certificate verified (§ 3; fallback `@<DB_VPC_HOST>…?sslmode=require`) |
+   | `vault_cuencada_database_url` | VPS credential `DATABASE_URL` | `postgresql://cuencada_app:<app pw>@db.cuencada.internal:5432/cuencada?sslmode=verify-full`: the **runtime** role over the VPC, with the server certificate verified (§ 3; fallback `@<DB_VPC_HOST>…?sslmode=require`). If it uses the admin role instead of `cuencada_app`, that is accepted risk A11 (§ 3) |
    | `vault_cuencada_jwt_secret` | VPS credential | `openssl rand -hex 48` (at least 32 chars) |
    | `vault_cuencada_resend_api_key` | VPS credential | Resend API key: **sending access, cuencada.com domain only** |
    | `vault_cuencada_s3_access_key_id` / `vault_cuencada_s3_secret_access_key` | VPS credentials | Linode **limited** key: read/write on this bucket only (§ Bucket) |
-   | `vault_cuencada_migrate_database_url` | operator only | `postgresql://cuencada_owner:<owner pw>@127.0.0.1:${TUNNEL_PORT}/cuencada`: the **owner** role through the tunnel |
+   | `vault_cuencada_migrate_database_url` | operator only | `postgresql://<owner role>:<owner pw>@127.0.0.1:${TUNNEL_PORT}/cuencada`: the production `cuencada` database through the tunnel, as `cuencada_owner` or an existing admin role (§ 3). Always `127.0.0.1`, never `localhost` (§ 4) |
    | `vault_cuencada_seed_admin_temp_password` | operator only | at least 16 chars, passes the password policy |
-   | `vault_cuencada_seed_whatsapp_url`, `…_external_album_url`, `…_lyrics_url`, `…_program_url` | operator only | the **new** links from § 2 |
+   | `vault_cuencada_seed_whatsapp_url`, `…_external_album_url`, `…_lyrics_url`, `…_program_url` | operator only | the links the seed writes. Meant to be the **new** links from § 2; at launch O used the existing ones (§ 2) |
 
    `mise run deploy-preflight` prints the list of keys `infra/project.yml`
    references. It never reads the values.
@@ -155,6 +164,13 @@ The WhatsApp group invite and the OneDrive share links are public. They are
 in the legacy `index.html` and `cuencada2026.html`, and in git history. Git
 history is not rewritten (owner decision), so the old links must die.
 
+**Launch status (2026-10-07): deferred by O.** The seed ran with the existing
+links. Until they are rotated, that is accepted risk A10 in the
+[threat model](../security/threat-model.md). To rotate later, do steps 1
+and 2, then paste the new links into **Panel → edit the 2026 edition**. The
+seed only writes links on the edition's first insert, so re-running it
+changes nothing; step 3 only matters for a fresh database.
+
 1. **O:** WhatsApp → group → Invite via link → **Reset link**.
 2. **O:** OneDrive → each shared item (album, song lyrics, program) → Manage
    access → **remove the existing "Anyone with the link" links** → create new
@@ -167,7 +183,13 @@ history is not rewritten (owner decision), so the old links must die.
 
 ## 3. Database: roles, network, TLS (once, O, on the DB server)
 
-[`infra/db/roles.sql`](../../infra/db/roles.sql) creates two roles:
+[`infra/db/roles.sql`](../../infra/db/roles.sql) creates two roles.
+
+The owner/migrator doesn't have to be `cuencada_owner`. It can be an
+**existing admin role**, such as the platform's DB admin role (that is what
+the launch used). Pass it as `-v owner_role=<that role>`: the script creates
+a role only when it is missing, never alters an existing one, and grants
+`cuencada_app` DML on that owner's tables.
 
 - **`cuencada_owner`** owns the database, schema `public` and every table.
   - It is used only by the migrator and the one-off seed, from the
@@ -194,12 +216,27 @@ postgres=# \password cuencada_app
 
 - Until a password is set, the roles can't log in (they fail closed).
 - **Non-interactive alternative:** compute the verifier on your machine with
-  `read -rs PW; printf '%s' "$PW" | node infra/db/scram-verifier.mjs; unset PW`,
+  `printf 'password: '; read -rs PW; echo; printf '%s' "$PW" | node infra/db/scram-verifier.mjs; unset PW`,
   then run `ALTER ROLE cuencada_app PASSWORD 'SCRAM-SHA-256$4096:…';`.
 - **Never** run `ALTER ROLE … PASSWORD '<plain>'`, and never pass passwords
   as `psql -v` arguments: they would land in history, `ps` and the server log.
 
-**Network and auth.** In `postgresql.conf`:
+**Runtime role on the admin role (accepted risk A11).** If the runtime
+`DATABASE_URL` uses that same admin role instead of the least-privilege
+`cuencada_app`, the API runs with DDL rights, and a compromised `server_1`
+holds the admin password. Record it in WP-2.4.md and follow up (backlog
+"Post-launch"):
+
+1. Run `roles.sql` with `-v owner_role=<that role>`, then set the
+   `cuencada_app` password as above.
+2. Allow `cuencada_app` in `pg_hba` (below), switch
+   `vault_cuencada_database_url` to `cuencada_app`, redeploy, and check
+   `/health/ready` (§ 4).
+
+**Network and auth.** The platform may already manage `postgresql.conf` and
+`pg_hba.conf` on the DB server (it did at launch). Then the lines below are
+guidance to **verify** against what is there, not a required edit. In
+`postgresql.conf`:
 
 ```ini
 listen_addresses = 'localhost,<DB_VPC_HOST>'   # never a public interface
@@ -253,7 +290,7 @@ host      cuencada  cuencada_owner  127.0.0.1/32               scram-sha-256
   `ps`.
   ```sh
   umask 077; PGPASSFILE="$(mktemp)"; export PGPASSFILE; trap 'rm -f "$PGPASSFILE"' EXIT
-  read -rsp 'cuencada_app password: ' PW; echo
+  printf 'cuencada_app password: '; read -rs PW; echo
   printf 'db.cuencada.internal:5432:cuencada:cuencada_app:%s\n' "$PW" > "$PGPASSFILE"; unset PW
   PGSSLROOTCERT=/etc/ssl/certs/cuencada-db-ca.pem \
     psql "postgresql://cuencada_app@db.cuencada.internal:5432/cuencada?sslmode=verify-full" -c 'select 1'
@@ -296,11 +333,26 @@ over the VPC was considered and rejected:
 
 ```sh
 ssh -N -L ${TUNNEL_PORT}:127.0.0.1:5432 <db server> & TUNNEL=$!
-read -rsp 'owner-role URL (vault_cuencada_migrate_database_url): ' MIGRATE_DATABASE_URL; echo
+printf 'owner-role URL (vault_cuencada_migrate_database_url): '; read -rs MIGRATE_DATABASE_URL; echo
 export MIGRATE_DATABASE_URL
 mise run deploy
 unset MIGRATE_DATABASE_URL; kill $TUNNEL
 ```
+
+- **`MIGRATE_DATABASE_URL`** is simply the production `cuencada` database
+  through the tunnel:
+  `postgresql://<owner role>:<pw>@127.0.0.1:${TUNNEL_PORT}/cuencada`. The
+  owner role is `cuencada_owner` or the existing admin role (§ 3).
+- **Use `127.0.0.1`, not `localhost`.** `build-bundle.sh` compares the URL's
+  host and port with `deploy.migrate_tunnel` (`127.0.0.1:15432`) literally,
+  so `localhost` is refused.
+- **Never use `--skip-migrate`** when the release has migrations: the bundle
+  would ship code for a schema the database doesn't have.
+- **Arguments after `--`** go to the final `ansible-playbook` only, not to
+  `build-bundle`. For example:
+  `mise run deploy -- -e deploy_key_local_path=<path to the deploy key>`.
+- **First deploy:** the migration creates the tables, but no account exists
+  yet. The seed (§ 6) is what creates the admin account.
 
 What runs, in order:
 
@@ -404,12 +456,12 @@ through the tunnel (the seed only inserts rows). Every value is pasted with
 
 ```sh
 ssh -N -L ${TUNNEL_PORT}:127.0.0.1:5432 <db server> & TUNNEL=$!
-read -rsp 'owner-role URL: '            DB_URL;  echo
-read -rsp 'seed admin temp password: '  SEED_PW; echo
-read -rsp 'new WhatsApp link: '         WA;      echo
-read -rsp 'new album link: '            ALBUM;   echo
-read -rsp 'new lyrics link: '           LYRICS;  echo
-read -rsp 'new program link: '          PROGRAM; echo
+printf 'owner-role URL: ';           read -rs DB_URL;  echo
+printf 'seed admin temp password: '; read -rs SEED_PW; echo
+printf 'WhatsApp link: ';            read -rs WA;      echo
+printf 'album link: ';               read -rs ALBUM;   echo
+printf 'lyrics link: ';              read -rs LYRICS;  echo
+printf 'program link: ';             read -rs PROGRAM; echo
 NODE_ENV=production DATABASE_URL="$DB_URL" SEED_ADMIN_EMAIL=admin@cuencada.com \
   SEED_ADMIN_TEMP_PASSWORD="$SEED_PW" SEED_WHATSAPP_URL="$WA" SEED_EXTERNAL_ALBUM_URL="$ALBUM" \
   SEED_LYRICS_URL="$LYRICS" SEED_PROGRAM_URL="$PROGRAM" \
@@ -430,14 +482,44 @@ unset DB_URL SEED_PW WA ALBUM LYRICS PROGRAM; kill $TUNNEL
 1. Log in at `https://cuencada.com/entrar` as `admin@cuencada.com`.
 2. You are forced to change the password. Keep the new one in a password
    manager.
-3. **Verify the email:** click the link in the verification email. Chat and
-   the gallery stay at 403 `EMAIL_UNVERIFIED` until then, so
-   `admin@cuencada.com` must be a real, monitored mailbox.
+3. **Verify the email.** Logging in and changing the password do **not**
+   send the verification email by themselves. Press **"Reenviar enlace"** on
+   the verify banner, then click the link in the email. Chat and the gallery
+   stay at 403 `EMAIL_UNVERIFIED` until then, so `admin@cuencada.com` must be
+   a real, monitored mailbox.
+
+### Email troubleshooting
+
+If the verification email (or any other) doesn't arrive:
+
+1. **Resend dashboard:**
+   - **Emails:** is the message listed, and is it delivered, bounced or
+     missing?
+   - **Domains:** `cuencada.com` must show "Verified" (§ Resend DNS).
+2. **API logs on `server_1`:**
+   ```sh
+   journalctl -u cuencada-server --since '1 hour ago' --no-pager | grep -E "mail\.|resend|job failed"
+   ```
+   - `mail.recipient_budget_exceeded`: the per-address budget skipped the
+     send (at most one per purpose every 2 minutes, 3 an hour, 10 a day).
+     The request still answers 202. Wait a few minutes, then press
+     "Reenviar enlace" once.
+   - `mail.cap_reached` / `mail.queue_full`: the global daily cap, or the
+     mail queue is full (§ 10).
+   - `job failed`: the send to Resend failed (API key, domain or a Resend
+     outage).
+   - Nothing at all: the request never reached the API, or the banner was
+     still counting down.
+3. **Receiving side:**
+   - `admin@cuencada.com` receives mail through the registrar's inbound
+     forwarding (Porkbun). Check that the forward exists and points at a
+     mailbox someone reads.
+   - Check that mailbox's spam folder: forwarded mail often lands there.
 
 ## 7. Smoke tests (O, A can read the output)
 
 ```sh
-read -rsp 'admin password: ' SMOKE_PASSWORD; echo; export SMOKE_PASSWORD
+printf 'admin password: '; read -rs SMOKE_PASSWORD; echo; export SMOKE_PASSWORD
 SMOKE_BASE_URL=https://cuencada.com SMOKE_EMAIL=admin@cuencada.com node scripts/deploy-smoke.mjs
 unset SMOKE_PASSWORD
 ```
@@ -559,7 +641,8 @@ Pino levels are numeric: 50 = error, 60 = fatal.
      everything else under `server.env`. The preflight fails otherwise.
    - Add it to the vault when it's a secret.
 4. Open the tunnel, `read -rs` the owner-role URL into
-   `MIGRATE_DATABASE_URL`, then `mise run deploy` (O approves).
+   `MIGRATE_DATABASE_URL` (`127.0.0.1`, § 4), then `mise run deploy`
+   (O approves). Never `--skip-migrate` a release that has migrations.
 5. Health and the secrets check (§ 4), then the smoke test (§ 7).
 6. **Security fix?**
    - **Bump the minimum client version**, once that mechanism exists
@@ -610,10 +693,10 @@ cuencada.com.
 pasted with `read -rs`.
 
 ```sh
-B=<bucket>
+B=cuencada
 umask 077; S3CFG="$(mktemp)"; trap 'rm -f "$S3CFG"' EXIT
-read -rsp 'bucket-admin access key: ' AK; echo
-read -rsp 'bucket-admin secret key: ' SK; echo
+printf 'bucket-admin access key: '; read -rs AK; echo
+printf 'bucket-admin secret key: '; read -rs SK; echo
 printf '[default]\naccess_key = %s\nsecret_key = %s\nhost_base = us-east-1.linodeobjects.com\nhost_bucket = %%(bucket)s.us-east-1.linodeobjects.com\nuse_https = True\n' \
   "$AK" "$SK" > "$S3CFG"
 unset AK SK
@@ -641,7 +724,8 @@ key can upload and delete:
 
 ```sh
 pnpm build
-read -rsp 'runtime access key: ' S3_ACCESS_KEY_ID; echo; read -rsp 'runtime secret key: ' S3_SECRET_ACCESS_KEY; echo
+printf 'runtime access key: '; read -rs S3_ACCESS_KEY_ID; echo
+printf 'runtime secret key: '; read -rs S3_SECRET_ACCESS_KEY; echo
 export S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY
 S3_ENDPOINT=https://us-east-1.linodeobjects.com S3_REGION=us-east-1 S3_BUCKET=$B \
   node infra/bucket/check-presigned-put.mjs

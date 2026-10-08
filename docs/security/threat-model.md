@@ -1,6 +1,6 @@
 # Threat model
 
-WP-2.3 · Security Engineer · 2026-10-06 · baseline `main` @ `28c55aa`, updated after the PR #35 review (merged with `main` @ `e75e718`); updated by WP-2.4 (deploy prep, #36 invites)
+WP-2.3 · Security Engineer · 2026-10-06 · baseline `main` @ `28c55aa`, updated after the PR #35 review (merged with `main` @ `e75e718`); updated by WP-2.4 (deploy prep, #36 invites); updated by WP-3.2 after the 2026-10-07 launch (accepted risks A10, A11)
 
 Cuencada is a private family portal:
 
@@ -193,7 +193,7 @@ Each row lists the main mitigation and where it's enforced or tested.
 
 | # | Risk | Decision | Owner |
 |---|---|---|---|
-| A1 | The **legacy static files** (`index.html`, `cuencada2026.html`, root `images/`) carry the old WhatsApp and OneDrive links, and git history keeps them. They are not served on cuencada.com (no vhost before cutover; WP-2.4 checked), but the repo is public. | Rotate the WhatsApp and OneDrive links before the production seed; the seed now refuses to run without the new `SEED_*_URL` and no longer contains the legacy links (WP-2.4). `git rm` the files after cutover. "Sweep forward, no history rewrite". | Repo owner |
+| A1 | The **legacy static files** (`index.html`, `cuencada2026.html`, root `images/`) carry the old WhatsApp and OneDrive links, and git history keeps them. They are not served on cuencada.com (no vhost before cutover; WP-2.4 checked), but the repo is public. | Rotate the WhatsApp and OneDrive links before the production seed; the seed now refuses to run without the new `SEED_*_URL` and no longer contains the legacy links (WP-2.4). `git rm` the files after cutover. "Sweep forward, no history rewrite". **The rotation was deferred at launch: see A10.** | Repo owner |
 | A2 | **Open invites shared through WhatsApp:** anyone the link reaches can create an account, verify their own mailbox, and then read every member-only area. Email verification does not limit this. | Accepted, with these mitigations: 5 uses by default (10 max) and 72 h at most (#36), an admin alert on each acceptance (#36), admin revoke, accounts that start unverified (no PII until they verify), the admin audit log, and admins can disable a stranger's account. | Owner / orchestrator (ADR 0001) |
 | A3 | **Chat author visibility:** a member unlisted from the directory still shows their name and avatar in chat. | Accepted. Help text tells members (backlog 0.8c T5-FE). | Orchestrator (T7) |
 | A4 | **Unverified members** can still read announcements and the RSVP summary (counts only, no names). | **Decided** (owner, WP-2.3 L2, now fixed): the gallery, every media route and the member edition details are gated with `requireVerifiedEmail` (ADR 0001). Announcements and the summary stay open by decision. | Owner |
@@ -202,6 +202,8 @@ Each row lists the main mitigation and where it's enforced or tested.
 | A7 | **No CAPTCHA** on public auth endpoints. | Accepted. IP and email rate limits plus mail budgets. Revisit if abuse shows up. | Tech Lead |
 | A8 | sharp's prebuilt **libvips is LGPL-3.0-or-later**. | Accepted. Dynamically linked, unmodified and used server-side only, so no distribution obligation applies. | Tech Lead |
 | A9 | **Media in the browser cache:** after a logout, photos and avatars fetched through presigned URLs can stay in the browser's HTTP cache. | Bounded (WP-2.3 N1, fixed): stored objects carry `private, max-age=3600`, no longer than the presigned GET, instead of a year with `immutable`. The residual hour is accepted. Objects stored before the change keep their old metadata (there is no production bucket yet). `max-age` limits freshness, not disk retention; the 1 h presigned URL is the real bound. | Tech Lead |
+| A10 | **Legacy links still valid:** the WhatsApp group invite and the OneDrive share links (album, lyrics, program) in the legacy root files and git history (A1) were **not** rotated at launch. The production seed used them, so they are also the live links on the 2026 edition. Anyone who reads the public repo can join the WhatsApp group and open the shared items. | Accepted on 2026-10-07 (launch), **deferred by the owner**. Follow-up: reset the links, then update them in Panel → edit the 2026 edition (runbook § 2; backlog "Post-launch"). Closes A1's rotation step. | O (2026-10-07) |
+| A11 | **Runtime DB role may be the admin role:** if `DATABASE_URL` on `server_1` uses the DB admin role (the launch's migrator) instead of the DML-only `cuencada_app`, the API has DDL rights, and a compromised `server_1` holds the admin password. | Accepted on 2026-10-07 until `cuencada_app` is adopted. Follow-up: run `infra/db/roles.sql` with `-v owner_role=<that role>`, then switch the vault URL to `cuencada_app` and redeploy (runbook § 3; backlog "Post-launch"). | O (2026-10-07) |
 
 ## 6. Open items
 
