@@ -1,10 +1,12 @@
-import { type Person, idSchema } from "@cuencada/types";
+import { type PersonDetails, idSchema } from "@cuencada/types";
 import { type ReactNode, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { getApiErrorCode, getApiErrorMessage, isAbortError } from "../../../../shared/api/errors";
 import { Button } from "../../../../shared/ui/Button";
+import { Checkbox } from "../../../../shared/ui/Checkbox";
 import { EmptyState } from "../../../../shared/ui/EmptyState";
 import { Skeleton } from "../../../../shared/ui/Skeleton";
+import { Tabs } from "../../../../shared/ui/Tabs";
 import { useToast } from "../../../../shared/ui/Toast";
 import { cx } from "../../../../shared/ui/cx";
 import { useAccessDenial } from "../../../auth/accessDenied";
@@ -12,18 +14,20 @@ import { AccessDeniedState } from "../../../auth/components/AccessDeniedState";
 import { useGetPersonQuery } from "../../api";
 import { type FieldErrors, serverErrorToFieldErrors } from "../../lib/forms";
 import styles from "../admin.module.css";
-import { useDeletePersonMutation, useUpdatePersonMutation } from "../api";
+import { useDeletePersonMutation, usePurgePersonRevisionsMutation, useUpdatePersonMutation } from "../api";
 import { ADMIN_VERIFY_TITLE } from "./AdminFamilyPage";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PERSON_FORM_FIELDS, PersonForm, type PersonFormSubmit } from "../components/PersonForm";
 import { RelationshipManager } from "../components/RelationshipManager";
+import { RevisionFeed } from "../components/RevisionFeed";
 
 /** Why "Quitar" is disabled for a person linked to an account (the server answers 409 otherwise). */
 export const LINKED_DELETE_HINT = "Está vinculada a una cuenta. Para quitarla del árbol, primero desvincula la cuenta en «Datos» y guarda.";
 
 /**
  * `/admin/familia/:personId`: edit one person (data + linked account), manage
- * their parents, partners and children, or delete them.
+ * their parents, partners and children, see and undo their history, or
+ * delete them (optionally with their history).
  */
 export function AdminPersonPage(): ReactNode {
   const { personId = "" } = useParams();
@@ -56,10 +60,11 @@ export function AdminPersonPage(): ReactNode {
   );
 }
 
-function PersonEditor({ person }: { person: Person }): ReactNode {
+function PersonEditor({ person }: { person: PersonDetails }): ReactNode {
   const [update] = useUpdatePersonMutation();
   const [remove, removeState] = useDeletePersonMutation();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [purgeWithDelete, setPurgeWithDelete] = useState(false);
   const toast = useToast();
   const navigate = useNavigate();
 
@@ -71,16 +76,18 @@ function PersonEditor({ person }: { person: Person }): ReactNode {
       return null;
     } catch (error) {
       if (isAbortError(error)) return null;
-      if (getApiErrorCode(error) === "CONFLICT") return { userId: "Esa cuenta ya está vinculada a otra persona." };
-      return serverErrorToFieldErrors(error, "No pudimos guardar los cambios. Inténtalo otra vez.", PERSON_FORM_FIELDS);
+      const errors = serverErrorToFieldErrors(error, "No pudimos guardar los cambios. Inténtalo otra vez.", PERSON_FORM_FIELDS);
+      // A 409 is always about the account link (already linked elsewhere, or a re-link without unlinking first).
+      if (getApiErrorCode(error) === "CONFLICT" && errors.userId === undefined) return { userId: "Esa cuenta ya está vinculada a otra persona." };
+      return errors;
     }
   };
 
   const doDelete = async (): Promise<void> => {
     try {
-      await remove(person.id).unwrap();
+      await remove({ id: person.id, purgeHistory: purgeWithDelete }).unwrap();
       toast.show({
-        message: `Quitamos a ${person.fullName} del árbol.`,
+        message: purgeWithDelete ? `Quitamos a ${person.fullName} del árbol y borramos su historial.` : `Quitamos a ${person.fullName} del árbol.`,
         tone: "success"
       });
       navigate("/admin/familia");
@@ -93,15 +100,8 @@ function PersonEditor({ person }: { person: Person }): ReactNode {
     }
   };
 
-  return (
+  const data = (
     <>
-      <div className={styles.pageHeader}>
-        <h1 className={styles.pageTitle}>{person.fullName}</h1>
-        <Button variant="ghost" size="sm" to={`/arbol/${encodeURIComponent(person.id)}`}>
-          Ver en el árbol
-        </Button>
-      </div>
-
       <section aria-labelledby="datos-persona" className={styles.panel}>
         <h2 id="datos-persona" className={styles.sectionTitle}>
           Datos
@@ -120,12 +120,19 @@ function PersonEditor({ person }: { person: Person }): ReactNode {
         <h2 id="quitar-persona" className={styles.sectionTitle}>
           Quitar del árbol
         </h2>
-        <p className={styles.muted}>Se borran también todas sus relaciones. Su cuenta, si tiene, no se borra.</p>
+        <p className={styles.muted}>Se borran también todas sus relaciones y su foto del árbol. Su cuenta, si tiene, no se borra.</p>
         {person.userId !== null ? (
           <p id="quitar-persona-vinculada" className={styles.muted}>
             {LINKED_DELETE_HINT}
           </p>
         ) : null}
+        <Checkbox
+          label="Borrar también el historial"
+          hint="Para solicitudes de borrado: no queda ningún registro de sus datos y no se podrá deshacer."
+          checked={purgeWithDelete}
+          disabled={person.userId !== null}
+          onChange={(event) => setPurgeWithDelete(event.target.checked)}
+        />
         <Button
           variant="danger"
           disabled={person.userId !== null}
@@ -135,16 +142,82 @@ function PersonEditor({ person }: { person: Person }): ReactNode {
           Quitar a {person.fullName}
         </Button>
       </section>
+    </>
+  );
+
+  return (
+    <>
+      <div className={styles.pageHeader}>
+        <h1 className={styles.pageTitle}>{person.fullName}</h1>
+        <Button variant="ghost" size="sm" to={`/arbol/${encodeURIComponent(person.id)}`}>
+          Ver en el árbol
+        </Button>
+      </div>
+
+      <Tabs
+        label="Secciones de la persona"
+        variant="underline"
+        items={[
+          { id: "datos", label: "Datos", content: data },
+          { id: "historial", label: "Historial", content: <PersonHistory person={person} /> }
+        ]}
+      />
 
       <ConfirmDialog
         open={confirmDelete}
         title={`¿Quitar a ${person.fullName}?`}
-        description="Se borra la persona y todas sus relaciones. No se puede deshacer."
+        description={
+          purgeWithDelete
+            ? "Se borra la persona, sus relaciones y todo su historial. No se puede deshacer."
+            : "Se borra la persona y todas sus relaciones. Podrás deshacerlo desde «Actividad del árbol»."
+        }
         confirmLabel="Quitar"
         busy={removeState.isLoading}
         onConfirm={() => void doDelete()}
         onClose={() => setConfirmDelete(false)}
       />
     </>
+  );
+}
+
+/** "Historial": the person's changes with "Deshacer", and "Borrar historial" behind a confirmation. */
+function PersonHistory({ person }: { person: PersonDetails }): ReactNode {
+  const [confirmPurge, setConfirmPurge] = useState(false);
+  const [purge, purgeState] = usePurgePersonRevisionsMutation();
+  const toast = useToast();
+
+  const doPurge = async (): Promise<void> => {
+    try {
+      const result = await purge(person.id).unwrap();
+      toast.show({ message: result.deleted === 1 ? "Borramos 1 cambio del historial." : `Borramos ${result.deleted} cambios del historial.`, tone: "success" });
+    } catch (error) {
+      if (!isAbortError(error)) toast.show({ message: "No pudimos borrar el historial. Inténtalo otra vez.", tone: "danger" });
+    } finally {
+      setConfirmPurge(false);
+    }
+  };
+
+  return (
+    <section aria-labelledby="historial-persona" className={styles.panel}>
+      <div className={styles.groupHeader}>
+        <h2 id="historial-persona" className={styles.sectionTitle}>
+          Historial
+        </h2>
+        <Button variant="ghost" size="sm" onClick={() => setConfirmPurge(true)}>
+          Borrar historial
+        </Button>
+      </div>
+      <p className={styles.muted}>Cada cambio de sus datos y relaciones, de administradores y familiares. Se guarda un año.</p>
+      <RevisionFeed source={{ kind: "person", personId: person.id }} emptyTitle="Todavía no hay cambios registrados." />
+      <ConfirmDialog
+        open={confirmPurge}
+        title="¿Borrar el historial?"
+        description={`Se borran todos los cambios registrados de ${person.fullName}. Ya no se podrán deshacer.`}
+        confirmLabel="Borrar historial"
+        busy={purgeState.isLoading}
+        onConfirm={() => void doPurge()}
+        onClose={() => setConfirmPurge(false)}
+      />
+    </section>
   );
 }

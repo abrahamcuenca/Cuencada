@@ -17,7 +17,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { App } from "../../app.js";
-import { cuencadaAttendance, MagicLinkPurpose } from "../../db/schema/index.js";
+import { cuencadaAttendance, MagicLinkPurpose, personRelationships } from "../../db/schema/index.js";
 import { systemClock } from "../../lib/clock.js";
 import { S3Storage } from "../../lib/storage/s3.js";
 import { createEmailToken } from "../../modules/auth/emailTokens.js";
@@ -51,7 +51,10 @@ const HIDDEN = {
   ip: "198.51.100.23",
   userAgent: "W23-Secret-Agent/1.0",
   rsvpNote: "nota-privada-w23",
-  deletedChatBody: "cuerpo-borrado-w23"
+  deletedChatBody: "cuerpo-borrado-w23",
+  /** A living person's private life data (WP-4.1): only self, admins and the qualifying circle. */
+  birthplace: "Lugar-Privado-W41",
+  birthDate: "1977-11-23"
 };
 const UNLISTED_NAME = "Persona No Listada";
 
@@ -191,11 +194,24 @@ beforeEach(async () => {
   mediaId = media.id;
 
   // Family: the hidden member, the unlisted member and an unlinked person.
-  personId = (await insertPerson({ userId: hidden.id, fullName: "Persona Reservada" })).id;
+  personId = (
+    await insertPerson({
+      userId: hidden.id,
+      fullName: "Persona Reservada",
+      birthYear: 1977,
+      birthDate: HIDDEN.birthDate,
+      birthplace: HIDDEN.birthplace
+    })
+  ).id;
   await insertPerson({ userId: unlisted.id, fullName: UNLISTED_NAME });
   const relative = await insertPerson({ fullName: "Pariente Sin Cuenta" });
   await getTestDb().insert(cuencadaAttendance).values({ cuencadaId: edition.id, personId: relative.id });
-  await insertPerson({ userId: viewer.user.id, fullName: "Persona Lectora" });
+  const viewerPerson = await insertPerson({ userId: viewer.user.id, fullName: "Persona Lectora" });
+  // A member edge the viewer "made" between two people they did not create
+  // (planted): it must not pull the hidden person into the viewer's circle.
+  await getTestDb()
+    .insert(personRelationships)
+    .values({ kind: "parent_of", fromPersonId: personId, toPersonId: viewerPerson.id, createdByMember: true, createdByUserId: viewer.user.id });
 
   // Chat from the hidden member.
   const room = await insertGlobalRoom();
@@ -274,6 +290,9 @@ function scan(label: string, body: unknown, options: ScanOptions = {}): string[]
   if (SHA256_HEX.test(text)) problems.push(`${label}: 64-hex digest (token hash?)`);
   if (PRESIGNED_PUT.test(text)) problems.push(`${label}: presigned PUT URL`);
   if (text.includes(HIDDEN.rsvpNote) && options.admin !== true) problems.push(`${label}: another member's RSVP notes`);
+  if (options.admin !== true && (text.includes(HIDDEN.birthplace) || text.includes(HIDDEN.birthDate))) {
+    problems.push(`${label}: a living person's birth date or birthplace outside their circle`);
+  }
   if (options.admin !== true) {
     for (const email of text.match(EMAIL) ?? []) {
       if (!allowed.has(email.toLowerCase())) problems.push(`${label}: email ${email}`);
@@ -287,6 +306,11 @@ function scan(label: string, body: unknown, options: ScanOptions = {}): string[]
   if (options.admin === true && text.includes(BUCKET)) problems.push(`${label}: bucket name`);
   if (options.directory === true && text.includes(UNLISTED_NAME)) problems.push(`${label}: unlisted member's name`);
   return problems;
+}
+
+/** Bearer headers for a planted user (fresh session). */
+async function bearerAuth(user: TestUser): Promise<AuthInjectOptions> {
+  return bearerFor(user, await createSession(user.id));
 }
 
 async function get(url: string, auth: { headers: Record<string, string> }): Promise<unknown> {
@@ -323,6 +347,26 @@ describe("member-facing reads never leak PII", () => {
       ...scan("GET /api/family/tree", own)
     ]).toEqual([]);
     for (const body of [people, tree, own]) expect(JSON.stringify(body)).not.toContain(unlisted.id);
+  });
+
+  it("family (WP-4.1): living people's dates and birthplace stay inside the circle; revision routes are admin-only", async () => {
+    const tree = await get(`/api/family/tree?personId=${personId}&depth=4`, viewer.auth);
+    const own = await get("/api/family/tree?depth=4", viewer.auth);
+    const person = (await get(`/api/family/people/${personId}`, viewer.auth)) as { birthYear: number | null };
+    expect(person.birthYear).toBeNull();
+    expect([...scan("GET /api/family/tree?depth=4", tree), ...scan("GET /api/family/tree (own)", own)]).toEqual([]);
+    // Positive control: the person themself and admins do see them.
+    const self = await app.inject({ method: "GET", url: `/api/family/people/${personId}`, remoteAddress: "203.0.113.51", ...(await bearerAuth(hidden)) });
+    expect(self.body).toContain(HIDDEN.birthplace);
+    expect(JSON.stringify(await get(`/api/family/people/${personId}`, admin.auth))).toContain(HIDDEN.birthDate);
+    for (const url of [
+      "/api/admin/family/activity",
+      `/api/admin/people/${personId}/revisions`
+    ]) {
+      const response = await app.inject({ method: "GET", url, remoteAddress: "203.0.113.50", ...viewer.auth });
+      expect(response.statusCode, url).toBe(403);
+      expect(response.body).not.toContain(HIDDEN.birthplace);
+    }
   });
 
   it("attendees and RSVP summary: names only, no notes, emails or keys", async () => {
@@ -413,6 +457,15 @@ describe("admin console never serializes secrets", () => {
     const edition = await get("/api/admin/cuencadas", admin.auth);
     const editionId = (edition as Array<{ id: string; year: number }>).find((row) => row.year === YEAR)?.id;
     expect(editionId).toBeDefined();
+    // A family revision exists (its snapshots are admin-only PII, but never keys or tokens).
+    const edit = await app.inject({
+      method: "PATCH",
+      url: `/api/admin/people/${personId}`,
+      remoteAddress: "203.0.113.9",
+      payload: { nickname: "Reservada" },
+      ...admin.auth
+    });
+    expect(edit.statusCode).toBe(200);
     const bodies: Array<[string, unknown]> = [
       ["GET /api/admin/users", await get("/api/admin/users", admin.auth)],
       ["GET /api/admin/invites", await get("/api/admin/invites", admin.auth)],
@@ -422,7 +475,9 @@ describe("admin console never serializes secrets", () => {
       ["GET /api/admin/media/:id/reports", await get(`/api/admin/media/${mediaId}/reports`, admin.auth)],
       ["GET rsvps", await get(`/api/admin/cuencadas/${editionId}/rsvps`, admin.auth)],
       ["GET attendance", await get(`/api/admin/cuencadas/${editionId}/attendance`, admin.auth)],
-      ["GET /api/admin/summary", await get("/api/admin/summary", admin.auth)]
+      ["GET /api/admin/summary", await get("/api/admin/summary", admin.auth)],
+      ["GET /api/admin/family/activity", await get("/api/admin/family/activity", admin.auth)],
+      ["GET /api/admin/people/:id/revisions", await get(`/api/admin/people/${personId}/revisions`, admin.auth)]
     ];
     expect(bodies.flatMap(([label, body]) => scan(label, body, { admin: true }))).toEqual([]);
   });
@@ -456,7 +511,8 @@ describe("the PII scanner itself", () => {
       opaque: "A".repeat(43),
       planted: `prefix ${secrets[0] ?? "missing"} suffix`,
       body: HIDDEN.deletedChatBody,
-      name: UNLISTED_NAME
+      name: UNLISTED_NAME,
+      birthplace: HIDDEN.birthplace
     };
     const problems = scan("synthetic", leaky, { directory: true });
     for (const fragment of [
@@ -475,7 +531,8 @@ describe("the PII scanner itself", () => {
       "presigned PUT",
       "original object",
       'storage URL in "link"',
-      'forbidden key "showPhone"'
+      'forbidden key "showPhone"',
+      "birth date or birthplace outside their circle"
     ]) {
       expect(
         problems.some((problem) => problem.includes(fragment)),

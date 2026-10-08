@@ -13,7 +13,32 @@ import {
 import type { App } from "../../app.js";
 import { auditLogs, people, profiles } from "../../db/schema/index.js";
 
-const PERSON_KEYS = ["avatarUrl", "birthYear", "deathYear", "deceased", "familyBranch", "fullName", "id", "nickname", "userId"];
+const PERSON_KEYS = [
+  "avatarUrl",
+  "bio",
+  "birthDate",
+  "birthYear",
+  "birthplace",
+  "deathDate",
+  "deathYear",
+  "deceased",
+  "familyBranch",
+  "fullName",
+  "id",
+  "nickname",
+  "userId"
+];
+const DETAIL_KEYS = [
+  ...PERSON_KEYS,
+  "canAddRelative",
+  "canDelete",
+  "canEdit",
+  "canEditPhoto",
+  "contacts",
+  "isLinked",
+  "photoSource",
+  "photoUrl"
+].sort();
 const SUMMARY_KEYS = ["avatarUrl", "deceased", "fullName", "id", "nickname", "userId"];
 
 let app: App;
@@ -119,7 +144,7 @@ describe("GET /api/family/people/:id (privacy)", () => {
     const response = await app.inject({ method: "GET", url: `/api/family/people/${id}`, ...auth });
     expect(response.statusCode, response.body).toBe(200);
     const body = response.json<Person>();
-    expect(Object.keys(body).sort()).toEqual(PERSON_KEYS);
+    expect(Object.keys(body).sort()).toEqual(DETAIL_KEYS);
     return body;
   }
 
@@ -257,8 +282,9 @@ describe("GET /api/family/tree", () => {
     const executeSpy = vi.spyOn(app.db, "execute");
     const tree = await getTree(`?personId=${focus.id}&depth=3`);
     expect(tree.children).toHaveLength(6);
-    // The view issues 1 execute (the walk) + 2 selects (people, edges), independent of the tree size.
-    expect(executeSpy).toHaveBeenCalledTimes(1);
+    // The view issues 2 executes (the walk, the viewer's circle, WP-4.1) + 2 selects (people, edges),
+    // independent of the tree size.
+    expect(executeSpy).toHaveBeenCalledTimes(2);
     expect(selectSpy.mock.calls.length).toBeLessThanOrEqual(3);
   });
 

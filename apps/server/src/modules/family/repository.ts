@@ -1,15 +1,16 @@
 /**
  * Family-tree data access and the privacy-aware mappers.
  *
- * Privacy rules (people are PII; see AGENTS.md):
+ * Privacy rules (people are PII; see AGENTS.md and ADR 0001 §6):
  * - Admins and the person linked to the viewer's own account see every field.
- * - Living people: never a death year, and **no birth year for other
- *   members**, whether or not they are linked to an account (Security L1,
- *   PR #30: a year hidden only for linked people would reveal which `userId:
- *   null` nodes are unlisted accounts; it also protects minors). Only the
- *   linked member themself and admins see a living person's birth year.
- *   There are no birth dates, notes or contact fields in this module at all.
- * - Deceased people show both years.
+ * - Living people: never a death year/date, and **no birth year, birth date
+ *   or birthplace for other members** outside the viewer's **qualifying
+ *   own-family circle** (`circle.ts`, WP-4.1), whether or not they are linked
+ *   to an account (Security L1, PR #30: a year hidden only for linked people
+ *   would reveal which `userId: null` nodes are unlisted accounts; it also
+ *   protects minors).
+ * - Deceased people show their years, dates and birthplace.
+ * - The bio is shown to every reader (every family read is verified-only).
  * - **Unlisted accounts** (`profiles.listed_in_directory = false`): other
  *   members get `userId: null` and `avatarUrl: null` for the linked person,
  *   so the tree cannot be used to find or picture someone who opted out of
@@ -34,13 +35,28 @@ export const personColumns = {
   familyBranch: people.familyBranch,
   birthYear: people.birthYear,
   deathYear: people.deathYear,
-  deceased: people.deceased
+  deceased: people.deceased,
+  birthDate: people.birthDate,
+  deathDate: people.deathDate,
+  birthplace: people.birthplace,
+  bio: people.bio
 };
 
 /** A `people` row as selected by {@link personColumns}. */
 export type PersonRow = Pick<
   typeof people.$inferSelect,
-  "id" | "userId" | "fullName" | "nickname" | "familyBranch" | "birthYear" | "deathYear" | "deceased"
+  | "id"
+  | "userId"
+  | "fullName"
+  | "nickname"
+  | "familyBranch"
+  | "birthYear"
+  | "deathYear"
+  | "deceased"
+  | "birthDate"
+  | "deathDate"
+  | "birthplace"
+  | "bio"
 >;
 
 /**
@@ -52,7 +68,13 @@ export const personViewColumns = {
   ...personColumns,
   listedInDirectory: profiles.listedInDirectory,
   avatarKey: profiles.avatarKey,
-  userStatus: users.status
+  userStatus: users.status,
+  /** Internal only (tree photo, WP-4.3): never serialized. */
+  photoKey: people.photoKey,
+  /** Internal only (member delete rule): never serialized. */
+  createdByUserId: people.createdByUserId,
+  /** Internal only (member delete rule: edges made in the same transaction). */
+  createdAt: people.createdAt
 };
 
 /** A person read with {@link personViewColumns}. */
@@ -60,6 +82,9 @@ export type PersonViewRow = PersonRow & {
   listedInDirectory: boolean | null;
   avatarKey: string | null;
   userStatus: UserStatus | null;
+  photoKey: string | null;
+  createdByUserId: string | null;
+  createdAt: Date;
 };
 
 /** Ordering and paging for {@link selectPersonViews}. */
@@ -105,6 +130,12 @@ export const relationshipColumns = {
 export interface Viewer {
   id: string;
   role: UserRole;
+  /**
+   * The viewer's qualifying own-family circle (person ids, `circle.ts`),
+   * when the route loaded it. Missing = empty: living people's private
+   * fields stay hidden (fail closed).
+   */
+  circle?: ReadonlySet<string> | undefined;
 }
 
 /**
@@ -113,6 +144,15 @@ export interface Viewer {
  */
 export function canSeeAllFields(row: Pick<PersonRow, "userId">, viewer: Viewer): boolean {
   return viewer.role === "admin" || (row.userId !== null && row.userId === viewer.id);
+}
+
+/**
+ * True when `viewer` may see a **living** person's birth year, birth date and
+ * birthplace: admins, the person themself, and the viewer's qualifying
+ * own-family circle (ADR 0001 §6).
+ */
+export function canSeePrivateLife(row: Pick<PersonRow, "id" | "userId">, viewer: Viewer): boolean {
+  return canSeeAllFields(row, viewer) || (viewer.circle?.has(row.id) ?? false);
 }
 
 /**
@@ -193,17 +233,21 @@ export async function toPersonWithAvatar(deps: AvatarUrlDeps, row: PersonViewRow
  */
 export function toPerson(row: PersonViewRow, viewer: Viewer, avatars: PersonAvatarUrls): Person {
   const living = !row.deceased;
-  const hideBirthYear = living && !canSeeAllFields(row, viewer);
+  const hidePrivate = living && !canSeePrivateLife(row, viewer);
   return {
     id: row.id,
     userId: canSeeLink(row, viewer) ? row.userId : null,
     fullName: row.fullName,
     nickname: row.nickname,
     familyBranch: row.familyBranch,
-    birthYear: hideBirthYear ? null : row.birthYear,
+    birthYear: hidePrivate ? null : row.birthYear,
     deathYear: living ? null : row.deathYear,
     deceased: row.deceased,
-    avatarUrl: avatars.get(row.id) ?? null
+    avatarUrl: avatars.get(row.id) ?? null,
+    birthDate: hidePrivate ? null : row.birthDate,
+    deathDate: living ? null : row.deathDate,
+    birthplace: hidePrivate ? null : row.birthplace,
+    bio: row.bio
   };
 }
 

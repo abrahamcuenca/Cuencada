@@ -79,6 +79,14 @@ function mapInsertError(error: unknown): never {
   throw error;
 }
 
+/** Options of {@link insertRelationship}. */
+export interface InsertRelationshipOptions {
+  /** A member made it (only together with a new person, `relateTo`). Default `false` (admin). */
+  createdByMember?: boolean;
+  /** Re-use this id (reverting a `relationship.delete`). */
+  id?: string;
+}
+
 /**
  * Validate and insert a relationship inside `tx` (which must not have
  * written anything the lock should cover yet).
@@ -91,12 +99,14 @@ function mapInsertError(error: unknown): never {
  *
  * @param tx - Open transaction.
  * @param input - Validated input.
- * @param actorUserId - Admin creating it.
+ * @param actorUserId - Admin (or, with `options.createdByMember`, member) creating it.
+ * @param options - Provenance (`created_by_member`, Security M1) and an explicit id (revert re-creates the old edge).
  */
 export async function insertRelationship(
   tx: Transaction,
   input: CreateRelationshipInput,
-  actorUserId: string
+  actorUserId: string,
+  options: InsertRelationshipOptions = {}
 ): Promise<Relationship> {
   let fromPersonId = input.fromPersonId.toLowerCase();
   let toPersonId = input.toPersonId.toLowerCase();
@@ -130,7 +140,14 @@ export async function insertRelationship(
   try {
     const [row] = await tx
       .insert(personRelationships)
-      .values({ kind: input.kind, fromPersonId, toPersonId, createdByUserId: actorUserId })
+      .values({
+        ...(options.id === undefined ? {} : { id: options.id }),
+        kind: input.kind,
+        fromPersonId,
+        toPersonId,
+        createdByUserId: actorUserId,
+        createdByMember: options.createdByMember ?? false
+      })
       .returning(relationshipColumns);
     if (row === undefined) throw new Error("relationship insert returned no row");
     return toRelationship(row);

@@ -145,15 +145,20 @@ Still open:
 
 ### WP-4.0 follow-ups
 - Backfill `profiles.phone` to E.164 with `normalizePhoneE164` (contract from WP-4.0); until then every non-E.164 phone is left out of the `ContactCard` (no `tel:` guess at read time, Security L1); unreadable values stay as-is for an admin to fix. Then add a CHECK. Supersedes the two T5 E.164 items above.
-- `person_revisions` 1-year retention job (WP-4.1).
+- [x] `person_revisions` 1-year retention job (done in WP-4.1: `purgeExpiredRevisions`, family module timer).
 - Future (Security M1 follow-up): "member proposes a link between two existing people, an admin approves" (a pending-proposal table and an admin queue). Until then only admins relate existing people.
 - Avatars have 256/64 px derivatives only; consider a 512 px derivative so `PersonDetails.photoUrl` is sharp on large screens (WP-4.3).
-- Remove the deprecated `createPersonInputSchema`/`updatePersonInputSchema` once the admin form uses the WP-4 schemas (WP-4.1).
+- [x] Remove the deprecated `createPersonInputSchema`/`updatePersonInputSchema` (done in WP-4.1).
 
 ### WP-4.2 follow-ups
-- Deleting a person (WP-4.1 admin/member delete) should also **revoke** that person's pending invites in the same transaction. Today the `invites.person_id` FK (`ON DELETE SET NULL`) silently turns the invite into a plain bound invite: the accept creates a new person and is audited as `personLink: "created"`; only a delete racing the accept is recorded as a fallback (`deleted`). The `invite.created` audit row keeps the original `personId`.
-- `PATCH /api/admin/people/:id` re-links a person that already has an account to another one without a warning (the previous account loses its person). Consider requiring an explicit unlink first, or a 409 like the invite path (WP-4.1 owns the route).
-- Optional admin "Fusionar duplicados" tool for people created by self-registration (plan WP-4.2).
+- [x] Deleting a person (admin and member delete) **revokes** that person's pending invites in the same transaction, audited `invite.revoked` with ids and `reason: "person_deleted"` (done in WP-4.1).
+- [x] `PATCH /api/admin/people/:id` no longer moves a linked person to another account in one step: 409 `CONFLICT` + `PERSON_LINKED_TO_OTHER` on `userId`; unlink (`userId: null`) first (done in WP-4.1).
+- Optional admin "Fusionar duplicados" tool for people created by self-registration (plan WP-4.2; WP-4.5 builds on the WP-4.1 `insertRevision`/`createRelationshipTx`/`deleteRelationshipTx` helpers).
+
+### WP-4.1 follow-ups
+- **WP-4.3 merge:** `modules/family/personPhotoObjects.ts` is an interim helper for the admin person delete (current photo derivatives by the `people/…-<size>.webp` key layout + pending `person_photo_uploads` keys). Replace it with WP-4.3's helper once merged, and have WP-4.3 photo writes call `insertRevision(... "person.photo" ...)`.
+- **WP-4.4 merge:** the tree's "Detalles" accordion renders `PersonDetails.contacts` with a minimal list (`href` as-is, `rel="noopener noreferrer nofollow"`); switch it to WP-4.4's `ContactList` once merged.
+- The "Deshacer" of a `person.update` refuses (409) when the person changed afterwards; an admin undoes newer changes first. A "restore this version" (overwrite) action could come later.
 
 ## Post-launch (after the 2026-10-07 deploy)
 

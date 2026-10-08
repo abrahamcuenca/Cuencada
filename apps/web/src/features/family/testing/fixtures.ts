@@ -3,9 +3,20 @@
  * contract-shaped `FamilyTreeView` builder (same rules as the T6-BE plan),
  * and MSW handlers over it. Used by the tests and the screenshot stub.
  */
-import type { AdminUserListItem, FamilyTreeView, Person, PersonSummary, Relationship } from "@cuencada/types";
+import type {
+  AdminUserListItem,
+  FamilyActivityItem,
+  FamilyTreeView,
+  Person,
+  PersonDetails,
+  PersonSummary,
+  Relationship
+} from "@cuencada/types";
 import { type HttpHandler, HttpResponse, http } from "msw";
 import { apiUrl, errorBody } from "../../../../test/auth";
+
+/** Permission flags of `PersonDetails` a test can override per person. */
+export type DetailFlags = Partial<Pick<PersonDetails, "canEdit" | "canEditPhoto" | "canAddRelative" | "canDelete" | "contacts" | "photoUrl" | "photoSource">>;
 
 /** A deterministic v4-shaped UUID for fixture `n`. */
 export function fixtureId(n: number): string {
@@ -45,6 +56,10 @@ export function makePerson(id: string, fullName: string, overrides: Partial<Pers
     deathYear: null,
     deceased: false,
     avatarUrl: null,
+    birthDate: null,
+    deathDate: null,
+    birthplace: null,
+    bio: null,
     ...overrides
   };
 }
@@ -56,6 +71,69 @@ export interface FamilyDb {
   /** Accounts behind `GET /admin/users?q=` (name or email contains `q`). */
   accounts: AdminUserListItem[];
   log: Array<{ method: string; path: string; search: string; body: unknown }>;
+  /** Per-person overrides of the `PersonDetails` flags (default: the caller's own node may edit/add). */
+  flags: Map<string, DetailFlags>;
+  /** Revisions behind the history and activity endpoints, newest first. */
+  revisions: FamilyActivityItem[];
+}
+
+/**
+ * A `PersonDetails` for `person`: every optional field filled, flags from
+ * `db.flags` (default: only the caller's own node can be edited/added to).
+ */
+export function toDetails(db: FamilyDb, person: Person, mePersonId: string | null): PersonDetails {
+  const mine = person.id === mePersonId;
+  return {
+    ...person,
+    birthDate: person.birthDate ?? null,
+    deathDate: person.deathDate ?? null,
+    birthplace: person.birthplace ?? null,
+    bio: person.bio ?? null,
+    photoUrl: null,
+    photoSource: null,
+    isLinked: person.userId !== null,
+    canEdit: mine,
+    canEditPhoto: mine,
+    contacts: [],
+    canAddRelative: mine,
+    canDelete: false,
+    ...db.flags.get(person.id)
+  };
+}
+
+/** A fictional activity row (person snapshots only carry fictional names). */
+export function makeRevision(n: number, overrides: Partial<FamilyActivityItem> = {}): FamilyActivityItem {
+  const personId = overrides.personId ?? IDS.raul;
+  const snapshot = {
+    type: "person" as const,
+    personId: personId ?? IDS.raul,
+    id: personId ?? IDS.raul,
+    userId: null,
+    fullName: "Raúl Herrera Morales",
+    nickname: null,
+    familyBranch: "Herrera Navarro",
+    birthYear: 1981,
+    deathYear: null,
+    birthDate: null,
+    deathDate: null,
+    birthplace: null,
+    bio: null,
+    deceased: false
+  };
+  return {
+    id: fixtureId(700 + n),
+    personId,
+    relationshipId: null,
+    action: "person.update",
+    actor: { userId: ME_USER_ID, displayName: "José Herrera Navarro" },
+    before: snapshot,
+    after: { ...snapshot, nickname: "Rulo" },
+    revertedByRevisionId: null,
+    revertible: true,
+    createdAt: `2026-10-0${Math.min(n, 9)}T15:00:00.000Z`,
+    personName: "Raúl Herrera Morales",
+    ...overrides
+  };
 }
 
 let edgeSeq = 100;
@@ -105,7 +183,14 @@ export function makeFamilyDb(): FamilyDb {
     account(ME_USER_ID, "José Herrera Navarro", "jose.herrera@example.com", IDS.jose),
     account(fixtureId(901), "Ana Morales Vega", "ana.morales@example.com", IDS.ana)
   ];
-  return { people: new Map(people.map((person) => [person.id, person])), relationships, accounts, log: [] };
+  return {
+    people: new Map(people.map((person) => [person.id, person])),
+    relationships,
+    accounts,
+    log: [],
+    flags: new Map(),
+    revisions: []
+  };
 }
 
 /** A fictional admin-list account. */
@@ -161,7 +246,15 @@ export function buildView(db: FamilyDb, focusId: string, depth: number): FamilyT
     .filter((r) => r.kind === "partner_of" && (r.fromPersonId === focusId || r.toPersonId === focusId))
     .map((r) => (r.fromPersonId === focusId ? r.toPersonId : r.fromPersonId));
   const siblingIds = parentIds.flatMap((parent) => childrenOf(db, parent)).filter((id) => id !== focusId);
-  const extendedIds = depth >= 2 ? [...parentIds.flatMap((id) => parentsOf(db, id)), ...childIds.flatMap((id) => childrenOf(db, id))] : [];
+  // Generations 2..depth up and down (the server walks the same way, up to FAMILY_TREE_MAX_DEPTH).
+  const extendedIds: string[] = [];
+  let up = parentIds;
+  let down = childIds;
+  for (let level = 2; level <= depth; level += 1) {
+    up = up.flatMap((id) => parentsOf(db, id));
+    down = down.flatMap((id) => childrenOf(db, id));
+    extendedIds.push(...up, ...down);
+  }
   const returned = new Set([focusId, ...parentIds, ...childIds, ...partnerIds, ...siblingIds, ...extendedIds]);
   return {
     focus,
@@ -190,6 +283,18 @@ async function record(db: FamilyDb, request: Request): Promise<unknown> {
   const body: unknown = text ? JSON.parse(text) : null;
   db.log.push({ method: request.method, path: url.pathname.replace(/^.*\/api/, ""), search: url.search, body });
   return body;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Store the edge for "the new person is `relateTo.kind` of `relateTo.personId`". */
+function relate(db: FamilyDb, newId: string, relateTo: Record<string, unknown>): void {
+  const anchor = String(relateTo.personId);
+  if (relateTo.kind === "parent_of") db.relationships.push(edge("parent_of", newId, anchor));
+  else if (relateTo.kind === "child_of") db.relationships.push(edge("parent_of", anchor, newId));
+  else db.relationships.push(edge("partner_of", newId, anchor));
 }
 
 /** Options for {@link familyHandlers}. */
@@ -222,7 +327,72 @@ export function familyHandlers(db: FamilyDb, { mePersonId = IDS.jose }: FamilyHa
       await record(db, request);
       const person = db.people.get(String(params.id));
       if (!person) return HttpResponse.json(errorBody("NOT_FOUND", "No encontramos a esa persona."), { status: 404 });
-      return HttpResponse.json(person);
+      return HttpResponse.json(toDetails(db, person, mePersonId));
+    }),
+    http.post(apiUrl("/family/people"), async ({ request }) => {
+      const body = await record(db, request);
+      if (!isRecord(body) || !isRecord(body.relateTo)) return HttpResponse.json(errorBody("VALIDATION"), { status: 400 });
+      const { relateTo, ...fields } = body;
+      const person = makePerson(fixtureId(500 + db.people.size), "", fields);
+      db.people.set(person.id, person);
+      relate(db, person.id, relateTo);
+      return HttpResponse.json(toDetails(db, person, mePersonId), { status: 201 });
+    }),
+    http.patch(apiUrl("/family/people/:id"), async ({ request, params }) => {
+      const body = await record(db, request);
+      const person = db.people.get(String(params.id));
+      if (!person || !isRecord(body)) return HttpResponse.json(errorBody("NOT_FOUND"), { status: 404 });
+      const updated: Person = { ...person, ...body };
+      db.people.set(person.id, updated);
+      return HttpResponse.json(toDetails(db, updated, mePersonId));
+    }),
+    http.delete(apiUrl("/family/people/:id"), async ({ request, params }) => {
+      await record(db, request);
+      const id = String(params.id);
+      db.people.delete(id);
+      db.relationships = db.relationships.filter((r) => r.fromPersonId !== id && r.toPersonId !== id);
+      return new HttpResponse(null, { status: 204 });
+    }),
+    http.get(apiUrl("/admin/people/:id/revisions"), async ({ request, params }) => {
+      await record(db, request);
+      const id = String(params.id);
+      const items = db.revisions.filter((revision) => revision.personId === id || revision.after?.personId === id || revision.before?.personId === id);
+      return HttpResponse.json({ items: items.map(({ personName: _name, ...revision }) => revision), nextCursor: null });
+    }),
+    http.get(apiUrl("/admin/family/activity"), async ({ request }) => {
+      await record(db, request);
+      const url = new URL(request.url);
+      const action = url.searchParams.get("action");
+      const actor = url.searchParams.get("actorUserId");
+      const limit = Number(url.searchParams.get("limit") ?? "20");
+      const start = Number(url.searchParams.get("cursor") ?? "0");
+      const matching = db.revisions.filter((revision) => (action === null || revision.action === action) && (actor === null || revision.actor?.userId === actor));
+      const items = matching.slice(start, start + limit);
+      return HttpResponse.json({ items, nextCursor: start + limit < matching.length ? String(start + limit) : null });
+    }),
+    http.post(apiUrl("/admin/revisions/:revisionId/revert"), async ({ request, params }) => {
+      await record(db, request);
+      const target = db.revisions.find((revision) => revision.id === String(params.revisionId));
+      if (!target) return HttpResponse.json(errorBody("NOT_FOUND"), { status: 404 });
+      if (!target.revertible) return HttpResponse.json(errorBody("CONFLICT", "Este cambio ya se deshizo."), { status: 409 });
+      const revert = makeRevision(db.revisions.length + 1, {
+        id: fixtureId(800 + db.revisions.length),
+        action: "person.revert",
+        personId: target.personId,
+        personName: target.personName,
+        actor: { userId: fixtureId(990), displayName: "Octavio Admin" },
+        revertible: false
+      });
+      db.revisions = [revert, ...db.revisions.map((revision) => (revision.id === target.id ? { ...revision, revertible: false, revertedByRevisionId: revert.id } : revision))];
+      const { personName: _name, ...body } = revert;
+      return HttpResponse.json(body);
+    }),
+    http.post(apiUrl("/admin/people/:id/revisions/purge"), async ({ request, params }) => {
+      await record(db, request);
+      const id = String(params.id);
+      const before = db.revisions.length;
+      db.revisions = db.revisions.filter((revision) => revision.personId !== id && revision.after?.personId !== id && revision.before?.personId !== id);
+      return HttpResponse.json({ deleted: before - db.revisions.length });
     }),
     http.patch(apiUrl("/family/me"), async ({ request }) => {
       const body = await record(db, request);
@@ -234,8 +404,10 @@ export function familyHandlers(db: FamilyDb, { mePersonId = IDS.jose }: FamilyHa
     }),
     http.post(apiUrl("/admin/people"), async ({ request }) => {
       const body = await record(db, request);
-      const person = makePerson(fixtureId(500 + db.people.size), "", typeof body === "object" && body !== null ? body : {});
+      const { relateTo, ...fields } = isRecord(body) ? body : {};
+      const person = makePerson(fixtureId(500 + db.people.size), "", fields);
       db.people.set(person.id, person);
+      if (isRecord(relateTo)) relate(db, person.id, relateTo);
       return HttpResponse.json(person, { status: 201 });
     }),
     http.patch(apiUrl("/admin/people/:id"), async ({ request, params }) => {

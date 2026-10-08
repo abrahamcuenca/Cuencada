@@ -122,10 +122,14 @@ export function lifeYears(person: Pick<Person, "birthYear" | "deathYear" | "dece
   return null;
 }
 
-/** Grandparents and grandchildren derived from a depth ≥ 2 view. */
+/** Grandparents and grandchildren derived from a depth ≥ 2 view, plus older ancestors at depth 3–4 (WP-4.1). */
 export interface ExtendedGenerations {
   grandparents: PersonSummary[];
   grandchildren: PersonSummary[];
+  /** Parents of the grandparents (depth ≥ 3). */
+  greatGrandparents: PersonSummary[];
+  /** Parents of the great-grandparents (depth 4). */
+  greatGreatGrandparents: PersonSummary[];
 }
 
 /**
@@ -154,8 +158,23 @@ export function extendedGenerations(view: FamilyTreeView): ExtendedGenerations {
       if (person && person.id !== view.focus.id) grandchildren.set(person.id, person);
     }
   }
+  const parentsOf = (children: ReadonlyMap<string, PersonSummary>, exclude: ReadonlySet<string>): Map<string, PersonSummary> => {
+    const found = new Map<string, PersonSummary>();
+    for (const edge of view.extended.relationships) {
+      if (edge.kind !== "parent_of" || !children.has(edge.toPersonId) || exclude.has(edge.fromPersonId)) continue;
+      const person = byId.get(edge.fromPersonId);
+      if (person && person.id !== view.focus.id) found.set(person.id, person);
+    }
+    return found;
+  };
+  const seen = new Set<string>([view.focus.id, ...parentIds, ...grandparents.keys()]);
+  const greatGrandparents = parentsOf(grandparents, seen);
+  for (const id of greatGrandparents.keys()) seen.add(id);
+  const greatGreatGrandparents = parentsOf(greatGrandparents, seen);
   return {
     grandparents: [...grandparents.values()],
-    grandchildren: [...grandchildren.values()]
+    grandchildren: [...grandchildren.values()],
+    greatGrandparents: [...greatGrandparents.values()],
+    greatGreatGrandparents: [...greatGreatGrandparents.values()]
   };
 }

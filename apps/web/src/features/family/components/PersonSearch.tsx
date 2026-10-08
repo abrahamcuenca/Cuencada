@@ -27,6 +27,8 @@ export interface PersonSearchProps {
   autoFocus?: boolean;
   /** Empty the box after a pick (default). Pickers that may show an error keep the query. */
   clearOnPick?: boolean;
+  /** Called with the raw text as it is typed (e.g. to pre-fill "Crear nueva persona"). */
+  onQueryChange?: (text: string) => void;
   className?: string | undefined;
 }
 
@@ -43,6 +45,7 @@ export function PersonSearch({
   actionLabel = "Ver a",
   autoFocus = false,
   clearOnPick = true,
+  onQueryChange,
   className
 }: PersonSearchProps): ReactNode {
   const [text, setText] = useState("");
@@ -76,7 +79,10 @@ export function PersonSearch({
         maxLength={100}
         autoFocus={autoFocus}
         aria-describedby={statusId}
-        onChange={(event) => setText(event.target.value)}
+        onChange={(event) => {
+          setText(event.target.value);
+          onQueryChange?.(event.target.value);
+        }}
       />
       <p id={statusId} className={styles.searchStatus} aria-live="polite">
         {pending ? (
