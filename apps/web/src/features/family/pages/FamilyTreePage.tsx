@@ -17,6 +17,7 @@ import styles from "../family.module.css";
 import { useCachedPersonNames, usePrefersReducedMotion } from "../lib/hooks";
 import { type TrailEntry, type TreeLocationState, extendedGenerations, nextTrail, readTrail, resolveTrail } from "../lib/tree";
 import { PersonPhotoEditor } from "../photo";
+import { InvitePersonButton } from "../../admin/components/InvitePersonButton";
 
 // Only members editing their own node download the form.
 const SelfEditDialog = lazy(async () => ({
@@ -130,6 +131,7 @@ function TreeView({ view, busy, trail, expanded, onToggleExpanded, onOpen }: Tre
             Editar en administración
           </Button>
         ) : null}
+        {isAdmin ? <InvitePersonButton personId={focus.id} /> : null}
       </>
     ) : null;
 

@@ -115,6 +115,19 @@ export function familyNames(project: ProjectKey): { parent: string; partner: str
   };
 }
 
+/**
+ * WP-4.2: a tree person without an account (child of the seeded parent) whom
+ * an admin invites by email, and the address the invite goes to. The name is
+ * not a prefix-match of Ana's (journey 7 looks Ana up by accessible name).
+ */
+export function invitedPerson(project: ProjectKey): { fullName: string; email: string; typedName: string } {
+  return {
+    fullName: `Anabel ${SURNAMES[project]}`,
+    email: `anabel.${project}@e2e.example.test`,
+    typedName: `Anita ${SURNAMES[project]}`
+  };
+}
+
 /** The fictional future edition the RSVP journeys use. */
 export const FUTURE_YEAR = 2027;
 /** The seeded (past) edition whose public programa the offline journey caches. */

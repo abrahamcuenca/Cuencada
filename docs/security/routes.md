@@ -11,7 +11,7 @@ same guard config. `401`/`403` cells are guard denials (`UNAUTHENTICATED`,
 `PASSWORD_CHANGE_REQUIRED`, `FORBIDDEN`, `EMAIL_UNVERIFIED`); other non-2xx
 cells are handler answers for that principal's own data.
 
-Total: 102 routes (14 public, 41 user, 45 admin, 2 cookie).
+Total: 104 routes (14 public, 41 user, 47 admin, 2 cookie).
 
 | Method | Path | auth | Verified email | Pending pw allowed | Anon | Member | Unverified | Pending pw | Disabled | Revoked | Admin | Other member (IDOR) | Scope / notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -43,6 +43,8 @@ Total: 102 routes (14 public, 41 user, 45 admin, 2 cookie).
 | POST | `/api/admin/invites` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | POST | `/api/admin/invites/:id/resend` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | POST | `/api/admin/invites/:id/revoke` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
+| GET | `/api/admin/invites/people` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | WP-4.2 picker: living people without an account; no account ids |
+| GET | `/api/admin/invites/people/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |
 | DELETE | `/api/admin/itinerary/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | PATCH | `/api/admin/itinerary/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | DELETE | `/api/admin/locations/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
@@ -102,7 +104,7 @@ Total: 102 routes (14 public, 41 user, 45 admin, 2 cookie).
 | POST | `/api/family/people/:id/photo/uploads/:uploadId/confirm` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | uploader only (404 for another user's uploadId or another person's path) |
 | PATCH | `/api/family/people/me` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | self-scoped alias of /api/family/me; mass assignment: extra keys (fullName/userId/deceased/deathYear/id) → 2xx |
 | GET | `/api/family/tree` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/invites/accept` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
+| POST | `/api/invites/accept` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  | probe: invite naming another member's linked person (falls back, never relinks) → 2xx; probe: open link naming an unlinked person (legacy row; falls back, never links) → 2xx |
 | POST | `/api/invites/inspect` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
 | GET | `/api/me` | user |  | yes | 401 | 2xx | 2xx | 2xx | 401 | 401 | 2xx |  |  |
 | DELETE | `/api/media/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | uploader or admin (404 for other members) |

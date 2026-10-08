@@ -218,6 +218,30 @@ async function openInvite(): Promise<string> {
   return token;
 }
 
+/** The person linked to `owner` (inserted when the account has none yet). */
+async function linkedPerson(owner: Actor): Promise<string> {
+  const [existing] = await getTestDb().select({ id: people.id }).from(people).where(eq(people.userId, owner.user.id)).limit(1);
+  if (existing !== undefined) return existing.id;
+  const row = await insertPerson({ fullName: "Persona Vinculada", userId: owner.user.id });
+  return row.id;
+}
+
+/** A pending, emailed invite bound to `email` and naming `personId` (WP-4.2); returns the raw token. */
+async function personInvite(personId: string, email: string): Promise<string> {
+  const token = createOpaqueToken();
+  await getTestDb()
+    .insert(invites)
+    .values({
+      tokenHash: hashToken(token),
+      email,
+      personId,
+      maxUses: 1,
+      expiresAt: new Date(Date.now() + 86_400_000),
+      lastSentAt: new Date()
+    });
+  return token;
+}
+
 /** A pending, uploaded (in FakeStorage) gallery item owned by `owner`. */
 async function pendingUpload(ctx: MatrixContext, owner: Actor): Promise<string> {
   const edition = await upcoming(ctx);
@@ -551,7 +575,54 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
         email: `invitado-${randomUUID()}@example.test`,
         displayName: "Persona Invitada",
         password: "una-frase-larga-y-segura-2026"
-      })
+      }),
+    probes: [
+      {
+        label: "invite naming another member's linked person (falls back, never relinks)",
+        kind: "rule",
+        build: async (ctx) => {
+          const personId = await linkedPerson(ctx.other);
+          const email = `invitado-${randomUUID()}@example.test`;
+          return {
+            ...json("/api/invites/accept", {
+              token: await personInvite(personId, email),
+              email,
+              displayName: "Persona Invitada",
+              password: "una-frase-larga-y-segura-2026"
+            }),
+            state: async () => getTestDb().select({ userId: people.userId }).from(people).where(eq(people.id, personId))
+          };
+        },
+        expect: "2xx"
+      },
+      {
+        label: "open link naming an unlinked person (legacy row; falls back, never links)",
+        kind: "rule",
+        build: async () => {
+          const person = await insertPerson({ fullName: "Persona Sin Cuenta" });
+          const token = createOpaqueToken();
+          await getTestDb()
+            .insert(invites)
+            .values({
+              tokenHash: hashToken(token),
+              email: null,
+              personId: person.id,
+              maxUses: 5,
+              expiresAt: new Date(Date.now() + 86_400_000)
+            });
+          return {
+            ...json("/api/invites/accept", {
+              token,
+              email: `invitado-${randomUUID()}@example.test`,
+              displayName: "Persona Invitada",
+              password: "una-frase-larga-y-segura-2026"
+            }),
+            state: async () => getTestDb().select({ userId: people.userId }).from(people).where(eq(people.id, person.id))
+          };
+        },
+        expect: "2xx"
+      }
+    ]
   },
   { method: "GET", url: "/api/admin/invites", auth: "admin", build: async () => json("/api/admin/invites") },
   {
@@ -588,6 +659,30 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
         .returning({ id: invites.id });
       return json(`/api/admin/invites/${row?.id ?? randomUUID()}/resend`);
     }
+  },
+  {
+    method: "GET",
+    url: "/api/admin/invites/people",
+    auth: "admin",
+    note: "WP-4.2 picker: living people without an account; no account ids",
+    build: async () => {
+      await insertPerson({ fullName: "Ana Ejemplo" });
+      return json("/api/admin/invites/people?q=ana");
+    }
+  },
+  {
+    method: "GET",
+    url: "/api/admin/invites/people/:id",
+    auth: "admin",
+    build: async () => json(`/api/admin/invites/people/${(await insertPerson({ fullName: "Ana Ejemplo" })).id}`),
+    probes: [
+      {
+        label: "another member's linked person",
+        kind: "idor",
+        build: async (ctx) => json(`/api/admin/invites/people/${await linkedPerson(ctx.other)}`),
+        expect: { status: 403, code: "FORBIDDEN" }
+      }
+    ]
   },
 
   // ---------------------------------------------------------------- profile

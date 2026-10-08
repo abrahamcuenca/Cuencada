@@ -19,6 +19,7 @@ import {
   castMember,
   FUTURE_YEAR,
   familyNames,
+  invitedPerson,
   MEMBER_PASSWORD,
   PROJECT_KEYS,
   ProjectKey,
@@ -109,12 +110,14 @@ async function seedAnnouncedEdition(sql: Sql): Promise<void> {
 }
 
 /**
- * Per project: Ana and Beto, their parent (`parent_of` edges; the partner edge
- * is left for journey 7), and a deceased grandparent and great-grandparent
- * above the parent (WP-4.3 tree-photo journey).
+ * Tree people per project: the parent of Ana and Beto, a partner (the edge is
+ * left for journey 7), a child without an account whom journey 10 invites
+ * (WP-4.2), and a deceased grandparent and great-grandparent above the
+ * parent (WP-4.3 tree-photo journey).
  */
 async function seedFamily(sql: Sql, project: ProjectKey, anaUserId: string, betoUserId: string): Promise<void> {
   const names = familyNames(project);
+  const invited = invitedPerson(project);
   const ana = castMember(project, CastRole.Ana);
   const beto = castMember(project, CastRole.Beto);
   const rows = await sql<{ id: string; full_name: string }[]>`
@@ -122,7 +125,8 @@ async function seedFamily(sql: Sql, project: ProjectKey, anaUserId: string, beto
     values (${anaUserId}, ${ana.displayName}, 'Norte', 1990),
            (${betoUserId}, ${beto.displayName}, 'Norte', 1992),
            (null, ${names.parent}, 'Norte', 1960),
-           (null, ${names.partner}, 'Norte', 1962)
+           (null, ${names.partner}, 'Norte', 1962),
+           (null, ${invited.fullName}, 'Norte', 1995)
     returning id, full_name`;
   const ancestors = await sql<{ id: string; full_name: string }[]>`
     insert into people (user_id, full_name, family_branch, birth_year, death_year, deceased)
@@ -139,6 +143,7 @@ async function seedFamily(sql: Sql, project: ProjectKey, anaUserId: string, beto
     insert into person_relationships (kind, from_person_id, to_person_id)
     values ('parent_of', ${id(names.parent)}, ${id(ana.displayName)}),
            ('parent_of', ${id(names.parent)}, ${id(beto.displayName)}),
+           ('parent_of', ${id(names.parent)}, ${id(invited.fullName)}),
            ('parent_of', ${id(names.grandparent)}, ${id(names.parent)}),
            ('parent_of', ${id(names.greatGrandparent)}, ${id(names.grandparent)})`;
 }

@@ -5,6 +5,7 @@
  */
 import {
   type AdminInviteListItem,
+  type AdminInvitePerson,
   type InviteStatus,
   OPEN_INVITE_MAX_HOURS,
   OPEN_INVITE_MAX_LIFETIME_MS,
@@ -119,11 +120,13 @@ export function effectiveInviteStatus(
  * @param invite - The row.
  * @param createdByName - Creator's display name, if the creator still exists.
  * @param now - Current time (for the expired status).
+ * @param person - The linked tree person (WP-4.2), or `null`.
  */
 export function toAdminInviteListItem(
   invite: InviteRow,
   createdByName: string | null,
-  now: Date
+  now: Date,
+  person: AdminInvitePerson | null = null
 ): AdminInviteListItem {
   return {
     id: invite.id,
@@ -137,7 +140,8 @@ export function toAdminInviteListItem(
     createdByName,
     personId: invite.personId,
     note: invite.note,
-    lastSentAt: invite.lastSentAt === null ? null : invite.lastSentAt.toISOString()
+    lastSentAt: invite.lastSentAt === null ? null : invite.lastSentAt.toISOString(),
+    person
   };
 }
 

@@ -156,6 +156,11 @@ Still open:
 - Optional: an admin "Foto" control on `/admin/familia/:id` (today admins use the same controls on `/arbol/:id`).
 - Remove the deprecated `createPersonInputSchema`/`updatePersonInputSchema` once the admin form uses the WP-4 schemas (WP-4.1).
 
+### WP-4.2 follow-ups
+- Deleting a person (WP-4.1 admin/member delete) should also **revoke** that person's pending invites in the same transaction. Today the `invites.person_id` FK (`ON DELETE SET NULL`) silently turns the invite into a plain bound invite: the accept creates a new person and is audited as `personLink: "created"`; only a delete racing the accept is recorded as a fallback (`deleted`). The `invite.created` audit row keeps the original `personId`.
+- `PATCH /api/admin/people/:id` re-links a person that already has an account to another one without a warning (the previous account loses its person). Consider requiring an explicit unlink first, or a 409 like the invite path (WP-4.1 owns the route).
+- Optional admin "Fusionar duplicados" tool for people created by self-registration (plan WP-4.2).
+
 ## Post-launch (after the 2026-10-07 deploy)
 
 First production deploy and seed: 2026-10-07 (WP-3.2 recorded the lessons in
