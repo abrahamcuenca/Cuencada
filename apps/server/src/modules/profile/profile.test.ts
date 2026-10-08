@@ -148,7 +148,7 @@ describe("PATCH /api/profile/me", () => {
     expect(body).toMatchObject({
       displayName: "Tía Lupe",
       fullName: "Guadalupe Morales",
-      phone: "+52 (999) 555-0101",
+      phone: "+529995550101", // normalized to E.164 (WP-4.0)
       city: "Mérida",
       familyBranch: "Rama Norte",
       visibility: { showEmail: false, showPhone: true, showCity: true }

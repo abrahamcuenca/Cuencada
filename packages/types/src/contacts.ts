@@ -205,8 +205,7 @@ export const e164PhoneSchema: z.ZodType<string | null, string | null> = z
     if (e164 === null) {
       ctx.addIssue({
         code: "custom",
-        message:
-          "Teléfono inválido. Usa 10 dígitos o el formato internacional (+52…).",
+        message: "Teléfono inválido.",
       });
       return z.NEVER;
     }
@@ -357,7 +356,7 @@ export function toContactVisibility(
   };
 }
 
-/** Visibility patch: send only the switches that change. */
+/** Visibility patch: send only the switches that change; at least one when present (`{}` is a no-op → 400). */
 export const contactVisibilityInputSchema = z
   .strictObject({
     email: z.boolean(),
@@ -370,7 +369,10 @@ export const contactVisibilityInputSchema = z
     github: z.boolean(),
     website: z.boolean(),
   })
-  .partial();
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, {
+    error: "Indica al menos un contacto que mostrar u ocultar.",
+  });
 export type ContactVisibilityInput = z.infer<
   typeof contactVisibilityInputSchema
 >;
@@ -408,11 +410,13 @@ export const ownContactsSchema = z.object({
 }) satisfies z.ZodType<OwnContacts>;
 
 /**
- * `PATCH /api/profile/me/contacts` (WP-4.4). Send only what changes; blank or
- * `null` clears. Strict: unknown keys are a 400. `phone` and `whatsapp` are
- * normalized to E.164; handles drop one leading `@`; `website` is canonical
- * https. `visibility.email`/`phone` write `show_email`/`show_phone`; the rest
- * merge into `contact_visibility`.
+ * `PATCH /api/profile/me/contacts` (WP-4.4): the **only** path the web uses for
+ * contacts, including `phone`. Send only what changes; blank or `null` clears.
+ * Strict: unknown keys are a 400. `phone` and `whatsapp` are normalized to
+ * E.164; handles drop one leading `@`; `website` is canonical https.
+ * `visibility.email`/`phone` write `show_email`/`show_phone`; the rest merge
+ * into `contact_visibility`. WhatsApp is stored exactly as sent (`null` =
+ * none): the web pre-fills it from the phone, the server never infers it.
  */
 export const updateContactsInputSchema = z
   .strictObject({
@@ -520,9 +524,11 @@ function emailItem(
 function phoneItem(
   value: string,
 ): Pick<ContactItem, "href" | "display"> | null {
-  // Legacy `profiles.phone` values are free-form until the E.164 backfill.
-  const e164 = isE164(value) ? value : normalizePhoneE164(value);
-  return e164 === null ? null : { href: `tel:${e164}`, display: e164 };
+  // Security L1: only an already-valid E.164 value becomes a `tel:` link.
+  // Legacy free-form `profiles.phone` values are dropped (never guessed as +52:
+  // a US 10-digit number would dial Mexico) until the E.164 backfill. The +52
+  // default applies to input normalization only.
+  return isE164(value) ? { href: `tel:${value}`, display: value } : null;
 }
 
 function whatsappItem(
@@ -565,8 +571,8 @@ function itemFor(
  * Builds the member-facing {@link ContactCard}: one item per contact that has
  * a value **and** is switched on in `visibility`, in {@link CONTACT_KINDS}
  * order. Every value is re-validated against its rule; a value that fails
- * (corrupt row, legacy phone that cannot be read as E.164) is silently left
- * out rather than linked. `href` comes only from the fixed templates:
+ * (corrupt row, or a legacy phone not yet stored as E.164) is silently left
+ * out rather than linked; nothing is normalized or guessed at read time. `href` comes only from the fixed templates:
  *
  * | kind | href |
  * |---|---|

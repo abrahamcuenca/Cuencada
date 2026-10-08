@@ -285,6 +285,11 @@ describe("contact inputs", () => {
       updateContactsInputSchema.safeParse({ visibility: { city: true } })
         .success,
     ).toBe(false);
+    // An empty visibility object is a no-op, alone or alongside other fields.
+    expect(updateContactsInputSchema.safeParse({ visibility: {} }).success).toBe(false);
+    expect(updateContactsInputSchema.safeParse({ github: "ana", visibility: {} }).success).toBe(false);
+    // WhatsApp is stored as sent: nothing is inferred from the phone.
+    expect(updateContactsInputSchema.parse({ phone: "55 5010 0101" })).toEqual({ phone: "+525550100101" });
     expect(
       updateContactsInputSchema.safeParse({ visibility: { whatsapp: "true" } })
         .success,
@@ -487,21 +492,28 @@ describe("buildContactCard", () => {
     });
   });
 
-  it("normalizes a legacy free-form phone, and drops one it cannot read", () => {
-    expect(
-      buildContactCard({ ...NONE, phone: "55 5010 0101" }, ALL_ON),
-    ).toEqual([
-      {
-        kind: "phone",
-        label: "Teléfono",
-        href: "tel:+525550100101",
-        display: "+525550100101",
-      },
+  it("links only phones already stored as E.164 and never guesses +52 at read time (Security L1)", () => {
+    expect(buildContactCard({ ...NONE, phone: "+525550100101" }, ALL_ON)).toEqual([
+      { kind: "phone", label: "Teléfono", href: "tel:+525550100101", display: "+525550100101" },
     ]);
-    expect(buildContactCard({ ...NONE, phone: "llámame" }, ALL_ON)).toEqual([]);
-    expect(buildContactCard({ ...NONE, phone: "15550100199" }, ALL_ON)).toEqual(
-      [],
-    );
+    expect(buildContactCard({ ...NONE, phone: "+15550100199" }, ALL_ON)).toEqual([
+      { kind: "phone", label: "Teléfono", href: "tel:+15550100199", display: "+15550100199" },
+    ]);
+    // Legacy free-form values are dropped, not normalized: a US 10-digit number
+    // would otherwise be dialled as Mexican.
+    for (const legacy of [
+      "555 010 0199", // US 10-digit legacy value
+      "(555) 010-0199",
+      "55 5010 0101", // Mexican local, still not E.164
+      "525550100101",
+      "+52 55 5010 0101", // international but with spaces
+      "15550100199",
+      "llámame",
+    ]) {
+      expect(buildContactCard({ ...NONE, phone: legacy }, ALL_ON), legacy).toEqual([]);
+    }
+    // The +52 default still applies when *normalizing input*.
+    expect(normalizePhoneE164("555 010 0199")).toBe("+525550100199");
   });
 
   it("only ever emits https, mailto or tel links", () => {

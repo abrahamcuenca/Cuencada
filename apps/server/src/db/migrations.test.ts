@@ -469,6 +469,10 @@ describe("migration 0004", () => {
     expect(await sql`select count(*)::int as count from drizzle.__drizzle_migrations`).toEqual([{ count: latestCount }]);
 
     expect(await sql.unsafe(selectOldPeople)).toEqual(peopleBefore);
+    // Every pre-0004 edge came from the admin-only routes: it is not member-created (Security M1).
+    expect(await sql`select kind, created_by_member from person_relationships`).toEqual([
+      { kind: "parent_of", created_by_member: false }
+    ]);
     expect(await sql.unsafe(selectOldProfiles)).toEqual(profilesBefore);
     expect(
       await sql`
@@ -645,24 +649,34 @@ describe("migration 0004", () => {
     expect(await upload("image/png", 10 * 1024 * 1024 + 1, "people/p/u4")).toBe("23514");
     expect(await upload("image/webp", 10, "people/p/u1")).toBe("23505"); // object key unique
 
-    // Revisions: action CHECK, object snapshots, no self-revert.
-    const revision = (action: string, before: string | null = null): Promise<string | undefined> =>
+    // Revisions: action CHECK, object snapshots that name the person, no self-revert.
+    const snapshot = (fields: Record<string, unknown> = {}): string => JSON.stringify({ type: "person", personId: person, ...fields });
+    const revision = (action: string, before: string | null = snapshot(), after: string | null = null): Promise<string | undefined> =>
       sqlState(sql`
-        insert into person_revisions (person_id, actor_user_id, action, before)
-        values (${person}, ${editorId}, ${action}, ${before}::jsonb)
+        insert into person_revisions (person_id, actor_user_id, action, before, after)
+        values (${person}, ${editorId}, ${action}, ${before}::jsonb, ${after}::jsonb)
       `);
     for (const action of Object.values(PersonRevisionAction)) expect(await revision(action), action).toBeUndefined();
     expect(await revision("person.bogus")).toBe("23514");
     expect(await revision("person.update", "[1, 2]")).toBe("23514");
     expect(await revision("person.update", JSON.stringify("text"))).toBe("23514");
+    // Security L2: every snapshot must carry personId (a string), and a revision needs one snapshot.
+    expect(await revision("person.update", JSON.stringify({ type: "person", fullName: "x" }))).toBe("23514");
+    expect(await revision("person.update", snapshot(), JSON.stringify({ type: "person" }))).toBe("23514");
+    expect(await revision("person.update", JSON.stringify({ type: "person", personId: 42 }))).toBe("23514");
+    expect(await revision("person.update", JSON.stringify({ type: "person", personId: null }))).toBe("23514");
+    expect(await revision("person.update", null, null)).toBe("23514");
+    expect(await revision("person.create", null, snapshot())).toBeUndefined();
     const original = await insertId(sql`
       insert into person_revisions (person_id, actor_user_id, action, before, after)
-      values (${person}, ${editorId}, 'person.update', '{"type": "person", "fullName": "Abuela"}', '{"type": "person", "fullName": "Abuela Vega"}')
+      values (${person}, ${editorId}, 'person.update', ${snapshot({ fullName: "Abuela" })}::jsonb,
+              ${snapshot({ fullName: "Abuela Vega" })}::jsonb)
       returning id
     `);
     expect(await sqlState(sql`update person_revisions set reverted_by_revision_id = id where id = ${original}`)).toBe("23514");
     const revert = await insertId(sql`
-      insert into person_revisions (person_id, actor_user_id, action) values (${person}, ${adminId}, 'person.revert') returning id
+      insert into person_revisions (person_id, actor_user_id, action, after)
+      values (${person}, ${adminId}, 'person.revert', ${snapshot()}::jsonb) returning id
     `);
     await sql`update person_revisions set reverted_by_revision_id = ${revert} where id = ${original}`;
     // Retention cleanup deleting the revert row unlinks the original instead of failing.
@@ -672,7 +686,9 @@ describe("migration 0004", () => {
     ]);
     const relationshipRevision = await insertId(sql`
       insert into person_revisions (relationship_id, actor_user_id, action, after)
-      values (gen_random_uuid(), ${editorId}, 'relationship.create', '{"type": "relationship"}') returning id
+      values (gen_random_uuid(), ${editorId}, 'relationship.create',
+              ${JSON.stringify({ type: "relationship", personId: person, fromPersonId: adminId, toPersonId: person })}::jsonb)
+      returning id
     `);
 
     // Deleting the editor's account: set null everywhere, nothing lost.
@@ -680,7 +696,7 @@ describe("migration 0004", () => {
     expect(await sql`select updated_by_user_id from people where id = ${person}`).toEqual([{ updated_by_user_id: null }]);
     expect(await sql`select uploaded_by_user_id from person_photo_uploads`).toEqual([{ uploaded_by_user_id: null }]);
     expect(await sql`select count(*)::int as count from person_revisions where actor_user_id is null`).toEqual([
-      { count: Object.values(PersonRevisionAction).length + 2 }
+      { count: Object.values(PersonRevisionAction).length + 3 }
     ]);
 
     // Deleting the person: uploads cascade, revisions survive with person_id null.
@@ -690,11 +706,18 @@ describe("migration 0004", () => {
     expect(await sql`select count(*)::int as count from person_revisions`).toEqual(revisionCount);
     expect(await sql`select count(*)::int as count from person_revisions where person_id is not null`).toEqual([{ count: 0 }]);
     expect(await sql`select before from person_revisions where id = ${original}`).toEqual([
-      { before: { type: "person", fullName: "Abuela" } }
+      { before: { type: "person", personId: person, fullName: "Abuela" } }
     ]);
     expect(await sql`select relationship_id is not null as kept from person_revisions where id = ${relationshipRevision}`).toEqual([
       { kept: true }
     ]);
+    // A removal request can still find all history about the deleted person (the WP-4.1 purge query).
+    const aboutPerson = sql`
+      select count(*)::int as count from person_revisions
+      where person_id = ${person} or ${person} in (before ->> 'personId', after ->> 'personId',
+        before ->> 'fromPersonId', before ->> 'toPersonId', after ->> 'fromPersonId', after ->> 'toPersonId')
+    `;
+    expect(await aboutPerson).toEqual(revisionCount);
 
     // The PII comment is on the table.
     expect(await sql`select obj_description('person_revisions'::regclass, 'pg_class') like '%PII%' as commented`).toEqual([

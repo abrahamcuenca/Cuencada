@@ -12,6 +12,8 @@ import {
   personPhotoConfirmInputSchema,
   personRevisionSchema,
   personSchema,
+  personRevisionSnapshotSchema,
+  purgePersonRevisionsInputSchema,
   revertPersonRevisionInputSchema,
 } from "./family.js";
 import { clampCropRect, imageCropRectSchema } from "./profile.js";
@@ -391,6 +393,7 @@ describe("person read models", () => {
       actor: { userId: other, displayName: "Admin" },
       before: {
         type: "relationship",
+        personId: other,
         id: other,
         kind: "parent_of",
         fromPersonId: anchor,
@@ -417,6 +420,7 @@ describe("person read models", () => {
       action: "person.photo",
       before: {
         type: "photo",
+        personId: anchor,
         id: anchor,
         hasPhoto: true,
         photoUpdatedAt: null,
@@ -433,6 +437,39 @@ describe("person read models", () => {
         force: true,
       }).success,
     ).toBe(false);
+  });
+
+  it("requires personId on every snapshot (Security L2)", () => {
+    for (const snapshot of [
+      { type: "relationship", id: other, kind: "parent_of", fromPersonId: anchor, toPersonId: other },
+      { type: "photo", id: anchor, hasPhoto: false, photoUpdatedAt: null },
+      {
+        type: "person",
+        id: anchor,
+        userId: null,
+        fullName: "X",
+        nickname: null,
+        familyBranch: null,
+        birthYear: null,
+        deathYear: null,
+        birthDate: null,
+        deathDate: null,
+        birthplace: null,
+        bio: null,
+        deceased: false,
+      },
+    ]) {
+      expect(personRevisionSnapshotSchema.safeParse(snapshot).success, snapshot.type).toBe(false);
+      expect(personRevisionSnapshotSchema.safeParse({ ...snapshot, personId: anchor }).success, snapshot.type).toBe(true);
+    }
+  });
+
+  it("purge body is strict and needs an explicit confirm (the person is the path :id)", () => {
+    expect(purgePersonRevisionsInputSchema.parse({ confirm: true })).toEqual({ confirm: true });
+    expect(purgePersonRevisionsInputSchema.safeParse({}).success).toBe(false);
+    expect(purgePersonRevisionsInputSchema.safeParse({ confirm: "true" }).success).toBe(false);
+    expect(purgePersonRevisionsInputSchema.safeParse({ confirm: false }).success).toBe(false);
+    expect(purgePersonRevisionsInputSchema.safeParse({ confirm: true, personId: anchor }).success).toBe(false);
   });
 });
 
@@ -473,43 +510,37 @@ describe("image crop", () => {
     ).toEqual({ x: 1, y: 2, size: 3 });
   });
 
-  it("clampCropRect keeps the region square and inside the image", () => {
-    expect(clampCropRect({ x: 100, y: 50, size: 400 }, 1000, 800)).toEqual({
-      left: 100,
-      top: 50,
-      width: 400,
-      height: 400,
-    });
-    expect(clampCropRect({ x: 900, y: 0, size: 400 }, 1000, 800)).toEqual({
-      left: 900,
-      top: 0,
-      width: 100,
-      height: 100,
-    });
-    expect(clampCropRect({ x: 0, y: 700, size: 400 }, 1000, 800)).toEqual({
-      left: 0,
-      top: 700,
-      width: 100,
-      height: 100,
-    });
-    expect(clampCropRect({ x: 5000, y: 5000, size: 400 }, 1000, 800)).toEqual({
-      left: 999,
-      top: 799,
-      width: 1,
-      height: 1,
-    });
-    expect(clampCropRect({ x: 0, y: 0, size: 30_000 }, 1000, 800)).toEqual({
-      left: 0,
-      top: 0,
-      width: 800,
-      height: 800,
-    });
+  it("clampCropRect keeps the square's size and shifts its origin inside the image", () => {
+    // Fully inside: unchanged.
+    expect(clampCropRect({ x: 100, y: 50, size: 400 }, 1000, 800)).toEqual({ left: 100, top: 50, width: 400, height: 400 });
+    // Overflowing right / bottom: shifted back, not shrunk.
+    expect(clampCropRect({ x: 900, y: 0, size: 400 }, 1000, 800)).toEqual({ left: 600, top: 0, width: 400, height: 400 });
+    expect(clampCropRect({ x: 0, y: 700, size: 400 }, 1000, 800)).toEqual({ left: 0, top: 400, width: 400, height: 400 });
+    expect(clampCropRect({ x: 5000, y: 5000, size: 400 }, 1000, 800)).toEqual({ left: 600, top: 400, width: 400, height: 400 });
+    // Larger than the shorter side: capped to it, then shifted.
+    expect(clampCropRect({ x: 0, y: 0, size: 30_000 }, 1000, 800)).toEqual({ left: 0, top: 0, width: 800, height: 800 });
+    expect(clampCropRect({ x: 500, y: 100, size: 900 }, 1000, 800)).toEqual({ left: 200, top: 0, width: 800, height: 800 });
+    // Exact fit and a 1×1 image.
+    expect(clampCropRect({ x: 0, y: 0, size: 800 }, 800, 800)).toEqual({ left: 0, top: 0, width: 800, height: 800 });
+    expect(clampCropRect({ x: 3, y: 3, size: 3 }, 1, 1)).toEqual({ left: 0, top: 0, width: 1, height: 1 });
+    // Fractions from direct callers are truncated; the result always fits.
+    const odd = clampCropRect({ x: 10.9, y: 0.5, size: 99.9 }, 101, 100);
+    expect(odd).toEqual({ left: 2, top: 0, width: 99, height: 99 });
     expect(() => clampCropRect({ x: 0, y: 0, size: 1 }, 0, 10)).toThrow(
       RangeError,
     );
     expect(() => clampCropRect({ x: 0, y: 0, size: 1 }, 10.5, 10)).toThrow(
       RangeError,
     );
+    // Direct callers that skip the schema: non-finite values never reach extract().
+    for (const rect of [
+      { x: Number.NaN, y: 0, size: 10 },
+      { x: 0, y: Number.POSITIVE_INFINITY, size: 10 },
+      { x: 0, y: 0, size: Number.NaN },
+      { x: 0, y: 0, size: Number.POSITIVE_INFINITY },
+    ]) {
+      expect(() => clampCropRect(rect, 100, 100), JSON.stringify(rect)).toThrow(RangeError);
+    }
   });
 });
 
@@ -522,6 +553,8 @@ describe("WP-4 issue codes", () => {
     expect(codes).toEqual([
       "FAMILY_NOT_IN_CIRCLE",
       "PERSON_LINKED_TO_OTHER",
+      "PERSON_HAS_RELATIONSHIPS",
+      "NOT_CREATOR",
       "INVITE_PERSON_DECEASED",
       "INVITE_PERSON_REQUIRES_BOUND",
     ]);

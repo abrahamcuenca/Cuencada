@@ -159,10 +159,12 @@ export const personRevisions = pgTable(
       .on(table.revertedByRevisionId)
       .where(sql`"reverted_by_revision_id" is not null`),
     checkIn("person_revisions_action_check", "action", PersonRevisionAction),
+    // Snapshots are objects that always name the person (Security L2: purge by person).
     check(
       "person_revisions_snapshots_check",
-      sql`("before" is null or jsonb_typeof("before") = 'object') and ("after" is null or jsonb_typeof("after") = 'object')`
+      sql`("before" is null or (jsonb_typeof("before") = 'object' and coalesce(jsonb_typeof("before" -> 'personId'), '') = 'string')) and ("after" is null or (jsonb_typeof("after") = 'object' and coalesce(jsonb_typeof("after" -> 'personId'), '') = 'string'))`
     ),
+    check("person_revisions_has_snapshot_check", sql`"before" is not null or "after" is not null`),
     check(
       "person_revisions_not_self_reverted_check",
       sql`"reverted_by_revision_id" is null or "reverted_by_revision_id" <> "id"`
@@ -187,6 +189,14 @@ export const personRelationships = pgTable(
       .notNull()
       .references(() => people.id, { onDelete: "cascade" }),
     createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    /**
+     * WP-4.0 (Security M1): `true` when a **member** created the edge (only
+     * possible together with a new person, `relateTo`). Such an edge counts for
+     * the own-family circle only while `created_by_user_id` is also the
+     * creator of one of its endpoints; admin edges (`false`, every row before
+     * 0004) always count. See ADR 0001 §6.
+     */
+    createdByMember: boolean("created_by_member").notNull().default(false),
     createdAt: createdAt()
   },
   (table) => [

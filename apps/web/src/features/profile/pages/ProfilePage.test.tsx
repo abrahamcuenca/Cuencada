@@ -88,7 +88,8 @@ describe("ProfilePage form", () => {
     await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
 
     expect(await screen.findByText("Cambios guardados.")).toBeInTheDocument();
-    expect(db.patches).toEqual([{ city: "Monterrey", phone: "+52 555 010 0101" }]);
+    // The form sends the E.164-normalized phone (WP-4.0: same normalizer as the server).
+    expect(db.patches).toEqual([{ city: "Monterrey", phone: "+525550100101" }]);
     await waitFor(() => expect(screen.getByRole("button", { name: "Guardar cambios" })).toBeDisabled());
     expect(screen.getByLabelText(/Ciudad/)).toHaveValue("Monterrey");
   });

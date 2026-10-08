@@ -17,7 +17,7 @@ import {
 } from "./common.js";
 import { displayNameSchema } from "./auth.js";
 import { AVATAR_MAX_BYTES, MediaMimeType } from "./media.js";
-import { type ContactCard, type OwnContacts, contactCardSchema, ownContactsSchema } from "./contacts.js";
+import { type ContactCard, type OwnContacts, contactCardSchema, e164PhoneSchema, ownContactsSchema } from "./contacts.js";
 
 // WP-4.0: contact contracts live in their own file; re-exported here because
 // the `index.ts` barrel is frozen.
@@ -185,6 +185,11 @@ export const phoneSchema = z
  * `PATCH /api/profile/me`. Send only the fields that change; `null` clears.
  * Strict: any other key (`role`, `status`, `userId`, `email`, …) is a 400
  * `VALIDATION`, so mass assignment fails loudly instead of being ignored.
+ *
+ * `phone` is **deprecated here** (WP-4.0 decision): the web edits it through
+ * `PATCH /api/profile/me/contacts`. It is still accepted for older PWA
+ * clients, normalized with the same E.164 rules (`e164PhoneSchema`), so both
+ * paths store the same value. Blank or `null` clears.
  */
 export const updateProfileInputSchema = z
   .strictObject({
@@ -192,7 +197,7 @@ export const updateProfileInputSchema = z
     fullName: displayTextSchema(200),
     familyBranch: nullableDisplayTextSchema(120),
     city: nullableDisplayTextSchema(120),
-    phone: phoneSchema.nullable(),
+    phone: e164PhoneSchema,
     bio: nullableTextSchema(500),
     showEmail: z.boolean(),
     showPhone: z.boolean(),
@@ -302,21 +307,27 @@ export interface ClampedCrop {
 
 /**
  * Clamps `rect` to a `width × height` image so `extract()` never reads out of
- * bounds: the origin is pulled inside the image and the side shrinks to fit
- * both dimensions (the result stays square, side ≥ 1).
+ * bounds, keeping the user's framing as far as possible: the side is capped at
+ * the image's shorter dimension (`min(size, width, height)`, ≥ 1), then the
+ * origin is **shifted** back inside (`left ∈ [0, width − side]`,
+ * `top ∈ [0, height − side]`) rather than shrinking the square.
  *
  * @param rect - Crop parsed by {@link imageCropRectSchema}.
  * @param width - Image width in pixels after EXIF rotation (integer ≥ 1).
  * @param height - Image height in pixels after EXIF rotation (integer ≥ 1).
  * @returns The square region to extract.
- * @throws RangeError when the image dimensions are not positive integers.
+ * @throws RangeError when the image dimensions are not positive integers, or
+ *   a rect value is not a finite number (direct callers that skipped the schema).
  */
 export function clampCropRect(rect: ImageCropRect, width: number, height: number): ClampedCrop {
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
     throw new RangeError("clampCropRect: invalid image dimensions");
   }
-  const left = Math.min(Math.max(0, Math.trunc(rect.x)), width - 1);
-  const top = Math.min(Math.max(0, Math.trunc(rect.y)), height - 1);
-  const side = Math.max(1, Math.min(Math.trunc(rect.size), width - left, height - top));
+  if (!Number.isFinite(rect.x) || !Number.isFinite(rect.y) || !Number.isFinite(rect.size)) {
+    throw new RangeError("clampCropRect: invalid crop rect");
+  }
+  const side = Math.max(1, Math.min(Math.trunc(rect.size), width, height));
+  const left = Math.min(Math.max(0, Math.trunc(rect.x)), width - side);
+  const top = Math.min(Math.max(0, Math.trunc(rect.y)), height - side);
   return { left, top, width: side, height: side };
 }

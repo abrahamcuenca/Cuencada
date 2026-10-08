@@ -3141,6 +3141,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "created_by_member": {
+          "name": "created_by_member",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -3482,7 +3489,11 @@
         },
         "person_revisions_snapshots_check": {
           "name": "person_revisions_snapshots_check",
-          "value": "(\"before\" is null or jsonb_typeof(\"before\") = 'object') and (\"after\" is null or jsonb_typeof(\"after\") = 'object')"
+          "value": "(\"before\" is null or (jsonb_typeof(\"before\") = 'object' and coalesce(jsonb_typeof(\"before\" -> 'personId'), '') = 'string')) and (\"after\" is null or (jsonb_typeof(\"after\") = 'object' and coalesce(jsonb_typeof(\"after\" -> 'personId'), '') = 'string'))"
+        },
+        "person_revisions_has_snapshot_check": {
+          "name": "person_revisions_has_snapshot_check",
+          "value": "\"before\" is not null or \"after\" is not null"
         },
         "person_revisions_not_self_reverted_check": {
           "name": "person_revisions_not_self_reverted_check",

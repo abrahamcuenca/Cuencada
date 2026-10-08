@@ -72,7 +72,9 @@ export interface Person {
   avatarUrl: string | null;
   /**
    * Full birth date `YYYY-MM-DD` (WP-4.0). Same visibility as `birthYear`
-   * (WP-4.1 widens "may see" to the viewer's own-family circle). Optional on
+   * (WP-4.1 widens "may see" to the viewer's qualifying own-family circle,
+   * ADR 0001 §6, never to people reached through member-made edges between
+   * existing people). Optional on
    * the wire so responses from servers before WP-4.1 still parse.
    */
   birthDate?: string | null;
@@ -111,9 +113,11 @@ export type PersonPhotoSource = (typeof PersonPhotoSource)[keyof typeof PersonPh
 export const personPhotoSourceSchema = z.enum(PersonPhotoSource);
 
 /**
- * One person's full card (`GET /api/family/people/:id/details`: the tree
- * "Detalles" accordion and the person page; WP-4.1). Every {@link Person}
- * field is present (dates and texts are `null` when hidden or empty).
+ * One person's full card (`GET /api/family/people/:id` from WP-4.1; a superset
+ * of `Person`, so older clients still parse it): the tree "Detalles" accordion
+ * and the person page. Every {@link Person} field is present (dates and texts
+ * are `null` when hidden or empty). Built by WP-4.1 (permissions, privacy),
+ * using `resolvePersonPhoto` (WP-4.3) and `personContactCard` (WP-4.4).
  */
 export interface PersonDetails extends Person {
   birthDate: string | null;
@@ -121,9 +125,10 @@ export interface PersonDetails extends Person {
   birthplace: string | null;
   bio: string | null;
   /**
-   * Resolved photo at 512 px, server-side: the linked account's own avatar
-   * wins, else the person's tree photo, else `null`. Same visibility rules as
-   * `avatarUrl`.
+   * Resolved photo, server-side (`resolvePersonPhoto`): the linked account's
+   * own avatar wins, else the person's tree photo, else `null`. 256 px (the
+   * largest avatar derivative; WP-4.3 may serve 512 px for tree photos). Same
+   * visibility rules as `avatarUrl`.
    */
   photoUrl: string | null;
   /** Which photo `photoUrl` is; `null` when there is none (or it is hidden). */
@@ -133,7 +138,11 @@ export interface PersonDetails extends Person {
    * rule of `userId` (`false` when the account is hidden from them).
    */
   isLinked: boolean;
-  /** The viewer may edit this person (admin, self, or own-family circle and not linked to another account). */
+  /**
+   * The viewer may edit this person: admin, self, or in the viewer's
+   * **qualifying** own-family circle (ADR 0001 §6) and not linked to another
+   * account.
+   */
   canEdit: boolean;
   /** The viewer may upload or remove the tree photo (admins, close relatives, or the person themself; WP-4.3). */
   canEditPhoto: boolean;
@@ -305,6 +314,12 @@ export type UpdatePersonRequest = z.input<typeof updatePersonInputSchema>;
 /**
  * `POST /api/admin/relationships`. The server rejects self-references,
  * duplicates and `parent_of` cycles (409 `CONFLICT`).
+ *
+ * **Admin-only** (WP-4.0, Security M1): an edge between two *existing* people
+ * can pull someone into a member's own-family circle, so members never create
+ * or delete edges directly. A member's only way to add an edge is
+ * `memberCreatePersonInputSchema.relateTo`, which attaches a person the member
+ * creates in the same request.
  */
 export const createRelationshipInputSchema = z
   .object({
@@ -343,14 +358,24 @@ export type SelfEditPersonRequest = z.input<typeof selfEditPersonInputSchema>;
  * detail-code channel of ADR 0001 §4; `ErrorCode` itself stays closed).
  */
 export const FamilyIssueCode = {
-  /** 403 `FORBIDDEN`: the target person is outside the member's own-family circle. */
+  /**
+   * 403 `FORBIDDEN`: the target person (or `relateTo.personId`) is outside
+   * the member's qualifying own-family circle (ADR 0001 §6).
+   */
   NotInCircle: "FAMILY_NOT_IN_CIRCLE",
   /**
    * 403 `FORBIDDEN`: the person is linked to **another** account; only that
    * member or an admin may edit them. Also 409 `CONFLICT` on an invite for a
    * person that already has an account (WP-4.2).
    */
-  PersonLinkedToOther: "PERSON_LINKED_TO_OTHER"
+  PersonLinkedToOther: "PERSON_LINKED_TO_OTHER",
+  /**
+   * 409 `CONFLICT` on `DELETE /api/family/people/:id`: the person has edges
+   * other than the one its creator added with it; only an admin may delete it.
+   */
+  PersonHasRelationships: "PERSON_HAS_RELATIONSHIPS",
+  /** 403 `FORBIDDEN` on `DELETE /api/family/people/:id`: only the member who created the person (or an admin) may delete it. */
+  NotCreator: "NOT_CREATOR"
 } as const;
 export type FamilyIssueCode = (typeof FamilyIssueCode)[keyof typeof FamilyIssueCode];
 
@@ -525,7 +550,7 @@ function completeCreate<TValue extends PersonDateFields>(value: TValue): Omit<TV
 }
 
 /**
- * `POST /api/admin/family/people` (WP-4.1; supersedes `createPersonInputSchema`).
+ * `POST /api/admin/people` (WP-4.1; supersedes `createPersonInputSchema`).
  * Admins may create anyone, optionally linked to an account (`userId`) and
  * optionally related to an existing person (`relateTo`, default `null`).
  */
@@ -541,10 +566,14 @@ export type AdminCreatePersonInput = z.infer<typeof adminCreatePersonInputSchema
 export type AdminCreatePersonRequest = z.input<typeof adminCreatePersonInputSchema>;
 
 /**
- * `POST /api/family/people` (WP-4.1): a member adds a relative. `relateTo` is
- * **required** and its `personId` must be in the member's own-family circle
- * (403 `FAMILY_NOT_IN_CIRCLE`). Members never link accounts: `userId` is not
- * accepted (strict object → 400).
+ * `POST /api/family/people` (WP-4.1): a member adds a **new** relative. `relateTo`
+ * is **required** and its `personId` must already be in the member's
+ * qualifying own-family circle (403 `FAMILY_NOT_IN_CIRCLE`; ADR 0001 §6). The
+ * person and the edge are created in one transaction, and the edge is marked
+ * member-created (`person_relationships.created_by_member`). This is the
+ * **only** member path that creates an edge: members never relate two existing
+ * people (Security M1). Members never link accounts: `userId` is not accepted
+ * (strict object → 400).
  */
 export const memberCreatePersonInputSchema = z
   .strictObject({
@@ -559,7 +588,7 @@ export type MemberCreatePersonRequest = z.input<typeof memberCreatePersonInputSc
 const noChanges = { error: "No hay cambios que guardar." };
 
 /**
- * `PATCH /api/admin/family/people/:id` (WP-4.1; supersedes
+ * `PATCH /api/admin/people/:id` (WP-4.1; supersedes
  * `updatePersonInputSchema`). Partial, no defaults. A date without its year
  * fills the year; a death without `deceased` sets it. The server must then
  * re-check the **merged** row with {@link personDatesIssue} (e.g. a new
@@ -606,8 +635,19 @@ export const PersonRevisionAction = {
 export type PersonRevisionAction = (typeof PersonRevisionAction)[keyof typeof PersonRevisionAction];
 export const personRevisionActionSchema = z.enum(PersonRevisionAction);
 
-/** Snapshot of a person's editable columns (`before`/`after` of person actions). */
-export interface PersonRevisionPersonSnapshot {
+/**
+ * Every snapshot carries `personId` (Security L2): the person the revision is
+ * about, kept even after the person row is deleted (`person_revisions.person_id`
+ * becomes `null`). The DB requires the key (`person_revisions_snapshots_check`),
+ * so a removal request can find and purge all history about someone.
+ */
+interface PersonRevisionSnapshotBase {
+  /** The person this history entry is about (for a relationship: the person the change was made from, e.g. the new relative). */
+  personId: string;
+}
+
+/** Snapshot of a person's editable columns (`before`/`after` of person actions). `id` = `personId`. */
+export interface PersonRevisionPersonSnapshot extends PersonRevisionSnapshotBase {
   type: "person";
   id: string;
   userId: string | null;
@@ -624,7 +664,7 @@ export interface PersonRevisionPersonSnapshot {
 }
 
 /** Snapshot of a relationship (`after` of a create, `before` of a delete). */
-export interface PersonRevisionRelationshipSnapshot {
+export interface PersonRevisionRelationshipSnapshot extends PersonRevisionSnapshotBase {
   type: "relationship";
   id: string;
   kind: RelationshipKind;
@@ -637,8 +677,9 @@ export interface PersonRevisionRelationshipSnapshot {
  * Object keys are never exposed, and replaced photo objects are deleted, so
  * `person.photo` revisions are **not** revertible.
  */
-export interface PersonRevisionPhotoSnapshot {
+export interface PersonRevisionPhotoSnapshot extends PersonRevisionSnapshotBase {
   type: "photo";
+  /** Same as `personId`. */
   id: string;
   hasPhoto: boolean;
   photoUpdatedAt: string | null;
@@ -653,6 +694,7 @@ export type PersonRevisionSnapshot =
 export const personRevisionSnapshotSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("person"),
+    personId: idSchema,
     id: idSchema,
     userId: idSchema.nullable(),
     fullName: z.string().max(200),
@@ -668,6 +710,7 @@ export const personRevisionSnapshotSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("relationship"),
+    personId: idSchema,
     id: idSchema,
     kind: relationshipKindSchema,
     fromPersonId: idSchema,
@@ -675,6 +718,7 @@ export const personRevisionSnapshotSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("photo"),
+    personId: idSchema,
     id: idSchema,
     hasPhoto: z.boolean(),
     photoUpdatedAt: dateTimeSchema.nullable()
@@ -682,7 +726,7 @@ export const personRevisionSnapshotSchema = z.discriminatedUnion("type", [
 ]) satisfies z.ZodType<PersonRevisionSnapshot>;
 
 /**
- * One entry of the admin "Historial" (`GET /api/admin/family/revisions`).
+ * One entry of the admin "Historial" (`GET /api/admin/people/:id/revisions`).
  * **Admin-only**: `before`/`after` hold PII (dates, birthplace, bio). Rows are
  * kept one year (cleanup job, WP-4.1).
  */
@@ -717,22 +761,44 @@ export const personRevisionSchema = z.object({
   createdAt: dateTimeSchema
 }) satisfies z.ZodType<PersonRevision>;
 
-/** `GET /api/admin/family/revisions` query: newest first, optionally for one person. */
-export const personRevisionsQuerySchema = cursorQuerySchema.extend({
-  personId: idSchema.exactOptional()
-});
+/** `GET /api/admin/people/:id/revisions` query (`:id` = person): newest first, cursor-paged. */
+export const personRevisionsQuerySchema = cursorQuerySchema;
 export type PersonRevisionsQuery = z.infer<typeof personRevisionsQuerySchema>;
 export type PersonRevisionsQueryRequest = z.input<typeof personRevisionsQuerySchema>;
 
 /**
- * `POST /api/admin/family/revisions/revert` ("Deshacer"): restores `before`
- * (or removes/re-adds the relationship) in one transaction and records a
- * `person.revert` revision that points back through `revertedByRevisionId`.
- * 409 `CONFLICT` when it was already reverted or no longer applies.
+ * Path params of `POST /api/admin/revisions/:revisionId/revert` ("Deshacer";
+ * no body): restores `before` (or removes/re-adds the relationship) in one
+ * transaction and records a `person.revert` revision that points back
+ * through `revertedByRevisionId`. 409 `CONFLICT` when it was already reverted
+ * or no longer applies.
  */
 export const revertPersonRevisionInputSchema = z.strictObject({ revisionId: idSchema });
 export type RevertPersonRevisionInput = z.infer<typeof revertPersonRevisionInputSchema>;
 export type RevertPersonRevisionRequest = z.input<typeof revertPersonRevisionInputSchema>;
+
+/**
+ * Body of `POST /api/admin/people/:id/revisions/purge` (**admin-only**,
+ * WP-4.1; Security L2). `:id` is the person (`idParamSchema`), which may
+ * already be deleted. Erases every revision about that person for a removal
+ * request: rows whose `person_id` is it, or whose `before`/`after` snapshot
+ * has it as `personId`, `fromPersonId` or `toPersonId`. Audited (ids and the
+ * count only). `confirm` must be literally `true` so a stray call cannot wipe
+ * history.
+ */
+export const purgePersonRevisionsInputSchema = z.strictObject({
+  confirm: z.literal(true, { error: "Confirma que quieres borrar el historial." })
+});
+export type PurgePersonRevisionsInput = z.infer<typeof purgePersonRevisionsInputSchema>;
+export type PurgePersonRevisionsRequest = z.input<typeof purgePersonRevisionsInputSchema>;
+
+/** Response of the purge: how many revisions were deleted. */
+export interface PurgePersonRevisionsResponse {
+  deleted: number;
+}
+export const purgePersonRevisionsResponseSchema = z.object({
+  deleted: z.number().int().min(0)
+}) satisfies z.ZodType<PurgePersonRevisionsResponse>;
 
 /* -------------------------------------------------------------------------- */
 /* Person photos (WP-4.3)                                                      */

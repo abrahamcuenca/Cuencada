@@ -45,11 +45,12 @@ CREATE TABLE "person_revisions" (
 	"reverted_by_revision_id" uuid,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "person_revisions_action_check" CHECK ("action" in ('person.create', 'person.update', 'person.delete', 'relationship.create', 'relationship.delete', 'person.photo', 'person.revert')),
-	CONSTRAINT "person_revisions_snapshots_check" CHECK (("before" is null or jsonb_typeof("before") = 'object') and ("after" is null or jsonb_typeof("after") = 'object')),
+	CONSTRAINT "person_revisions_snapshots_check" CHECK (("before" is null or (jsonb_typeof("before") = 'object' and coalesce(jsonb_typeof("before" -> 'personId'), '') = 'string')) and ("after" is null or (jsonb_typeof("after") = 'object' and coalesce(jsonb_typeof("after" -> 'personId'), '') = 'string'))),
+	CONSTRAINT "person_revisions_has_snapshot_check" CHECK ("before" is not null or "after" is not null),
 	CONSTRAINT "person_revisions_not_self_reverted_check" CHECK ("reverted_by_revision_id" is null or "reverted_by_revision_id" <> "id")
 );
 --> statement-breakpoint
-COMMENT ON TABLE "person_revisions" IS 'WP-4.0 undo history of family edits. Contains PII (before/after snapshots: names, full dates, birthplace, bio). Admin-only reads; never copy into audit_logs. Retention: 1 year, deleted by a cleanup job (WP-4.1).';--> statement-breakpoint
+COMMENT ON TABLE "person_revisions" IS 'WP-4.0 undo history of family edits. Contains PII (before/after snapshots: names, full dates, birthplace, bio). Admin-only reads; never copy into audit_logs. Retention: 1 year, deleted by a cleanup job (WP-4.1). Every snapshot carries personId so an admin can purge all history about a person on a removal request.';--> statement-breakpoint
 COMMENT ON TABLE "person_photo_uploads" IS 'WP-4.0 pending tree-photo uploads (mirrors avatar_uploads). Photos of people without accounts are PII.';--> statement-breakpoint
 ALTER TABLE "person_photo_uploads" ADD CONSTRAINT "person_photo_uploads_person_id_people_id_fk" FOREIGN KEY ("person_id") REFERENCES "public"."people"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "person_photo_uploads" ADD CONSTRAINT "person_photo_uploads_uploaded_by_user_id_users_id_fk" FOREIGN KEY ("uploaded_by_user_id") REFERENCES "public"."users"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
@@ -89,7 +90,12 @@ ALTER TABLE "people" VALIDATE CONSTRAINT "people_dates_order_check";--> statemen
 ALTER TABLE "people" VALIDATE CONSTRAINT "people_birthplace_length_check";--> statement-breakpoint
 ALTER TABLE "people" VALIDATE CONSTRAINT "people_bio_length_check";--> statement-breakpoint
 ALTER TABLE "people" VALIDATE CONSTRAINT "people_photo_check";--> statement-breakpoint
--- 3. profiles: contacts (handles only, links are built server-side) and the
+-- 3. person_relationships: provenance for the own-family circle (Security M1).
+--    Every existing edge was created through the admin-only routes, so the
+--    constant default false is correct for them (metadata-only ADD COLUMN).
+ALTER TABLE "person_relationships" ADD COLUMN "created_by_member" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+COMMENT ON COLUMN "person_relationships"."created_by_member" IS 'WP-4.0: true when a member created the edge together with a new person (relateTo). Counts for the own-family circle only while created_by_user_id also created one of its endpoints; admin edges (false) always count.';--> statement-breakpoint
+-- 4. profiles: contacts (handles only, links are built server-side) and the
 --    per-contact visibility map. show_email/show_phone/show_city stay the
 --    source of truth for those fields; the map holds only the seven new kinds.
 ALTER TABLE "profiles" ADD COLUMN "whatsapp" text;--> statement-breakpoint
