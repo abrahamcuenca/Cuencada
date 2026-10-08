@@ -12,9 +12,11 @@ import {
   idParamSchema,
   type Page,
   type Person,
+  type PersonDetails,
   type PersonSummary,
   pageSchema,
   peopleQuerySchema,
+  personDetailsSchema,
   personSchema,
   personSummarySchema,
   type SelfEditPersonInput,
@@ -42,6 +44,7 @@ import {
   toPersonSummary,
   toPersonWithAvatar
 } from "./repository.js";
+import { buildPersonDetails } from "./personDetails.js";
 import { loadTreeView } from "./tree.js";
 
 const NOT_LINKED_MESSAGE = "Tu cuenta no está vinculada a ninguna persona del árbol familiar.";
@@ -159,18 +162,21 @@ const memberFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
     }
   );
 
-  /** `GET /api/family/people/:id`: one person, privacy rules applied. */
+  /**
+   * `GET /api/family/people/:id`: one person as `PersonDetails` (a superset
+   * of `Person`), privacy rules applied. Interim builder until WP-4.1.
+   */
   app.get(
     "/family/people/:id",
     {
       config: memberConfig,
-      schema: { params: idParamSchema, response: { 200: personSchema, 404: apiErrorSchema } }
+      schema: { params: idParamSchema, response: { 200: personDetailsSchema, 404: apiErrorSchema } }
     },
-    async (request): Promise<Person> => {
+    async (request): Promise<PersonDetails> => {
       const viewer = authUser(request);
       const row = await findPerson(app.db, request.params.id);
       if (row === undefined) throw new AppError("NOT_FOUND", PERSON_NOT_FOUND_MESSAGE);
-      return toPersonWithAvatar(app, row, viewer);
+      return buildPersonDetails(app, row, viewer);
     }
   );
 

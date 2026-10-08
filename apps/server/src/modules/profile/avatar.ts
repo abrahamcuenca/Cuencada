@@ -1,11 +1,13 @@
 /**
  * Avatar helpers: server-generated object keys, magic-byte sniffing, sharp
- * processing (auto-rotate, strip metadata, centre-cropped square WebP) and
- * presigned avatar URLs for responses.
+ * processing (auto-rotate, strip metadata, cropped square WebP; shared with
+ * the tree photos of WP-4.3 through `processSquareImage`) and presigned
+ * avatar URLs for responses.
  *
  * `avatarUrlFor` is the public export other tracks (T3 RSVP, T6 family,
  * T7 chat) use to turn `profiles.avatar_key` into a URL.
  */
+import { clampCropRect, type ImageCropRect } from "@cuencada/types";
 import type { AvatarMimeType } from "../../db/schema/index.js";
 import sharp from "sharp";
 import type { FastifyBaseLogger } from "fastify";
@@ -130,6 +132,25 @@ export type AvatarProcessingResult =
   | { ok: true; avatar: ProcessedAvatar }
   | { ok: false; failure: AvatarProcessingFailure };
 
+/** What {@link processSquareImage} renders. */
+export interface SquareImageOptions {
+  /**
+   * Square sides to encode (px), **largest first**: the upload is decoded
+   * once into a raw square of `sizes[0]`, and every size is encoded from it.
+   */
+  sizes: readonly [number, ...number[]];
+  /**
+   * Optional crop in source pixels after EXIF rotation. It is clamped with
+   * `clampCropRect` against the oriented dimensions before `extract()`, so
+   * an oversized or out-of-bounds rect never reaches sharp unclamped. Without
+   * it the image is centre-cropped to a square.
+   */
+  crop?: ImageCropRect;
+}
+
+/** Result of {@link processSquareImage}: one WebP per requested size, in order. */
+export type SquareImageResult = { ok: true; images: Buffer[] } | { ok: false; failure: AvatarProcessingFailure };
+
 function sharpInput(input: Uint8Array): ReturnType<typeof sharp> {
   return sharp(input, {
     limitInputPixels: AVATAR_MAX_INPUT_PIXELS,
@@ -142,53 +163,83 @@ function isPixelLimitError(error: unknown): boolean {
 }
 
 /**
- * Process-wide cap on concurrent avatar decodes (see
+ * Process-wide cap on concurrent avatar and tree-photo decodes (see
  * {@link AVATAR_PROCESSING_CONCURRENCY}). Exported for tests.
  */
 export const avatarProcessingSlots = new Semaphore(AVATAR_PROCESSING_CONCURRENCY);
 
 /**
- * Decode, auto-rotate (EXIF orientation), centre-crop to a square and
- * encode both sizes as WebP. sharp writes **no metadata** unless asked, so
- * EXIF (incl. GPS), XMP, IPTC, ICC and orientation tags are all dropped.
- * Only the first frame of an animated image is used.
+ * Decode, auto-rotate (EXIF orientation), crop to a square (the clamped
+ * `crop`, else the centre) and encode each size as WebP. sharp writes **no
+ * metadata** unless asked, so EXIF (incl. GPS), XMP, IPTC, ICC and
+ * orientation tags are all dropped. Only the first frame of an animated
+ * image is used.
  *
- * The upload is **decoded once**: it is rendered to a raw 256 px square,
- * and both WebPs are encoded from that small buffer. At most
- * {@link AVATAR_PROCESSING_CONCURRENCY} avatars are processed at a time in
- * this process; further confirms wait their turn.
+ * Shared by avatars (256/64) and tree photos (512/256/64, WP-4.3). The upload
+ * is **decoded once** and runs under the shared semaphore, so a burst of
+ * confirms cannot pin every libuv thread.
  *
  * @param input - The whole uploaded file.
  * @param declared - The type the magic bytes already matched.
+ * @param options - Sizes and optional crop.
  */
-export async function processAvatar(input: Uint8Array, declared: AvatarMimeType): Promise<AvatarProcessingResult> {
-  return avatarProcessingSlots.run(() => processAvatarNow(input, declared));
+export async function processSquareImage(
+  input: Uint8Array,
+  declared: AvatarMimeType,
+  options: SquareImageOptions
+): Promise<SquareImageResult> {
+  return avatarProcessingSlots.run(() => processSquareImageNow(input, declared, options));
 }
 
-async function processAvatarNow(input: Uint8Array, declared: AvatarMimeType): Promise<AvatarProcessingResult> {
+/**
+ * Oriented (post-`rotate()`) dimensions from the header, refusing anything
+ * above the pixel cap before a decode is attempted.
+ */
+function orientedSize(metadata: Awaited<ReturnType<ReturnType<typeof sharp>["metadata"]>>): { width: number; height: number } | null {
+  const width = metadata.autoOrient?.width ?? metadata.width;
+  const height = metadata.autoOrient?.height ?? metadata.height;
+  if (width === undefined || height === undefined || width < 1 || height < 1) return null;
+  return { width, height };
+}
+
+async function processSquareImageNow(
+  input: Uint8Array,
+  declared: AvatarMimeType,
+  options: SquareImageOptions
+): Promise<SquareImageResult> {
+  const [primary, ...rest] = options.sizes;
   try {
-    // Header only (no pixel decode): format check before the expensive step.
+    // Header only (no pixel decode): format and size checks before the expensive step.
     const metadata = await sharpInput(input).metadata();
     if (metadata.format !== SHARP_FORMAT_BY_MIME[declared]) {
       return { ok: false, failure: AvatarProcessingFailure.FormatMismatch };
     }
-    const square = await sharpInput(input)
-      .rotate()
-      .resize(AvatarSize.Large, AvatarSize.Large, { fit: "cover", position: "centre" })
+    const size = orientedSize(metadata);
+    if (size === null) return { ok: false, failure: AvatarProcessingFailure.DecodeFailed };
+    if (size.width * size.height > AVATAR_MAX_INPUT_PIXELS) {
+      return { ok: false, failure: AvatarProcessingFailure.PixelLimitExceeded };
+    }
+    // `.rotate()` first: the crop rect is in oriented pixels (sharp extracts after auto-orient).
+    let pipeline = sharpInput(input).rotate();
+    if (options.crop !== undefined) pipeline = pipeline.extract(clampCropRect(options.crop, size.width, size.height));
+    const square = await pipeline
+      .resize(primary, primary, { fit: "cover", position: "centre" })
       .raw()
       .toBuffer({ resolveWithObject: true });
     const fromSquare = (): ReturnType<typeof sharp> =>
       sharp(square.data, {
         raw: { width: square.info.width, height: square.info.height, channels: square.info.channels }
       });
-    const [large, small] = await Promise.all([
+    const images = await Promise.all([
       fromSquare().webp({ quality: AVATAR_WEBP_QUALITY }).toBuffer(),
-      fromSquare()
-        .resize(AvatarSize.Small, AvatarSize.Small, { fit: "cover", position: "centre" })
-        .webp({ quality: AVATAR_WEBP_QUALITY })
-        .toBuffer()
+      ...rest.map((side) =>
+        fromSquare()
+          .resize(side, side, { fit: "cover", position: "centre" })
+          .webp({ quality: AVATAR_WEBP_QUALITY })
+          .toBuffer()
+      )
     ]);
-    return { ok: true, avatar: { large, small } };
+    return { ok: true, images };
   } catch (error) {
     return {
       ok: false,
@@ -197,6 +248,29 @@ async function processAvatarNow(input: Uint8Array, declared: AvatarMimeType): Pr
         : AvatarProcessingFailure.DecodeFailed
     };
   }
+}
+
+/**
+ * Process an avatar: {@link processSquareImage} at 256 and 64 px, with an
+ * optional crop rect (clamped server-side).
+ *
+ * @param input - The whole uploaded file.
+ * @param declared - The type the magic bytes already matched.
+ * @param crop - Optional crop in oriented source pixels.
+ */
+export async function processAvatar(
+  input: Uint8Array,
+  declared: AvatarMimeType,
+  crop?: ImageCropRect
+): Promise<AvatarProcessingResult> {
+  const result = await processSquareImage(input, declared, {
+    sizes: [AvatarSize.Large, AvatarSize.Small],
+    ...(crop === undefined ? {} : { crop })
+  });
+  if (!result.ok) return result;
+  const [large, small] = result.images;
+  if (large === undefined || small === undefined) return { ok: false, failure: AvatarProcessingFailure.DecodeFailed };
+  return { ok: true, avatar: { large, small } };
 }
 
 /** What {@link avatarUrlFor} needs from the app. */

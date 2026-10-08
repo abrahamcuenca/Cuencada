@@ -1,5 +1,7 @@
 /**
- * Avatar upload cleanup, run on an interval by the profile module.
+ * Avatar and tree-photo upload cleanup, run on an interval by the profile
+ * module. The same two passes run over `avatar_uploads` and (WP-4.3)
+ * `person_photo_uploads`; the counts in the result cover both tables.
  *
  * 1. **Abandoned** uploads (never confirmed, `expires_at` older than the
  *    grace): the row is claimed (deleted with the condition re-checked)
@@ -14,7 +16,7 @@
 import { and, inArray, isNotNull, isNull, lt } from "drizzle-orm";
 import type { FastifyBaseLogger } from "fastify";
 import type { Database } from "../../db/client.js";
-import { avatarUploads } from "../../db/schema/index.js";
+import { avatarUploads, personPhotoUploads } from "../../db/schema/index.js";
 import type { Clock } from "../../lib/clock.js";
 import type { StorageService } from "../../lib/storage/types.js";
 import {
@@ -46,52 +48,55 @@ export interface AvatarCleanupResult {
  * @param deps - DB, storage, clock (cutoffs use `clock.now()`) and logger.
  */
 export async function cleanupAvatarUploads(deps: AvatarCleanupDeps): Promise<AvatarCleanupResult> {
-  const now = deps.clock.now().getTime();
-  const abandoned = and(
-    isNull(avatarUploads.confirmedAt),
-    lt(avatarUploads.expiresAt, new Date(now - AVATAR_CLEANUP_GRACE_MS))
-  );
-  const retired = and(
-    isNotNull(avatarUploads.confirmedAt),
-    lt(avatarUploads.confirmedAt, new Date(now - AVATAR_CONFIRMED_RETENTION_MS))
-  );
   const result: AvatarCleanupResult = {
     abandonedDeleted: 0,
     confirmedPurged: 0,
     objectDeleteFailures: 0
   };
+  await cleanupTable(deps, avatarUploads, "avatar", result);
+  await cleanupTable(deps, personPhotoUploads, "person photo", result);
+  if (result.abandonedDeleted > 0 || result.confirmedPurged > 0)
+    deps.log.info({ ...result }, "avatar uploads cleaned up");
+  return result;
+}
+
+/** Both upload tables share these columns. */
+type UploadTable = typeof avatarUploads | typeof personPhotoUploads;
+
+/** One table's two passes, added to `result`. */
+async function cleanupTable(
+  deps: AvatarCleanupDeps,
+  table: UploadTable,
+  label: string,
+  result: AvatarCleanupResult
+): Promise<void> {
+  const now = deps.clock.now().getTime();
+  const abandoned = and(isNull(table.confirmedAt), lt(table.expiresAt, new Date(now - AVATAR_CLEANUP_GRACE_MS)));
+  const retired = and(
+    isNotNull(table.confirmedAt),
+    lt(table.confirmedAt, new Date(now - AVATAR_CONFIRMED_RETENTION_MS))
+  );
 
   for (const [condition, field] of [
     [abandoned, "abandonedDeleted"],
     [retired, "confirmedPurged"]
   ] as const) {
     for (let batch = 0; batch < AVATAR_CLEANUP_MAX_BATCHES; batch += 1) {
-      const candidates = deps.db
-        .select({ id: avatarUploads.id })
-        .from(avatarUploads)
-        .where(condition)
-        .limit(AVATAR_CLEANUP_BATCH_SIZE);
+      const candidates = deps.db.select({ id: table.id }).from(table).where(condition).limit(AVATAR_CLEANUP_BATCH_SIZE);
       const claimed = await deps.db
-        .delete(avatarUploads)
-        .where(and(inArray(avatarUploads.id, candidates), condition))
-        .returning({
-          id: avatarUploads.id,
-          objectKey: avatarUploads.objectKey
-        });
+        .delete(table)
+        .where(and(inArray(table.id, candidates), condition))
+        .returning({ id: table.id, objectKey: table.objectKey });
       for (const row of claimed) {
         try {
           await deps.storage.delete(row.objectKey);
         } catch (error) {
           result.objectDeleteFailures += 1;
-          deps.log.warn({ uploadId: row.id, errorName: errorName(error) }, "avatar cleanup object delete failed");
+          deps.log.warn({ uploadId: row.id, errorName: errorName(error) }, `${label} cleanup object delete failed`);
         }
       }
       result[field] += claimed.length;
       if (claimed.length < AVATAR_CLEANUP_BATCH_SIZE) break;
     }
   }
-
-  if (result.abandonedDeleted > 0 || result.confirmedPurged > 0)
-    deps.log.info({ ...result }, "avatar uploads cleaned up");
-  return result;
 }

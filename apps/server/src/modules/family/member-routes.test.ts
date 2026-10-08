@@ -14,6 +14,20 @@ import type { App } from "../../app.js";
 import { auditLogs, people, profiles } from "../../db/schema/index.js";
 
 const PERSON_KEYS = ["avatarUrl", "birthYear", "deathYear", "deceased", "familyBranch", "fullName", "id", "nickname", "userId"];
+/** `GET /api/family/people/:id` returns `PersonDetails` (WP-4.0 contract, interim builder in WP-4.3). */
+const DETAILS_KEYS = [
+  ...PERSON_KEYS,
+  "bio",
+  "birthDate",
+  "birthplace",
+  "canEdit",
+  "canEditPhoto",
+  "contacts",
+  "deathDate",
+  "isLinked",
+  "photoSource",
+  "photoUrl"
+].sort();
 const SUMMARY_KEYS = ["avatarUrl", "deceased", "fullName", "id", "nickname", "userId"];
 
 let app: App;
@@ -119,7 +133,7 @@ describe("GET /api/family/people/:id (privacy)", () => {
     const response = await app.inject({ method: "GET", url: `/api/family/people/${id}`, ...auth });
     expect(response.statusCode, response.body).toBe(200);
     const body = response.json<Person>();
-    expect(Object.keys(body).sort()).toEqual(PERSON_KEYS);
+    expect(Object.keys(body).sort()).toEqual(DETAILS_KEYS);
     return body;
   }
 

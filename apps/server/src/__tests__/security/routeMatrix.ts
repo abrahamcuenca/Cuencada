@@ -24,6 +24,7 @@ import {
   mediaItems,
   mediaReports,
   people,
+  personPhotoUploads,
   profiles,
   sessions,
   users
@@ -262,6 +263,57 @@ async function avatarIntent(ctx: MatrixContext, owner: Actor): Promise<string> {
     .values({ id, userId: owner.user.id, objectKey: key, mimeType: "image/png", byteSize: body.byteLength, expiresAt: new Date(Date.now() + 300_000) });
   await ctx.storage.simulateUpload(key, body, "image/png");
   return id;
+}
+
+/** The actor's own linked person (members may change their own tree photo). */
+async function ownPerson(ctx: MatrixContext): Promise<string> {
+  const [existing] = await getTestDb().select({ id: people.id }).from(people).where(eq(people.userId, ctx.actor.user.id)).limit(1);
+  return existing?.id ?? (await insertPerson({ userId: ctx.actor.user.id })).id;
+}
+
+/** An uploaded tree-photo intent by `owner` for `personId` (WP-4.3). */
+async function personPhotoIntent(ctx: MatrixContext, owner: Actor, personId: string): Promise<string> {
+  const body = await png();
+  const id = randomUUID();
+  const key = `people/${personId}/${id}.png`;
+  await getTestDb().insert(personPhotoUploads).values({
+    id,
+    personId,
+    uploadedByUserId: owner.user.id,
+    objectKey: key,
+    mimeType: "image/png",
+    byteSize: body.byteLength,
+    expiresAt: new Date(Date.now() + 300_000)
+  });
+  await ctx.storage.simulateUpload(key, body, "image/png");
+  return id;
+}
+
+/** Tree-photo state of `personId` plus its upload rows (compared before/after probes). */
+function personPhotoState(personId: string): () => Promise<unknown> {
+  return async () => ({
+    person: await getTestDb()
+      .select({ photoKey: people.photoKey, photoUpdatedAt: people.photoUpdatedAt })
+      .from(people)
+      .where(eq(people.id, personId)),
+    uploads: await getTestDb()
+      .select({ id: personPhotoUploads.id, confirmedAt: personPhotoUploads.confirmedAt })
+      .from(personPhotoUploads)
+      .where(eq(personPhotoUploads.personId, personId))
+  });
+}
+
+/** A member trying to change the photo of someone who is not a close relative (403). */
+function notARelative(path: (personId: string) => string, payload?: unknown): Probe {
+  return {
+    label: "a person who is not a close relative",
+    kind: "rule",
+    build: async () => {
+      const stranger = await insertPerson({ fullName: "Sin Parentesco" });
+      return { ...json(path(stranger.id), payload), state: personPhotoState(stranger.id) };
+    },
+    expect: { status: 403, code: "FORBIDDEN" }
+  };
 }
 
 /** The global chat room (one per database). */
@@ -1069,6 +1121,75 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
       return json("/api/family/people/me", { nickname: "Peque" });
     },
     probes: [familyMassAssignment("/api/family/people/me")]
+  },
+  {
+    method: "POST",
+    url: "/api/family/people/:id/photo/uploads",
+    auth: "user",
+    requireVerifiedEmail: true,
+    owner: "admins, the linked person, close relatives of a person without account (WP-4.3)",
+    build: async (ctx) => json(`/api/family/people/${await ownPerson(ctx)}/photo/uploads`, { mimeType: "image/png", byteSize: 1000 }),
+    probes: [
+      notARelative((id) => `/api/family/people/${id}/photo/uploads`, { mimeType: "image/png", byteSize: 1000 }),
+      {
+        label: "another member's linked person",
+        kind: "idor",
+        build: async (ctx) => {
+          const theirs = await insertPerson({ userId: ctx.other.user.id });
+          return {
+            ...json(`/api/family/people/${theirs.id}/photo/uploads`, { mimeType: "image/png", byteSize: 1000 }),
+            state: personPhotoState(theirs.id)
+          };
+        },
+        expect: { status: 403, code: "FORBIDDEN" }
+      }
+    ]
+  },
+  {
+    method: "POST",
+    url: "/api/family/people/:id/photo/uploads/:uploadId/confirm",
+    auth: "user",
+    requireVerifiedEmail: true,
+    owner: "uploader only (404 for another user's uploadId or another person's path)",
+    build: async (ctx) => {
+      const personId = await ownPerson(ctx);
+      return json(`/api/family/people/${personId}/photo/uploads/${await personPhotoIntent(ctx, ctx.actor, personId)}/confirm`, {});
+    },
+    probes: [
+      {
+        label: "another member's upload intent",
+        kind: "idor",
+        build: async (ctx) => {
+          const theirs = await insertPerson({ userId: ctx.other.user.id });
+          const uploadId = await personPhotoIntent(ctx, ctx.other, theirs.id);
+          return { ...json(`/api/family/people/${theirs.id}/photo/uploads/${uploadId}/confirm`, {}), state: personPhotoState(theirs.id) };
+        },
+        expect: NOT_FOUND
+      },
+      {
+        label: "own upload intent under another person's path",
+        kind: "idor",
+        build: async (ctx) => {
+          const personId = await ownPerson(ctx);
+          const uploadId = await personPhotoIntent(ctx, ctx.actor, personId);
+          const elsewhere = await insertPerson({ fullName: "Otra Persona" });
+          return {
+            ...json(`/api/family/people/${elsewhere.id}/photo/uploads/${uploadId}/confirm`, {}),
+            state: async () => ({ own: await personPhotoState(personId)(), elsewhere: await personPhotoState(elsewhere.id)() })
+          };
+        },
+        expect: NOT_FOUND
+      }
+    ]
+  },
+  {
+    method: "DELETE",
+    url: "/api/family/people/:id/photo",
+    auth: "user",
+    requireVerifiedEmail: true,
+    owner: "same rule as the upload intent (WP-4.3)",
+    build: async (ctx) => json(`/api/family/people/${await ownPerson(ctx)}/photo`),
+    probes: [notARelative((id) => `/api/family/people/${id}/photo`)]
   },
   {
     method: "POST",

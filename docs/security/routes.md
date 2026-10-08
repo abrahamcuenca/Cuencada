@@ -11,7 +11,7 @@ same guard config. `401`/`403` cells are guard denials (`UNAUTHENTICATED`,
 `PASSWORD_CHANGE_REQUIRED`, `FORBIDDEN`, `EMAIL_UNVERIFIED`); other non-2xx
 cells are handler answers for that principal's own data.
 
-Total: 99 routes (14 public, 38 user, 45 admin, 2 cookie).
+Total: 102 routes (14 public, 41 user, 45 admin, 2 cookie).
 
 | Method | Path | auth | Verified email | Pending pw allowed | Anon | Member | Unverified | Pending pw | Disabled | Revoked | Admin | Other member (IDOR) | Scope / notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -97,6 +97,9 @@ Total: 99 routes (14 public, 38 user, 45 admin, 2 cookie).
 | PATCH | `/api/family/me` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | self-scoped (the caller's linked person); mass assignment: extra keys (fullName/userId/deceased/deathYear/id) → 2xx |
 | GET | `/api/family/people` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | GET | `/api/family/people/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
+| DELETE | `/api/family/people/:id/photo` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | same rule as the upload intent (WP-4.3); probe: a person who is not a close relative → 403 |
+| POST | `/api/family/people/:id/photo/uploads` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | admins, the linked person, close relatives of a person without account (WP-4.3); probe: a person who is not a close relative → 403 |
+| POST | `/api/family/people/:id/photo/uploads/:uploadId/confirm` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | uploader only (404 for another user's uploadId or another person's path) |
 | PATCH | `/api/family/people/me` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | self-scoped alias of /api/family/me; mass assignment: extra keys (fullName/userId/deceased/deathYear/id) → 2xx |
 | GET | `/api/family/tree` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | POST | `/api/invites/accept` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
