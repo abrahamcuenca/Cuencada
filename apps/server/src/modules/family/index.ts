@@ -6,6 +6,8 @@
  *   account linking and relationships with cycle prevention.
  * - `/admin/people/:id/revisions*`, `/admin/revisions/:id/revert`,
  *   `/admin/family/activity` (admins): history, undo, purge, activity feed.
+ * - `/admin/people/:id/merge*`, `/admin/family/duplicates` (admins):
+ *   "Fusionar personas" and "Posibles duplicados" (WP-4.5).
  *
  * Lifecycle: `onReady` starts the revision retention timer (unref'd, one
  * year); `onClose` clears it and waits for a running pass.
@@ -13,6 +15,7 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import adminFamilyRoutes from "./admin-routes.js";
 import memberFamilyRoutes from "./member-routes.js";
+import mergeRoutes from "./merge-routes.js";
 import revisionRoutes from "./revision-routes.js";
 import { REVISION_CLEANUP_INTERVAL_MS, purgeExpiredRevisions } from "./revisions.js";
 
@@ -21,6 +24,7 @@ const familyModule: FastifyPluginAsyncZod = async (app) => {
   await app.register(memberFamilyRoutes);
   await app.register(adminFamilyRoutes);
   await app.register(revisionRoutes);
+  await app.register(mergeRoutes);
 
   let timer: NodeJS.Timeout | null = null;
   let running: Promise<void> | null = null;

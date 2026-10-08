@@ -106,10 +106,11 @@ const REVERTIBLE: ReadonlySet<PersonRevisionAction> = new Set([
   PersonRevisionAction.PersonUpdate,
   PersonRevisionAction.PersonDelete,
   PersonRevisionAction.RelationshipCreate,
-  PersonRevisionAction.RelationshipDelete
+  PersonRevisionAction.RelationshipDelete,
+  PersonRevisionAction.PersonMerge
 ]);
 
-/** True when `action` can be reverted at all (photo and revert rows cannot). */
+/** True when `action` can be reverted at all (photo and revert rows cannot; a merge can, WP-4.5). */
 export function isRevertibleAction(action: PersonRevisionAction): boolean {
   return REVERTIBLE.has(action);
 }
@@ -167,14 +168,15 @@ export function toPersonRevision(row: RevisionViewRow): PersonRevision {
 
 /**
  * Every revision **about** `personId`: its own rows, and any snapshot that
- * names it as `personId`, `fromPersonId` or `toPersonId` (relationship rows
- * made from the other side, rows written after the person was deleted).
+ * names it as `personId`, `fromPersonId`, `toPersonId` or `duplicatePersonId`
+ * (relationship rows made from the other side, rows written after the person
+ * was deleted, and a `person.merge` that removed it, WP-4.5).
  *
  * @param personId - Person id (may already be deleted).
  */
 export function revisionsAboutPerson(personId: string): SQL {
   const matches = (column: typeof personRevisions.before | typeof personRevisions.after): SQL =>
-    sql`(${column} ->> 'personId' = ${personId} or ${column} ->> 'fromPersonId' = ${personId} or ${column} ->> 'toPersonId' = ${personId})`;
+    sql`(${column} ->> 'personId' = ${personId} or ${column} ->> 'fromPersonId' = ${personId} or ${column} ->> 'toPersonId' = ${personId} or ${column} ->> 'duplicatePersonId' = ${personId})`;
   return or(eq(personRevisions.personId, personId), matches(personRevisions.before), matches(personRevisions.after)) ?? sql`false`;
 }
 

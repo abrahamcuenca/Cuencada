@@ -334,7 +334,24 @@ export const FamilyIssueCode = {
    * a member editing their **own linked** person sent `deceased`, `deathYear`
    * or `deathDate`; for linked people those are admin-only.
    */
-  AdminOnlyField: "ADMIN_ONLY_FIELD"
+  AdminOnlyField: "ADMIN_ONLY_FIELD",
+  /**
+   * 409 `CONFLICT` on `POST /api/admin/people/:keepId/merge` (WP-4.5): both
+   * people are linked to (different) accounts. Merging accounts is out of
+   * scope; unlink one first.
+   */
+  MergeBothLinked: "MERGE_BOTH_LINKED",
+  /**
+   * 409 `CONFLICT` on the merge (WP-4.5): moving the duplicate's
+   * relationships would break a tree rule (a cycle, or a third parent). One
+   * detail per conflicting relationship, `path: "relationships.<id>"`.
+   */
+  MergeConflict: "MERGE_CONFLICT",
+  /**
+   * 409 `CONFLICT` on "Deshacer" of a `person.merge` (WP-4.5) that can no
+   * longer be undone safely (see ADR 0001 §6, merge semantics).
+   */
+  MergeNotRevertible: "MERGE_NOT_REVERTIBLE"
 } as const;
 
 /**
@@ -621,7 +638,9 @@ export const PersonRevisionAction = {
   RelationshipCreate: "relationship.create",
   RelationshipDelete: "relationship.delete",
   PersonPhoto: "person.photo",
-  PersonRevert: "person.revert"
+  PersonRevert: "person.revert",
+  /** Two people merged into one ("Fusionar personas", WP-4.5, migration 0006). */
+  PersonMerge: "person.merge"
 } as const;
 export type PersonRevisionAction = (typeof PersonRevisionAction)[keyof typeof PersonRevisionAction];
 export const personRevisionActionSchema = z.enum(PersonRevisionAction);
@@ -676,28 +695,120 @@ export interface PersonRevisionPhotoSnapshot extends PersonRevisionSnapshotBase 
   photoUpdatedAt: string | null;
 }
 
+/** What a merge did with one of the duplicate's relationships (WP-4.5). */
+export const MergeEdgeOutcome = {
+  /** Re-pointed to the kept person (same id, same creator and provenance). */
+  Moved: "moved",
+  /** Dropped: the kept person already had the same relationship. */
+  Duplicate: "duplicate",
+  /** Dropped: it joined the two merged people (it would become a self-link). */
+  Self: "self"
+} as const;
+export type MergeEdgeOutcome = (typeof MergeEdgeOutcome)[keyof typeof MergeEdgeOutcome];
+export const mergeEdgeOutcomeSchema = z.enum(MergeEdgeOutcome);
+
+/** One of the duplicate's relationships as it was before a merge, and what the merge did with it. */
+export interface PersonMergeEdgeRecord {
+  id: string;
+  kind: RelationshipKind;
+  fromPersonId: string;
+  toPersonId: string;
+  /** Provenance kept on the moved edge (Security M1) and restored by "Deshacer". */
+  createdByMember: boolean;
+  createdByUserId: string | null;
+  outcome: MergeEdgeOutcome;
+}
+
+/** Tree photos in a merge: who had one, and whether the duplicate's moved to the kept person. */
+export interface PersonMergePhotoRecord {
+  keep: boolean;
+  duplicate: boolean;
+  moved: boolean;
+  /** `photo_updated_at` of the duplicate's photo (never the key). */
+  duplicateUpdatedAt: string | null;
+}
+
+/**
+ * `before` of a `person.merge` revision (WP-4.5): both people as they were,
+ * plus what the merge moved, so "Deshacer" can split them again. Ids, flags
+ * and person snapshots only: no emails, contacts or object keys.
+ * `personId` is the kept person; `duplicatePersonId` names the removed one,
+ * so a purge of either finds this row (Security L2).
+ */
+export interface PersonRevisionMergeSnapshot extends PersonRevisionSnapshotBase {
+  type: "merge";
+  /** Same as `personId` (the kept person). */
+  id: string;
+  duplicatePersonId: string;
+  keep: PersonRevisionPersonSnapshot;
+  duplicate: PersonRevisionPersonSnapshot;
+  /** `people.created_by_user_id` of the duplicate (restored by "Deshacer": member delete and circle rules). */
+  duplicateCreatedByUserId: string | null;
+  /** The kept person's relationships before the merge (minus any link to the duplicate). */
+  keepRelationshipIds: string[];
+  /** The duplicate's relationships and what happened to each. */
+  relationships: PersonMergeEdgeRecord[];
+  photo: PersonMergePhotoRecord;
+  /** Invites that named the duplicate: re-pointed to the kept person, or revoked (pending ones that could not move). */
+  invites: { moved: string[]; revoked: string[] };
+  /** Attendance rows: moved to the kept person, or dropped (editions the kept person already had). */
+  attendance: { moved: string[]; droppedCuencadaIds: string[] };
+}
+
 /** `person_revisions.before`/`after` (jsonb), discriminated by `type`. */
 export type PersonRevisionSnapshot =
   | PersonRevisionPersonSnapshot
   | PersonRevisionRelationshipSnapshot
-  | PersonRevisionPhotoSnapshot;
+  | PersonRevisionPhotoSnapshot
+  | PersonRevisionMergeSnapshot;
+
+const personRevisionPersonSnapshotSchema = z.object({
+  type: z.literal("person"),
+  personId: idSchema,
+  id: idSchema,
+  userId: idSchema.nullable(),
+  fullName: z.string().max(200),
+  nickname: z.string().max(80).nullable(),
+  familyBranch: z.string().max(120).nullable(),
+  birthYear: z.number().int().nullable(),
+  deathYear: z.number().int().nullable(),
+  birthDate: dateSchema.nullable(),
+  deathDate: dateSchema.nullable(),
+  birthplace: z.string().max(PERSON_BIRTHPLACE_MAX_LENGTH).nullable(),
+  bio: z.string().max(PERSON_BIO_MAX_LENGTH).nullable(),
+  deceased: z.boolean()
+}) satisfies z.ZodType<PersonRevisionPersonSnapshot>;
+
+const personMergeEdgeRecordSchema = z.object({
+  id: idSchema,
+  kind: relationshipKindSchema,
+  fromPersonId: idSchema,
+  toPersonId: idSchema,
+  createdByMember: z.boolean(),
+  createdByUserId: idSchema.nullable(),
+  outcome: mergeEdgeOutcomeSchema
+}) satisfies z.ZodType<PersonMergeEdgeRecord>;
 
 export const personRevisionSnapshotSchema = z.discriminatedUnion("type", [
+  personRevisionPersonSnapshotSchema,
   z.object({
-    type: z.literal("person"),
+    type: z.literal("merge"),
     personId: idSchema,
     id: idSchema,
-    userId: idSchema.nullable(),
-    fullName: z.string().max(200),
-    nickname: z.string().max(80).nullable(),
-    familyBranch: z.string().max(120).nullable(),
-    birthYear: z.number().int().nullable(),
-    deathYear: z.number().int().nullable(),
-    birthDate: dateSchema.nullable(),
-    deathDate: dateSchema.nullable(),
-    birthplace: z.string().max(PERSON_BIRTHPLACE_MAX_LENGTH).nullable(),
-    bio: z.string().max(PERSON_BIO_MAX_LENGTH).nullable(),
-    deceased: z.boolean()
+    duplicatePersonId: idSchema,
+    keep: personRevisionPersonSnapshotSchema,
+    duplicate: personRevisionPersonSnapshotSchema,
+    duplicateCreatedByUserId: idSchema.nullable(),
+    keepRelationshipIds: z.array(idSchema),
+    relationships: z.array(personMergeEdgeRecordSchema),
+    photo: z.object({
+      keep: z.boolean(),
+      duplicate: z.boolean(),
+      moved: z.boolean(),
+      duplicateUpdatedAt: dateTimeSchema.nullable()
+    }),
+    invites: z.object({ moved: z.array(idSchema), revoked: z.array(idSchema) }),
+    attendance: z.object({ moved: z.array(idSchema), droppedCuencadaIds: z.array(idSchema) })
   }),
   z.object({
     type: z.literal("relationship"),
@@ -828,6 +939,322 @@ export const familyActivityQuerySchema = cursorQuerySchema.extend({
 });
 export type FamilyActivityQuery = z.infer<typeof familyActivityQuerySchema>;
 export type FamilyActivityQueryRequest = z.input<typeof familyActivityQuerySchema>;
+
+/* -------------------------------------------------------------------------- */
+/* Merge people ("Fusionar personas", WP-4.5; admin-only)                      */
+/* -------------------------------------------------------------------------- */
+
+/** The person fields a merge combines, in display order. */
+export const PERSON_MERGE_FIELDS = [
+  "fullName",
+  "nickname",
+  "familyBranch",
+  "birthYear",
+  "birthDate",
+  "deathYear",
+  "deathDate",
+  "deceased",
+  "birthplace",
+  "bio"
+] as const;
+export type PersonMergeField = (typeof PERSON_MERGE_FIELDS)[number];
+
+/** Which person a merged field comes from. */
+export const MergeFieldChoice = {
+  Keep: "keep",
+  Duplicate: "duplicate"
+} as const;
+export type MergeFieldChoice = (typeof MergeFieldChoice)[keyof typeof MergeFieldChoice];
+export const mergeFieldChoiceSchema = z.enum(MergeFieldChoice);
+
+/** The values a merge combines (one person's side, or the result). */
+export type PersonMergeValues = Pick<PersonRevisionPersonSnapshot, PersonMergeField>;
+
+/** Per-field choices; a missing field uses {@link defaultMergeChoices}. */
+export type PersonMergeChoices = Partial<Record<PersonMergeField, MergeFieldChoice>>;
+
+export const personMergeFieldsSchema = z.strictObject({
+  fullName: mergeFieldChoiceSchema.exactOptional(),
+  nickname: mergeFieldChoiceSchema.exactOptional(),
+  familyBranch: mergeFieldChoiceSchema.exactOptional(),
+  birthYear: mergeFieldChoiceSchema.exactOptional(),
+  birthDate: mergeFieldChoiceSchema.exactOptional(),
+  deathYear: mergeFieldChoiceSchema.exactOptional(),
+  deathDate: mergeFieldChoiceSchema.exactOptional(),
+  deceased: mergeFieldChoiceSchema.exactOptional(),
+  birthplace: mergeFieldChoiceSchema.exactOptional(),
+  bio: mergeFieldChoiceSchema.exactOptional()
+}) satisfies z.ZodType<PersonMergeChoices>;
+
+/**
+ * Default choices: the kept person's value, filling its blanks from the
+ * duplicate. A full date is only taken from the duplicate when it falls in
+ * the resulting year (so the defaults never break the date rules), and
+ * `deceased` comes from the duplicate only when it says the person died.
+ *
+ * @param keep - The kept person's values.
+ * @param duplicate - The duplicate's values.
+ */
+export function defaultMergeChoices(keep: PersonMergeValues, duplicate: PersonMergeValues): Record<PersonMergeField, MergeFieldChoice> {
+  const fill = (field: Exclude<PersonMergeField, "deceased">): MergeFieldChoice =>
+    keep[field] === null && duplicate[field] !== null ? MergeFieldChoice.Duplicate : MergeFieldChoice.Keep;
+  const birthYear = fill("birthYear");
+  const deathYear = fill("deathYear");
+  const dateChoice = (field: "birthDate" | "deathDate", year: number | null): MergeFieldChoice => {
+    const candidate = duplicate[field];
+    return keep[field] === null && candidate !== null && year === yearOf(candidate) ? MergeFieldChoice.Duplicate : MergeFieldChoice.Keep;
+  };
+  return {
+    fullName: MergeFieldChoice.Keep,
+    nickname: fill("nickname"),
+    familyBranch: fill("familyBranch"),
+    birthYear,
+    birthDate: dateChoice("birthDate", birthYear === MergeFieldChoice.Keep ? keep.birthYear : duplicate.birthYear),
+    deathYear,
+    deathDate: dateChoice("deathDate", deathYear === MergeFieldChoice.Keep ? keep.deathYear : duplicate.deathYear),
+    deceased: !keep.deceased && duplicate.deceased ? MergeFieldChoice.Duplicate : MergeFieldChoice.Keep,
+    birthplace: fill("birthplace"),
+    bio: fill("bio")
+  };
+}
+
+/**
+ * The merged values for `choices` (missing ones use the defaults). The
+ * result still has to pass {@link personDatesIssue}; the server re-checks.
+ *
+ * @param keep - The kept person's values.
+ * @param duplicate - The duplicate's values.
+ * @param choices - Per-field overrides.
+ */
+export function mergedPersonValues(keep: PersonMergeValues, duplicate: PersonMergeValues, choices: PersonMergeChoices = {}): PersonMergeValues {
+  const resolved = { ...defaultMergeChoices(keep, duplicate), ...choices };
+  const pick = <TField extends PersonMergeField>(field: TField): PersonMergeValues[TField] =>
+    resolved[field] === MergeFieldChoice.Duplicate ? duplicate[field] : keep[field];
+  return {
+    fullName: pick("fullName"),
+    nickname: pick("nickname"),
+    familyBranch: pick("familyBranch"),
+    birthYear: pick("birthYear"),
+    birthDate: pick("birthDate"),
+    deathYear: pick("deathYear"),
+    deathDate: pick("deathDate"),
+    deceased: pick("deceased"),
+    birthplace: pick("birthplace"),
+    bio: pick("bio")
+  };
+}
+
+/**
+ * Body of `POST /api/admin/people/:keepId/merge` (`:keepId` = the person
+ * that stays). The duplicate is merged into it and removed, in one
+ * transaction (ADR 0001 §6, merge semantics). 409 `MERGE_BOTH_LINKED` /
+ * `MERGE_CONFLICT`; 400 when the merged dates break a rule.
+ */
+export const personMergeInputSchema = z.strictObject({
+  duplicateId: idSchema,
+  fields: personMergeFieldsSchema.exactOptional()
+});
+export type PersonMergeInput = z.infer<typeof personMergeInputSchema>;
+export type PersonMergeRequest = z.input<typeof personMergeInputSchema>;
+
+/** `GET /api/admin/people/:keepId/merge-preview?duplicateId=`. */
+export const personMergePreviewQuerySchema = z.object({ duplicateId: idSchema });
+export type PersonMergePreviewQuery = z.infer<typeof personMergePreviewQuerySchema>;
+export type PersonMergePreviewQueryRequest = z.input<typeof personMergePreviewQuerySchema>;
+
+const personMergeValuesSchema = personRevisionPersonSnapshotSchema.pick({
+  fullName: true,
+  nickname: true,
+  familyBranch: true,
+  birthYear: true,
+  birthDate: true,
+  deathYear: true,
+  deathDate: true,
+  deceased: true,
+  birthplace: true,
+  bio: true
+}) satisfies z.ZodType<PersonMergeValues>;
+
+/** One side of the merge preview. */
+export interface PersonMergeSide {
+  /** Admin view (resolved photo in `avatarUrl`). */
+  person: Person;
+  values: PersonMergeValues;
+  /** Display name of the linked account, if any. */
+  accountName: string | null;
+  /** Has a tree photo (`people.photo_key`), whether or not an avatar wins. */
+  hasTreePhoto: boolean;
+  relationshipCount: number;
+}
+
+/** Role of the other person relative to the merged person. */
+export const MergeEdgeRole = {
+  Parent: "parent",
+  Child: "child",
+  Partner: "partner"
+} as const;
+export type MergeEdgeRole = (typeof MergeEdgeRole)[keyof typeof MergeEdgeRole];
+
+/** Why a relationship cannot move. */
+export const MergeConflictReason = {
+  /** The other person is already a descendant (or ancestor) of the kept person. */
+  Cycle: "cycle",
+  /** The kept person (or the child) would have three parents. */
+  TooManyParents: "too_many_parents"
+} as const;
+export type MergeConflictReason = (typeof MergeConflictReason)[keyof typeof MergeConflictReason];
+
+/** One of the duplicate's relationships in the preview. */
+export interface PersonMergeEdge {
+  id: string;
+  kind: RelationshipKind;
+  /** The relative on the other end (`null` for a link between the two merged people). */
+  otherPersonId: string | null;
+  otherPersonName: string | null;
+  role: MergeEdgeRole;
+  outcome: MergeEdgeOutcome;
+}
+
+/** A relationship that would break a rule. */
+export interface PersonMergeConflict extends PersonMergeEdge {
+  reason: MergeConflictReason;
+}
+
+/** What the merge preview shows (admin-only, PII). */
+export interface PersonMergePreview {
+  keep: PersonMergeSide;
+  duplicate: PersonMergeSide;
+  defaults: Record<PersonMergeField, MergeFieldChoice>;
+  relationships: {
+    moved: PersonMergeEdge[];
+    dropped: PersonMergeEdge[];
+    conflicts: PersonMergeConflict[];
+  };
+  /** Which tree photo stays; `deletesDuplicatePhoto` when both had one. */
+  photo: { result: "keep" | "duplicate" | "none"; deletesDuplicatePhoto: boolean };
+  /** `moved`: the duplicate's account moves to the kept person. */
+  account: { result: "none" | "keep" | "moved"; bothLinked: boolean };
+  invites: { move: number; revoke: number };
+  attendance: { move: number; drop: number };
+  /** Why the merge would be refused as is (empty = it can go ahead, dates aside). */
+  blockers: FamilyIssueCode[];
+}
+
+const personMergeEdgeSchema = z.object({
+  id: idSchema,
+  kind: relationshipKindSchema,
+  otherPersonId: idSchema.nullable(),
+  otherPersonName: z.string().max(200).nullable(),
+  role: z.enum(MergeEdgeRole),
+  outcome: mergeEdgeOutcomeSchema
+}) satisfies z.ZodType<PersonMergeEdge>;
+
+const personMergeSideSchema = z.object({
+  person: personSchema,
+  values: personMergeValuesSchema,
+  accountName: z.string().max(80).nullable(),
+  hasTreePhoto: z.boolean(),
+  relationshipCount: z.number().int().min(0)
+}) satisfies z.ZodType<PersonMergeSide>;
+
+const mergeChoiceRecordSchema = z.object({
+  fullName: mergeFieldChoiceSchema,
+  nickname: mergeFieldChoiceSchema,
+  familyBranch: mergeFieldChoiceSchema,
+  birthYear: mergeFieldChoiceSchema,
+  birthDate: mergeFieldChoiceSchema,
+  deathYear: mergeFieldChoiceSchema,
+  deathDate: mergeFieldChoiceSchema,
+  deceased: mergeFieldChoiceSchema,
+  birthplace: mergeFieldChoiceSchema,
+  bio: mergeFieldChoiceSchema
+}) satisfies z.ZodType<Record<PersonMergeField, MergeFieldChoice>>;
+
+export const personMergePreviewSchema = z.object({
+  keep: personMergeSideSchema,
+  duplicate: personMergeSideSchema,
+  defaults: mergeChoiceRecordSchema,
+  relationships: z.object({
+    moved: z.array(personMergeEdgeSchema),
+    dropped: z.array(personMergeEdgeSchema),
+    conflicts: z.array(personMergeEdgeSchema.extend({ reason: z.enum(MergeConflictReason) }))
+  }),
+  photo: z.object({ result: z.enum(["keep", "duplicate", "none"]), deletesDuplicatePhoto: z.boolean() }),
+  account: z.object({ result: z.enum(["none", "keep", "moved"]), bothLinked: z.boolean() }),
+  invites: z.object({ move: z.number().int().min(0), revoke: z.number().int().min(0) }),
+  attendance: z.object({ move: z.number().int().min(0), drop: z.number().int().min(0) }),
+  blockers: z.array(z.enum(FamilyIssueCode))
+}) satisfies z.ZodType<PersonMergePreview>;
+
+/** Response of the merge: the kept person and the `person.merge` revision ("Deshacer" target). */
+export interface PersonMergeResponse {
+  person: Person;
+  revisionId: string;
+  /** "Deshacer" is offered (the server re-checks on revert). */
+  revertible: boolean;
+}
+export const personMergeResponseSchema = z.object({
+  person: personSchema,
+  revisionId: idSchema,
+  revertible: z.boolean()
+}) satisfies z.ZodType<PersonMergeResponse>;
+
+/** Why two people are listed as possible duplicates. */
+export const DuplicateReason = {
+  /** Same normalized name (case, accents, spaces) and compatible years. */
+  SameName: "same_name",
+  /** Same name except one has a second surname, and compatible years. */
+  SimilarName: "similar_name",
+  /** An invite named a tree person but the account got a new person instead (`personLink: fallback`). */
+  InviteFallback: "invite_fallback"
+} as const;
+export type DuplicateReason = (typeof DuplicateReason)[keyof typeof DuplicateReason];
+
+/** One person of a possible-duplicate pair (never the account id). */
+export interface DuplicateCandidate {
+  id: string;
+  fullName: string;
+  nickname: string | null;
+  familyBranch: string | null;
+  birthYear: number | null;
+  deathYear: number | null;
+  deceased: boolean;
+  linked: boolean;
+  relationshipCount: number;
+}
+
+/** A pair for "Posibles duplicados", with a suggested person to keep. */
+export interface PossibleDuplicate {
+  keep: DuplicateCandidate;
+  duplicate: DuplicateCandidate;
+  reason: DuplicateReason;
+  /** `false` when both are linked to accounts (`MERGE_BOTH_LINKED`). */
+  mergeable: boolean;
+}
+
+const duplicateCandidateSchema = z.object({
+  id: idSchema,
+  fullName: z.string().max(200),
+  nickname: z.string().max(80).nullable(),
+  familyBranch: z.string().max(120).nullable(),
+  birthYear: z.number().int().nullable(),
+  deathYear: z.number().int().nullable(),
+  deceased: z.boolean(),
+  linked: z.boolean(),
+  relationshipCount: z.number().int().min(0)
+}) satisfies z.ZodType<DuplicateCandidate>;
+
+export const possibleDuplicateSchema = z.object({
+  keep: duplicateCandidateSchema,
+  duplicate: duplicateCandidateSchema,
+  reason: z.enum(DuplicateReason),
+  mergeable: z.boolean()
+}) satisfies z.ZodType<PossibleDuplicate>;
+
+/** `GET /api/admin/family/duplicates`: cursor-paged pairs (the cursor is opaque, no PII). */
+export const familyDuplicatesQuerySchema = cursorQuerySchema;
+export type FamilyDuplicatesQuery = z.infer<typeof familyDuplicatesQuerySchema>;
+export type FamilyDuplicatesQueryRequest = z.input<typeof familyDuplicatesQuerySchema>;
 
 /* -------------------------------------------------------------------------- */
 /* Person photos (WP-4.3)                                                      */

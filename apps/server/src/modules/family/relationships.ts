@@ -99,13 +99,14 @@ export interface InsertRelationshipOptions {
  *
  * @param tx - Open transaction.
  * @param input - Validated input.
- * @param actorUserId - Admin (or, with `options.createdByMember`, member) creating it.
+ * @param actorUserId - Admin (or, with `options.createdByMember`, member) creating it; `null` only when
+ *   re-creating an edge whose creator account is gone (WP-4.5 merge and its undo keep the original creator).
  * @param options - Provenance (`created_by_member`, Security M1) and an explicit id (revert re-creates the old edge).
  */
 export async function insertRelationship(
   tx: Transaction,
   input: CreateRelationshipInput,
-  actorUserId: string,
+  actorUserId: string | null,
   options: InsertRelationshipOptions = {}
 ): Promise<Relationship> {
   let fromPersonId = input.fromPersonId.toLowerCase();
