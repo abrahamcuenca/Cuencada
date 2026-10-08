@@ -65,6 +65,8 @@ const ADMIN_ROUTES: RouteCheck[] = [
   { name: "admin-usuarios", open: "/admin/usuarios" },
   { name: "admin-familia", open: "/admin/familia" },
   { name: "admin-actividad", open: "/admin/familia/actividad", ready: "Actividad del árbol" },
+  // WP-4.5: the "Posibles duplicados" tab.
+  { name: "admin-duplicados", open: "/admin/familia/actividad?vista=duplicados", ready: "Actividad del árbol" },
   { name: "admin-cuencadas", open: "/admin/cuencadas" }
 ];
 

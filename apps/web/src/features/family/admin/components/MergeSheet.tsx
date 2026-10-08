@@ -193,7 +193,10 @@ function MergePreviewBody({ preview, choices, datesIssue, serverError, onChoose,
   const keepName = keep.person.fullName;
   const duplicateName = duplicate.person.fullName;
   const differing = PERSON_MERGE_FIELDS.filter((field) => !sameMergeValue(field, keep.values, duplicate.values));
-  const same = PERSON_MERGE_FIELDS.filter((field) => sameMergeValue(field, keep.values, duplicate.values) && keep.values[field] !== null);
+  // Equal and worth saying ("living" on both sides is not a datum).
+  const same = PERSON_MERGE_FIELDS.filter(
+    (field) => sameMergeValue(field, keep.values, duplicate.values) && keep.values[field] !== null && keep.values[field] !== false
+  );
   const { moved, dropped, conflicts } = preview.relationships;
   const photoText =
     preview.photo.result === "keep"

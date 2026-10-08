@@ -156,6 +156,22 @@ export function familyEditingNames(project: ProjectKey): {
   };
 }
 
+/**
+ * People of the merge journey (WP-4.5), unique per project. The first two
+ * words never match a seeded person ("Lucía {Apellido}" is the seeded
+ * grandparent), so "Posibles duplicados" pairs only these two.
+ */
+export function mergeNames(project: ProjectKey): { treePerson: string; typedName: string; partner: string; email: string } {
+  const surname = SURNAMES[project];
+  return {
+    treePerson: `Lucía Arias ${surname}`,
+    // What the relative types when joining with a shared link: a second surname.
+    typedName: `Lucía Arias ${surname} Peña`,
+    partner: `Marco Ruiz ${surname}`,
+    email: `lucia.arias.${project}@e2e.example.test`
+  };
+}
+
 /** The fictional future edition the RSVP journeys use. */
 export const FUTURE_YEAR = 2027;
 /** The seeded (past) edition whose public programa the offline journey caches. */
