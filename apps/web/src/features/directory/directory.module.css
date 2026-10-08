@@ -138,8 +138,8 @@ a.row:hover {
   flex-direction: column;
 }
 
-/* Aligned with the name: list padding + 48px avatar + gap. */
-.rowChips {
+/* Aligned with the name: list padding + 48px avatar + gap (beats ContactList's own padding: 0). */
+.entry .rowChips {
   padding: 0 var(--space-4) var(--space-3) calc(var(--space-4) + 48px + var(--space-3));
 }
 
