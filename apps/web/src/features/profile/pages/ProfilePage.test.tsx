@@ -89,10 +89,11 @@ describe("ProfilePage form", () => {
     expect(screen.getByLabelText(/Nombre completo/)).toHaveValue("Rosa Elena Ejemplo");
     expect(screen.getByLabelText(/Cómo te dicen/)).toHaveValue("Rosa");
     expect(screen.getByLabelText(/Ciudad/)).toHaveAttribute("autocomplete", "address-level2");
-    const phone = screen.getByLabelText(/Teléfono \/ WhatsApp/);
+    // WP-4.4: the phone lives in the "Contacto" form, with its own save button.
+    const phone = within(screen.getByRole("form", { name: "Contacto" })).getByLabelText(/^Teléfono/);
     expect(phone).toHaveAttribute("type", "tel");
     expect(phone).toHaveAttribute("inputmode", "tel");
-    expect(phone).toHaveAttribute("autocomplete", "tel");
+    expect(within(screen.getByRole("form", { name: "Datos de perfil" })).queryByLabelText(/Teléfono/)).toBeNull();
     expect(screen.getByRole("form", { name: "Datos de perfil" })).toHaveAttribute("novalidate");
     expect(screen.getByRole("button", { name: "Guardar cambios" })).toBeDisabled();
     expect(screen.getByRole("link", { name: /Sesiones y seguridad/ })).toHaveAttribute("href", "/perfil/sesiones");
@@ -104,12 +105,10 @@ describe("ProfilePage form", () => {
     const city = screen.getByLabelText(/Ciudad/);
     await user.clear(city);
     await user.type(city, "Monterrey");
-    await user.type(screen.getByLabelText(/Teléfono/), "+52 555 010 0101");
     await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
 
     expect(await screen.findByText("Cambios guardados.")).toBeInTheDocument();
-    // The form sends the E.164-normalized phone (WP-4.0: same normalizer as the server).
-    expect(db.patches).toEqual([{ city: "Monterrey", phone: "+525550100101" }]);
+    expect(db.patches).toEqual([{ city: "Monterrey" }]);
     await waitFor(() => expect(screen.getByRole("button", { name: "Guardar cambios" })).toBeDisabled());
     expect(screen.getByLabelText(/Ciudad/)).toHaveValue("Monterrey");
   });
@@ -131,11 +130,10 @@ describe("ProfilePage form", () => {
     const user = await openProfile();
 
     await user.clear(screen.getByLabelText(/Nombre completo/));
-    await user.type(screen.getByLabelText(/Teléfono/), "abc");
+    await user.type(screen.getByLabelText(/Sobre mí/), "a".repeat(501));
     await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
 
     expect(await screen.findByText("Este campo es obligatorio.")).toBeInTheDocument();
-    expect(screen.getByText("Teléfono inválido.")).toBeInTheDocument();
     expect(screen.getByLabelText(/Nombre completo/)).toHaveFocus();
     expect(screen.getByLabelText(/Nombre completo/)).toHaveAttribute("aria-invalid", "true");
     expect(db.patches).toEqual([]);
@@ -158,26 +156,24 @@ describe("ProfilePage privacy", () => {
   it("sends each toggled switch with its new value", async () => {
     const user = await openProfile();
 
-    const phone = screen.getByRole("switch", { name: "Mostrar mi teléfono a la familia" });
-    const email = screen.getByRole("switch", { name: "Mostrar mi correo a la familia" });
-    expect(phone).not.toBeChecked();
-    expect(email).toBeChecked();
-    expect(screen.getByRole("switch", { name: "Mostrar mi ciudad a la familia" })).toBeChecked();
+    const city = screen.getByRole("switch", { name: "Mostrar mi ciudad a la familia" });
+    expect(city).toBeChecked();
+    // WP-4.4: the email and phone switches moved to "Contacto".
+    expect(screen.queryByRole("switch", { name: "Mostrar mi correo a la familia" })).toBeNull();
 
-    await user.click(phone);
-    await user.click(email);
+    await user.click(city);
     await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
 
     await screen.findByText("Cambios guardados.");
-    expect(db.patches).toEqual([{ showEmail: false, showPhone: true }]);
-    expect(db.profile.visibility).toEqual({ showEmail: false, showPhone: true, showCity: true, listedInDirectory: true });
+    expect(db.patches).toEqual([{ showCity: false }]);
+    expect(db.profile.visibility).toEqual({ showEmail: true, showPhone: false, showCity: false, listedInDirectory: true });
   });
 
   it("explains each switch in Spanish", async () => {
     await openProfile();
 
-    expect(screen.getByRole("switch", { name: "Mostrar mi correo a la familia" })).toHaveAccessibleDescription(
-      "Tu correo (prima@example.com) aparecerá en tu ficha del directorio."
+    expect(screen.getByRole("switch", { name: "Mostrar mi ciudad a la familia" })).toHaveAccessibleDescription(
+      "Aparecerá en tu ficha y podrán encontrarte al buscar por ciudad."
     );
     expect(screen.getByText(/Tus datos solo los ve la familia con sesión iniciada/)).toBeInTheDocument();
   });

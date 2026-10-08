@@ -22,6 +22,13 @@ export const familyRoutes: FeatureRoutes = {
       })
     },
     {
+      // Static segment: ranks above `:personId`.
+      path: "/admin/familia/actividad",
+      lazy: async () => ({
+        Component: (await import("./admin/pages/FamilyActivityPage")).FamilyActivityPage
+      })
+    },
+    {
       path: "/admin/familia/:personId",
       lazy: async () => ({
         Component: (await import("./admin/pages/AdminPersonPage")).AdminPersonPage

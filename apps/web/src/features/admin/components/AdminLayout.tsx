@@ -24,6 +24,7 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
   { to: "/admin/cuencadas", icon: "✅", label: "Asistencia", hint: "Ábrela desde cada Cuencada" },
   { to: "/admin/media", icon: "📷", label: "Fotos", hint: "Revisar y moderar fotos" },
   { to: "/admin/familia", icon: "🌳", label: "Personas y árbol", hint: "Familia, parentescos y cuentas" },
+  { to: "/admin/familia/actividad", icon: "🕰️", label: "Actividad del árbol", hint: "Cambios de todos, con «Deshacer»" },
   { to: "/admin/invitaciones", icon: "💌", label: "Invitaciones", hint: "Invitar por correo o enlace" },
   { to: "/admin/usuarios", icon: "👥", label: "Usuarios", hint: "Roles, acceso y sesiones" },
   { to: "/admin/bitacora", icon: "📜", label: "Bitácora", hint: "Quién cambió qué y cuándo" }

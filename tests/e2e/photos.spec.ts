@@ -40,6 +40,8 @@ test.describe("photos with crop", () => {
     const focus = page.getByRole("article", { name: greatGrandparent });
     await expect(focus).toBeVisible();
 
+    // The tree-photo controls live in the focus card's "Detalles" panel (WP-4.1 layout).
+    await focus.getByText("Detalles", { exact: true }).click();
     // "Agregar foto" on a fresh database ("Cambiar foto" when a retry finds the photo already set).
     await pickFile(page, focus.getByRole("button", { name: /^(Agregar|Cambiar) foto$/ }), "bisabuelo-e2e.jpg", "e2e");
     const cropper = page.getByRole("dialog", { name: "Ajustar foto" });

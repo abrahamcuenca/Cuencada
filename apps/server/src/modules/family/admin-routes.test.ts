@@ -122,7 +122,9 @@ describe("POST /api/admin/people", () => {
       {},
       { fullName: "" },
       { fullName: "X", birthYear: 2000, deathYear: 1990, deceased: true },
-      { fullName: "X", deathYear: 1990 },
+      { fullName: "X", deathYear: 1990, deceased: false },
+      { fullName: "X", birthDate: "1990-05-01", birthYear: 1991 },
+      { fullName: "X", userId: null, extra: true },
       { fullName: "X", birthYear: 1700 }
     ]) {
       const response = await app.inject({ method: "POST", url: "/api/admin/people", payload, ...adminAuth });
@@ -178,7 +180,12 @@ describe("PATCH /api/admin/people/:id", () => {
 
   it("maps CHECK violations against stored values to 400 with Spanish messages", async () => {
     const person = await insertPerson({ birthYear: 1950 });
-    const notDeceased = await app.inject({ method: "PATCH", url: `/api/admin/people/${person.id}`, payload: { deathYear: 2000 }, ...adminAuth });
+    const notDeceased = await app.inject({
+      method: "PATCH",
+      url: `/api/admin/people/${person.id}`,
+      payload: { deathYear: 2000, deceased: false },
+      ...adminAuth
+    });
     expect(notDeceased.statusCode).toBe(400);
     expect(notDeceased.json<ApiError>().error.details?.[0]?.path).toBe("deceased");
     const order = await app.inject({

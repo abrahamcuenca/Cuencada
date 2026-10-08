@@ -17,7 +17,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { App } from "../../app.js";
-import { cuencadaAttendance, MagicLinkPurpose } from "../../db/schema/index.js";
+import { cuencadaAttendance, MagicLinkPurpose, personRelationships } from "../../db/schema/index.js";
 import { systemClock } from "../../lib/clock.js";
 import { S3Storage } from "../../lib/storage/s3.js";
 import { createEmailToken } from "../../modules/auth/emailTokens.js";
@@ -51,8 +51,41 @@ const HIDDEN = {
   ip: "198.51.100.23",
   userAgent: "W23-Secret-Agent/1.0",
   rsvpNote: "nota-privada-w23",
-  deletedChatBody: "cuerpo-borrado-w23"
+  deletedChatBody: "cuerpo-borrado-w23",
+  /** A living person's private life data (WP-4.1): only self, admins and the qualifying circle. */
+  birthplace: "Lugar-Privado-W41",
+  birthDate: "1977-11-23"
 };
+/**
+ * WP-4.4: social contacts planted on the hidden member with every switch off,
+ * and on the unlisted and disabled members with every switch **on**. None may
+ * surface in a member-facing body (matched verbatim, and WhatsApp on digits).
+ */
+const HIDDEN_CONTACTS = {
+  whatsapp: "+12025550199",
+  instagram: "oculta.w44",
+  facebook: "oculta.w44.fb",
+  tiktok: "oculta_w44",
+  linkedin: "oculta-w44",
+  github: "oculta-w44-gh",
+  website: "https://oculta-w44.example.com/"
+};
+const UNLISTED_CONTACTS = { instagram: "nolistada.w44", whatsapp: "+12025550188", website: "https://nolistada-w44.example.com/" };
+const DISABLED_CONTACTS = { instagram: "baja.w44", whatsapp: "+12025550177", website: "https://baja-w44.example.com/" };
+const ALL_SWITCHES_ON = {
+  showEmail: true,
+  showPhone: true,
+  contactVisibility: { whatsapp: true, instagram: true, facebook: true, tiktok: true, linkedin: true, github: true, website: true }
+};
+/** Planted contact strings that must never reach a member-facing body. */
+const PLANTED_CONTACT_STRINGS = [
+  ...Object.values(HIDDEN_CONTACTS).map((value) => value.replace(/^\+/, "")),
+  ...Object.values(UNLISTED_CONTACTS).map((value) => value.replace(/^\+/, "")),
+  ...Object.values(DISABLED_CONTACTS).map((value) => value.replace(/^\+/, "")),
+  "oculta-w44.example.com",
+  "nolistada-w44.example.com",
+  "baja-w44.example.com"
+];
 const UNLISTED_NAME = "Persona No Listada";
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
@@ -88,6 +121,7 @@ const FORBIDDEN_KEYS = [
   "showCity",
   "listedInDirectory",
   "visibility",
+  "contactVisibility",
   "notes",
   "mustChangePassword"
 ];
@@ -102,6 +136,7 @@ let admin: { user: TestUser; auth: AuthInjectOptions };
 let hidden: TestUser;
 let open: TestUser;
 let unlisted: TestUser;
+let disabled: TestUser;
 let roomId: string;
 let mediaId: string;
 let personId: string;
@@ -138,7 +173,9 @@ beforeEach(async () => {
       showCity: false,
       phone: HIDDEN.phone,
       city: HIDDEN.city,
-      avatarKey: `avatars/${randomUUID()}/large.webp`
+      avatarKey: `avatars/${randomUUID()}/large.webp`,
+      ...HIDDEN_CONTACTS,
+      contactVisibility: {}
     }
   });
   open = await createUser({
@@ -146,7 +183,17 @@ beforeEach(async () => {
     displayName: "Persona Abierta",
     profile: { listedInDirectory: true, showEmail: true, showPhone: true, showCity: true, phone: "5551112222", city: "Mérida" }
   });
-  unlisted = await createUser({ emailVerified: true, displayName: UNLISTED_NAME, profile: { listedInDirectory: false } });
+  unlisted = await createUser({
+    emailVerified: true,
+    displayName: UNLISTED_NAME,
+    profile: { listedInDirectory: false, ...UNLISTED_CONTACTS, ...ALL_SWITCHES_ON }
+  });
+  disabled = await createUser({
+    emailVerified: true,
+    status: "disabled",
+    displayName: "Persona Dada De Baja",
+    profile: { listedInDirectory: true, ...DISABLED_CONTACTS, ...ALL_SWITCHES_ON }
+  });
 
   // Sessions with a planted IP and user agent, through the real login.
   const login = await app.inject({
@@ -193,7 +240,15 @@ beforeEach(async () => {
   mediaId = media.id;
 
   // Family: the hidden member, the unlisted member and an unlinked person.
-  personId = (await insertPerson({ userId: hidden.id, fullName: "Persona Reservada" })).id;
+  personId = (
+    await insertPerson({
+      userId: hidden.id,
+      fullName: "Persona Reservada",
+      birthYear: 1977,
+      birthDate: HIDDEN.birthDate,
+      birthplace: HIDDEN.birthplace
+    })
+  ).id;
   await insertPerson({ userId: unlisted.id, fullName: UNLISTED_NAME });
   // WP-4.3: the unlinked relative has a tree photo (only ever served as a presigned URL).
   const relative = await insertPerson({
@@ -203,7 +258,12 @@ beforeEach(async () => {
   });
   relativeId = relative.id;
   await getTestDb().insert(cuencadaAttendance).values({ cuencadaId: edition.id, personId: relative.id });
-  await insertPerson({ userId: viewer.user.id, fullName: "Persona Lectora" });
+  const viewerPerson = await insertPerson({ userId: viewer.user.id, fullName: "Persona Lectora" });
+  // A member edge the viewer "made" between two people they did not create
+  // (planted): it must not pull the hidden person into the viewer's circle.
+  await getTestDb()
+    .insert(personRelationships)
+    .values({ kind: "parent_of", fromPersonId: personId, toPersonId: viewerPerson.id, createdByMember: true, createdByUserId: viewer.user.id });
 
   // Chat from the hidden member.
   const room = await insertGlobalRoom();
@@ -282,12 +342,20 @@ function scan(label: string, body: unknown, options: ScanOptions = {}): string[]
   if (SHA256_HEX.test(text)) problems.push(`${label}: 64-hex digest (token hash?)`);
   if (PRESIGNED_PUT.test(text)) problems.push(`${label}: presigned PUT URL`);
   if (text.includes(HIDDEN.rsvpNote) && options.admin !== true) problems.push(`${label}: another member's RSVP notes`);
+  if (options.admin !== true && (text.includes(HIDDEN.birthplace) || text.includes(HIDDEN.birthDate))) {
+    problems.push(`${label}: a living person's birth date or birthplace outside their circle`);
+  }
   if (options.admin !== true) {
     for (const email of text.match(EMAIL) ?? []) {
       if (!allowed.has(email.toLowerCase())) problems.push(`${label}: email ${email}`);
     }
     if (text.replace(/\D/g, "").includes(HIDDEN.phoneDigits)) problems.push(`${label}: hidden phone`);
     if (text.includes(HIDDEN.city)) problems.push(`${label}: hidden city`);
+    const digitsOnly = text.replace(/\D/g, "");
+    for (const planted of PLANTED_CONTACT_STRINGS) {
+      const leaked = /^[0-9]+$/.test(planted) ? digitsOnly.includes(planted) : text.includes(planted);
+      if (leaked) problems.push(`${label}: hidden/unlisted/disabled contact ${planted}`);
+    }
     if (text.includes(BUCKET)) problems.push(`${label}: bucket name`);
     if (text.includes(HIDDEN.userAgent)) problems.push(`${label}: another member's user agent`);
     if (options.allowIp !== true && IPV4.test(text)) problems.push(`${label}: IP address`);
@@ -295,6 +363,11 @@ function scan(label: string, body: unknown, options: ScanOptions = {}): string[]
   if (options.admin === true && text.includes(BUCKET)) problems.push(`${label}: bucket name`);
   if (options.directory === true && text.includes(UNLISTED_NAME)) problems.push(`${label}: unlisted member's name`);
   return problems;
+}
+
+/** Bearer headers for a planted user (fresh session). */
+async function bearerAuth(user: TestUser): Promise<AuthInjectOptions> {
+  return bearerFor(user, await createSession(user.id));
 }
 
 async function get(url: string, auth: { headers: Record<string, string> }): Promise<unknown> {
@@ -316,7 +389,24 @@ describe("member-facing reads never leak PII", () => {
     expect(one).not.toHaveProperty("email");
     expect(one).not.toHaveProperty("phone");
     expect(one).not.toHaveProperty("city");
+    // WP-4.4: every switch off → an empty card; nothing hidden is in the body.
+    expect(one).toHaveProperty("contacts", []);
     expect(JSON.stringify(list)).not.toContain(unlisted.id);
+    expect(JSON.stringify(list)).not.toContain(disabled.id);
+    const gone = await app.inject({ method: "GET", url: `/api/directory/${disabled.id}`, ...viewer.auth });
+    expect(gone.statusCode).toBe(404);
+    expect(scan("GET /api/directory/:disabled", gone.json(), { directory: true })).toEqual([]);
+  });
+
+  it("directory contacts never reach an unverified viewer", async () => {
+    const unverified = await createUser({ emailVerified: false, displayName: "Persona Sin Verificar" });
+    const auth = await bearerFor(unverified, await createSession(unverified.id));
+    for (const url of ["/api/directory", `/api/directory/${open.id}`, `/api/directory/${hidden.id}`]) {
+      const response = await app.inject({ method: "GET", url, ...auth });
+      expect(response.statusCode, url).toBe(403);
+      expect(response.body).not.toContain("contacts");
+      expect(scan(`unverified ${url}`, response.json())).toEqual([]);
+    }
   });
 
   it("family: people, person detail and tree carry no contact data, and unlisted accounts are not linked", async () => {
@@ -356,6 +446,26 @@ describe("member-facing reads never leak PII", () => {
     expect(
       [...scan("GET /api/family/people/:id (tree photo)", detail), ...scan("DELETE /api/family/people/:id/photo", removed.json(), { admin: true })]
     ).toEqual([]);
+  });
+
+  it("family (WP-4.1): living people's dates and birthplace stay inside the circle; revision routes are admin-only", async () => {
+    const tree = await get(`/api/family/tree?personId=${personId}&depth=4`, viewer.auth);
+    const own = await get("/api/family/tree?depth=4", viewer.auth);
+    const person = (await get(`/api/family/people/${personId}`, viewer.auth)) as { birthYear: number | null };
+    expect(person.birthYear).toBeNull();
+    expect([...scan("GET /api/family/tree?depth=4", tree), ...scan("GET /api/family/tree (own)", own)]).toEqual([]);
+    // Positive control: the person themself and admins do see them.
+    const self = await app.inject({ method: "GET", url: `/api/family/people/${personId}`, remoteAddress: "203.0.113.51", ...(await bearerAuth(hidden)) });
+    expect(self.body).toContain(HIDDEN.birthplace);
+    expect(JSON.stringify(await get(`/api/family/people/${personId}`, admin.auth))).toContain(HIDDEN.birthDate);
+    for (const url of [
+      "/api/admin/family/activity",
+      `/api/admin/people/${personId}/revisions`
+    ]) {
+      const response = await app.inject({ method: "GET", url, remoteAddress: "203.0.113.50", ...viewer.auth });
+      expect(response.statusCode, url).toBe(403);
+      expect(response.body).not.toContain(HIDDEN.birthplace);
+    }
   });
 
   it("attendees and RSVP summary: names only, no notes, emails or keys", async () => {
@@ -446,6 +556,15 @@ describe("admin console never serializes secrets", () => {
     const edition = await get("/api/admin/cuencadas", admin.auth);
     const editionId = (edition as Array<{ id: string; year: number }>).find((row) => row.year === YEAR)?.id;
     expect(editionId).toBeDefined();
+    // A family revision exists (its snapshots are admin-only PII, but never keys or tokens).
+    const edit = await app.inject({
+      method: "PATCH",
+      url: `/api/admin/people/${personId}`,
+      remoteAddress: "203.0.113.9",
+      payload: { nickname: "Reservada" },
+      ...admin.auth
+    });
+    expect(edit.statusCode).toBe(200);
     const bodies: Array<[string, unknown]> = [
       ["GET /api/admin/users", await get("/api/admin/users", admin.auth)],
       ["GET /api/admin/invites", await get("/api/admin/invites", admin.auth)],
@@ -455,7 +574,9 @@ describe("admin console never serializes secrets", () => {
       ["GET /api/admin/media/:id/reports", await get(`/api/admin/media/${mediaId}/reports`, admin.auth)],
       ["GET rsvps", await get(`/api/admin/cuencadas/${editionId}/rsvps`, admin.auth)],
       ["GET attendance", await get(`/api/admin/cuencadas/${editionId}/attendance`, admin.auth)],
-      ["GET /api/admin/summary", await get("/api/admin/summary", admin.auth)]
+      ["GET /api/admin/summary", await get("/api/admin/summary", admin.auth)],
+      ["GET /api/admin/family/activity", await get("/api/admin/family/activity", admin.auth)],
+      ["GET /api/admin/people/:id/revisions", await get(`/api/admin/people/${personId}/revisions`, admin.auth)]
     ];
     expect(bodies.flatMap(([label, body]) => scan(label, body, { admin: true }))).toEqual([]);
   });
@@ -489,7 +610,11 @@ describe("the PII scanner itself", () => {
       opaque: "A".repeat(43),
       planted: `prefix ${secrets[0] ?? "missing"} suffix`,
       body: HIDDEN.deletedChatBody,
-      name: UNLISTED_NAME
+      name: UNLISTED_NAME,
+      birthplace: HIDDEN.birthplace,
+      contacts: [{ kind: "instagram", href: `https://instagram.com/${HIDDEN_CONTACTS.instagram}` }],
+      wa: "wa.me/1 202 555 0199",
+      contactVisibility: {}
     };
     const problems = scan("synthetic", leaky, { directory: true });
     expect(scan("synthetic tree photo", { photo: "people/0f2c4e1a-0000-4000-8000-000000000000/0f2c4e1a-0000-4000-8000-000000000001-256.webp", photoKey: "x" })).toEqual(
@@ -511,7 +636,11 @@ describe("the PII scanner itself", () => {
       "presigned PUT",
       "original object",
       'storage URL in "link"',
-      'forbidden key "showPhone"'
+      'forbidden key "showPhone"',
+      "birth date or birthplace outside their circle",
+      'forbidden key "contactVisibility"',
+      `contact ${HIDDEN_CONTACTS.instagram}`,
+      "contact 12025550199"
     ]) {
       expect(
         problems.some((problem) => problem.includes(fragment)),

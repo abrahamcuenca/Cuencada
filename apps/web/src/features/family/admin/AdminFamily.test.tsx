@@ -60,7 +60,7 @@ describe("AdminFamilyPage", { timeout: 15_000 }, () => {
     await user.click(await screen.findByRole("button", { name: /Nueva persona/ }));
     const form = screen.getByRole("region", { name: "Nueva persona" });
     await user.click(within(form).getByRole("button", { name: "Crear persona" }));
-    expect(await within(form).findByText(/obligatorio|Escribe|caracter/i)).toBeInTheDocument();
+    expect(await within(form).findByText("Este campo es obligatorio.")).toBeInTheDocument();
     expect(writes()).toHaveLength(0);
 
     await user.type(within(form).getByLabelText(/^Nombre completo/), "Clara Ríos Peña");
@@ -73,8 +73,12 @@ describe("AdminFamilyPage", { timeout: 15_000 }, () => {
       nickname: null,
       familyBranch: null,
       birthYear: 1990,
+      birthDate: null,
       deathYear: null,
+      deathDate: null,
       deceased: false,
+      birthplace: null,
+      bio: null,
       userId: null
     });
     await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/admin\/familia\/[0-9a-f-]{36}$/));

@@ -65,6 +65,12 @@ export interface OwnProfile {
    * WP-4.4). Optional so responses from servers before WP-4.4 still parse.
    */
   contacts?: OwnContacts;
+  /**
+   * WP-4.4: present (and `true`) only when the stored `phone` is not E.164 (a
+   * legacy free-form value). The card never links such a phone, so the web
+   * asks the owner to confirm it with a country code. Absent otherwise.
+   */
+  phoneNeedsConfirmation?: true;
   updatedAt: string;
 }
 
@@ -81,6 +87,7 @@ export const ownProfileSchema = z.object({
   avatarUrl: z.string().max(4096).nullable(),
   visibility: profileVisibilitySchema,
   contacts: ownContactsSchema.exactOptional(),
+  phoneNeedsConfirmation: z.literal(true).exactOptional(),
   updatedAt: dateTimeSchema
 }) satisfies z.ZodType<OwnProfile>;
 

@@ -7,7 +7,7 @@ const baseline = toFormValues(profile);
 
 describe("dirtyFields", () => {
   it("ignores surrounding spaces and treats blank as empty", () => {
-    expect(dirtyFields(baseline, { ...baseline, city: "  Mérida ", phone: "   " })).toEqual([]);
+    expect(dirtyFields(baseline, { ...baseline, city: "  Mérida ", bio: "   " })).toEqual([]);
   });
 
   it("reports a toggled switch", () => {
@@ -28,10 +28,6 @@ describe("buildProfilePatch", () => {
   it("rejects a blank required field and a too-long bio with Spanish messages", () => {
     const result = buildProfilePatch(baseline, { ...baseline, displayName: " ", bio: "a".repeat(501) });
     expect(result).toEqual({ ok: false, errors: { displayName: "Este campo es obligatorio.", bio: "Máximo 500 caracteres." } });
-  });
-
-  it("rejects an invalid phone", () => {
-    expect(buildProfilePatch(baseline, { ...baseline, phone: "llámame" })).toEqual({ ok: false, errors: { phone: "Teléfono inválido." } });
   });
 
   it("sends only listedInDirectory when only it changed", () => {

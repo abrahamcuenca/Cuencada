@@ -128,6 +128,34 @@ export function invitedPerson(project: ProjectKey): { fullName: string; email: s
   };
 }
 
+/**
+ * People the family-editing journey (WP-4.1) creates around Beto, unique per
+ * project: none exist in the seed, and Ana's side of the tree (journey 7) is
+ * never touched.
+ */
+export function familyEditingNames(project: ProjectKey): {
+  wife: string;
+  daughter: string;
+  mother: string;
+  grandfather: string;
+  grandmother: string;
+  greatGrandparent: string;
+  greatGreatGrandparent: string;
+  memberChild: string;
+} {
+  const surname = SURNAMES[project];
+  return {
+    wife: `Carmen Lago ${surname}`,
+    daughter: `Paula ${surname} Lago`,
+    mother: `Rosa Vidal ${surname}`,
+    grandfather: `Tomás Vidal ${surname}`,
+    grandmother: `Inés Mora ${surname}`,
+    greatGrandparent: `Julián Vidal ${surname}`,
+    greatGreatGrandparent: `Ezequiel Vidal ${surname}`,
+    memberChild: `Martín ${surname} Lago`
+  };
+}
+
 /** The fictional future edition the RSVP journeys use. */
 export const FUTURE_YEAR = 2027;
 /** The seeded (past) edition whose public programa the offline journey caches. */

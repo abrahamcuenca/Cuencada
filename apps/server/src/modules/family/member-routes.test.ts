@@ -13,17 +13,28 @@ import {
 import type { App } from "../../app.js";
 import { auditLogs, people, profiles } from "../../db/schema/index.js";
 
-const PERSON_KEYS = ["avatarUrl", "birthYear", "deathYear", "deceased", "familyBranch", "fullName", "id", "nickname", "userId"];
-/** `GET /api/family/people/:id` returns `PersonDetails` (WP-4.0 contract, interim builder in WP-4.3). */
-const DETAILS_KEYS = [
-  ...PERSON_KEYS,
+const PERSON_KEYS = [
+  "avatarUrl",
   "bio",
   "birthDate",
+  "birthYear",
   "birthplace",
+  "deathDate",
+  "deathYear",
+  "deceased",
+  "familyBranch",
+  "fullName",
+  "id",
+  "nickname",
+  "userId"
+];
+const DETAIL_KEYS = [
+  ...PERSON_KEYS,
+  "canAddRelative",
+  "canDelete",
   "canEdit",
   "canEditPhoto",
   "contacts",
-  "deathDate",
   "isLinked",
   "photoSource",
   "photoUrl"
@@ -133,7 +144,7 @@ describe("GET /api/family/people/:id (privacy)", () => {
     const response = await app.inject({ method: "GET", url: `/api/family/people/${id}`, ...auth });
     expect(response.statusCode, response.body).toBe(200);
     const body = response.json<Person>();
-    expect(Object.keys(body).sort()).toEqual(DETAILS_KEYS);
+    expect(Object.keys(body).sort()).toEqual(DETAIL_KEYS);
     return body;
   }
 
@@ -271,8 +282,9 @@ describe("GET /api/family/tree", () => {
     const executeSpy = vi.spyOn(app.db, "execute");
     const tree = await getTree(`?personId=${focus.id}&depth=3`);
     expect(tree.children).toHaveLength(6);
-    // The view issues 1 execute (the walk) + 2 selects (people, edges), independent of the tree size.
-    expect(executeSpy).toHaveBeenCalledTimes(1);
+    // The view issues 2 executes (the walk, the viewer's circle, WP-4.1) + 2 selects (people, edges),
+    // independent of the tree size.
+    expect(executeSpy).toHaveBeenCalledTimes(2);
     expect(selectSpy.mock.calls.length).toBeLessThanOrEqual(3);
   });
 
@@ -300,7 +312,7 @@ describe("GET /api/family/tree", () => {
 
 describe("PATCH /api/family/me", () => {
   for (const url of ["/api/family/me", "/api/family/people/me"]) {
-    it(`edits only nickname, branch and birth year of the caller's own node (${url})`, async () => {
+    it(`edits the caller's own node with the self field set (${url})`, async () => {
       const me = await insertPerson({ fullName: "Yo Mismo", userId: member.id });
       const response = await app.inject({
         method: "PATCH",
@@ -313,7 +325,7 @@ describe("PATCH /api/family/me", () => {
     });
   }
 
-  it("ignores mass-assigned fields (userId, fullName, deceased, id, relationships)", async () => {
+  it("ignores mass-assigned fields (userId, deceased, death data, id, relationships; WP-4.1 allows fullName)", async () => {
     const me = await insertPerson({ fullName: "Yo Mismo", userId: member.id });
     const victim = await insertPerson({ fullName: "Otra Persona" });
     const otherUser = await createUser();
@@ -324,7 +336,6 @@ describe("PATCH /api/family/me", () => {
         nickname: "Nuevo",
         id: victim.id,
         userId: otherUser.id,
-        fullName: "Hackeado",
         deceased: true,
         deathYear: 2000,
         createdByUserId: otherUser.id,
@@ -346,7 +357,7 @@ describe("PATCH /api/family/me", () => {
 
   it("answers 400 when nothing editable is sent, even if forbidden keys are", async () => {
     await insertPerson({ userId: member.id });
-    for (const payload of [{}, { userId: null }, { fullName: "X" }, { birthYear: 1700 }]) {
+    for (const payload of [{}, { userId: null }, { deceased: true }, { fullName: "" }, { birthYear: 1700 }]) {
       const response = await app.inject({ method: "PATCH", url: "/api/family/me", payload, ...memberAuth });
       expect(response.statusCode, JSON.stringify(payload)).toBe(400);
       expect(response.json<ApiError>().error.code).toBe("VALIDATION");

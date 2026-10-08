@@ -146,7 +146,10 @@ describe("FamilyTreePage", { timeout: 15_000 }, () => {
     const grandchildren = screen.getByRole("region", { name: /^Nietos/ });
     expect(within(grandchildren).getAllByRole("button")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Ver menos" })).toHaveAttribute("aria-expanded", "true");
-    expect(db.log.some((entry) => entry.path === "/family/tree" && entry.search.includes("depth=2"))).toBe(true);
+    // WP-4.1: the expanded view asks for four generations (great-great-grandparents).
+    expect(db.log.some((entry) => entry.path === "/family/tree" && entry.search.includes("depth=4"))).toBe(true);
+    // No older ancestors in this fixture: those bands stay out.
+    expect(screen.queryByRole("region", { name: /^Bisabuelos/ })).not.toBeInTheDocument();
   });
 
   it("shows the verify-email state on 403", async () => {
@@ -218,26 +221,33 @@ describe("FamilyTreePage", { timeout: 15_000 }, () => {
     await focusHeading(/^Sara Herrera Navarro/);
   });
 
-  it("offers «Editar mis datos» only on my own node, with only the permitted fields", async () => {
+  it("offers «Editar mis datos» on my own node (canEdit) and sends only the changed fields", async () => {
     const user = userEvent.setup();
     renderApp("/arbol", authenticatedState(me));
 
     await focusHeading(/^José Herrera Navarro/);
-    await user.click(screen.getByRole("button", { name: /Editar mis datos/ }));
+    await user.click(await screen.findByRole("button", { name: /Editar mis datos/ }));
     const dialog = await screen.findByRole("dialog", { name: "Editar mis datos" });
-    expect(within(dialog).getAllByRole("textbox").map(labelOf)).toEqual(["Apodo", "Rama familiar", "Año de nacimiento"]);
+    expect(within(dialog).getAllByRole("textbox").map(labelOf)).toEqual([
+      "Nombre completo",
+      "Apodo",
+      "Rama familiar",
+      "Año de nacimiento",
+      "Lugar de nacimiento",
+      "Biografía"
+    ]);
     expect(within(dialog).getByLabelText(/^Apodo/)).toHaveValue("Pepe");
     expect(within(dialog).getByLabelText(/^Rama familiar/)).toHaveValue("Herrera Navarro");
     expect(within(dialog).getByLabelText(/^Año de nacimiento/)).toHaveValue("1952");
-    expect(within(dialog).queryByLabelText(/Nombre/)).not.toBeInTheDocument();
-    expect(within(dialog).queryByLabelText(/fallec/i)).not.toBeInTheDocument();
+    // Death fields appear only with «Ya falleció».
+    expect(within(dialog).queryByLabelText(/^Año de fallecimiento/)).not.toBeInTheDocument();
 
     await user.clear(within(dialog).getByLabelText(/^Apodo/));
     await user.type(within(dialog).getByLabelText(/^Apodo/), "Jorgito");
     await user.click(within(dialog).getByRole("button", { name: "Guardar" }));
 
     await waitFor(() => expect(db.log.find((entry) => entry.method === "PATCH")?.body).toEqual({ nickname: "Jorgito" }));
-    expect(db.log.find((entry) => entry.method === "PATCH")?.path).toBe("/family/me");
+    expect(db.log.find((entry) => entry.method === "PATCH")?.path).toBe(`/family/people/${IDS.jose}`);
     expect(await screen.findByText("«Jorgito»")).toBeInTheDocument();
   });
 
@@ -281,7 +291,7 @@ describe("FamilyTreePage", { timeout: 15_000 }, () => {
     const user = userEvent.setup();
     renderApp("/arbol", authenticatedState(me));
     await focusHeading(/^José Herrera Navarro/);
-    await user.click(screen.getByRole("button", { name: /Editar mis datos/ }));
+    await user.click(await screen.findByRole("button", { name: /Editar mis datos/ }));
     const dialog = await screen.findByRole("dialog", { name: "Editar mis datos" });
     await user.clear(within(dialog).getByLabelText(/^Año de nacimiento/));
     await user.type(within(dialog).getByLabelText(/^Año de nacimiento/), "1700");

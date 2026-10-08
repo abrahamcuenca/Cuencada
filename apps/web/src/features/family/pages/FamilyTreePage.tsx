@@ -2,15 +2,19 @@ import { type FamilyTreeView, idSchema } from "@cuencada/types";
 import { type ReactNode, Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useAppSelector } from "../../../app/hooks";
-import { getApiErrorCode } from "../../../shared/api/errors";
+import { getApiErrorCode, getApiErrorMessage, isAbortError } from "../../../shared/api/errors";
 import { Button } from "../../../shared/ui/Button";
 import { EmptyState } from "../../../shared/ui/EmptyState";
 import { Skeleton } from "../../../shared/ui/Skeleton";
+import { useToast } from "../../../shared/ui/Toast";
 import { cx } from "../../../shared/ui/cx";
 import { useAccessDenial } from "../../auth/accessDenied";
 import { selectCurrentUser, selectIsAdmin } from "../../auth/authSlice";
 import { AccessDeniedState } from "../../auth/components/AccessDeniedState";
-import { useGetFamilyTreeQuery, useGetPersonQuery } from "../api";
+import { ConfirmDialog } from "../admin/components/ConfirmDialog";
+import { useDeleteFamilyPersonMutation, useGetFamilyTreeQuery, useGetPersonQuery } from "../api";
+import { ADD_RELATIVE_LABELS, type RelativeRole } from "../components/addRelative";
+import { PersonDetailsSection } from "../components/PersonDetailsSection";
 import { PersonSearch } from "../components/PersonSearch";
 import { Breadcrumbs, FocusCard, type OpenPerson, RelativeBand, SiblingStrip } from "../components/TreeParts";
 import styles from "../family.module.css";
@@ -19,17 +23,26 @@ import { type TrailEntry, type TreeLocationState, extendedGenerations, nextTrail
 import { PersonPhotoEditor } from "../photo";
 import { InvitePersonButton } from "../../admin/components/InvitePersonButton";
 
-// Only members editing their own node download the form.
-const SelfEditDialog = lazy(async () => ({
-  default: (await import("../components/SelfEditDialog")).SelfEditDialog
+// The sheets download only when opened.
+const EditPersonDialog = lazy(async () => ({
+  default: (await import("../components/EditPersonDialog")).EditPersonDialog
 }));
+const AddRelativeDialog = lazy(async () => ({
+  default: (await import("../components/AddRelativeDialog")).AddRelativeDialog
+}));
+
+/** Depth of the expanded view: up to great-great-grandparents (WP-4.1). */
+const EXPANDED_DEPTH = 4;
+/** A person has at most two recorded parents (the server enforces it too). */
+const MAX_PARENTS = 2;
 
 /**
  * `/arbol/:personId?` (members): a person-centred family tree. Parents
  * above, partners beside (below on phones), children below, siblings in a
  * scrolling strip; tapping anyone navigates to them, so the URL, Back and
- * the breadcrumb trail all follow. Grandparents and grandchildren load on
- * "Ver más". Without `personId` the caller's own node is the focus.
+ * the breadcrumb trail all follow. "Ver más" loads up to four generations.
+ * Without `personId` the caller's own node is the focus. People who may
+ * edit get "Agregar …" on the bands and "Editar"/"Eliminar" on the card.
  */
 export function FamilyTreePage(): ReactNode {
   const { personId } = useParams();
@@ -41,7 +54,8 @@ export function FamilyTreePage(): ReactNode {
   const [expanded, setExpanded] = useState(false);
   const validId = personId === undefined || idSchema.safeParse(personId).success;
 
-  const tree = useGetFamilyTreeQuery(personId === undefined ? { depth: expanded ? 2 : 1 } : { personId, depth: expanded ? 2 : 1 }, {
+  const depth = expanded ? EXPANDED_DEPTH : 1;
+  const tree = useGetFamilyTreeQuery(personId === undefined ? { depth } : { personId, depth }, {
     skip: !validId
   });
 
@@ -95,12 +109,18 @@ function TreeView({ view, busy, trail, expanded, onToggleExpanded, onOpen }: Tre
   const isAdmin = useAppSelector(selectIsAdmin);
   const reducedMotion = usePrefersReducedMotion();
   const [editing, setEditing] = useState(false);
+  const [adding, setAdding] = useState<RelativeRole | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const shownFocus = useRef<string | null>(null);
   const { focus } = view;
-  // WP-4.3: `PersonDetails.canEditPhoto` decides whether the tree-photo controls show.
-  const details = useGetPersonQuery(focus.id);
-  const photoEditor = details.data?.canEditPhoto === true ? <PersonPhotoEditor person={details.data} /> : null;
+  const cached = useGetPersonQuery(focus.id).currentData;
+  const details = cached?.id === focus.id ? cached : undefined;
+  const [remove, removeState] = useDeleteFamilyPersonMutation();
+  const navigate = useNavigate();
+  const toast = useToast();
+  // WP-4.3: `PersonDetails.canEditPhoto` decides whether the tree-photo controls show (in "Detalles").
+  const photoEditor = details?.canEditPhoto === true ? <PersonPhotoEditor person={details} /> : null;
 
   // After a re-centre (not on first load), move focus to the new person's
   // name so keyboard and screen-reader users land on what changed.
@@ -117,13 +137,43 @@ function TreeView({ view, busy, trail, expanded, onToggleExpanded, onOpen }: Tre
   const isMine = me !== null && (me.personId === focus.id || (focus.userId !== null && focus.userId === me.id));
   const generations = view.depth >= 2 ? extendedGenerations(view) : null;
   const canExpand = view.parents.length > 0 || view.children.length > 0;
+  // UX only: the server re-checks every write (own-family circle, ADR 0001 §6).
+  const canEdit = details?.canEdit === true;
+  const canAdd = isAdmin || details?.canAddRelative === true;
+  const canDelete = details?.canDelete === true;
+  const relatedIds = new Set([focus.id, ...[...view.parents, ...view.partners, ...view.children].map((person) => person.id)]);
+
+  const addButton = (role: RelativeRole): ReactNode =>
+    canAdd && !(role === "parent" && view.parents.length >= MAX_PARENTS) ? (
+      <Button variant="ghost" size="sm" icon="+" onClick={() => setAdding(role)}>
+        {ADD_RELATIVE_LABELS[role]}
+      </Button>
+    ) : null;
+
+  const doDelete = async (): Promise<void> => {
+    try {
+      await remove(focus.id).unwrap();
+      toast.show({ message: `Quitamos a ${focus.fullName} del árbol.`, tone: "success" });
+      setConfirmDelete(false);
+      navigate("/arbol");
+    } catch (error) {
+      setConfirmDelete(false);
+      if (isAbortError(error)) return;
+      toast.show({ message: getApiErrorMessage(error), tone: "danger" });
+    }
+  };
+
   const actions =
-    isMine || isAdmin || photoEditor !== null ? (
+    canEdit || canDelete || isAdmin ? (
       <>
-        {photoEditor}
-        {isMine ? (
+        {canEdit ? (
           <Button variant="secondary" size="sm" icon="✏️" onClick={() => setEditing(true)}>
-            Editar mis datos
+            {isMine ? "Editar mis datos" : "Editar"}
+          </Button>
+        ) : null}
+        {canDelete ? (
+          <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(true)}>
+            Eliminar
           </Button>
         ) : null}
         {isAdmin ? (
@@ -153,6 +203,26 @@ function TreeView({ view, busy, trail, expanded, onToggleExpanded, onOpen }: Tre
         data-motion={reducedMotion ? "reduced" : "full"}
         aria-busy={busy}
       >
+        {expanded && generations !== null && generations.greatGreatGrandparents.length > 0 ? (
+          <RelativeBand
+            title="Tatarabuelos"
+            headingId="arbol-tatarabuelos"
+            people={generations.greatGreatGrandparents}
+            emptyText=""
+            onOpen={onOpen}
+            className={styles.extendedBand}
+          />
+        ) : null}
+        {expanded && generations !== null && generations.greatGrandparents.length > 0 ? (
+          <RelativeBand
+            title="Bisabuelos"
+            headingId="arbol-bisabuelos"
+            people={generations.greatGrandparents}
+            emptyText=""
+            onOpen={onOpen}
+            className={styles.extendedBand}
+          />
+        ) : null}
         {expanded ? (
           generations === null ? (
             <Skeleton shape="block" height="5rem" />
@@ -174,9 +244,15 @@ function TreeView({ view, busy, trail, expanded, onToggleExpanded, onOpen }: Tre
           emptyText="Aún no hay padres registrados."
           connector="up"
           onOpen={onOpen}
+          action={addButton("parent")}
         />
         <div className={styles.focusRow}>
-          <FocusCard person={focus} headingRef={headingRef} actions={actions} />
+          <FocusCard
+            person={focus}
+            headingRef={headingRef}
+            actions={actions}
+            details={details === undefined ? null : <PersonDetailsSection person={details} photoEditor={photoEditor} />}
+          />
           <RelativeBand
             title={view.partners.length === 1 ? "Pareja" : "Parejas"}
             headingId="arbol-parejas"
@@ -184,6 +260,7 @@ function TreeView({ view, busy, trail, expanded, onToggleExpanded, onOpen }: Tre
             emptyText="Aún no hay pareja registrada."
             onOpen={onOpen}
             className={styles.partners}
+            action={addButton("partner")}
           />
         </div>
         <RelativeBand
@@ -193,6 +270,7 @@ function TreeView({ view, busy, trail, expanded, onToggleExpanded, onOpen }: Tre
           emptyText="Aún no hay hijos registrados."
           connector="down"
           onOpen={onOpen}
+          action={addButton("child")}
         />
         {expanded && generations !== null ? (
           <RelativeBand
@@ -206,10 +284,38 @@ function TreeView({ view, busy, trail, expanded, onToggleExpanded, onOpen }: Tre
         ) : null}
         <SiblingStrip people={view.siblings} onOpen={onOpen} headingId="arbol-hermanos" />
       </div>
-      {editing ? (
+      {editing && details !== undefined ? (
         <Suspense fallback={null}>
-          <SelfEditDialog person={focus} open={editing} onClose={() => setEditing(false)} />
+          <EditPersonDialog
+            person={details}
+            open={editing}
+            isAdmin={isAdmin}
+            {...(isMine ? { title: "Editar mis datos" } : {})}
+            onClose={() => setEditing(false)}
+          />
         </Suspense>
+      ) : null}
+      {adding !== null ? (
+        <Suspense fallback={null}>
+          <AddRelativeDialog
+            anchor={{ id: focus.id, fullName: focus.fullName }}
+            role={adding}
+            isAdmin={isAdmin}
+            relatedIds={relatedIds}
+            onClose={() => setAdding(null)}
+          />
+        </Suspense>
+      ) : null}
+      {canDelete ? (
+        <ConfirmDialog
+          open={confirmDelete}
+          title={`¿Quitar a ${focus.fullName} del árbol?`}
+          description="Se quitan también las relaciones que agregaste con esta persona."
+          confirmLabel="Eliminar"
+          busy={removeState.isLoading}
+          onConfirm={() => void doDelete()}
+          onClose={() => setConfirmDelete(false)}
+        />
       ) : null}
     </>
   );

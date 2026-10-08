@@ -10,10 +10,14 @@ import { useGetDirectoryEntryQuery } from "../api";
 import { mailtoHref, telHref, whatsappHref } from "../lib/contactLinks";
 import styles from "../directory.module.css";
 import { DirectoryError } from "./AccessStates";
+import { ContactList } from "./ContactList";
 
 /**
  * One member's card (`GET /directory/:userId`). Shows only the fields the
  * response carries: hidden contact fields are absent, and so are their buttons.
+ * Servers from WP-4.4 send `contacts` (server-built links), listed with
+ * {@link ContactList}; the legacy phone/email buttons remain only for older
+ * responses without it.
  */
 export function DirectoryDetail({ userId }: { userId: string }): ReactNode {
   // [SEC] The route param is untrusted: only a UUID is ever put in the request path.
@@ -56,13 +60,19 @@ function NotFound(): ReactNode {
 /** Under "Llamar" when the number has no country code (so no WhatsApp link). */
 export const NO_COUNTRY_CODE_NOTE = "Este número no tiene código de país, así que no podemos abrirlo en WhatsApp.";
 
+/** Under "Contacto" when the member shows no contact. */
+export const NO_CONTACTS_TEXT = "No comparte datos de contacto.";
+
 function EntryCard({ entry, onImageError }: { entry: DirectoryEntry; onImageError: () => void }): ReactNode {
   const heading = useRef<HTMLHeadingElement>(null);
   const name = entry.fullName || entry.displayName;
-  const phone = entry.phone;
+  const card = entry.contacts;
+  // Legacy fields only when the server sent no card (pre-WP-4.4 responses).
+  const phone = card === undefined ? entry.phone : undefined;
+  const email = card === undefined ? entry.email : undefined;
   const call = phone === undefined ? null : telHref(phone);
   const whatsapp = phone === undefined ? null : whatsappHref(phone);
-  const mail = entry.email === undefined ? null : mailtoHref(entry.email);
+  const mail = email === undefined ? null : mailtoHref(email);
 
   // Move focus to the person when the detail opens (it replaces the list on phones).
   useEffect(() => {
@@ -96,17 +106,26 @@ function EntryCard({ entry, onImageError }: { entry: DirectoryEntry; onImageErro
             <dd translate="no">{phone}</dd>
           </div>
         ) : null}
-        {entry.email !== undefined ? (
+        {email !== undefined ? (
           <div>
             <dt>Correo</dt>
             <dd translate="no" className={styles.email}>
-              {entry.email}
+              {email}
             </dd>
           </div>
         ) : null}
       </dl>
 
       {entry.bio ? <p className={styles.bio}>{entry.bio}</p> : null}
+
+      {card !== undefined ? (
+        <section className={styles.contacts} aria-labelledby={`contacto-${entry.userId}`}>
+          <h3 id={`contacto-${entry.userId}`} className={styles.contactsTitle}>
+            Contacto
+          </h3>
+          <ContactList contacts={card} ownerName={entry.displayName || name} emptyText={NO_CONTACTS_TEXT} />
+        </section>
+      ) : null}
 
       {call !== null || whatsapp !== null || mail !== null ? (
         <div className={styles.actions}>

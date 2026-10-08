@@ -1,4 +1,11 @@
-import type { AvatarConfirmRequest, AvatarUploadRequest, AvatarUploadResponse, OwnProfile, UpdateProfileRequest } from "@cuencada/types";
+import type {
+  AvatarConfirmRequest,
+  AvatarUploadRequest,
+  AvatarUploadResponse,
+  OwnProfile,
+  UpdateContactsRequest,
+  UpdateProfileRequest
+} from "@cuencada/types";
 import { baseApi } from "../../shared/api/baseApi";
 import { refreshCurrentUser } from "../auth/api";
 
@@ -42,6 +49,17 @@ export const profileApi = baseApi.injectEndpoints({
       invalidatesTags: (result) => (result ? directoryTags(result.userId) : [])
     }),
 
+    /** `PATCH /profile/me/contacts` (WP-4.4) with the changed contacts and switches only. */
+    updateContacts: build.mutation<OwnProfile, UpdateContactsRequest>({
+      query: (body) => ({ url: "/profile/me/contacts", method: "PATCH", body }),
+      async onQueryStarted(_patch, { dispatch, queryFulfilled }) {
+        const saved = await queryFulfilled.then(({ data }) => data).catch(() => null);
+        if (saved === null) return; // The Contacto section shows the error.
+        dispatch(profileApi.util.upsertQueryData("getProfile", undefined, saved));
+      },
+      invalidatesTags: (result) => (result ? directoryTags(result.userId) : [])
+    }),
+
     /** `POST /profile/me/avatar/uploads`: the presigned PUT. */
     createAvatarUpload: build.mutation<AvatarUploadResponse, AvatarUploadRequest>({
       query: (body) => ({ url: "/profile/me/avatar/uploads", method: "POST", body })
@@ -73,4 +91,11 @@ export const profileApi = baseApi.injectEndpoints({
   })
 });
 
-export const { useGetProfileQuery, useUpdateProfileMutation, useCreateAvatarUploadMutation, useConfirmAvatarMutation, useDeleteAvatarMutation } = profileApi;
+export const {
+  useGetProfileQuery,
+  useUpdateProfileMutation,
+  useUpdateContactsMutation,
+  useCreateAvatarUploadMutation,
+  useConfirmAvatarMutation,
+  useDeleteAvatarMutation
+} = profileApi;

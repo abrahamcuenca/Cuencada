@@ -31,7 +31,7 @@ import {
   personPhotoObjectKeys,
   resolvePersonPhoto
 } from "./personPhoto.js";
-import { isCloseRelative } from "./photoAccess.js";
+import { loadFamilyCircle } from "./circle.js";
 
 let app: App;
 let storage: FakeStorage;
@@ -326,7 +326,7 @@ describe("who may change a tree photo", () => {
       createdByMember: true,
       createdByUserId: intruder.id
     });
-    expect(await isCloseRelative(getTestDb(), me.personId, target.id)).toBe(false);
+    expect((await loadFamilyCircle(getTestDb(), me.user.id)).close.has(target.id)).toBe(false);
     expect((await intent(me.auth, target.id, 100)).statusCode).toBe(403);
 
     // A member-made edge with a person that member created qualifies.
@@ -338,8 +338,7 @@ describe("who may change a tree photo", () => {
       createdByMember: true,
       createdByUserId: me.user.id
     });
-    expect(await isCloseRelative(getTestDb(), me.personId, added.id)).toBe(true);
-    expect(await isCloseRelative(getTestDb(), added.id, me.personId)).toBe(true);
+    expect((await loadFamilyCircle(getTestDb(), me.user.id)).close.has(added.id)).toBe(true);
     expect((await intent(me.auth, added.id, 100)).statusCode).toBe(201);
   });
 

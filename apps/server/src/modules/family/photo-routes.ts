@@ -33,10 +33,10 @@ import {
 import { and, count, eq, gt, isNull } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import { people, personPhotoUploads, personRevisions } from "../../db/schema/index.js";
-import { recordAudit, type Transaction } from "../../lib/audit.js";
+import { people, personPhotoUploads } from "../../db/schema/index.js";
+import { type DbOrTx, recordAudit, type Transaction } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
-import { authUser } from "../../plugins/auth.js";
+import { type AuthUser, authUser } from "../../plugins/auth.js";
 import { processSquareImage } from "../profile/avatar.js";
 import {
   AVATAR_CONFIRM_GRACE_MS,
@@ -48,15 +48,18 @@ import {
 } from "../profile/constants.js";
 import { rateLimitByUser, t5ErrorResponses } from "../profile/shared.js";
 import { browserUploadHeaders, putWebpDerivatives, readVerifiedUpload } from "../profile/uploadPipeline.js";
-import { buildPersonDetails } from "./personDetails.js";
+import { EMPTY_CIRCLE, loadFamilyCircle } from "./circle.js";
+import { buildPersonDetails } from "./details.js";
 import {
   deletePersonPhotoObjects,
   PERSON_PHOTO_SIZES,
   personPhotoDerivativeKeys,
   personPhotoKeys
 } from "./personPhoto.js";
-import { photoEditDenial } from "./photoAccess.js";
-import { findPerson, type PersonViewRow, type Viewer } from "./repository.js";
+import { loadPhotoEditDenial } from "./photoAccess.js";
+import { lockFamilyTree } from "./relationships.js";
+import { findPerson, type PersonRow, type PersonViewRow } from "./repository.js";
+import { insertRevision } from "./revisions.js";
 
 const PERSON_NOT_FOUND = "No encontramos a esa persona.";
 const NOT_ALLOWED = "No puedes cambiar la foto de esta persona.";
@@ -89,11 +92,13 @@ async function requirePerson(app: FastifyInstance, id: string): Promise<PersonVi
 }
 
 /**
- * 403 unless `viewer` may change `person`'s photo. The detail code
- * (`photoEditDenial`) never tells a non-relative that a person is linked.
+ * 403 unless `user` may change `person`'s photo (WP-4.1's qualifying circle,
+ * `close` set). The detail code (`photoEditDenial`) never tells a
+ * non-relative that a person is linked. Inside a write, call it after the
+ * tree lock.
  */
-async function requirePhotoEditor(app: FastifyInstance, viewer: Viewer, person: PersonViewRow): Promise<void> {
-  const code = await photoEditDenial(app.db, viewer, person);
+async function requirePhotoEditor(db: DbOrTx, user: AuthUser, person: Pick<PersonRow, "id" | "userId">): Promise<void> {
+  const code = await loadPhotoEditDenial(db, user, person);
   if (code === null) return;
   throw new AppError("FORBIDDEN", NOT_ALLOWED, { details: [{ path: "id", message: NOT_ALLOWED, code }] });
 }
@@ -109,10 +114,17 @@ function photoSnapshot(personId: string, photoUpdatedAt: Date | null): PersonRev
   };
 }
 
-/** The person row locked for the photo change (or 404 when it was deleted meanwhile). */
-async function lockPersonPhoto(tx: Transaction, personId: string): Promise<{ photoKey: string | null; photoUpdatedAt: Date | null }> {
+/**
+ * Take WP-4.1's lock order for a photo write (**tree → person**) and return
+ * the locked row (or 404 when it was deleted meanwhile).
+ */
+async function lockPersonPhoto(
+  tx: Transaction,
+  personId: string
+): Promise<{ id: string; userId: string | null; photoKey: string | null; photoUpdatedAt: Date | null }> {
+  await lockFamilyTree(tx);
   const [row] = await tx
-    .select({ photoKey: people.photoKey, photoUpdatedAt: people.photoUpdatedAt })
+    .select({ id: people.id, userId: people.userId, photoKey: people.photoKey, photoUpdatedAt: people.photoUpdatedAt })
     .from(people)
     .where(eq(people.id, personId))
     .for("update");
@@ -120,9 +132,11 @@ async function lockPersonPhoto(tx: Transaction, personId: string): Promise<{ pho
   return row;
 }
 
-/** Re-read and build the response after a change. */
-async function detailsFor(app: FastifyInstance, personId: string, viewer: Viewer): Promise<PersonDetails> {
-  return buildPersonDetails(app, await requirePerson(app, personId), viewer);
+/** Re-read and build the response (WP-4.1's builder, with the caller's circle). */
+async function detailsFor(app: FastifyInstance, personId: string, user: AuthUser): Promise<PersonDetails> {
+  const row = await requirePerson(app, personId);
+  const circle = user.role === "admin" ? EMPTY_CIRCLE : await loadFamilyCircle(app.db, user.id);
+  return buildPersonDetails(app, row, { id: user.id, role: user.role, circle: circle.ids }, circle);
 }
 
 /**
@@ -182,7 +196,7 @@ const personPhotoRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       const viewer = authUser(request);
       const person = await requirePerson(app, request.params.id);
-      await requirePhotoEditor(app, viewer, person);
+      await requirePhotoEditor(app.db, viewer, person);
       const { mimeType, byteSize } = request.body;
       const now = app.clock.now();
 
@@ -265,8 +279,9 @@ const personPhotoRoutes: FastifyPluginAsyncZod = async (app) => {
         .limit(1);
       if (upload === undefined) throw new AppError("NOT_FOUND", UPLOAD_NOT_FOUND);
       const person = await requirePerson(app, personId);
-      if (upload.confirmedAt !== null) return buildPersonDetails(app, person, viewer);
-      await requirePhotoEditor(app, viewer, person);
+      if (upload.confirmedAt !== null) return detailsFor(app, personId, viewer);
+      // Early check (before the decode); repeated under the tree lock below.
+      await requirePhotoEditor(app.db, viewer, person);
 
       const now = app.clock.now();
       if (now.getTime() > upload.expiresAt.getTime() + AVATAR_CONFIRM_GRACE_MS) {
@@ -295,22 +310,23 @@ const personPhotoRoutes: FastifyPluginAsyncZod = async (app) => {
       ]);
 
       const outcome = await app.db.transaction(async (tx) => {
+        const current = await lockPersonPhoto(tx, personId);
+        await requirePhotoEditor(tx, viewer, current);
         const claimed = await tx
           .update(personPhotoUploads)
           .set({ confirmedAt: app.clock.now() })
           .where(and(eq(personPhotoUploads.id, upload.id), isNull(personPhotoUploads.confirmedAt)))
           .returning({ id: personPhotoUploads.id });
         if (claimed.length === 0) return { kind: "lost" as const };
-        const current = await lockPersonPhoto(tx, personId);
         const changedAt = app.clock.now();
         await tx
           .update(people)
           .set({ photoKey: keys.large, photoUpdatedAt: changedAt, updatedByUserId: viewer.id, updatedAt: changedAt })
           .where(eq(people.id, personId));
-        await tx.insert(personRevisions).values({
+        await insertRevision(tx, {
+          action: PersonRevisionAction.PersonPhoto,
           personId,
           actorUserId: viewer.id,
-          action: PersonRevisionAction.PersonPhoto,
           before: photoSnapshot(personId, current.photoKey === null ? null : current.photoUpdatedAt),
           after: photoSnapshot(personId, changedAt)
         });
@@ -359,19 +375,20 @@ const personPhotoRoutes: FastifyPluginAsyncZod = async (app) => {
       const viewer = authUser(request);
       const personId = request.params.id;
       const person = await requirePerson(app, personId);
-      await requirePhotoEditor(app, viewer, person);
+      await requirePhotoEditor(app.db, viewer, person);
       const previousKey = await app.db.transaction(async (tx) => {
         const current = await lockPersonPhoto(tx, personId);
+        await requirePhotoEditor(tx, viewer, current);
         if (current.photoKey === null) return null;
         const changedAt = app.clock.now();
         await tx
           .update(people)
           .set({ photoKey: null, photoUpdatedAt: null, updatedByUserId: viewer.id, updatedAt: changedAt })
           .where(eq(people.id, personId));
-        await tx.insert(personRevisions).values({
+        await insertRevision(tx, {
+          action: PersonRevisionAction.PersonPhoto,
           personId,
           actorUserId: viewer.id,
-          action: PersonRevisionAction.PersonPhoto,
           before: photoSnapshot(personId, current.photoUpdatedAt),
           after: photoSnapshot(personId, null)
         });
