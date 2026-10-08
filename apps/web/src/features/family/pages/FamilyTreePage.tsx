@@ -22,6 +22,7 @@ import { useCachedPersonNames, usePrefersReducedMotion } from "../lib/hooks";
 import { type TrailEntry, type TreeLocationState, extendedGenerations, nextTrail, readTrail, resolveTrail } from "../lib/tree";
 import { PersonPhotoEditor } from "../photo";
 import { InvitePersonButton } from "../../admin/components/InvitePersonButton";
+import { PROFILE_CONTACT_PATH } from "../../profile/paths";
 
 // The sheets download only when opened.
 const EditPersonDialog = lazy(async () => ({
@@ -164,11 +165,17 @@ function TreeView({ view, busy, trail, expanded, onToggleExpanded, onOpen }: Tre
   };
 
   const actions =
-    canEdit || canDelete || isAdmin ? (
+    canEdit || canDelete || isAdmin || isMine ? (
       <>
         {canEdit ? (
           <Button variant="secondary" size="sm" icon="✏️" onClick={() => setEditing(true)}>
             {isMine ? "Editar mis datos" : "Editar"}
+          </Button>
+        ) : null}
+        {/* WP-4.7: phone, WhatsApp and networks are edited in the profile, not in the tree. */}
+        {isMine ? (
+          <Button variant="secondary" size="sm" icon="📇" to={PROFILE_CONTACT_PATH}>
+            Editar mi contacto
           </Button>
         ) : null}
         {canDelete ? (

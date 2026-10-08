@@ -119,6 +119,11 @@
   min-width: 0;
 }
 
+/* WP-4.7: /perfil#contacto lands below the sticky TopNav. */
+.contactForm {
+  scroll-margin-top: calc(var(--top-nav-height) + var(--safe-top, 0px) + var(--space-4));
+}
+
 .sectionTitle {
   margin: var(--space-2) 0 0;
   font-family: var(--font-display);

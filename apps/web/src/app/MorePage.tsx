@@ -5,6 +5,7 @@ import { logout } from "../features/auth/session";
 import { InstallAppCard } from "../features/pwa";
 import { reportUnexpected } from "../shared/lib/reportUnexpected";
 import { Button } from "../shared/ui/Button";
+import { PROFILE_CONTACT_PATH } from "../features/profile/paths";
 import { useAppDispatch, useAppSelector } from "./hooks";
 import styles from "./more.module.css";
 
@@ -18,6 +19,8 @@ const MEMBER_LINKS: readonly MoreLink[] = [
   { to: "/directorio", label: "Directorio", icon: "🧭" },
   { to: "/arbol", label: "Árbol familiar", icon: "🌳" },
   { to: "/perfil", label: "Mi perfil", icon: "🙂" },
+  // WP-4.7: straight to the contact fields (phone, WhatsApp, networks), the owner's most-asked edit.
+  { to: PROFILE_CONTACT_PATH, label: "Contacto", icon: "📇" },
   { to: "/perfil/sesiones", label: "Sesiones y seguridad", icon: "🔐" }
 ];
 
@@ -29,7 +32,7 @@ const ADMIN_LINK: MoreLink = { to: "/admin", label: "Panel de administración", 
 /**
  * `/mas`: the mobile "Más" tab. Large tappable rows for destinations that
  * don't fit in the bottom bar, plus "Cerrar sesión". At ≥900px the TopNav
- * shows these links directly.
+ * shows these links directly and the account menu the profile ones.
  *
  * The Admin row is a UX hint only; the server enforces the role.
  */

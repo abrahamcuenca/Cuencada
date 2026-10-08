@@ -19,6 +19,7 @@ import {
   selectSessionAudience,
 } from "../../auth/authSlice";
 import { GalleryPreview } from "../../gallery/components/GalleryPreview";
+import { CompleteProfileCard } from "../../profile/components/CompleteProfileCard";
 import {
   useGetCuencadaHomeQuery,
   useListCuencadasQuery,
@@ -98,6 +99,7 @@ export function HomePage(): ReactNode {
         {home.error !== undefined ? (
           <OfflineNotice onRetry={() => void home.refetch()} />
         ) : null}
+        <CompleteProfileCard />
       </div>
       {featured ? (
         <TodayMessage

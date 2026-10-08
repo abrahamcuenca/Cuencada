@@ -5,7 +5,10 @@ import { AvatarCircle } from "../../../shared/ui/AvatarCircle";
 import { Button } from "../../../shared/ui/Button";
 import { EmptyState } from "../../../shared/ui/EmptyState";
 import { Skeleton } from "../../../shared/ui/Skeleton";
+import { useAppSelector } from "../../../app/hooks";
+import { selectCurrentUser } from "../../auth/authSlice";
 import { useExpiredUrlRefetch } from "../../gallery";
+import { PROFILE_PATH } from "../../profile/paths";
 import { useGetDirectoryEntryQuery } from "../api";
 import { mailtoHref, telHref, whatsappHref } from "../lib/contactLinks";
 import styles from "../directory.module.css";
@@ -65,6 +68,8 @@ export const NO_CONTACTS_TEXT = "No comparte datos de contacto.";
 
 function EntryCard({ entry, onImageError }: { entry: DirectoryEntry; onImageError: () => void }): ReactNode {
   const heading = useRef<HTMLHeadingElement>(null);
+  // WP-4.7: the member's own card links to where it is edited. UX only: /perfil edits the caller, whatever this says.
+  const isOwn = useAppSelector(selectCurrentUser)?.id === entry.userId;
   const name = entry.fullName || entry.displayName;
   const card = entry.contacts;
   // Legacy fields only when the server sent no card (pre-WP-4.4 responses).
@@ -146,6 +151,12 @@ function EntryCard({ entry, onImageError }: { entry: DirectoryEntry; onImageErro
             </Button>
           ) : null}
         </div>
+      ) : null}
+
+      {isOwn ? (
+        <Button variant="secondary" to={PROFILE_PATH} icon="✏️" fullWidth>
+          Editar mi perfil
+        </Button>
       ) : null}
 
       {entry.personId !== null ? (

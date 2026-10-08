@@ -13,6 +13,8 @@ export interface DirectoryListProps {
   entries: readonly DirectoryEntry[];
   /** The member open in the detail, highlighted in the list. */
   selectedId: string | undefined;
+  /** The logged-in member: their row says "(tú)" (WP-4.7). */
+  ownUserId: string | undefined;
   hasMore: boolean;
   loadingMore: boolean;
   onLoadMore: () => void;
@@ -25,7 +27,7 @@ export interface DirectoryListProps {
  * viewport, with a "Cargar más" button as the fallback (keyboard and
  * screen-reader users, browsers without IntersectionObserver).
  */
-export function DirectoryList({ entries, selectedId, hasMore, loadingMore, onLoadMore }: DirectoryListProps): ReactNode {
+export function DirectoryList({ entries, selectedId, ownUserId, hasMore, loadingMore, onLoadMore }: DirectoryListProps): ReactNode {
   const sentinel = useRef<HTMLDivElement>(null);
   const loadMore = useRef(onLoadMore);
   loadMore.current = onLoadMore;
@@ -48,7 +50,7 @@ export function DirectoryList({ entries, selectedId, hasMore, loadingMore, onLoa
       <ul className={styles.list} aria-label="Familiares">
         {entries.map((entry) => (
           <li key={entry.userId}>
-            <EntryRow entry={entry} selected={entry.userId === selectedId} />
+            <EntryRow entry={entry} selected={entry.userId === selectedId} isOwn={entry.userId === ownUserId} />
           </li>
         ))}
       </ul>
@@ -63,7 +65,7 @@ export function DirectoryList({ entries, selectedId, hasMore, loadingMore, onLoa
   );
 }
 
-function EntryRow({ entry, selected }: { entry: DirectoryEntry; selected: boolean }): ReactNode {
+function EntryRow({ entry, selected, isOwn }: { entry: DirectoryEntry; selected: boolean; isOwn: boolean }): ReactNode {
   const name = entry.fullName || entry.displayName;
   const meta = [entry.city, entry.familyBranch].filter((part): part is string => typeof part === "string" && part !== "").join(" · ");
   const contacts = entry.contacts ?? [];
@@ -72,7 +74,10 @@ function EntryRow({ entry, selected }: { entry: DirectoryEntry; selected: boolea
       <Link to={`/directorio/${entry.userId}`} className={styles.row} aria-current={selected ? "true" : undefined}>
         <AvatarCircle name={name} src={entry.avatarUrl ?? undefined} size="md" decorative />
         <span className={styles.rowText}>
-          <span className={styles.rowName}>{name}</span>
+          <span className={styles.rowName}>
+            {name}
+            {isOwn ? <span className={styles.youTag}> (tú)</span> : null}
+          </span>
           {meta !== "" ? <span className={styles.rowMeta}>{meta}</span> : null}
         </span>
         <span aria-hidden="true" className={styles.chevron}>

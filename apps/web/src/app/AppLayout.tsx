@@ -3,11 +3,11 @@ import { Link, Outlet, useLocation, useMatches } from "react-router-dom";
 import {
   type SessionAudience,
   selectIsOffline,
+  selectCurrentUser,
   selectLogoutPending,
   selectSessionAudience,
   type WithAuthState
 } from "../features/auth/authSlice";
-import { logout } from "../features/auth/session";
 import { type ChatUnreadBadge, useChatUnreadBadge } from "../features/chat/unread";
 import { useGetCuencadaHomeQuery } from "../features/cuencadas/api";
 import { programaYear } from "../features/cuencadas/lib/programa";
@@ -20,7 +20,8 @@ import { Button } from "../shared/ui/Button";
 import { type NavItem, renderRouterLink } from "../shared/ui/nav";
 import { PageShell } from "../shared/ui/PageShell";
 import { TopNav } from "../shared/ui/TopNav";
-import { useAppDispatch, useAppSelector } from "./hooks";
+import { AccountMenu } from "./AccountMenu";
+import { useAppSelector } from "./hooks";
 import styles from "./layout.module.css";
 
 /** "Programa" before the home query answers (or when there is no edition yet). */
@@ -29,8 +30,6 @@ export const PROGRAMA_FALLBACK_PATH = "/";
 export const MORE_PATH = "/mas";
 /** Login page, the anonymous "Entrar" tab and button. */
 export const LOGIN_NAV_PATH = "/entrar";
-/** Visible label of the admin console link (TopNav). */
-export const ADMIN_NAV_LABEL = "Panel";
 
 /** Shown while the server has not confirmed a logout. */
 export const LOGOUT_PENDING_NOTICE =
@@ -98,7 +97,8 @@ export function bottomNavItems(audience: SessionAudience, programaPath: string, 
 /**
  * TopNav (≥900px) destinations for who is looking. The brand links home for
  * members; anonymous visitors also get an explicit "Inicio" next to "Programa".
- * The admin link ("Panel") is a UX hint only; the server enforces the role.
+ * Admins get the same links: "Panel" lives in the account menu (WP-4.7), so
+ * the bar keeps room for the avatar and name at 900px.
  *
  * @param audience - From `selectSessionAudience`.
  * @param programaPath - `/cuencada/{year}` of the current or latest edition.
@@ -113,16 +113,14 @@ export function topNavItems(audience: SessionAudience, programaPath: string, cha
     case "anonymous":
       return [{ key: "inicio", label: "Inicio", href: "/", end: true }, programa];
     case "member":
-    case "admin": {
-      const items: NavItem[] = [
+    case "admin":
+      return [
         programa,
         { key: "galeria", label: "Galería", href: "/galeria" },
         { key: "directorio", label: "Directorio", href: "/directorio" },
         { key: "arbol", label: "Árbol", href: "/arbol" },
         { key: "chat", label: "Chat", href: "/chat", ...chatBadgeProps(chatBadge) }
       ];
-      return audience === "admin" ? [...items, { key: "admin", label: ADMIN_NAV_LABEL, href: "/admin" }] : items;
-    }
   }
 }
 
@@ -149,12 +147,12 @@ function Brand(): ReactNode {
 }
 
 function SessionAction({ audience }: { audience: SessionAudience }): ReactNode {
-  const dispatch = useAppDispatch();
   const { pathname } = useLocation();
+  const user = useAppSelector(selectCurrentUser);
 
-  // Session still restoring: neither "Entrar" nor "Salir" yet (no flash of the wrong one).
+  // Session still restoring: neither "Entrar" nor the account menu yet (no flash of the wrong one).
   if (audience === "pending") return null;
-  if (audience === "anonymous") {
+  if (audience === "anonymous" || user === null) {
     // Already on the login screens: an "Entrar" button there is noise.
     if (pathname === LOGIN_NAV_PATH || pathname.startsWith(`${LOGIN_NAV_PATH}/`)) return null;
     return (
@@ -163,17 +161,7 @@ function SessionAction({ audience }: { audience: SessionAudience }): ReactNode {
       </Button>
     );
   }
-  return (
-    <Button
-      variant="secondary"
-      size="sm"
-      onClick={() => {
-        void dispatch(logout());
-      }}
-    >
-      Salir
-    </Button>
-  );
+  return <AccountMenu user={user} />;
 }
 
 function StatusBanner(): ReactNode {
@@ -191,13 +179,13 @@ function selectNeedsEmailVerification(state: WithAuthState): boolean {
 
 /**
  * App shell built on the WP-0.7 primitives: `TopNav` (brand, links at
- * ≥900px, Entrar/Salir), the routed page inside `PageShell`'s `<main>`, and
+ * ≥900px, "Entrar" or the {@link AccountMenu}), the routed page inside `PageShell`'s `<main>`, and
  * the mobile `BottomNav`.
  *
  * The destinations depend on the session ({@link topNavItems},
  * {@link bottomNavItems}): public ones while it restores, plus "Entrar" for
  * anonymous visitors, the member destinations once logged in, and "Panel"
- * for admins. That is a UX hint, not access control; the server enforces
+ * (in the account menu) for admins. That is a UX hint, not access control; the server enforces
  * authentication and the role.
  */
 export function AppLayout(): ReactNode {
