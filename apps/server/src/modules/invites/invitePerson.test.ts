@@ -423,6 +423,54 @@ describe("POST /api/invites/accept with a person", () => {
       });
     });
 
+    it("a merge that moves the invite to the kept person while the accept waits: the accept links the kept person (WP-4.6)", async () => {
+      const { app: instance } = await setup();
+      const duplicate = await insertPerson({ fullName: "Ana Ejemplo" });
+      const keep = await insertPerson({ fullName: "Ana Ejemplo Ruiz" });
+      const token = await insertBoundInvite(duplicate.id, "ana@example.test");
+
+      // What "Fusionar personas" does to a pending invite of the removed duplicate (WP-4.5):
+      // re-point it to the kept person, then delete the duplicate.
+      const response = await acceptDuring(instance, duplicate.id, token, "ana@example.test", async (tx) => {
+        await tx.update(invites).set({ personId: keep.id }).where(eq(invites.personId, duplicate.id));
+        await tx.delete(people).where(eq(people.id, duplicate.id));
+      });
+
+      expect(response.statusCode).toBe(201);
+      const userId = response.json<{ user: { id: string } }>().user.id;
+      expect(await peopleOf(userId)).toEqual([keep.id]);
+      expect(await acceptAudit("ana@example.test")).toMatchObject({ personLink: "linked", personId: keep.id });
+      const [invite] = await getTestDb().select().from(invites).where(eq(invites.tokenHash, hashToken(token)));
+      expect(invite?.useCount).toBe(1);
+      expect(await getTestDb().select().from(users).where(eq(users.email, "ana@example.test"))).toHaveLength(1);
+    });
+
+    it("retries a moved invite only once, and still re-checks the kept person (linked meanwhile: fallback)", async () => {
+      const { app: instance } = await setup();
+      const duplicate = await insertPerson({ fullName: "Ana Ejemplo" });
+      const keep = await insertPerson({ fullName: "Ana Ejemplo Ruiz" });
+      const token = await insertBoundInvite(duplicate.id, "ana@example.test");
+      const other = await createUser();
+
+      const response = await acceptDuring(instance, duplicate.id, token, "ana@example.test", async (tx) => {
+        await tx.update(invites).set({ personId: keep.id }).where(eq(invites.personId, duplicate.id));
+        await tx.delete(people).where(eq(people.id, duplicate.id));
+        await tx.update(people).set({ userId: other.id }).where(eq(people.id, keep.id));
+      });
+
+      expect(response.statusCode).toBe(201);
+      expect(await peopleOf(other.id)).toEqual([keep.id]);
+      const userId = response.json<{ user: { id: string } }>().user.id;
+      const own = await peopleOf(userId);
+      expect(own).toHaveLength(1);
+      expect(own).not.toContain(keep.id);
+      expect(await acceptAudit("ana@example.test")).toMatchObject({
+        personLink: "fallback",
+        requestedPersonId: keep.id,
+        personFallbackReason: "linked"
+      });
+    });
+
     it("a death recorded while the accept waits is honoured", async () => {
       const { app: instance } = await setup();
       const ana = await insertPerson({ fullName: "Ana Ejemplo" });
