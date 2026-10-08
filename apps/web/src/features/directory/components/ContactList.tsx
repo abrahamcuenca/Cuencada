@@ -1,6 +1,7 @@
 import { type ContactItem, contactItemSchema } from "@cuencada/types";
 import type { ReactNode } from "react";
 import { cx } from "../../../shared/ui/cx";
+import { formatPhoneDisplay } from "../lib/phoneDisplay";
 import { ContactIcon } from "./ContactIcon";
 import styles from "./ContactList.module.css";
 
@@ -11,7 +12,8 @@ export const CONTACT_LINK_REL = "noopener noreferrer nofollow";
 export interface ContactListProps {
   /**
    * The server-built card (`DirectoryEntry.contacts`, `PersonDetails.contacts`).
-   * Rendered in the order given; `href`, `label` and `display` are used as-is.
+   * Rendered in the order given; `href` and `label` are used as-is, and so is
+   * `display`, except that phone/WhatsApp numbers are grouped for reading.
    */
   contacts: readonly ContactItem[];
   /**
@@ -59,6 +61,8 @@ export function ContactList({ contacts, variant = "list", ownerName, emptyText =
 
 function ContactLink({ item, variant, ownerName }: { item: ContactItem; variant: "list" | "chips"; ownerName: string | undefined }): ReactNode {
   const external = item.href.startsWith("https://");
+  // Phones are E.164 from the server; group the digits for reading (the href is untouched).
+  const display = item.kind === "phone" || item.kind === "whatsapp" ? formatPhoneDisplay(item.display) : item.display;
   const linkProps = external ? { target: "_blank", rel: CONTACT_LINK_REL } : {};
   const newTab = external ? " (se abre en otra pestaña)" : "";
 
@@ -69,8 +73,8 @@ function ContactLink({ item, variant, ownerName }: { item: ContactItem; variant:
         href={item.href}
         {...linkProps}
         className={cx(styles.chip, styles[item.kind])}
-        aria-label={`${item.label}${owner}: ${item.display}${newTab}`}
-        title={`${item.label}: ${item.display}`}
+        aria-label={`${item.label}${owner}: ${display}${newTab}`}
+        title={`${item.label}: ${display}`}
       >
         <ContactIcon kind={item.kind} className={styles.chipIcon} />
       </a>
@@ -85,7 +89,7 @@ function ContactLink({ item, variant, ownerName }: { item: ContactItem; variant:
       <span className={styles.text}>
         <span className={styles.label}>{item.label}</span>
         <span className={styles.display} translate="no">
-          {item.display}
+          {display}
         </span>
       </span>
       {external ? (

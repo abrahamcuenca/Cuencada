@@ -1,7 +1,7 @@
 import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CONTACT_HANDLE_RULES, type HandleNetwork, PersonRevisionAction, isE164, isValidHandle } from "@cuencada/types";
+import { CONTACT_HANDLE_RULES, E164_PATTERN, type HandleNetwork, PersonRevisionAction, isE164, isValidHandle } from "@cuencada/types";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
@@ -15,7 +15,8 @@ import { migrationsFolder } from "./migrate.js";
  * filled with seed-era rows, then migrated to the latest version. Migration
  * 0002: the same database is first taken 0000 → 0001, filled with rows in the
  * 0001 shape, then migrated to the latest version. Migration 0003: likewise
- * from 0002, and migration 0004 from 0003. The scratch database uses a
+ * from 0002, migration 0004 from 0003, and migration 0005 (data only) from
+ * 0004. The scratch database uses a
  * harness-style name so the global teardown also reclaims it.
  */
 
@@ -34,6 +35,7 @@ let partialFolder: string;
 let upTo0001Folder: string;
 let upTo0002Folder: string;
 let upTo0003Folder: string;
+let upTo0004Folder: string;
 /** Number of migrations in the real journal (the "latest" version). */
 let latestCount: number;
 
@@ -78,6 +80,7 @@ beforeAll(async () => {
   upTo0001Folder = await migrationsUpTo(2);
   upTo0002Folder = await migrationsUpTo(3);
   upTo0003Folder = await migrationsUpTo(4);
+  upTo0004Folder = await migrationsUpTo(5);
   const journal = JSON.parse(await readFile(join(migrationsFolder, "meta", "_journal.json"), "utf8")) as Journal; // drizzle-kit's own file shape
   latestCount = journal.entries.length;
 });
@@ -102,6 +105,7 @@ afterAll(async () => {
   if (upTo0001Folder) await rm(upTo0001Folder, { recursive: true, force: true });
   if (upTo0002Folder) await rm(upTo0002Folder, { recursive: true, force: true });
   if (upTo0003Folder) await rm(upTo0003Folder, { recursive: true, force: true });
+  if (upTo0004Folder) await rm(upTo0004Folder, { recursive: true, force: true });
   await dropScratch();
 });
 
@@ -723,5 +727,90 @@ describe("migration 0004", () => {
     expect(await sql`select obj_description('person_revisions'::regclass, 'pg_class') like '%PII%' as commented`).toEqual([
       { commented: true }
     ]);
+  });
+});
+
+describe("migration 0005 (WhatsApp carry-over, data only)", () => {
+  /** One user + profile in the 0004 shape; returns the user id. */
+  async function member(
+    email: string,
+    profile: { phone: string | null; showPhone: boolean; whatsapp?: string; visibility?: Record<string, boolean> }
+  ): Promise<string> {
+    const userId = await insertId(sql`insert into users (email, display_name) values (${email}, 'Prima') returning id`);
+    await sql`
+      insert into profiles (user_id, full_name, phone, show_phone, whatsapp, contact_visibility)
+      values (${userId}, ${email}, ${profile.phone}, ${profile.showPhone}, ${profile.whatsapp ?? null}, ${JSON.stringify(profile.visibility ?? {})}::jsonb)
+    `;
+    return userId;
+  }
+
+  const contactsOf = async (userId: string): Promise<unknown> =>
+    (await sql`select phone, show_phone, whatsapp, contact_visibility from profiles where user_id = ${userId}`)[0];
+
+  it("uses the same E.164 pattern as the WhatsApp CHECK", async () => {
+    const file = await readFile(join(migrationsFolder, "0005_whatsapp_carryover.sql"), "utf8");
+    expect(file).toContain(`'${E164_PATTERN}'`);
+  });
+
+  it("copies E.164 phones to WhatsApp with the phone's visibility, leaves everything else alone, and is idempotent", async () => {
+    await migrate(drizzle(sql), { migrationsFolder: upTo0004Folder });
+
+    const shown = await member("shown@example.test", { phone: "+525550100101", showPhone: true });
+    const hidden = await member("hidden@example.test", { phone: "+525550100102", showPhone: false });
+    const legacy = await member("legacy@example.test", { phone: "55 5010 0103", showPhone: true });
+    const noPhone = await member("nophone@example.test", { phone: null, showPhone: true });
+    const ownWhatsapp = await member("own@example.test", {
+      phone: "+525550100104",
+      showPhone: true,
+      whatsapp: "+12025550199",
+      visibility: { whatsapp: false }
+    });
+    const keptKey = await member("kept@example.test", {
+      phone: "+525550100105",
+      showPhone: true,
+      visibility: { whatsapp: false, instagram: true }
+    });
+    const before = {
+      legacy: await contactsOf(legacy),
+      noPhone: await contactsOf(noPhone),
+      ownWhatsapp: await contactsOf(ownWhatsapp)
+    };
+
+    await migrate(drizzle(sql), { migrationsFolder });
+    expect(await sql`select count(*)::int as count from drizzle.__drizzle_migrations`).toEqual([{ count: latestCount }]);
+
+    // E.164 + shown → WhatsApp copied and shown.
+    expect(await contactsOf(shown)).toEqual({
+      phone: "+525550100101",
+      show_phone: true,
+      whatsapp: "+525550100101",
+      contact_visibility: { whatsapp: true }
+    });
+    // E.164 + hidden → copied but hidden.
+    expect(await contactsOf(hidden)).toEqual({
+      phone: "+525550100102",
+      show_phone: false,
+      whatsapp: "+525550100102",
+      contact_visibility: { whatsapp: false }
+    });
+    // Legacy phone, no phone and an existing WhatsApp: untouched.
+    expect(await contactsOf(legacy)).toEqual(before.legacy);
+    expect(await contactsOf(noPhone)).toEqual(before.noPhone);
+    expect(await contactsOf(ownWhatsapp)).toEqual(before.ownWhatsapp);
+    // An explicit visibility choice is preserved (the number is still carried over).
+    expect(await contactsOf(keptKey)).toEqual({
+      phone: "+525550100105",
+      show_phone: true,
+      whatsapp: "+525550100105",
+      contact_visibility: { whatsapp: false, instagram: true }
+    });
+
+    // Re-running the statement changes nothing.
+    const all = "select user_id, phone, show_phone, whatsapp, contact_visibility, updated_at from profiles order by user_id";
+    const once = await sql.unsafe(all);
+    const statement = await readFile(join(migrationsFolder, "0005_whatsapp_carryover.sql"), "utf8");
+    const result = await sql.unsafe(statement);
+    expect(result.count).toBe(0);
+    expect(await sql.unsafe(all)).toEqual(once);
   });
 });

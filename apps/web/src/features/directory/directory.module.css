@@ -129,11 +129,25 @@ a.row:hover {
 
 .rowSelected {
   background: var(--color-primary-soft);
-  box-shadow: inset 4px 0 0 var(--color-primary);
+}
+
+/*
+ * The selected member's accent spans the card link and the chip row. It is a
+ * positioned pseudo-element (not an inset shadow on the wrapper), so the
+ * hovered link's background can't paint over it.
+ */
+.rowSelected::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--color-primary);
+  pointer-events: none;
 }
 
 /* One member: the card link plus, under it, the contact chips (WP-4.4). */
 .entry {
+  position: relative;
   display: flex;
   flex-direction: column;
 }

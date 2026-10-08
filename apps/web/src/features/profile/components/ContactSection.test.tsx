@@ -44,6 +44,7 @@ describe("ContactSection", () => {
     expect(within(form).getByRole("checkbox", { name: "Usar mi teléfono" })).toBeChecked();
     expect(within(form).getByLabelText(/^Instagram/)).toHaveAccessibleDescription(/Solo tu usuario/);
     expect(within(form).getByText("prima@example.com")).toBeInTheDocument();
+    expect(within(form).getByText(/todos los familiares con cuenta verificada/)).toBeInTheDocument();
     expect(within(form).getByRole("button", { name: "Guardar contacto" })).toBeDisabled();
   });
 

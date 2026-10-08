@@ -134,8 +134,8 @@ export function ContactSection({ profile }: ContactSectionProps): ReactNode {
         Contacto
       </h2>
       <p className={styles.sectionHint}>
-        Solo la familia con sesión iniciada ve lo que actives. Todo empieza oculto: enciende "Mostrar a la familia" en cada dato que quieras
-        compartir.
+        Lo que actives lo podrán ver todos los familiares con cuenta verificada, en el directorio y en el árbol. Nadie más lo ve. Todo empieza
+        oculto: enciende "Mostrar a la familia" en cada dato que quieras compartir.
       </p>
 
       {profile.phoneNeedsConfirmation === true ? (
