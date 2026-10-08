@@ -63,6 +63,7 @@ const ADMIN_ROUTES: RouteCheck[] = [
   { name: "admin-invitaciones", open: "/admin/invitaciones" },
   { name: "admin-usuarios", open: "/admin/usuarios" },
   { name: "admin-familia", open: "/admin/familia" },
+  { name: "admin-actividad", open: "/admin/familia/actividad", ready: "Actividad del árbol" },
   { name: "admin-cuencadas", open: "/admin/cuencadas" }
 ];
 

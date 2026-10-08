@@ -2,51 +2,72 @@
  * Member family-tree routes under `/api/family`. Every route needs a
  * logged-in member with a **verified email** (`requireVerifiedEmail`):
  * tree data is PII. Response schemas strip anything outside the contract.
+ *
+ * Writes (WP-4.1, ADR 0001 §6): members add new relatives attached to their
+ * qualifying own-family circle, edit people in it, and delete only their own
+ * unlinked additions. There are **no** member relationship routes. Every
+ * write takes the tree lock, recomputes the circle inside the transaction,
+ * writes a revision and an audit row, and is rate limited per user.
  */
 import {
-  AuditAction,
-  AuditEntityType,
   apiErrorSchema,
+  type FamilyIssueCode,
+  FamilyIssueCode as Issue,
   familyTreeQuerySchema,
   familyTreeViewSchema,
   idParamSchema,
+  LINKED_PERSON_ADMIN_ONLY_FIELDS,
+  type MemberUpdatePersonInput,
+  memberCreatePersonInputSchema,
+  memberUpdatePersonInputSchema,
   type Page,
   type Person,
+  type PersonDetails,
   type PersonSummary,
   pageSchema,
   peopleQuerySchema,
+  personDetailsSchema,
   personSchema,
   personSummarySchema,
   type SelfEditPersonInput,
   selfEditPersonInputSchema
 } from "@cuencada/types";
-import { and, eq, ilike, or, type SQL, sql } from "drizzle-orm";
+import { and, ilike, or, type SQL, sql } from "drizzle-orm";
+import type { FastifyInstance, RouteShorthandOptions } from "fastify";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import type { RouteShorthandOptions } from "fastify";
 import { z } from "zod";
 import { people } from "../../db/schema/index.js";
-import { recordAudit, type Transaction } from "../../lib/audit.js";
-import { AppError } from "../../lib/errors.js";
-import { rateLimitByIp } from "../../lib/rateLimit.js";
-import { authUser } from "../../plugins/auth.js";
-import { PgErrorCode, pgErrorInfo } from "./db-errors.js";
+import type { DbOrTx, Transaction } from "../../lib/audit.js";
+import { AppError, isAppError } from "../../lib/errors.js";
+import { extraRateLimitHook, ipKey, rateLimitByIp } from "../../lib/rateLimit.js";
+import { type AuthUser, authUser } from "../../plugins/auth.js";
 import { AvatarSize } from "../profile/constants.js";
+import { EMPTY_CIRCLE, type FamilyCircle, loadFamilyCircle } from "./circle.js";
+import { buildPersonDetails, hasForeignEdges, memberCanEdit } from "./details.js";
+import { lockFamilyTree } from "./relationships.js";
 import {
   escapeLike,
   findPerson,
   findPersonByUserId,
-  type PersonRow,
-  personColumns,
   presignPersonAvatars,
   selectPersonViews,
   toPersonSummary,
-  toPersonWithAvatar
+  toPersonWithAvatar,
+  type Viewer
 } from "./repository.js";
 import { loadTreeView } from "./tree.js";
+import { PERSON_NOT_FOUND, type PersonPatch, createPersonTx, deletePersonTx, lockPersonRow, updatePersonTx } from "./writes.js";
 
 const NOT_LINKED_MESSAGE = "Tu cuenta no está vinculada a ninguna persona del árbol familiar.";
-const PERSON_NOT_FOUND_MESSAGE = "No encontramos a esa persona.";
 const BIRTH_YEAR_MESSAGE = "El año de nacimiento no es compatible con el año de fallecimiento registrado.";
+const NOT_IN_CIRCLE_MESSAGE = "Solo puedes cambiar a tu familia cercana. Pídele a un administrador que haga este cambio.";
+const LINKED_TO_OTHER_MESSAGE = "Esta persona tiene su propia cuenta: solo ella o un administrador pueden cambiar sus datos.";
+const NOT_CREATOR_MESSAGE = "Solo quien agregó a esta persona, o un administrador, puede quitarla del árbol.";
+const ADMIN_ONLY_FIELD_MESSAGE = "Solo un administrador puede registrar el fallecimiento de una persona con cuenta.";
+const HAS_RELATIONSHIPS_MESSAGE = "Esta persona tiene otras relaciones en el árbol. Pídele a un administrador que la quite.";
+
+/** Member family writes per user (create, edit, delete, self edit): 60 per hour. */
+export const MEMBER_FAMILY_WRITE_LIMIT = { max: 60, timeWindow: "1 hour" } as const;
 
 /* -------------------------------- Cursor -------------------------------- */
 
@@ -77,45 +98,65 @@ function decodeCursor(value: string): string {
   return parsed.data[0];
 }
 
-/* ------------------------------- Self edit ------------------------------ */
+/* -------------------------------- Helpers ------------------------------- */
+
+/**
+ * A family 403/409 with its stable reason in `details[0].code`
+ * (`FamilyIssueCode`, ADR 0001 §4/§6).
+ */
+function familyError(code: "FORBIDDEN" | "CONFLICT", issue: FamilyIssueCode, message: string, path = "id"): AppError {
+  return new AppError(code, message, { details: [{ path, message, code: issue }] });
+}
+
+/** The viewer and their circle (admins: full scope, no circle needed). */
+async function viewerWithCircle(db: DbOrTx, user: AuthUser): Promise<{ viewer: Viewer; circle: FamilyCircle }> {
+  const circle = user.role === "admin" ? EMPTY_CIRCLE : await loadFamilyCircle(db, user.id);
+  return { viewer: { id: user.id, role: user.role, circle: circle.ids }, circle };
+}
 
 /** `set` values for a self edit: only the whitelisted keys that were sent. */
-function selfEditValues(input: SelfEditPersonInput): Partial<typeof people.$inferInsert> {
-  const values: Partial<typeof people.$inferInsert> = {};
+function selfEditValues(input: SelfEditPersonInput): PersonPatch {
+  const values: PersonPatch = {};
+  if (input.fullName !== undefined) values.fullName = input.fullName;
   if (input.nickname !== undefined) values.nickname = input.nickname;
   if (input.familyBranch !== undefined) values.familyBranch = input.familyBranch;
   if (input.birthYear !== undefined) values.birthYear = input.birthYear;
+  if (input.birthDate !== undefined) values.birthDate = input.birthDate;
+  if (input.birthplace !== undefined) values.birthplace = input.birthplace;
+  if (input.bio !== undefined) values.bio = input.bio;
   return values;
 }
 
-/**
- * Update the caller's own person row. The `user_id` predicate re-checks
- * ownership in the statement itself.
- *
- * @throws AppError `VALIDATION` when the birth year breaks a CHECK (e.g. after the death year).
- */
-async function updateOwnPerson(
-  tx: Transaction,
-  personId: string,
-  userId: string,
-  values: Partial<typeof people.$inferInsert>
-): Promise<PersonRow | undefined> {
-  try {
-    const [updated] = await tx
-      .update(people)
-      .set(values)
-      .where(and(eq(people.id, personId), eq(people.userId, userId)))
-      .returning(personColumns);
-    return updated;
-  } catch (error) {
-    if (pgErrorInfo(error)?.code === PgErrorCode.CheckViolation) {
-      throw new AppError("VALIDATION", BIRTH_YEAR_MESSAGE, {
-        details: [{ path: "birthYear", message: BIRTH_YEAR_MESSAGE }],
-        cause: error
-      });
-    }
-    throw error;
+/** The keys of a member PATCH that were sent or derived (never `userId`: the schema has none). */
+function memberPatch(input: MemberUpdatePersonInput): PersonPatch {
+  const patch: PersonPatch = {};
+  if (input.fullName !== undefined) patch.fullName = input.fullName;
+  if (input.nickname !== undefined) patch.nickname = input.nickname;
+  if (input.familyBranch !== undefined) patch.familyBranch = input.familyBranch;
+  if (input.birthYear !== undefined) patch.birthYear = input.birthYear;
+  if (input.deathYear !== undefined) patch.deathYear = input.deathYear;
+  if (input.birthDate !== undefined) patch.birthDate = input.birthDate;
+  if (input.deathDate !== undefined) patch.deathDate = input.deathDate;
+  if (input.birthplace !== undefined) patch.birthplace = input.birthplace;
+  if (input.bio !== undefined) patch.bio = input.bio;
+  if (input.deceased !== undefined) patch.deceased = input.deceased;
+  return patch;
+}
+
+/** Why `user` may not edit `row`: outside the circle, or linked to another account. */
+function editDenial(row: { id: string; userId: string | null }, user: AuthUser): AppError {
+  if (row.userId !== null && row.userId !== user.id) {
+    return familyError("FORBIDDEN", Issue.PersonLinkedToOther, LINKED_TO_OTHER_MESSAGE);
   }
+  return familyError("FORBIDDEN", Issue.NotInCircle, NOT_IN_CIRCLE_MESSAGE);
+}
+
+/** Re-read `id` with the joins and build the card for the writer, inside the transaction. */
+async function detailsAfterWrite(app: FastifyInstance, tx: Transaction, id: string, user: AuthUser): Promise<PersonDetails> {
+  const view = await findPerson(tx, id);
+  if (view === undefined) throw new Error("person vanished inside its write transaction");
+  const { viewer, circle } = await viewerWithCircle(tx, user);
+  return buildPersonDetails({ db: tx, storage: app.storage, log: app.log }, view, viewer, circle);
 }
 
 /* -------------------------------- Routes -------------------------------- */
@@ -123,6 +164,19 @@ async function updateOwnPerson(
 /** Member family routes (mounted under `/api`). */
 const memberFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
   const memberConfig = { auth: "user", requireVerifiedEmail: true } as const;
+  // One counter shared by every member write route (a route's own
+  // `config.rateLimit` would count each route separately).
+  const writeLimit = extraRateLimitHook(app, {
+    ...MEMBER_FAMILY_WRITE_LIMIT,
+    keyGenerator: (request) => `family-write:${request.user === null ? ipKey(request) : `user:${request.user.id}`}`
+  });
+  const writeErrors = {
+    400: apiErrorSchema,
+    403: apiErrorSchema,
+    404: apiErrorSchema,
+    409: apiErrorSchema,
+    429: apiErrorSchema
+  };
 
   /** `GET /api/family/people`: search by name, nickname or branch; keyset-paginated by name. */
   app.get(
@@ -159,18 +213,19 @@ const memberFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
     }
   );
 
-  /** `GET /api/family/people/:id`: one person, privacy rules applied. */
+  /** `GET /api/family/people/:id`: one person's card (`PersonDetails`), privacy rules applied. */
   app.get(
     "/family/people/:id",
     {
       config: memberConfig,
-      schema: { params: idParamSchema, response: { 200: personSchema, 404: apiErrorSchema } }
+      schema: { params: idParamSchema, response: { 200: personDetailsSchema, 404: apiErrorSchema } }
     },
-    async (request): Promise<Person> => {
-      const viewer = authUser(request);
+    async (request): Promise<PersonDetails> => {
+      const user = authUser(request);
       const row = await findPerson(app.db, request.params.id);
-      if (row === undefined) throw new AppError("NOT_FOUND", PERSON_NOT_FOUND_MESSAGE);
-      return toPersonWithAvatar(app, row, viewer);
+      if (row === undefined) throw new AppError("NOT_FOUND", PERSON_NOT_FOUND);
+      const { viewer, circle } = await viewerWithCircle(app.db, user);
+      return buildPersonDetails(app, row, viewer, circle);
     }
   );
 
@@ -182,57 +237,169 @@ const memberFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: { querystring: familyTreeQuerySchema, response: { 200: familyTreeViewSchema, 404: apiErrorSchema } }
     },
     async (request) => {
-      const viewer = authUser(request);
+      const user = authUser(request);
       let focusId = request.query.personId;
       if (focusId === undefined) {
-        const own = await findPersonByUserId(app.db, viewer.id);
+        const own = await findPersonByUserId(app.db, user.id);
         if (own === undefined) throw new AppError("NOT_FOUND", NOT_LINKED_MESSAGE);
         focusId = own.id;
       }
+      const { viewer } = await viewerWithCircle(app.db, user);
       return loadTreeView(app, focusId, request.query.depth, viewer);
     }
   );
 
   /**
+   * `POST /api/family/people`: a member adds a **new** relative attached to
+   * someone in their qualifying circle (`relateTo`), in one transaction under
+   * the tree lock. The edge is member-created (Security M1). `userId` is not
+   * accepted (strict schema → 400). Admins have full scope (admin edge).
+   */
+  app.post(
+    "/family/people",
+    {
+      config: memberConfig,
+      preHandler: writeLimit,
+      schema: { body: memberCreatePersonInputSchema, response: { 201: personDetailsSchema, ...writeErrors } }
+    },
+    async (request, reply): Promise<PersonDetails> => {
+      const user = authUser(request);
+      const { relateTo, ...values } = request.body;
+      const anchorId = relateTo.personId.toLowerCase();
+      const details = await app.db.transaction(async (tx) => {
+        await lockFamilyTree(tx);
+        const admin = user.role === "admin";
+        // Admins have full scope (their edges are admin edges); members only within their circle.
+        if (!admin && !(await loadFamilyCircle(tx, user.id)).ids.has(anchorId)) {
+          throw familyError("FORBIDDEN", Issue.NotInCircle, NOT_IN_CIRCLE_MESSAGE, "relateTo.personId");
+        }
+        const { row } = await createPersonTx(tx, {
+          values: { ...values, userId: null },
+          relateTo: { personId: anchorId, kind: relateTo.kind },
+          actor: { id: user.id, ip: request.ip },
+          member: !admin
+        });
+        return detailsAfterWrite(app, tx, row.id, user);
+      });
+      return reply.code(201).send(details);
+    }
+  );
+
+  /**
+   * `PATCH /api/family/people/:id`: a member edits themself or someone in
+   * their qualifying circle who is not linked to another account.
+   */
+  app.patch(
+    "/family/people/:id",
+    {
+      config: memberConfig,
+      preHandler: writeLimit,
+      schema: {
+        params: idParamSchema,
+        body: memberUpdatePersonInputSchema,
+        response: { 200: personDetailsSchema, ...writeErrors }
+      }
+    },
+    async (request): Promise<PersonDetails> => {
+      const user = authUser(request);
+      const id = request.params.id.toLowerCase();
+      return app.db.transaction(async (tx) => {
+        await lockFamilyTree(tx);
+        const before = await lockPersonRow(tx, id);
+        if (before === undefined) throw new AppError("NOT_FOUND", PERSON_NOT_FOUND);
+        const patch = memberPatch(request.body);
+        if (user.role !== "admin") {
+          const circle = await loadFamilyCircle(tx, user.id);
+          if (!memberCanEdit(before, { id: user.id, role: user.role }, circle)) throw editDenial(before, user);
+          // PR #46 L2: on a linked person (the member's own node), death data is admin-only.
+          const adminOnly = LINKED_PERSON_ADMIN_ONLY_FIELDS.find((field) => patch[field] !== undefined);
+          if (before.userId !== null && adminOnly !== undefined) {
+            throw familyError("FORBIDDEN", Issue.AdminOnlyField, ADMIN_ONLY_FIELD_MESSAGE, adminOnly);
+          }
+        }
+        await updatePersonTx(tx, before, patch, { id: user.id, ip: request.ip });
+        return detailsAfterWrite(app, tx, id, user);
+      });
+    }
+  );
+
+  /**
+   * `DELETE /api/family/people/:id`: a member removes a person **they
+   * created**, without an account, whose only edges are the ones they made
+   * together with it (removed in the same transaction).
+   */
+  app.delete(
+    "/family/people/:id",
+    {
+      config: memberConfig,
+      preHandler: writeLimit,
+      schema: { params: idParamSchema, response: { 204: z.null(), ...writeErrors } }
+    },
+    async (request, reply) => {
+      const user = authUser(request);
+      const id = request.params.id.toLowerCase();
+      await app.db.transaction(async (tx) => {
+        await lockFamilyTree(tx);
+        const row = await lockPersonRow(tx, id);
+        const view = row === undefined ? undefined : await findPerson(tx, id);
+        if (row === undefined || view === undefined) throw new AppError("NOT_FOUND", PERSON_NOT_FOUND);
+        if (view.createdByUserId !== user.id) throw familyError("FORBIDDEN", Issue.NotCreator, NOT_CREATOR_MESSAGE);
+        if (row.userId !== null) throw familyError("FORBIDDEN", Issue.PersonLinkedToOther, LINKED_TO_OTHER_MESSAGE);
+        if (await hasForeignEdges(tx, id, user.id)) {
+          throw familyError("CONFLICT", Issue.PersonHasRelationships, HAS_RELATIONSHIPS_MESSAGE);
+        }
+        await deletePersonTx(tx, row, { id: user.id, ip: request.ip });
+      });
+      return reply.code(204).send(null);
+    }
+  );
+
+  /**
    * `PATCH /api/family/me` (and the alias `/api/family/people/me`): the
-   * member edits nickname, branch and birth year of their **own** linked
-   * person. Unknown keys (`userId`, `fullName`, `deceased`, relationships…)
-   * are stripped by the schema and never reach the update.
+   * member edits their **own** linked person with the same field set as
+   * `PATCH /api/family/people/:id` on their own node (name, nickname, branch,
+   * birth year/date, birthplace, bio). Death data, `userId` and other unknown
+   * keys are stripped by the schema (older clients) and never reach the
+   * update. The merged row is re-checked with `personDatesIssue()` and
+   * recorded as a revision.
    */
   const selfEditOptions = {
     config: memberConfig,
+    preHandler: writeLimit,
     schema: {
       body: selfEditPersonInputSchema,
-      response: { 200: personSchema, 400: apiErrorSchema, 404: apiErrorSchema }
+      response: { 200: personSchema, 400: apiErrorSchema, 404: apiErrorSchema, 429: apiErrorSchema }
     }
   } satisfies RouteShorthandOptions;
 
-  const selfEditHandler = async (viewer: ReturnType<typeof authUser>, input: SelfEditPersonInput, ip: string): Promise<Person> => {
+  const selfEditHandler = async (user: AuthUser, input: SelfEditPersonInput, ip: string): Promise<Person> => {
     const saved = await app.db.transaction(async (tx) => {
-      const own = await findPersonByUserId(tx, viewer.id);
-      if (own === undefined) throw new AppError("NOT_FOUND", NOT_LINKED_MESSAGE);
+      // Lock order everywhere: tree → person → invite.
+      await lockFamilyTree(tx);
+      const own = await findPersonByUserId(tx, user.id);
+      const before = own === undefined ? undefined : await lockPersonRow(tx, own.id);
+      if (before === undefined || before.userId !== user.id) throw new AppError("NOT_FOUND", NOT_LINKED_MESSAGE);
       const values = selfEditValues(input);
-      const updated = await updateOwnPerson(tx, own.id, viewer.id, values);
-      if (updated === undefined) throw new AppError("NOT_FOUND", NOT_LINKED_MESSAGE);
-      await recordAudit(tx, {
-        actorUserId: viewer.id,
-        action: AuditAction.PersonUpdated,
-        entityType: AuditEntityType.Person,
-        entityId: updated.id,
-        metadata: { fields: Object.keys(values), self: true },
-        ip
-      });
+      try {
+        await updatePersonTx(tx, before, values, { id: user.id, ip }, { self: true });
+      } catch (error) {
+        // A conflict with stored death data the member cannot change: report it on the birth field they sent.
+        const path = isAppError(error) && error.code === "VALIDATION" ? error.details?.[0]?.path : undefined;
+        if (path !== undefined && !(path in values)) {
+          const field = values.birthYear === undefined && values.birthDate !== undefined ? "birthDate" : "birthYear";
+          throw new AppError("VALIDATION", BIRTH_YEAR_MESSAGE, { details: [{ path: field, message: BIRTH_YEAR_MESSAGE }], cause: error });
+        }
+        throw error;
+      }
       // Re-read with the profile join (avatar) inside the same transaction.
-      const view = await findPerson(tx, updated.id);
+      const view = await findPerson(tx, before.id);
       if (view === undefined) throw new AppError("NOT_FOUND", NOT_LINKED_MESSAGE);
       return view;
     });
-    return toPersonWithAvatar(app, saved, viewer);
+    return toPersonWithAvatar(app, saved, { id: user.id, role: user.role });
   };
 
-  app.patch("/family/me", selfEditOptions, async (request) =>
-    selfEditHandler(authUser(request), request.body, request.ip)
-  );
+  app.patch("/family/me", selfEditOptions, async (request) => selfEditHandler(authUser(request), request.body, request.ip));
   app.patch("/family/people/me", selfEditOptions, async (request) =>
     selfEditHandler(authUser(request), request.body, request.ip)
   );

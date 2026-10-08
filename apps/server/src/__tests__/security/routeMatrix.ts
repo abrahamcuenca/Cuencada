@@ -11,7 +11,7 @@
  * principal.
  */
 import { randomUUID } from "node:crypto";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray, ne, or } from "drizzle-orm";
 import type { App } from "../../app.js";
 import {
   avatarUploads,
@@ -24,6 +24,8 @@ import {
   mediaItems,
   mediaReports,
   people,
+  personRelationships,
+  personRevisions,
   profiles,
   sessions,
   users
@@ -360,12 +362,13 @@ async function hiddenRoomMessage(ctx: MatrixContext, sender: Actor): Promise<{ r
 
 /**
  * Mass assignment on the self-edit of the caller's tree node: keys outside
- * nickname/familyBranch/birthYear (name, account link, death data) must have
- * no effect on the caller's node nor on anyone else's.
+ * the self field set (account link, death data, another person's id) must
+ * have no effect on the caller's node nor on anyone else's (WP-4.1: the name
+ * is part of the self field set).
  */
 function familyMassAssignment(url: string): Probe {
   return {
-    label: "extra keys (fullName/userId/deceased/deathYear/id)",
+    label: "extra keys (userId/deceased/deathYear/deathDate/id)",
     kind: "mass-assignment",
     build: async (ctx) => {
       const own = await insertPerson({ userId: ctx.actor.user.id, fullName: "Nombre Original" });
@@ -373,10 +376,10 @@ function familyMassAssignment(url: string): Probe {
       return {
         ...json(url, {
           nickname: "Peque",
-          fullName: "Nombre Cambiado",
           userId: ctx.other.user.id,
           deceased: true,
           deathYear: 2000,
+          deathDate: "2000-01-01",
           id: theirs.id
         }),
         state: async () =>
@@ -389,6 +392,56 @@ function familyMassAssignment(url: string): Probe {
     },
     expect: "2xx"
   };
+}
+
+/** People with exactly this name (a denied create must leave none). */
+function peopleNamed(fullName: string): () => Promise<unknown> {
+  return async () => getTestDb().select({ id: people.id }).from(people).where(eq(people.fullName, fullName));
+}
+
+/** The full person row (compared before/after a probe). */
+function personState(id: string): () => Promise<unknown> {
+  return async () => getTestDb().select().from(people).where(eq(people.id, id));
+}
+
+/** Every edge touching `id`. */
+function edgesTouching(id: string): () => Promise<unknown> {
+  return async () =>
+    getTestDb()
+      .select({ id: personRelationships.id })
+      .from(personRelationships)
+      .where(or(eq(personRelationships.fromPersonId, id), eq(personRelationships.toPersonId, id)));
+}
+
+/** A person with one revertible `person.update` revision (fixture for the revision routes). */
+async function personWithRevision(): Promise<{ personId: string; revisionId: string }> {
+  const person = await insertPerson({ nickname: "Después" });
+  const snapshot = {
+    type: "person" as const,
+    personId: person.id,
+    id: person.id,
+    userId: null,
+    fullName: person.fullName,
+    familyBranch: null,
+    birthYear: null,
+    deathYear: null,
+    birthDate: null,
+    deathDate: null,
+    birthplace: null,
+    bio: null,
+    deceased: false
+  };
+  const [revision] = await getTestDb()
+    .insert(personRevisions)
+    .values({
+      action: "person.update",
+      personId: person.id,
+      before: { ...snapshot, nickname: "Antes" },
+      after: { ...snapshot, nickname: "Después" }
+    })
+    .returning({ id: personRevisions.id });
+  if (revision === undefined) throw new Error("personWithRevision: no row");
+  return { personId: person.id, revisionId: revision.id };
 }
 
 /** The chat message row (compared before/after a probe). */
@@ -1221,6 +1274,167 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
   },
   {
     method: "POST",
+    url: "/api/family/people",
+    auth: "user",
+    requireVerifiedEmail: true,
+    owner: "qualifying own-family circle (relateTo must be in it; ADR 0001 §6)",
+    build: async (ctx) => {
+      const self = await insertPerson({ userId: ctx.actor.user.id });
+      return json("/api/family/people", { fullName: "Hija Nueva", relateTo: { personId: self.id, kind: "child_of" } });
+    },
+    probes: [
+      {
+        label: "relative of a person outside the circle (another member's node)",
+        kind: "idor",
+        build: async (ctx) => {
+          await insertPerson({ userId: ctx.actor.user.id });
+          const theirs = await insertPerson({ userId: ctx.other.user.id });
+          return {
+            ...json("/api/family/people", { fullName: "Intrusa Matriz", relateTo: { personId: theirs.id, kind: "child_of" } }),
+            state: peopleNamed("Intrusa Matriz")
+          };
+        },
+        expect: { status: 403, code: "FORBIDDEN" }
+      },
+      {
+        label: "circle widened through a member edge whose creator made no endpoint (planted)",
+        kind: "rule",
+        build: async (ctx) => {
+          const self = await insertPerson({ userId: ctx.actor.user.id });
+          const stranger = await insertPerson();
+          await getTestDb()
+            .insert(personRelationships)
+            .values({ kind: "parent_of", fromPersonId: stranger.id, toPersonId: self.id, createdByMember: true, createdByUserId: ctx.actor.user.id });
+          return {
+            ...json("/api/family/people", { fullName: "Intrusa Plantada", relateTo: { personId: stranger.id, kind: "partner_of" } }),
+            state: peopleNamed("Intrusa Plantada")
+          };
+        },
+        expect: { status: 403, code: "FORBIDDEN" }
+      },
+      {
+        label: "userId / createdByUserId keys",
+        kind: "mass-assignment",
+        build: async (ctx) => {
+          const self = await insertPerson({ userId: ctx.actor.user.id });
+          return {
+            ...json("/api/family/people", {
+              fullName: "Con Cuenta Ajena",
+              userId: ctx.other.user.id,
+              createdByUserId: ctx.other.user.id,
+              relateTo: { personId: self.id, kind: "child_of" }
+            }),
+            state: peopleNamed("Con Cuenta Ajena")
+          };
+        },
+        expect: { status: 400, code: "VALIDATION" }
+      },
+      {
+        label: "existing-to-existing edge",
+        kind: "rule",
+        build: async (ctx) => {
+          const self = await insertPerson({ userId: ctx.actor.user.id });
+          const stranger = await insertPerson();
+          return {
+            ...json("/api/family/people", { kind: "parent_of", fromPersonId: stranger.id, toPersonId: self.id }),
+            state: edgesTouching(self.id)
+          };
+        },
+        expect: { status: 400, code: "VALIDATION" }
+      }
+    ]
+  },
+  {
+    method: "PATCH",
+    url: "/api/family/people/:id",
+    auth: "user",
+    requireVerifiedEmail: true,
+    owner: "self, or the qualifying circle minus people linked to another account",
+    build: async (ctx) => {
+      const self = await insertPerson({ userId: ctx.actor.user.id });
+      return json(`/api/family/people/${self.id}`, { nickname: "Peque" });
+    },
+    probes: [
+      {
+        label: "person linked to another account",
+        kind: "idor",
+        build: async (ctx) => {
+          await insertPerson({ userId: ctx.actor.user.id });
+          const theirs = await insertPerson({ userId: ctx.other.user.id, fullName: "Nodo Ajeno" });
+          return { ...json(`/api/family/people/${theirs.id}`, { fullName: "Cambiado" }), state: personState(theirs.id) };
+        },
+        expect: { status: 403, code: "FORBIDDEN" }
+      },
+      {
+        label: "person outside the circle",
+        kind: "idor",
+        build: async (ctx) => {
+          await insertPerson({ userId: ctx.actor.user.id });
+          const stranger = await insertPerson({ fullName: "Sin Parentesco", birthYear: 1970 });
+          return { ...json(`/api/family/people/${stranger.id}`, { birthYear: 1971 }), state: personState(stranger.id) };
+        },
+        expect: { status: 403, code: "FORBIDDEN" }
+      },
+      {
+        label: "userId key",
+        kind: "mass-assignment",
+        build: async (ctx) => {
+          const self = await insertPerson({ userId: ctx.actor.user.id });
+          return { ...json(`/api/family/people/${self.id}`, { nickname: "x", userId: ctx.other.user.id }), state: personState(self.id) };
+        },
+        expect: { status: 400, code: "VALIDATION" }
+      },
+      {
+        label: "death data on the caller's own linked node (ADMIN_ONLY_FIELD)",
+        kind: "rule",
+        build: async (ctx) => {
+          const self = await insertPerson({ userId: ctx.actor.user.id });
+          return { ...json(`/api/family/people/${self.id}`, { deceased: true, deathYear: 2030 }), state: personState(self.id) };
+        },
+        expect: { status: 403, code: "FORBIDDEN" }
+      }
+    ]
+  },
+  {
+    method: "DELETE",
+    url: "/api/family/people/:id",
+    auth: "user",
+    requireVerifiedEmail: true,
+    owner: "creator only (unlinked, no other edges)",
+    build: async (ctx) => json(`/api/family/people/${(await insertPerson({ createdByUserId: ctx.actor.user.id })).id}`),
+    probes: [
+      {
+        label: "another member's addition",
+        kind: "idor",
+        build: async (ctx) => {
+          const theirs = await insertPerson({ createdByUserId: ctx.other.user.id });
+          return { ...json(`/api/family/people/${theirs.id}`), state: personState(theirs.id) };
+        },
+        expect: { status: 403, code: "FORBIDDEN" }
+      },
+      {
+        label: "own addition with another edge",
+        kind: "rule",
+        build: async (ctx) => {
+          const mine = await insertPerson({ createdByUserId: ctx.actor.user.id });
+          await insertParentOf((await insertPerson()).id, mine.id);
+          return { ...json(`/api/family/people/${mine.id}`), state: personState(mine.id) };
+        },
+        expect: { status: 409, code: "CONFLICT" }
+      },
+      {
+        label: "own addition linked to an account",
+        kind: "rule",
+        build: async (ctx) => {
+          const mine = await insertPerson({ createdByUserId: ctx.actor.user.id, userId: ctx.other.user.id });
+          return { ...json(`/api/family/people/${mine.id}`), state: personState(mine.id) };
+        },
+        expect: { status: 403, code: "FORBIDDEN" }
+      }
+    ]
+  },
+  {
+    method: "POST",
     url: "/api/admin/people",
     auth: "admin",
     build: async () => json("/api/admin/people", { fullName: "Persona Nueva" })
@@ -1255,6 +1469,32 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
       const edge = await insertParentOf((await insertPerson()).id, (await insertPerson()).id);
       return json(`/api/admin/relationships/${edge.id}`);
     }
+  },
+  {
+    method: "GET",
+    url: "/api/admin/people/:id/revisions",
+    auth: "admin",
+    note: "PII snapshots",
+    build: async () => json(`/api/admin/people/${(await personWithRevision()).personId}/revisions`)
+  },
+  {
+    method: "POST",
+    url: "/api/admin/people/:id/revisions/purge",
+    auth: "admin",
+    build: async () => json(`/api/admin/people/${(await personWithRevision()).personId}/revisions/purge`, { confirm: true })
+  },
+  {
+    method: "POST",
+    url: "/api/admin/revisions/:revisionId/revert",
+    auth: "admin",
+    build: async () => json(`/api/admin/revisions/${(await personWithRevision()).revisionId}/revert`)
+  },
+  {
+    method: "GET",
+    url: "/api/admin/family/activity",
+    auth: "admin",
+    note: "PII snapshots",
+    build: async () => json("/api/admin/family/activity")
   },
 
   // ---------------------------------------------------------------- chat

@@ -153,6 +153,40 @@
   border-top: 1px solid var(--color-border);
 }
 
+/* WP-4.1: history and activity rows wrap their "Deshacer" under the text on narrow phones. */
+.revisionRow {
+  flex-wrap: wrap;
+  padding-block: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* The person's name in an activity row: a full-height tap target. */
+.personLink {
+  display: flex;
+  align-items: center;
+  min-height: var(--tap-min);
+}
+
+/* "Deshecho": a badge sized to its text, not the row. */
+.badgeLine {
+  justify-self: start;
+}
+
+/* The actor's name in a row: a text-looking button with a full-size hit area. */
+.linkButton {
+  display: inline-flex;
+  align-items: center;
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-primary);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 @media (min-width: 600px) {
   .grid2 {
     grid-template-columns: repeat(2, minmax(0, 1fr));

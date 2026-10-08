@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AuditAction, auditActionSchema, auditLogQuerySchema, adminUserPatchInputSchema } from "./admin.js";
-import { createRelationshipInputSchema, createPersonInputSchema, familyTreeQuerySchema, updatePersonInputSchema } from "./family.js";
+import { adminCreatePersonInputSchema, adminUpdatePersonInputSchema, createRelationshipInputSchema, familyTreeQuerySchema } from "./family.js";
 import { adminAttendanceBulkInputSchema } from "./rsvp.js";
 
 const a = "6f1b2a3c-4d5e-4f60-8a7b-9c0d1e2f3a4b";
@@ -66,14 +66,14 @@ describe("createRelationshipInputSchema", () => {
 
 describe("person years", () => {
   it("rejects a death year before the birth year", () => {
-    expect(createPersonInputSchema.safeParse({ fullName: "Abuelo", birthYear: 1930, deathYear: 1920 }).success).toBe(false);
-    expect(createPersonInputSchema.safeParse({ fullName: "Abuelo", birthYear: 1930, deathYear: 1930 }).success).toBe(true);
-    expect(updatePersonInputSchema.safeParse({ birthYear: 1950, deathYear: 1949 }).success).toBe(false);
+    expect(adminCreatePersonInputSchema.safeParse({ fullName: "Abuelo", birthYear: 1930, deathYear: 1920 }).success).toBe(false);
+    expect(adminCreatePersonInputSchema.safeParse({ fullName: "Abuelo", birthYear: 1930, deathYear: 1930 }).success).toBe(true);
+    expect(adminUpdatePersonInputSchema.safeParse({ birthYear: 1950, deathYear: 1949 }).success).toBe(false);
   });
 
   it("rejects years outside 1800–2200 and spoofed names", () => {
-    expect(createPersonInputSchema.safeParse({ fullName: "X", birthYear: 1799 }).success).toBe(false);
-    expect(createPersonInputSchema.safeParse({ fullName: "\u202Eabc" }).success).toBe(false);
+    expect(adminCreatePersonInputSchema.safeParse({ fullName: "X", birthYear: 1799 }).success).toBe(false);
+    expect(adminCreatePersonInputSchema.safeParse({ fullName: "\u202Eabc" }).success).toBe(false);
   });
 });
 

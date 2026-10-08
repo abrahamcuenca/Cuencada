@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildView, IDS, makeFamilyDb } from "../testing/fixtures";
+import { buildView, fixtureId, IDS, makeFamilyDb, makePerson } from "../testing/fixtures";
 import { issuesToFieldErrors, toNullableText, toNullableYear } from "./forms";
 import { collectPersonNames, displayName, extendedGenerations, lifeYears, nextTrail, readTrail, resolveTrail, TRAIL_MAX } from "./tree";
 
@@ -92,7 +92,24 @@ describe("extendedGenerations", () => {
   it("returns empty rings at depth 1", () => {
     const view = buildView(makeFamilyDb(), IDS.jose, 1);
     if (view === null) throw new Error("missing fixture");
-    expect(extendedGenerations(view)).toEqual({ grandparents: [], grandchildren: [] });
+    expect(extendedGenerations(view)).toEqual({ grandparents: [], grandchildren: [], greatGrandparents: [], greatGreatGrandparents: [] });
+  });
+
+  it("derives great- and great-great-grandparents from a depth-4 view (WP-4.1)", () => {
+    const db = makeFamilyDb();
+    const great = makePerson(fixtureId(201), "Bisabuela Ríos");
+    const greatGreat = makePerson(fixtureId(202), "Tatarabuelo Ríos");
+    db.people.set(great.id, great);
+    db.people.set(greatGreat.id, greatGreat);
+    db.relationships.push(
+      { id: fixtureId(301), kind: "parent_of", fromPersonId: great.id, toPersonId: IDS.ernesto },
+      { id: fixtureId(302), kind: "parent_of", fromPersonId: greatGreat.id, toPersonId: great.id }
+    );
+    const view = buildView(db, IDS.jose, 4);
+    if (view === null) throw new Error("missing fixture");
+    const generations = extendedGenerations(view);
+    expect(generations.greatGrandparents.map((person) => person.fullName)).toEqual(["Bisabuela Ríos"]);
+    expect(generations.greatGreatGrandparents.map((person) => person.fullName)).toEqual(["Tatarabuelo Ríos"]);
   });
 });
 

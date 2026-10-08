@@ -465,3 +465,126 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* ---------------------------------------------------------------- WP-4.1 editing */
+
+/* "＋ Agregar …" under a band title. */
+.bandAction {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+/* "Detalles" accordion inside the focus card. */
+.details {
+  width: 100%;
+  margin-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  text-align: start;
+}
+
+.detailsSummary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding-inline: var(--space-2);
+  color: var(--color-primary);
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+
+.detailsBody {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-2);
+}
+
+.detailsPhoto {
+  width: 8rem;
+  height: 8rem;
+  max-width: 100%;
+  justify-self: center;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.detailsList {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.detailsRow {
+  display: grid;
+  gap: 0.125rem;
+}
+
+.detailsRow dt {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.detailsRow dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.detailsBio {
+  margin: 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.detailsActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* Person form (add / edit sheets and the admin editor). */
+.fieldPair {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.fieldset {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.legend {
+  padding-inline: var(--space-1);
+  font-weight: var(--weight-semibold);
+}
+
+.fieldsetHint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.note {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-primary-soft);
+  font-size: var(--text-sm);
+}
+
+.orDivider {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+@media (min-width: 600px) {
+  .fieldPair {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

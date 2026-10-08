@@ -72,6 +72,8 @@ export interface RelativeBandProps {
   connector?: ConnectorDirection | undefined;
   headingId: string;
   className?: string | undefined;
+  /** E.g. "Agregar pareja" for people who may add relatives (WP-4.1). */
+  action?: ReactNode;
 }
 
 /**
@@ -80,7 +82,7 @@ export interface RelativeBandProps {
  * lines. Screen readers get a heading plus a list of buttons; the lines are
  * `aria-hidden`.
  */
-export function RelativeBand({ title, people, emptyText, onOpen, connector, headingId, className }: RelativeBandProps): ReactNode {
+export function RelativeBand({ title, people, emptyText, onOpen, connector, headingId, className, action }: RelativeBandProps): ReactNode {
   const columns = Math.min(Math.max(people.length, 1), BAND_MAX_COLUMNS);
   const style = { "--band-columns": columns } as CSSProperties; // CSS custom property: CSSProperties has no index signature for `--*`.
   const lines = connector !== undefined && people.length > 0 ? <Connector columns={columns} direction={connector} /> : null;
@@ -90,6 +92,7 @@ export function RelativeBand({ title, people, emptyText, onOpen, connector, head
         {title}
         {people.length > 1 ? <span className={styles.count}> ({people.length})</span> : null}
       </h2>
+      {action ? <div className={styles.bandAction}>{action}</div> : null}
       {connector === "down" ? lines : null}
       {people.length === 0 ? (
         <p className={styles.empty}>{emptyText}</p>
@@ -142,10 +145,12 @@ export interface FocusCardProps {
   person: Person;
   headingRef: Ref<HTMLHeadingElement>;
   actions?: ReactNode;
+  /** The "Detalles" accordion (WP-4.1), under the actions. */
+  details?: ReactNode;
 }
 
 /** The person in the centre: large avatar with a gold ring, name, years, branch. */
-export function FocusCard({ person, headingRef, actions }: FocusCardProps): ReactNode {
+export function FocusCard({ person, headingRef, actions, details }: FocusCardProps): ReactNode {
   const years = lifeYears(person);
   return (
     <article className={styles.focus} aria-labelledby={`focus-${person.id}`}>
@@ -170,6 +175,7 @@ export function FocusCard({ person, headingRef, actions }: FocusCardProps): Reac
       ) : null}
       {person.userId === null ? <Badge tone="neutral">Sin cuenta</Badge> : null}
       {actions ? <div className={styles.focusActions}>{actions}</div> : null}
+      {details}
     </article>
   );
 }

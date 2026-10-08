@@ -152,6 +152,21 @@ export interface PersonDetails extends Person {
    * when nothing is switched on.
    */
   contacts: ContactCard;
+  /**
+   * The viewer may add a **new** relative attached to this person
+   * (`POST /api/family/people` with `relateTo.personId` = this person): admins,
+   * or the person is in the viewer's qualifying circle (also when linked to
+   * another account, which `canEdit` excludes). UX only; the server re-checks.
+   * Optional on the wire (added by WP-4.1).
+   */
+  canAddRelative?: boolean;
+  /**
+   * The viewer may delete this person with `DELETE /api/family/people/:id`:
+   * they created it, it has no account and no edges other than their own
+   * (ADR 0001 §6). Always `false` for admins here (they use the admin route).
+   * UX only; the server re-checks. Optional on the wire (added by WP-4.1).
+   */
+  canDelete?: boolean;
 }
 
 export const personDetailsSchema = personSchema.extend({
@@ -164,7 +179,9 @@ export const personDetailsSchema = personSchema.extend({
   isLinked: z.boolean(),
   canEdit: z.boolean(),
   canEditPhoto: z.boolean(),
-  contacts: contactCardSchema
+  contacts: contactCardSchema,
+  canAddRelative: z.boolean().exactOptional(),
+  canDelete: z.boolean().exactOptional()
 }) satisfies z.ZodType<PersonDetails>;
 
 /** Lightweight node for rings and search results. */
@@ -259,57 +276,8 @@ const personDateValue = dateSchema.refine((value) => yearOf(value) >= 1800 && ye
   error: "La fecha debe estar entre 1800 y 2200."
 });
 
-const personFields = {
-  fullName: displayTextSchema(200),
-  nickname: nullableDisplayTextSchema(80),
-  familyBranch: nullableTextSchema(120),
-  birthYear: yearValue.nullable(),
-  deathYear: yearValue.nullable(),
-  deceased: z.boolean(),
-  userId: idSchema.nullable()
-};
-
-function yearsConsistent(value: { birthYear?: number | null | undefined; deathYear?: number | null | undefined }): boolean {
-  if (value.birthYear === null || value.birthYear === undefined) return true;
-  if (value.deathYear === null || value.deathYear === undefined) return true;
-  return value.deathYear >= value.birthYear;
-}
-
-const yearsIssue = { error: "El año de fallecimiento no puede ser anterior al de nacimiento.", path: ["deathYear"] };
-
-/**
- * `POST /api/admin/people`.
- * @deprecated WP-4.1 moves the admin form to {@link adminCreatePersonInputSchema}
- * (dates, birthplace, bio, `relateTo`); kept until then so the current route compiles.
- */
-export const createPersonInputSchema = z
-  .object({
-    ...personFields,
-    nickname: nullableDisplayTextSchema(80).default(null),
-    familyBranch: nullableTextSchema(120).default(null),
-    birthYear: yearValue.nullable().default(null),
-    deathYear: yearValue.nullable().default(null),
-    deceased: z.boolean().default(false),
-    userId: idSchema.nullable().default(null)
-  })
-  .refine(yearsConsistent, yearsIssue);
-export type CreatePersonInput = z.infer<typeof createPersonInputSchema>;
-export type CreatePersonRequest = z.input<typeof createPersonInputSchema>;
-
-/**
- * `PATCH /api/admin/people/:id`. `userId` links/unlinks an account (unique).
- * @deprecated WP-4.1 moves to {@link adminUpdatePersonInputSchema}. Once any
- * row has a `birth_date`/`death_date`, a year patched through this schema can
- * hit the migration-0004 CHECKs; the route must merge-check with
- * {@link personDatesIssue} or be replaced.
- */
-export const updatePersonInputSchema = z
-  .object(personFields)
-  .partial()
-  .refine(yearsConsistent, yearsIssue)
-  .refine((value) => Object.keys(value).length > 0, { error: "No hay cambios que guardar." });
-export type UpdatePersonInput = z.infer<typeof updatePersonInputSchema>;
-export type UpdatePersonRequest = z.input<typeof updatePersonInputSchema>;
+// WP-4.1 removed the deprecated `createPersonInputSchema`/`updatePersonInputSchema`:
+// the admin routes and form use `adminCreatePersonInputSchema`/`adminUpdatePersonInputSchema`.
 
 /**
  * `POST /api/admin/relationships`. The server rejects self-references,
@@ -333,21 +301,6 @@ export const createRelationshipInputSchema = z
   });
 export type CreateRelationshipInput = z.infer<typeof createRelationshipInputSchema>;
 export type CreateRelationshipRequest = z.input<typeof createRelationshipInputSchema>;
-
-/**
- * `PATCH /api/family/me` (alias `PATCH /api/family/people/me`): a member edits limited fields of their *own* linked
- * person. Relationships remain admin-only.
- */
-export const selfEditPersonInputSchema = z
-  .object({
-    nickname: nullableDisplayTextSchema(80),
-    familyBranch: nullableTextSchema(120),
-    birthYear: yearValue.nullable()
-  })
-  .partial()
-  .refine((value) => Object.keys(value).length > 0, { error: "No hay cambios que guardar." });
-export type SelfEditPersonInput = z.infer<typeof selfEditPersonInputSchema>;
-export type SelfEditPersonRequest = z.input<typeof selfEditPersonInputSchema>;
 
 /* -------------------------------------------------------------------------- */
 /* WP-4.0: family editing by admins and members                                */
@@ -375,8 +328,20 @@ export const FamilyIssueCode = {
    */
   PersonHasRelationships: "PERSON_HAS_RELATIONSHIPS",
   /** 403 `FORBIDDEN` on `DELETE /api/family/people/:id`: only the member who created the person (or an admin) may delete it. */
-  NotCreator: "NOT_CREATOR"
+  NotCreator: "NOT_CREATOR",
+  /**
+   * 403 `FORBIDDEN` on `PATCH /api/family/people/:id` (WP-4.1, Security L2):
+   * a member editing their **own linked** person sent `deceased`, `deathYear`
+   * or `deathDate`; for linked people those are admin-only.
+   */
+  AdminOnlyField: "ADMIN_ONLY_FIELD"
 } as const;
+
+/**
+ * Fields a member may never set on a person linked to an account (their own
+ * node): marking someone dead is admin-only (WP-4.1, Security L2).
+ */
+export const LINKED_PERSON_ADMIN_ONLY_FIELDS = ["deceased", "deathYear", "deathDate"] as const;
 export type FamilyIssueCode = (typeof FamilyIssueCode)[keyof typeof FamilyIssueCode];
 
 /**
@@ -618,6 +583,32 @@ export const memberUpdatePersonInputSchema = z
 export type MemberUpdatePersonInput = z.infer<typeof memberUpdatePersonInputSchema>;
 export type MemberUpdatePersonRequest = z.input<typeof memberUpdatePersonInputSchema>;
 
+/**
+ * `PATCH /api/family/me` (alias `PATCH /api/family/people/me`): a member edits
+ * their *own* linked person. Same field set a member may change on their own
+ * node through `PATCH /api/family/people/:id` (WP-4.1, Security L2): name,
+ * nickname, branch, birth year/date, birthplace and bio. Death data
+ * (`deceased`, `deathYear`, `deathDate`), `userId` and relationships are
+ * admin-only; this legacy route **strips** unknown keys (older clients),
+ * while `PATCH /api/family/people/:id` answers 403 `ADMIN_ONLY_FIELD`.
+ */
+export const selfEditPersonInputSchema = z
+  .object({
+    fullName: personWriteFields.fullName,
+    nickname: personWriteFields.nickname,
+    familyBranch: personWriteFields.familyBranch,
+    birthYear: personWriteFields.birthYear,
+    birthDate: personWriteFields.birthDate,
+    birthplace: personWriteFields.birthplace,
+    bio: personWriteFields.bio
+  })
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, noChanges)
+  .transform((value) => ({ ...value, ...deriveDateFields(value) }))
+  .superRefine((value, ctx) => toIssue(ctx, patchDatesIssue(value)));
+export type SelfEditPersonInput = z.infer<typeof selfEditPersonInputSchema>;
+export type SelfEditPersonRequest = z.input<typeof selfEditPersonInputSchema>;
+
 /* -------------------------------------------------------------------------- */
 /* Revisions (admin-only undo history)                                         */
 /* -------------------------------------------------------------------------- */
@@ -799,6 +790,44 @@ export interface PurgePersonRevisionsResponse {
 export const purgePersonRevisionsResponseSchema = z.object({
   deleted: z.number().int().min(0)
 }) satisfies z.ZodType<PurgePersonRevisionsResponse>;
+
+/**
+ * Query of `DELETE /api/admin/people/:id` (WP-4.1). `purgeHistory=true`
+ * ("Borrar también el historial") erases every revision about the person in
+ * the same transaction, **before** the delete, and the delete itself then
+ * records no revision (a removal request leaves no snapshot behind).
+ */
+export const adminDeletePersonQuerySchema = z.object({
+  purgeHistory: z.stringbool().default(false)
+});
+export type AdminDeletePersonQuery = z.infer<typeof adminDeletePersonQuerySchema>;
+export type AdminDeletePersonQueryRequest = z.input<typeof adminDeletePersonQuerySchema>;
+
+/**
+ * One row of the global admin feed "Actividad del árbol"
+ * (`GET /api/admin/family/activity`, WP-4.1): a {@link PersonRevision} plus
+ * the person's display name (current name, or the name in the snapshot once
+ * the person is deleted). **Admin-only** (PII).
+ */
+export interface FamilyActivityItem extends PersonRevision {
+  personName: string | null;
+}
+
+export const familyActivityItemSchema = personRevisionSchema.extend({
+  personName: z.string().max(200).nullable()
+}) satisfies z.ZodType<FamilyActivityItem>;
+
+/**
+ * `GET /api/admin/family/activity` query: newest first, keyset-paginated
+ * (`cursor` is opaque and carries no PII), optionally filtered by who made
+ * the change and by action.
+ */
+export const familyActivityQuerySchema = cursorQuerySchema.extend({
+  actorUserId: idSchema.exactOptional(),
+  action: personRevisionActionSchema.exactOptional()
+});
+export type FamilyActivityQuery = z.infer<typeof familyActivityQuerySchema>;
+export type FamilyActivityQueryRequest = z.input<typeof familyActivityQuerySchema>;
 
 /* -------------------------------------------------------------------------- */
 /* Person photos (WP-4.3)                                                      */
