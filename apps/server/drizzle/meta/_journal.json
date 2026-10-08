@@ -43,6 +43,13 @@
       "when": 1791432866772,
       "tag": "0005_whatsapp_carryover",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791434806849,
+      "tag": "0006_person_merge_action",
+      "breakpoints": true
     }
   ]
 }

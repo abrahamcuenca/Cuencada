@@ -14,6 +14,8 @@
  * their `relationship.create` rows reverted); undoing a `person.delete`
  * restores the edges deleted with it. Restored people and edges are recorded
  * as the admin's (`created_by_member = false`): the admin chose to restore them.
+ * Undoing a `person.merge` (WP-4.5, `merge.ts`) re-creates the duplicate with
+ * its old id and restores its edges with their **original** provenance.
  */
 import {
   AuditEntityType,
@@ -26,6 +28,7 @@ import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { people, personRelationships, personRevisions } from "../../db/schema/index.js";
 import { recordAudit, type Transaction } from "../../lib/audit.js";
 import { AppError, isAppError } from "../../lib/errors.js";
+import { undoMergeTx } from "./merge.js";
 import { lockFamilyTree } from "./relationships.js";
 import { personPhotoObjectKeys } from "./personPhoto.js";
 import { type PersonRow, personColumns, relationshipColumns, toRelationship } from "./repository.js";
@@ -299,6 +302,12 @@ export async function revertRevisionTx(tx: Transaction, revisionId: string, acto
     case PersonRevisionAction.RelationshipDelete:
       record = await undoRelationshipDelete(tx, revision, actor);
       break;
+    case PersonRevisionAction.PersonMerge: {
+      // WP-4.5: split the merged people again (merge.ts), or 409 when anything changed since.
+      const undo = await undoMergeTx(tx, revision, actor);
+      record = { personId: undo.personId, before: undo.before, after: undo.after, alsoReverted: [] };
+      break;
+    }
     default:
       throw new AppError("CONFLICT", NOT_REVERTIBLE);
   }

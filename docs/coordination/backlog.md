@@ -158,10 +158,16 @@ Still open:
 ### WP-4.2 follow-ups
 - [x] Deleting a person (admin and member delete) **revokes** that person's pending invites in the same transaction, audited `invite.revoked` with ids and `reason: "person_deleted"` (done in WP-4.1).
 - [x] `PATCH /api/admin/people/:id` no longer moves a linked person to another account in one step: 409 `CONFLICT` + `PERSON_LINKED_TO_OTHER` on `userId`; unlink (`userId: null`) first (done in WP-4.1).
-- Optional admin "Fusionar duplicados" tool for people created by self-registration (plan WP-4.2; WP-4.5 builds on the WP-4.1 `insertRevision`/`createRelationshipTx`/`deleteRelationshipTx` helpers).
+- [x] Optional admin "Fusionar duplicados" tool for people created by self-registration: done in WP-4.5 ("Fusionar personas", "Posibles duplicados").
+
+### WP-4.5 follow-ups
+- "Posibles duplicados" has no "No son la misma persona" dismissal: a false positive stays listed until a name or year changes. Add a dismissed-pairs table if admins ask.
+- Account merge (two linked people, `MERGE_BOTH_LINKED`) is out of scope (owner decision: people only). An admin unlinks one first.
+- The duplicates scan reads the whole tree in memory (family scale); move the name normalization to SQL (`unaccent` + a trigram index) if the tree grows to thousands of people.
+- A merge undo refuses (409) after **any** later change about either person, even an unrelated one; an admin undoes newer changes first. A losing tree photo (both had one) and dropped pending uploads are not restored by the undo.
 
 ### WP-4.1 follow-ups
-- **WP-4.3 merge:** `modules/family/personPhotoObjects.ts` is an interim helper for the admin person delete (current photo derivatives by the `people/…-<size>.webp` key layout + pending `person_photo_uploads` keys). Replace it with WP-4.3's helper once merged, and have WP-4.3 photo writes call `insertRevision(... "person.photo" ...)`.
+- [x] **WP-4.3 merge:** `modules/family/personPhotoObjects.ts` is an interim helper for the admin person delete (current photo derivatives by the `people/…-<size>.webp` key layout + pending `person_photo_uploads` keys). Replace it with WP-4.3's helper once merged, and have WP-4.3 photo writes call `insertRevision(... "person.photo" ...)`.
 - [x] **WP-4.4 merge:** the tree's "Detalles" accordion uses WP-4.4's `ContactList` (done in WP-4.1 after merging PR #45).
 - The "Deshacer" of a `person.update` refuses (409) when the person changed afterwards; an admin undoes newer changes first. A "restore this version" (overwrite) action could come later.
 

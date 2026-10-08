@@ -115,6 +115,8 @@ export const AuditAction = {
   PersonPhotoRemoved: "person.photo_removed",
   /** WP-4.3: a tree-photo upload was refused at confirm (`metadata.reason`). */
   PersonPhotoRejected: "person.photo_rejected",
+  /** WP-4.5: a duplicate person was merged into another (metadata: ids and counts only). */
+  PersonMerged: "person.merged",
   RelationshipCreated: "relationship.created",
   RelationshipDeleted: "relationship.deleted",
   ChatMessageDeleted: "chat_message.deleted"

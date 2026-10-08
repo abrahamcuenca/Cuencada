@@ -6,9 +6,14 @@ import type {
   CreateRelationshipRequest,
   FamilyActivityItem,
   FamilyActivityQueryRequest,
+  FamilyDuplicatesQueryRequest,
   Page,
   Person,
+  PersonMergePreview,
+  PersonMergeRequest,
+  PersonMergeResponse,
   PersonRevision,
+  PossibleDuplicate,
   PersonRevisionsQueryRequest,
   PurgePersonRevisionsResponse,
   Relationship
@@ -32,6 +37,20 @@ export interface DeletePersonArgs {
 /** `GET /admin/people/:id/revisions` args. */
 export interface PersonRevisionsArgs extends PersonRevisionsQueryRequest {
   personId: string;
+}
+
+/** "Posibles duplicados" (WP-4.5); invalidated by merges and undos (both invalidate every `Person` tag). */
+export const DUPLICATE_LIST = { type: "Person", id: "DUPLICATES" } as const;
+
+/** `GET /admin/people/:keepId/merge-preview` args. */
+export interface MergePreviewArgs {
+  keepId: string;
+  duplicateId: string;
+}
+
+/** `POST /admin/people/:keepId/merge` args. */
+export interface MergePeopleArgs extends PersonMergeRequest {
+  keepId: string;
 }
 
 /**
@@ -112,6 +131,23 @@ export const familyAdminApi = baseApi.injectEndpoints({
       // An undo can change any person, edge or tree view.
       invalidatesTags: [REVISION_LIST, FAMILY_TREE_ALL, PERSON_LIST, "Person", { type: "Relationship", id: "LIST" }]
     }),
+    /** `GET /admin/family/duplicates`: "Posibles duplicados" (WP-4.5). */
+    getFamilyDuplicates: build.query<Page<PossibleDuplicate>, FamilyDuplicatesQueryRequest>({
+      query: (params) => ({ url: "/admin/family/duplicates", params }),
+      providesTags: [DUPLICATE_LIST]
+    }),
+    /** `GET /admin/people/:keepId/merge-preview?duplicateId=`: what "Fusionar" would do (never changes anything). */
+    getMergePreview: build.query<PersonMergePreview, MergePreviewArgs>({
+      query: ({ keepId, duplicateId }) => ({ url: `/admin/people/${encodeURIComponent(keepId)}/merge-preview`, params: { duplicateId } }),
+      // Always fresh: the tree may have changed since the sheet was last open.
+      keepUnusedDataFor: 0
+    }),
+    /** `POST /admin/people/:keepId/merge` ("Fusionar"): returns the kept person and the revision to undo. */
+    mergePeople: build.mutation<PersonMergeResponse, MergePeopleArgs>({
+      query: ({ keepId, ...body }) => ({ url: `/admin/people/${encodeURIComponent(keepId)}/merge`, method: "POST", body }),
+      // A merge changes two people, their edges, the trees around them and the duplicate list.
+      invalidatesTags: [REVISION_LIST, FAMILY_TREE_ALL, PERSON_LIST, "Person", { type: "Relationship", id: "LIST" }]
+    }),
     /** `POST /admin/people/:id/revisions/purge` ("Borrar historial"). */
     purgePersonRevisions: build.mutation<PurgePersonRevisionsResponse, string>({
       query: (personId) => ({
@@ -134,5 +170,8 @@ export const {
   useGetPersonRevisionsQuery,
   useGetFamilyActivityQuery,
   useRevertRevisionMutation,
-  usePurgePersonRevisionsMutation
+  usePurgePersonRevisionsMutation,
+  useGetFamilyDuplicatesQuery,
+  useGetMergePreviewQuery,
+  useMergePeopleMutation
 } = familyAdminApi;

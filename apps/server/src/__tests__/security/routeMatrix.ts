@@ -466,6 +466,27 @@ function edgesTouching(id: string): () => Promise<unknown> {
 }
 
 /** A person with one revertible `person.update` revision (fixture for the revision routes). */
+/** Two unlinked people with the same name and a parent each (WP-4.5 merge fixtures). */
+async function mergePair(): Promise<{ keep: string; duplicate: string }> {
+  const keep = await insertPerson({ fullName: "Lucía Ejemplo" });
+  const duplicate = await insertPerson({ fullName: "Lucía Ejemplo" });
+  await insertParentOf((await insertPerson()).id, duplicate.id);
+  return { keep: keep.id, duplicate: duplicate.id };
+}
+
+/** What a refused merge must not touch: the people rows and every edge touching them. */
+async function mergeState(ids: string[]): Promise<unknown> {
+  const db = getTestDb();
+  return {
+    people: await db.select().from(people).where(inArray(people.id, ids)).orderBy(people.id),
+    edges: await db
+      .select()
+      .from(personRelationships)
+      .where(or(inArray(personRelationships.fromPersonId, ids), inArray(personRelationships.toPersonId, ids)))
+      .orderBy(personRelationships.id)
+  };
+}
+
 async function personWithRevision(): Promise<{ personId: string; revisionId: string }> {
   const person = await insertPerson({ nickname: "Después" });
   const snapshot = {
@@ -1616,6 +1637,81 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     auth: "admin",
     note: "PII snapshots",
     build: async () => json("/api/admin/family/activity")
+  },
+  {
+    method: "GET",
+    url: "/api/admin/people/:id/merge-preview",
+    auth: "admin",
+    note: "PII preview; dry run in a rolled-back transaction",
+    build: async () => {
+      const pair = await mergePair();
+      return json(`/api/admin/people/${pair.keep}/merge-preview?duplicateId=${pair.duplicate}`);
+    },
+    probes: [
+      {
+        label: "preview of another member's linked person (no change)",
+        kind: "idor",
+        build: async (ctx) => {
+          const linked = await linkedPerson(ctx.other);
+          const keep = (await insertPerson({ fullName: "Persona Vinculada" })).id;
+          return { ...json(`/api/admin/people/${keep}/merge-preview?duplicateId=${linked}`), state: async () => mergeState([keep, linked]) };
+        },
+        expect: { status: 403, code: "FORBIDDEN" }
+      }
+    ]
+  },
+  {
+    method: "POST",
+    url: "/api/admin/people/:id/merge",
+    auth: "admin",
+    build: async () => {
+      const pair = await mergePair();
+      return json(`/api/admin/people/${pair.keep}/merge`, { duplicateId: pair.duplicate });
+    },
+    probes: [
+      {
+        label: "take over another member's linked person by merging it into an unlinked one (before/after)",
+        kind: "idor",
+        build: async (ctx) => {
+          const linked = await linkedPerson(ctx.other);
+          const keep = (await insertPerson({ fullName: "Persona Vinculada" })).id;
+          return { ...json(`/api/admin/people/${keep}/merge`, { duplicateId: linked }), state: async () => mergeState([keep, linked]) };
+        },
+        expect: { status: 403, code: "FORBIDDEN" }
+      },
+      {
+        label: "merge a relative into own linked person (before/after)",
+        kind: "rule",
+        build: async (ctx) => {
+          const own = await linkedPerson(ctx.actor);
+          const relative = (await insertPerson({ fullName: "Persona Vinculada" })).id;
+          return { ...json(`/api/admin/people/${own}/merge`, { duplicateId: relative }), state: async () => mergeState([own, relative]) };
+        },
+        expect: { status: 403, code: "FORBIDDEN" }
+      },
+      {
+        label: "mass assignment of userId/fields beyond the choices (before/after)",
+        kind: "mass-assignment",
+        build: async (ctx) => {
+          const pair = await mergePair();
+          return {
+            ...json(`/api/admin/people/${pair.keep}/merge`, { duplicateId: pair.duplicate, userId: ctx.actor.user.id, fields: { userId: "duplicate" } }),
+            state: async () => mergeState([pair.keep, pair.duplicate])
+          };
+        },
+        expect: { status: 403, code: "FORBIDDEN" }
+      }
+    ]
+  },
+  {
+    method: "GET",
+    url: "/api/admin/family/duplicates",
+    auth: "admin",
+    note: "PII pairs (no account ids)",
+    build: async () => {
+      await mergePair();
+      return json("/api/admin/family/duplicates");
+    }
   },
 
   // ---------------------------------------------------------------- chat

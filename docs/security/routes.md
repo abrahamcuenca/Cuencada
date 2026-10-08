@@ -11,7 +11,7 @@ same guard config. `401`/`403` cells are guard denials (`UNAUTHENTICATED`,
 `PASSWORD_CHANGE_REQUIRED`, `FORBIDDEN`, `EMAIL_UNVERIFIED`); other non-2xx
 cells are handler answers for that principal's own data.
 
-Total: 112 routes (14 public, 45 user, 51 admin, 2 cookie).
+Total: 115 routes (14 public, 45 user, 54 admin, 2 cookie).
 
 | Method | Path | auth | Verified email | Pending pw allowed | Anon | Member | Unverified | Pending pw | Disabled | Revoked | Admin | Other member (IDOR) | Scope / notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -40,6 +40,7 @@ Total: 112 routes (14 public, 45 user, 51 admin, 2 cookie).
 | GET | `/api/admin/cuencadas/:id/rsvps` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | GET | `/api/admin/cuencadas/:id/rsvps.csv` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | GET | `/api/admin/family/activity` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | PII snapshots |
+| GET | `/api/admin/family/duplicates` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | PII pairs (no account ids) |
 | GET | `/api/admin/invites` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | POST | `/api/admin/invites` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | POST | `/api/admin/invites/:id/resend` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
@@ -56,6 +57,8 @@ Total: 112 routes (14 public, 45 user, 51 admin, 2 cookie).
 | POST | `/api/admin/people` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | DELETE | `/api/admin/people/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | PATCH | `/api/admin/people/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
+| POST | `/api/admin/people/:id/merge` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 | probe: merge a relative into own linked person (before/after) → 403; mass assignment: mass assignment of userId/fields beyond the choices (before/after) → 403 |
+| GET | `/api/admin/people/:id/merge-preview` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 | PII preview; dry run in a rolled-back transaction |
 | GET | `/api/admin/people/:id/revisions` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | PII snapshots |
 | POST | `/api/admin/people/:id/revisions/purge` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | POST | `/api/admin/relationships` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
