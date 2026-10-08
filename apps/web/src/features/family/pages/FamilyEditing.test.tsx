@@ -175,6 +175,30 @@ describe("adding relatives as a member", { timeout: 15_000 }, () => {
   });
 });
 
+describe("editing my own linked node (PR #46 L2)", { timeout: 15_000 }, () => {
+  it("hides «Ya falleció» and the death fields (admin-only for people with an account)", async () => {
+    const user = userEvent.setup();
+    renderApp("/arbol", authenticatedState(me));
+    await focus(/^José Herrera Navarro/);
+    await user.click(await screen.findByRole("button", { name: /Editar mis datos/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Editar mis datos" });
+    expect(within(dialog).getByLabelText(/^Nombre completo/)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/^Lugar de nacimiento/)).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/Ya falleció/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText(/fallecimiento/)).not.toBeInTheDocument();
+  });
+
+  it("keeps the death fields for an unlinked relative the member may edit", async () => {
+    const user = userEvent.setup();
+    db.flags.set(IDS.raul, { canEdit: true });
+    renderApp(`/arbol/${IDS.raul}`, authenticatedState(me));
+    await focus(/^Raúl Herrera Morales/);
+    await user.click(await screen.findByRole("button", { name: "Editar" }));
+    const dialog = await screen.findByRole("dialog", { name: "Editar a Raúl Herrera Morales" });
+    expect(within(dialog).getByLabelText(/Ya falleció/)).toBeInTheDocument();
+  });
+});
+
 describe("member delete", { timeout: 15_000 }, () => {
   it("offers «Eliminar» only with canDelete and deletes after confirming", async () => {
     const user = userEvent.setup();

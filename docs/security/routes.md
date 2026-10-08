@@ -100,13 +100,13 @@ Total: 108 routes (14 public, 41 user, 51 admin, 2 cookie).
 | GET | `/api/cuencadas/home` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
 | GET | `/api/directory` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | GET | `/api/directory/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | listed members only (404 for unlisted) |
-| PATCH | `/api/family/me` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | self-scoped (the caller's linked person); mass assignment: extra keys (fullName/userId/deceased/deathYear/id) → 2xx |
+| PATCH | `/api/family/me` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | self-scoped (the caller's linked person); mass assignment: extra keys (userId/deceased/deathYear/deathDate/id) → 2xx |
 | GET | `/api/family/people` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | POST | `/api/family/people` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | qualifying own-family circle (relateTo must be in it; ADR 0001 §6); probe: circle widened through a member edge whose creator made no endpoint (planted) → 403; mass assignment: userId / createdByUserId keys → 400; probe: existing-to-existing edge → 400 |
 | DELETE | `/api/family/people/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | creator only (unlinked, no other edges); probe: own addition with another edge → 409; probe: own addition linked to an account → 403 |
 | GET | `/api/family/people/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
-| PATCH | `/api/family/people/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | self, or the qualifying circle minus people linked to another account; mass assignment: userId key → 400 |
-| PATCH | `/api/family/people/me` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | self-scoped alias of /api/family/me; mass assignment: extra keys (fullName/userId/deceased/deathYear/id) → 2xx |
+| PATCH | `/api/family/people/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | self, or the qualifying circle minus people linked to another account; mass assignment: userId key → 400; probe: death data on the caller's own linked node (ADMIN_ONLY_FIELD) → 403 |
+| PATCH | `/api/family/people/me` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | self-scoped alias of /api/family/me; mass assignment: extra keys (userId/deceased/deathYear/deathDate/id) → 2xx |
 | GET | `/api/family/tree` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | POST | `/api/invites/accept` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  | probe: invite naming another member's linked person (falls back, never relinks) → 2xx; probe: open link naming an unlinked person (legacy row; falls back, never links) → 2xx |
 | POST | `/api/invites/inspect` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |

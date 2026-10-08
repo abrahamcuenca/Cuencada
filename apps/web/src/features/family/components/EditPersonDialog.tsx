@@ -60,7 +60,8 @@ export function EditPersonDialog({ person, open, isAdmin, title, onClose }: Edit
   return (
     <Dialog open={open} onClose={onClose} title={title ?? `Editar a ${person.fullName}`}>
       <form className={styles.form} noValidate onSubmit={(event) => void submit(event)}>
-        <PersonFields values={values} errors={errors} onChange={setValues} />
+        {/* Death data of a linked person (the member's own node) is admin-only (403 ADMIN_ONLY_FIELD). */}
+        <PersonFields values={values} errors={errors} onChange={setValues} hideDeath={!isAdmin && (person.isLinked || person.userId !== null)} />
         {errors._form ? (
           <p role="alert" className={styles.formError}>
             {errors._form}

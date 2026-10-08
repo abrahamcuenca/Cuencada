@@ -115,6 +115,9 @@ test.describe("family editing", () => {
     await expect(undo).toBeVisible();
     await docShot(page, testInfo, "t6", "actividad", undo);
     await undo.click();
+    const confirmUndo = page.getByRole("alertdialog", { name: "¿Deshacer este cambio?" });
+    await expect(confirmUndo).toContainText("quedarán registradas como agregadas por un administrador");
+    await confirmUndo.getByRole("button", { name: "Deshacer" }).click();
     await expect(page.getByText("Deshicimos el cambio.")).toBeVisible();
     await expect(undo).toHaveCount(0);
 

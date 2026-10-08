@@ -341,12 +341,13 @@ async function hiddenRoomMessage(ctx: MatrixContext, sender: Actor): Promise<{ r
 
 /**
  * Mass assignment on the self-edit of the caller's tree node: keys outside
- * nickname/familyBranch/birthYear (name, account link, death data) must have
- * no effect on the caller's node nor on anyone else's.
+ * the self field set (account link, death data, another person's id) must
+ * have no effect on the caller's node nor on anyone else's (WP-4.1: the name
+ * is part of the self field set).
  */
 function familyMassAssignment(url: string): Probe {
   return {
-    label: "extra keys (fullName/userId/deceased/deathYear/id)",
+    label: "extra keys (userId/deceased/deathYear/deathDate/id)",
     kind: "mass-assignment",
     build: async (ctx) => {
       const own = await insertPerson({ userId: ctx.actor.user.id, fullName: "Nombre Original" });
@@ -354,10 +355,10 @@ function familyMassAssignment(url: string): Probe {
       return {
         ...json(url, {
           nickname: "Peque",
-          fullName: "Nombre Cambiado",
           userId: ctx.other.user.id,
           deceased: true,
           deathYear: 2000,
+          deathDate: "2000-01-01",
           id: theirs.id
         }),
         state: async () =>
@@ -1328,6 +1329,15 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
           return { ...json(`/api/family/people/${self.id}`, { nickname: "x", userId: ctx.other.user.id }), state: personState(self.id) };
         },
         expect: { status: 400, code: "VALIDATION" }
+      },
+      {
+        label: "death data on the caller's own linked node (ADMIN_ONLY_FIELD)",
+        kind: "rule",
+        build: async (ctx) => {
+          const self = await insertPerson({ userId: ctx.actor.user.id });
+          return { ...json(`/api/family/people/${self.id}`, { deceased: true, deathYear: 2030 }), state: personState(self.id) };
+        },
+        expect: { status: 403, code: "FORBIDDEN" }
       }
     ]
   },

@@ -6,9 +6,13 @@ import { EmptyState } from "../../../../shared/ui/EmptyState";
 import { Skeleton } from "../../../../shared/ui/Skeleton";
 import { useToast } from "../../../../shared/ui/Toast";
 import { useGetFamilyActivityQuery, useGetPersonRevisionsQuery, useRevertRevisionMutation } from "../api";
-import { RevisionList } from "./RevisionList";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { RevisionList, revisionSummary } from "./RevisionList";
 
 const PAGE_SIZE = 20;
+
+/** Shown in the "Deshacer" confirmation: restored people and edges are recorded as the admin's (WP-4.1). */
+export const REVERT_PROVENANCE_NOTE = "Al deshacer, la persona y sus relaciones quedarán registradas como agregadas por un administrador.";
 
 /** Which list to show. */
 export type RevisionSource =
@@ -36,6 +40,7 @@ export function RevisionFeed({ source, onFilterActor, emptyTitle }: RevisionFeed
   const cursors = paging.key === key ? paging.cursors : [null];
   const [revert] = useRevertRevisionMutation();
   const [revertingId, setRevertingId] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<PersonRevision | null>(null);
   const toast = useToast();
 
   const onRevert = async (revision: PersonRevision): Promise<void> => {
@@ -47,6 +52,7 @@ export function RevisionFeed({ source, onFilterActor, emptyTitle }: RevisionFeed
       if (!isAbortError(error)) toast.show({ message: getApiErrorMessage(error), tone: "danger" });
     } finally {
       setRevertingId(null);
+      setConfirming(null);
     }
   };
 
@@ -60,11 +66,22 @@ export function RevisionFeed({ source, onFilterActor, emptyTitle }: RevisionFeed
           isLast={index === cursors.length - 1}
           emptyTitle={emptyTitle}
           revertingId={revertingId}
-          onRevert={(revision) => void onRevert(revision)}
+          onRevert={setConfirming}
           onFilterActor={onFilterActor}
           onMore={(next) => setPaging({ key, cursors: [...cursors, next] })}
         />
       ))}
+      <ConfirmDialog
+        open={confirming !== null}
+        title="¿Deshacer este cambio?"
+        description={`${confirming === null ? "" : `«${revisionSummary(confirming)}». `}${REVERT_PROVENANCE_NOTE}`}
+        confirmLabel="Deshacer"
+        busy={confirming !== null && revertingId === confirming.id}
+        onConfirm={() => {
+          if (confirming !== null) void onRevert(confirming);
+        }}
+        onClose={() => setConfirming(null)}
+      />
     </div>
   );
 }

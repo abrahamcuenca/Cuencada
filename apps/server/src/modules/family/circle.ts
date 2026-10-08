@@ -21,7 +21,10 @@
  * The last rule lets a member edit the relatives they just added (a sibling
  * added as a child of their parent, a grandchild); it cannot reach anybody
  * else's relatives, because a member edge always joins a person that member
- * created to someone already in their circle.
+ * created to someone already in their circle. It covers **unlinked** people
+ * only and stops at linked ones (PR #46 L1): once an addition gets its own
+ * account, the creator keeps it only through the normal rules (e.g. their
+ * own child over a qualifying edge).
  */
 import { FAMILY_TREE_MAX_DEPTH, RelationshipKind } from "@cuencada/types";
 import { sql } from "drizzle-orm";
@@ -112,6 +115,9 @@ export async function loadFamilyCircle(db: DbOrTx, userId: string): Promise<Fami
       join ${people} np
         on np.id = case when q.from_person_id = o.id then q.to_person_id else q.from_person_id end
        and np.created_by_user_id = ${userId}::uuid
+       -- PR #46 Security L1: an addition that got its own account leaves
+       -- the creator's own-additions circle, and the walk stops there.
+       and np.user_id is null
       where o.level < ${depth}::int
     )
     select distinct

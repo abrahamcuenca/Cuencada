@@ -405,6 +405,91 @@ describe("GET /api/family/people/:id (PersonDetails privacy, WP-4.1)", () => {
   });
 });
 
+describe("own additions that get an account (PR #46 L1)", () => {
+  it("leave the creator's circle (no living dates, no edit) and stop the own-additions walk", async () => {
+    const f = await family();
+    const sister = (
+      await post({ fullName: "Hermana Nueva", birthDate: "1984-04-04", birthplace: "Pueblo Norte", relateTo: { personId: f.parent.id, kind: "child_of" } })
+    ).json<PersonDetails>();
+    const niece = (await post({ fullName: "Sobrina Nueva", relateTo: { personId: sister.id, kind: "child_of" } })).json<PersonDetails>();
+    let circle = await loadFamilyCircle(app.db, member.id);
+    expect(circle.ids.has(sister.id) && circle.ids.has(niece.id)).toBe(true);
+
+    const sisterUser = await createUser({ emailVerified: true });
+    await getTestDb().update(people).set({ userId: sisterUser.id }).where(eq(people.id, sister.id));
+    circle = await loadFamilyCircle(app.db, member.id);
+    expect(circle.ids.has(sister.id)).toBe(false);
+    expect(circle.ids.has(niece.id)).toBe(false);
+
+    const read = (await app.inject({ method: "GET", url: `/api/family/people/${sister.id}`, ...memberAuth })).json<PersonDetails>();
+    expect(read).toMatchObject({ birthDate: null, birthYear: null, birthplace: null, canEdit: false, canAddRelative: false });
+    const edit = await patch(sister.id, { nickname: "Hermanita" });
+    expect(edit.statusCode).toBe(403);
+    const nieceEdit = await patch(niece.id, { nickname: "Sobri" });
+    expect(issue(nieceEdit.body)).toEqual({ code: "FORBIDDEN", detail: "FAMILY_NOT_IN_CIRCLE" });
+    const [row] = await getTestDb().select({ nickname: people.nickname }).from(people).where(eq(people.id, niece.id));
+    expect(row?.nickname).toBeNull();
+  });
+
+  it("keep the creator's own child in the circle through the normal rules (qualifying member edge)", async () => {
+    const f = await family();
+    const child = (await post({ fullName: "Hijo Nuevo", birthDate: "2015-05-05", relateTo: { personId: f.self.id, kind: "child_of" } })).json<PersonDetails>();
+    const childUser = await createUser({ emailVerified: true });
+    await getTestDb().update(people).set({ userId: childUser.id }).where(eq(people.id, child.id));
+    expect((await loadFamilyCircle(app.db, member.id)).ids.has(child.id)).toBe(true);
+    const read = (await app.inject({ method: "GET", url: `/api/family/people/${child.id}`, ...memberAuth })).json<PersonDetails>();
+    // Dates visible (circle), but not editable: the child has their own account.
+    expect(read).toMatchObject({ birthDate: "2015-05-05", canEdit: false });
+  });
+});
+
+describe("death data on the member's own linked node (PR #46 L2)", () => {
+  it("answers 403 ADMIN_ONLY_FIELD for deceased, deathYear or deathDate and changes nothing", async () => {
+    const f = await family();
+    for (const payload of [{ deceased: true }, { deathYear: 2030 }, { deathDate: "2030-01-01" }, { nickname: "x", deathYear: 2030, deceased: true }]) {
+      const response = await patch(f.self.id, payload);
+      expect(response.statusCode, JSON.stringify(payload)).toBe(403);
+      expect(issue(response.body)).toEqual({ code: "FORBIDDEN", detail: "ADMIN_ONLY_FIELD" });
+    }
+    const [row] = await getTestDb().select().from(people).where(eq(people.id, f.self.id));
+    expect(row).toMatchObject({ deceased: false, deathYear: null, nickname: null });
+    expect(await revisionsOf(f.self.id)).toHaveLength(0);
+  });
+
+  it("lets the member change name, nickname, branch, birth date/year, birthplace and bio of their own node", async () => {
+    const f = await family();
+    const response = await patch(f.self.id, {
+      fullName: "Ana Morales Vega de Pérez",
+      nickname: "Anita",
+      familyBranch: "Rama Norte",
+      birthDate: "1980-02-02",
+      birthplace: "Pueblo Norte",
+      bio: "Maestra."
+    });
+    expect(response.statusCode, response.body).toBe(200);
+  });
+
+  it("still lets a member record the death of an unlinked relative in their circle", async () => {
+    const f = await family();
+    const response = await patch(f.parent.id, { deathYear: 2020 });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json<PersonDetails>()).toMatchObject({ deceased: true, deathYear: 2020 });
+  });
+
+  it("aligns PATCH /api/family/me: the same fields are accepted, death data is stripped", async () => {
+    const f = await family();
+    const response = await app.inject({
+      method: "PATCH",
+      url: "/api/family/me",
+      payload: { fullName: "Ana M. Vega", birthDate: "1980-03-03", birthplace: "Villa Sur", bio: "Hola.", deceased: true, deathYear: 2030 },
+      ...memberAuth
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    const [row] = await getTestDb().select().from(people).where(eq(people.id, f.self.id));
+    expect(row).toMatchObject({ fullName: "Ana M. Vega", birthYear: 1980, birthDate: "1980-03-03", birthplace: "Villa Sur", bio: "Hola.", deceased: false, deathYear: null });
+  });
+});
+
 describe("rate limit", () => {
   it("allows 60 member family writes per hour per user, then answers 429", async () => {
     await insertPerson({ userId: member.id, fullName: "Ana Morales Vega" });

@@ -302,21 +302,6 @@ export const createRelationshipInputSchema = z
 export type CreateRelationshipInput = z.infer<typeof createRelationshipInputSchema>;
 export type CreateRelationshipRequest = z.input<typeof createRelationshipInputSchema>;
 
-/**
- * `PATCH /api/family/me` (alias `PATCH /api/family/people/me`): a member edits limited fields of their *own* linked
- * person. Relationships remain admin-only.
- */
-export const selfEditPersonInputSchema = z
-  .object({
-    nickname: nullableDisplayTextSchema(80),
-    familyBranch: nullableTextSchema(120),
-    birthYear: yearValue.nullable()
-  })
-  .partial()
-  .refine((value) => Object.keys(value).length > 0, { error: "No hay cambios que guardar." });
-export type SelfEditPersonInput = z.infer<typeof selfEditPersonInputSchema>;
-export type SelfEditPersonRequest = z.input<typeof selfEditPersonInputSchema>;
-
 /* -------------------------------------------------------------------------- */
 /* WP-4.0: family editing by admins and members                                */
 /* -------------------------------------------------------------------------- */
@@ -343,8 +328,20 @@ export const FamilyIssueCode = {
    */
   PersonHasRelationships: "PERSON_HAS_RELATIONSHIPS",
   /** 403 `FORBIDDEN` on `DELETE /api/family/people/:id`: only the member who created the person (or an admin) may delete it. */
-  NotCreator: "NOT_CREATOR"
+  NotCreator: "NOT_CREATOR",
+  /**
+   * 403 `FORBIDDEN` on `PATCH /api/family/people/:id` (WP-4.1, Security L2):
+   * a member editing their **own linked** person sent `deceased`, `deathYear`
+   * or `deathDate`; for linked people those are admin-only.
+   */
+  AdminOnlyField: "ADMIN_ONLY_FIELD"
 } as const;
+
+/**
+ * Fields a member may never set on a person linked to an account (their own
+ * node): marking someone dead is admin-only (WP-4.1, Security L2).
+ */
+export const LINKED_PERSON_ADMIN_ONLY_FIELDS = ["deceased", "deathYear", "deathDate"] as const;
 export type FamilyIssueCode = (typeof FamilyIssueCode)[keyof typeof FamilyIssueCode];
 
 /**
@@ -585,6 +582,32 @@ export const memberUpdatePersonInputSchema = z
   .superRefine((value, ctx) => toIssue(ctx, patchDatesIssue(value)));
 export type MemberUpdatePersonInput = z.infer<typeof memberUpdatePersonInputSchema>;
 export type MemberUpdatePersonRequest = z.input<typeof memberUpdatePersonInputSchema>;
+
+/**
+ * `PATCH /api/family/me` (alias `PATCH /api/family/people/me`): a member edits
+ * their *own* linked person. Same field set a member may change on their own
+ * node through `PATCH /api/family/people/:id` (WP-4.1, Security L2): name,
+ * nickname, branch, birth year/date, birthplace and bio. Death data
+ * (`deceased`, `deathYear`, `deathDate`), `userId` and relationships are
+ * admin-only; this legacy route **strips** unknown keys (older clients),
+ * while `PATCH /api/family/people/:id` answers 403 `ADMIN_ONLY_FIELD`.
+ */
+export const selfEditPersonInputSchema = z
+  .object({
+    fullName: personWriteFields.fullName,
+    nickname: personWriteFields.nickname,
+    familyBranch: personWriteFields.familyBranch,
+    birthYear: personWriteFields.birthYear,
+    birthDate: personWriteFields.birthDate,
+    birthplace: personWriteFields.birthplace,
+    bio: personWriteFields.bio
+  })
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, noChanges)
+  .transform((value) => ({ ...value, ...deriveDateFields(value) }))
+  .superRefine((value, ctx) => toIssue(ctx, patchDatesIssue(value)));
+export type SelfEditPersonInput = z.infer<typeof selfEditPersonInputSchema>;
+export type SelfEditPersonRequest = z.input<typeof selfEditPersonInputSchema>;
 
 /* -------------------------------------------------------------------------- */
 /* Revisions (admin-only undo history)                                         */

@@ -16,6 +16,7 @@ import {
   familyTreeQuerySchema,
   familyTreeViewSchema,
   idParamSchema,
+  LINKED_PERSON_ADMIN_ONLY_FIELDS,
   type MemberUpdatePersonInput,
   memberCreatePersonInputSchema,
   memberUpdatePersonInputSchema,
@@ -62,6 +63,7 @@ const BIRTH_YEAR_MESSAGE = "El año de nacimiento no es compatible con el año d
 const NOT_IN_CIRCLE_MESSAGE = "Solo puedes cambiar a tu familia cercana. Pídele a un administrador que haga este cambio.";
 const LINKED_TO_OTHER_MESSAGE = "Esta persona tiene su propia cuenta: solo ella o un administrador pueden cambiar sus datos.";
 const NOT_CREATOR_MESSAGE = "Solo quien agregó a esta persona, o un administrador, puede quitarla del árbol.";
+const ADMIN_ONLY_FIELD_MESSAGE = "Solo un administrador puede registrar el fallecimiento de una persona con cuenta.";
 const HAS_RELATIONSHIPS_MESSAGE = "Esta persona tiene otras relaciones en el árbol. Pídele a un administrador que la quite.";
 
 /** Member family writes per user (create, edit, delete, self edit): 60 per hour. */
@@ -115,9 +117,13 @@ async function viewerWithCircle(db: DbOrTx, user: AuthUser): Promise<{ viewer: V
 /** `set` values for a self edit: only the whitelisted keys that were sent. */
 function selfEditValues(input: SelfEditPersonInput): PersonPatch {
   const values: PersonPatch = {};
+  if (input.fullName !== undefined) values.fullName = input.fullName;
   if (input.nickname !== undefined) values.nickname = input.nickname;
   if (input.familyBranch !== undefined) values.familyBranch = input.familyBranch;
   if (input.birthYear !== undefined) values.birthYear = input.birthYear;
+  if (input.birthDate !== undefined) values.birthDate = input.birthDate;
+  if (input.birthplace !== undefined) values.birthplace = input.birthplace;
+  if (input.bio !== undefined) values.bio = input.bio;
   return values;
 }
 
@@ -301,11 +307,17 @@ const memberFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
         await lockFamilyTree(tx);
         const before = await lockPersonRow(tx, id);
         if (before === undefined) throw new AppError("NOT_FOUND", PERSON_NOT_FOUND);
+        const patch = memberPatch(request.body);
         if (user.role !== "admin") {
           const circle = await loadFamilyCircle(tx, user.id);
           if (!memberCanEdit(before, { id: user.id, role: user.role }, circle)) throw editDenial(before, user);
+          // PR #46 L2: on a linked person (the member's own node), death data is admin-only.
+          const adminOnly = LINKED_PERSON_ADMIN_ONLY_FIELDS.find((field) => patch[field] !== undefined);
+          if (before.userId !== null && adminOnly !== undefined) {
+            throw familyError("FORBIDDEN", Issue.AdminOnlyField, ADMIN_ONLY_FIELD_MESSAGE, adminOnly);
+          }
         }
-        await updatePersonTx(tx, before, memberPatch(request.body), { id: user.id, ip: request.ip });
+        await updatePersonTx(tx, before, patch, { id: user.id, ip: request.ip });
         return detailsAfterWrite(app, tx, id, user);
       });
     }
@@ -344,10 +356,12 @@ const memberFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
 
   /**
    * `PATCH /api/family/me` (and the alias `/api/family/people/me`): the
-   * member edits nickname, branch and birth year of their **own** linked
-   * person. Unknown keys (`userId`, `fullName`, `deceased`, relationships…)
-   * are stripped by the schema and never reach the update. The merged row is
-   * re-checked with `personDatesIssue()` and recorded as a revision.
+   * member edits their **own** linked person with the same field set as
+   * `PATCH /api/family/people/:id` on their own node (name, nickname, branch,
+   * birth year/date, birthplace, bio). Death data, `userId` and other unknown
+   * keys are stripped by the schema (older clients) and never reach the
+   * update. The merged row is re-checked with `personDatesIssue()` and
+   * recorded as a revision.
    */
   const selfEditOptions = {
     config: memberConfig,
@@ -363,15 +377,15 @@ const memberFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
       const own = await findPersonByUserId(tx, user.id);
       const before = own === undefined ? undefined : await lockPersonRow(tx, own.id);
       if (before === undefined || before.userId !== user.id) throw new AppError("NOT_FOUND", NOT_LINKED_MESSAGE);
+      const values = selfEditValues(input);
       try {
-        await updatePersonTx(tx, before, selfEditValues(input), { id: user.id, ip }, { self: true });
+        await updatePersonTx(tx, before, values, { id: user.id, ip }, { self: true });
       } catch (error) {
-        // The member only sends a birth year here: report any date conflict on it.
-        if (isAppError(error) && error.code === "VALIDATION") {
-          throw new AppError("VALIDATION", BIRTH_YEAR_MESSAGE, {
-            details: [{ path: "birthYear", message: BIRTH_YEAR_MESSAGE }],
-            cause: error
-          });
+        // A conflict with stored death data the member cannot change: report it on the birth field they sent.
+        const path = isAppError(error) && error.code === "VALIDATION" ? error.details?.[0]?.path : undefined;
+        if (path !== undefined && !(path in values)) {
+          const field = values.birthYear === undefined && values.birthDate !== undefined ? "birthDate" : "birthYear";
+          throw new AppError("VALIDATION", BIRTH_YEAR_MESSAGE, { details: [{ path: field, message: BIRTH_YEAR_MESSAGE }], cause: error });
         }
         throw error;
       }

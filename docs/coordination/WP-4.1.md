@@ -76,6 +76,12 @@ Built on WP-4.0 (contracts, migration 0004, ADR 0001 §6) and merged with `origi
 - **Pending invites:** a person delete revokes the person's pending invites in the same transaction, after the person row lock (person, then invite, like the invite accept). Audited `invite.revoked` with `reason: "person_deleted"`.
 - **Accepted risk:** `canEdit: false` / 403 `PERSON_LINKED_TO_OTHER` can reveal to the qualifying circle that an unlisted relative has an account. This is accepted risk A13 (WP-4.0).
 
+## Review fixes (PR #46, Security)
+- **L1:** the own-additions walk (`circle.ts`) covers unlinked people only and stops at linked ones. Once an addition gets an account, the creator loses its living dates and birthplace and the right to edit it, unless it is in the circle by the normal rules (their own child over a qualifying edge). Additions hanging off it fall out of the circle too.
+- **L2:** on a member's own linked node, `deceased`, `deathYear` and `deathDate` are admin-only. `PATCH /api/family/people/:id` answers 403 `ADMIN_ONLY_FIELD` (new `FamilyIssueCode`). `PATCH /api/family/me` now accepts the same self field set (name, nickname, branch, birth year/date, birthplace, bio) and strips death data. The edit sheet hides "Ya falleció" and the death fields for the member's own node. Documented in ADR 0001 §6.
+- **UI:** "Deshacer" now opens a confirmation sheet with "Al deshacer, la persona y sus relaciones quedarán registradas como agregadas por un administrador."
+- **Tests:** the circle and permission rules (L1, 2 tests), the admin-only death fields and the aligned `/me` (L2, 4 tests), a route-matrix rule probe (`ADMIN_ONLY_FIELD`, with state), an updated `/me` mass-assignment probe, RTL tests for the hidden fields and the revert confirmation, and the e2e journey 13 confirm step.
+
 ## Tests
 - **Server:**
   - `member-editing.test.ts` (23): the circle rule (depth bound, a planted non-qualifying member edge, fail-closed when the creator is gone); create, edit and delete with every error code and state checks; no sequence of member requests reaches someone else's relatives; `userId` and existing-to-existing edges → 400, and no member relationship route; `PersonDetails` privacy; the rate limit; merged dates on `PATCH /family/me`.

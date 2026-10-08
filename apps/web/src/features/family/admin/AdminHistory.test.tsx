@@ -57,6 +57,10 @@ describe("AdminPersonPage · Historial", { timeout: 15_000 }, () => {
     const undo = within(panel).getAllByRole("button", { name: /^Deshacer/ });
     expect(undo).toHaveLength(1);
     await user.click(undo[0] ?? panel);
+    const confirm = await screen.findByRole("alertdialog", { name: "¿Deshacer este cambio?" });
+    expect(confirm).toHaveTextContent("Al deshacer, la persona y sus relaciones quedarán registradas como agregadas por un administrador.");
+    expect(writes()).toHaveLength(0);
+    await user.click(within(confirm).getByRole("button", { name: "Deshacer" }));
     await waitFor(() => expect(writes()[0]).toMatchObject({ method: "POST", path: `/admin/revisions/${fixtureId(702)}/revert` }));
     expect(await screen.findByText("Deshicimos el cambio.")).toBeInTheDocument();
     expect(await within(panel).findAllByText("Deshecho")).toHaveLength(2);

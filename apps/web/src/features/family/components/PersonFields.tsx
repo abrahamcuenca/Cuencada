@@ -15,6 +15,11 @@ export interface PersonFieldsProps {
   onChange: (values: PersonFormValues) => void;
   /** Focus the name field when the sheet opens. */
   autoFocusName?: boolean;
+  /**
+   * Hide "Ya falleció" and the death fields: a member editing their own
+   * linked node cannot set them (admin-only, 403 `ADMIN_ONLY_FIELD`).
+   */
+  hideDeath?: boolean;
 }
 
 /**
@@ -22,7 +27,7 @@ export interface PersonFieldsProps {
  * or a full date; "Ya falleció" reveals the death year/date; birthplace and
  * a short bio. Clearing a year clears its date (the year follows the date).
  */
-export function PersonFields({ values, errors, onChange, autoFocusName = false }: PersonFieldsProps): ReactNode {
+export function PersonFields({ values, errors, onChange, autoFocusName = false, hideDeath = false }: PersonFieldsProps): ReactNode {
   const set = (field: PersonTextField, value: string): void => onChange(editPersonField(values, field, value));
   return (
     <>
@@ -96,14 +101,16 @@ export function PersonFields({ values, errors, onChange, autoFocusName = false }
           )}
         </Field>
       </fieldset>
-      <Checkbox
-        label="Ya falleció"
-        hint="Márcalo aunque no sepas el año. En el árbol se muestra con «†»."
-        checked={values.deceased}
-        error={errors.deceased}
-        onChange={(event) => onChange(setDeceased(values, event.target.checked))}
-      />
-      {values.deceased ? (
+      {hideDeath ? null : (
+        <Checkbox
+          label="Ya falleció"
+          hint="Márcalo aunque no sepas el año. En el árbol se muestra con «†»."
+          checked={values.deceased}
+          error={errors.deceased}
+          onChange={(event) => onChange(setDeceased(values, event.target.checked))}
+        />
+      )}
+      {values.deceased && !hideDeath ? (
         <fieldset className={styles.fieldset}>
           <legend className={styles.legend}>Fallecimiento</legend>
           <div className={styles.fieldPair}>
