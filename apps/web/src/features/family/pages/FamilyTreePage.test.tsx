@@ -241,6 +241,35 @@ describe("FamilyTreePage", { timeout: 15_000 }, () => {
     expect(await screen.findByText("«Jorgito»")).toBeInTheDocument();
   });
 
+  it("shows the tree-photo controls only when the server says canEditPhoto (WP-4.3)", async () => {
+    const details = {
+      ...db.people.get(IDS.ines),
+      birthDate: null,
+      deathDate: null,
+      birthplace: null,
+      bio: null,
+      photoUrl: null,
+      photoSource: "person",
+      isLinked: false,
+      canEdit: false,
+      canEditPhoto: true,
+      contacts: []
+    };
+    server.use(http.get(apiUrl(`/family/people/${IDS.ines}`), () => HttpResponse.json(details)));
+    renderApp(`/arbol/${IDS.ines}`, authenticatedState(me));
+    await focusHeading(/^Inés Herrera Morales/);
+    expect(await screen.findByRole("button", { name: /Cambiar foto/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Quitar foto/ })).toBeInTheDocument();
+    expect(screen.getByTestId("person-photo-file-input")).toHaveAttribute("accept", "image/jpeg,image/png,image/webp");
+  });
+
+  it("hides the tree-photo controls when canEditPhoto is false", async () => {
+    renderApp(`/arbol/${IDS.ines}`, authenticatedState(me));
+    await focusHeading(/^Inés Herrera Morales/);
+    await waitFor(() => expect(db.log.some((entry) => entry.path === `/family/people/${IDS.ines}`)).toBe(true));
+    expect(screen.queryByRole("button", { name: /Agregar foto|Cambiar foto/ })).not.toBeInTheDocument();
+  });
+
   it("does not offer «Editar mis datos» on someone else's node", async () => {
     renderApp(`/arbol/${IDS.ines}`, authenticatedState(me));
     await focusHeading(/^Inés Herrera Morales/);

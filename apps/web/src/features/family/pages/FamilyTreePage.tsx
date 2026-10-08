@@ -10,12 +10,13 @@ import { cx } from "../../../shared/ui/cx";
 import { useAccessDenial } from "../../auth/accessDenied";
 import { selectCurrentUser, selectIsAdmin } from "../../auth/authSlice";
 import { AccessDeniedState } from "../../auth/components/AccessDeniedState";
-import { useGetFamilyTreeQuery } from "../api";
+import { useGetFamilyTreeQuery, useGetPersonQuery } from "../api";
 import { PersonSearch } from "../components/PersonSearch";
 import { Breadcrumbs, FocusCard, type OpenPerson, RelativeBand, SiblingStrip } from "../components/TreeParts";
 import styles from "../family.module.css";
 import { useCachedPersonNames, usePrefersReducedMotion } from "../lib/hooks";
 import { type TrailEntry, type TreeLocationState, extendedGenerations, nextTrail, readTrail, resolveTrail } from "../lib/tree";
+import { PersonPhotoEditor } from "../photo";
 
 // Only members editing their own node download the form.
 const SelfEditDialog = lazy(async () => ({
@@ -96,6 +97,9 @@ function TreeView({ view, busy, trail, expanded, onToggleExpanded, onOpen }: Tre
   const headingRef = useRef<HTMLHeadingElement>(null);
   const shownFocus = useRef<string | null>(null);
   const { focus } = view;
+  // WP-4.3: `PersonDetails.canEditPhoto` decides whether the tree-photo controls show.
+  const details = useGetPersonQuery(focus.id);
+  const photoEditor = details.data?.canEditPhoto === true ? <PersonPhotoEditor person={details.data} /> : null;
 
   // After a re-centre (not on first load), move focus to the new person's
   // name so keyboard and screen-reader users land on what changed.
@@ -113,8 +117,9 @@ function TreeView({ view, busy, trail, expanded, onToggleExpanded, onOpen }: Tre
   const generations = view.depth >= 2 ? extendedGenerations(view) : null;
   const canExpand = view.parents.length > 0 || view.children.length > 0;
   const actions =
-    isMine || isAdmin ? (
+    isMine || isAdmin || photoEditor !== null ? (
       <>
+        {photoEditor}
         {isMine ? (
           <Button variant="secondary" size="sm" icon="✏️" onClick={() => setEditing(true)}>
             Editar mis datos

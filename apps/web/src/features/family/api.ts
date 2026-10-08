@@ -1,4 +1,16 @@
-import type { FamilyTreeQueryRequest, FamilyTreeView, Page, PeopleQueryRequest, Person, PersonSummary, SelfEditPersonRequest } from "@cuencada/types";
+import type {
+  FamilyTreeQueryRequest,
+  FamilyTreeView,
+  Page,
+  PeopleQueryRequest,
+  Person,
+  PersonDetails,
+  PersonPhotoConfirmBodyRequest,
+  PersonPhotoUploadRequest,
+  PersonPhotoUploadResponse,
+  PersonSummary,
+  SelfEditPersonRequest
+} from "@cuencada/types";
 import { baseApi } from "../../shared/api/baseApi";
 
 /** Cache tag for every tree view: any people/relationship change invalidates it. */
@@ -28,8 +40,8 @@ export const familyApi = baseApi.injectEndpoints({
         }))
       ]
     }),
-    /** `GET /family/people/:id`: the full `Person` (years, branch). */
-    getPerson: build.query<Person, string>({
+    /** `GET /family/people/:id`: `PersonDetails` (a superset of `Person`: photo, `canEditPhoto`…). */
+    getPerson: build.query<PersonDetails, string>({
       query: (id) => `/family/people/${encodeURIComponent(id)}`,
       providesTags: (_result, _error, id) => [{ type: "Person", id }]
     }),
@@ -37,8 +49,34 @@ export const familyApi = baseApi.injectEndpoints({
     updateMyPerson: build.mutation<Person, SelfEditPersonRequest>({
       query: (body) => ({ url: "/family/me", method: "PATCH", body }),
       invalidatesTags: (result) => [FAMILY_TREE_ALL, PERSON_LIST, ...(result ? [{ type: "Person" as const, id: result.id }] : [])]
+    }),
+    /** `POST /family/people/:id/photo/uploads` (WP-4.3): presigned PUT for a tree photo. */
+    createPersonPhotoUpload: build.mutation<PersonPhotoUploadResponse, PersonPhotoUploadRequest & { personId: string }>({
+      query: ({ personId, ...body }) => ({ url: `/family/people/${encodeURIComponent(personId)}/photo/uploads`, method: "POST", body })
+    }),
+    /** `POST /family/people/:id/photo/uploads/:uploadId/confirm`: the server checks, crops and stores the photo. */
+    confirmPersonPhoto: build.mutation<PersonDetails, PersonPhotoConfirmBodyRequest & { personId: string; uploadId: string }>({
+      query: ({ personId, uploadId, ...body }) => ({
+        url: `/family/people/${encodeURIComponent(personId)}/photo/uploads/${encodeURIComponent(uploadId)}/confirm`,
+        method: "POST",
+        body
+      }),
+      invalidatesTags: (_result, _error, { personId }) => [FAMILY_TREE_ALL, PERSON_LIST, { type: "Person" as const, id: personId }]
+    }),
+    /** `DELETE /family/people/:id/photo`: removes the tree photo. */
+    deletePersonPhoto: build.mutation<PersonDetails, string>({
+      query: (personId) => ({ url: `/family/people/${encodeURIComponent(personId)}/photo`, method: "DELETE" }),
+      invalidatesTags: (_result, _error, personId) => [FAMILY_TREE_ALL, PERSON_LIST, { type: "Person" as const, id: personId }]
     })
   })
 });
 
-export const { useGetFamilyTreeQuery, useSearchPeopleQuery, useGetPersonQuery, useUpdateMyPersonMutation } = familyApi;
+export const {
+  useGetFamilyTreeQuery,
+  useSearchPeopleQuery,
+  useGetPersonQuery,
+  useUpdateMyPersonMutation,
+  useCreatePersonPhotoUploadMutation,
+  useConfirmPersonPhotoMutation,
+  useDeletePersonPhotoMutation
+} = familyApi;
