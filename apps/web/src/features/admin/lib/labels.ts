@@ -28,6 +28,7 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   [AuditAction.UserEmailVerifiedByAdmin]: "Marcó un correo como verificado",
   [AuditAction.RefreshReuseDetected]: "Reúso de sesión detectado",
   [AuditAction.RefreshRace]: "Renovación de sesión simultánea",
+  [AuditAction.RefreshGraceReissued]: "Sesión renovada de nuevo tras una recarga",
   [AuditAction.PasswordChanged]: "Cambió su contraseña",
   [AuditAction.PasswordReset]: "Restableció su contraseña",
   [AuditAction.LoggedIn]: "Entró",

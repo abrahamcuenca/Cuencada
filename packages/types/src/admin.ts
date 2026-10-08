@@ -42,8 +42,13 @@ export const AuditAction = {
   /** T8: an admin marked the account's email as verified by hand. */
   UserEmailVerifiedByAdmin: "user.email_verified_by_admin",
   RefreshReuseDetected: "auth.refresh_reuse_detected",
-  /** A used refresh token was presented again inside the grace window (409, nothing revoked). */
+  /** Legacy (before WP-4.6): a used refresh token was presented again inside the grace window (409, nothing revoked). */
   RefreshRace: "auth.refresh_race",
+  /**
+   * WP-4.6: a used refresh token was presented again inside the grace window and its
+   * unused successor was rotated on its behalf (metadata: token row ids only).
+   */
+  RefreshGraceReissued: "auth.refresh_grace_reissued",
   PasswordChanged: "auth.password_changed",
   PasswordReset: "auth.password_reset",
   /** Password or magic-link login (`metadata.method`). */

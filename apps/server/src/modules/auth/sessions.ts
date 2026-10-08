@@ -7,8 +7,11 @@
  * - Each refresh token is single-use. Rotation marks the old row `used_at`
  *   and links `replaced_by_token_id`. Presenting a used token more than
  *   {@link REFRESH_REUSE_GRACE_MS} after its use is **reuse**: the whole
- *   session is revoked. Within the window it is a benign multi-tab race
- *   (409 `REFRESH_RACE`, nothing revoked).
+ *   session is revoked. Within the window (WP-4.6) the client most likely lost
+ *   the rotation response (a reload or a second tab): its immediate, still
+ *   unused successor is rotated once more and a fresh token issued for the
+ *   same session ("grace re-issue"). A second grace use of the same token
+ *   finds the successor used and is reuse.
  * - Only SHA-256 hashes of refresh tokens are stored.
  */
 import { and, eq, isNull, ne, type SQL } from "drizzle-orm";
@@ -19,7 +22,7 @@ import type { DbOrTx, Transaction } from "../../lib/audit.js";
 import { createOpaqueToken, hashToken } from "../../lib/tokens.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** A used refresh token presented again within this window is a race, not reuse. */
+/** A used refresh token presented again within this window gets a grace re-issue, not reuse (WP-4.6). */
 export const REFRESH_REUSE_GRACE_MS = 10_000;
 /** Stored and returned User-Agent length (matches `sessionListItemSchema`). */
 export const USER_AGENT_MAX = 300;
@@ -141,20 +144,98 @@ export async function revokeSessions(
   return rows.map((row) => row.id);
 }
 
+/** Why a refresh was treated as reuse (audit metadata, no token data). */
+export type RefreshReuseReason =
+  /** A used token presented after the grace window. */
+  | "after_grace"
+  /** A used token presented inside the window, but its successor was already used (a second grace use or a stale chain). */
+  | "successor_used"
+  /** A used token inside the window whose successor is missing from its session (tampering or a bug: fail closed). */
+  | "successor_missing";
+
 /** Result of {@link rotateRefreshToken}. */
 export type RefreshOutcome =
   | ({ kind: "rotated"; userId: string } & IssuedRefresh)
-  /** Unknown token, expired token/session, revoked session or disabled user. */
+  /**
+   * WP-4.6 grace re-issue: the presented token was rotated less than
+   * {@link REFRESH_REUSE_GRACE_MS} ago and its successor is still unused, so
+   * the successor was rotated in turn and a fresh token issued for the same
+   * session (the browser most likely never stored the successor's cookie).
+   */
+  | ({
+      kind: "grace_reissued";
+      userId: string;
+      /** Row id of the token the client presented (not token material). */
+      presentedTokenId: string;
+      /** Row id of the successor that was rotated on its behalf. */
+      successorTokenId: string;
+    } & IssuedRefresh)
+  /** Unknown token, expired token/session, revoked session, disabled user, or an expired successor inside the grace window. */
   | { kind: "invalid" }
-  /** Used within the grace window: another tab just rotated it. */
-  | { kind: "race"; userId: string; sessionId: string }
-  /** Used after the grace window: the session was revoked by this call. */
-  | { kind: "reuse"; userId: string; sessionId: string };
+  /** Reuse: the session was revoked by this call. */
+  | { kind: "reuse"; userId: string; sessionId: string; reason: RefreshReuseReason };
+
+/** The locked session row a refresh works on. */
+interface LockedSession {
+  id: string;
+  userId: string;
+  absoluteExpiresAt: Date;
+}
 
 /**
- * Rotate a refresh token inside `tx`, locking its row (`SELECT … FOR UPDATE`)
- * so two concurrent refreshes serialize: the second one sees `used_at` and
- * gets `race`.
+ * Mark `tokenId` used, link it to a newly issued token and slide the session's
+ * idle expiry. The caller holds the session lock.
+ */
+async function rotateTokenRow(
+  tx: Transaction,
+  config: SessionConfig,
+  session: LockedSession,
+  tokenId: string,
+  now: Date
+): Promise<IssuedRefresh> {
+  const refreshExpiresAt = idleExpiry(config, now, session.absoluteExpiresAt);
+  const next = await insertRefreshToken(tx, session.id, refreshExpiresAt);
+  await tx
+    .update(refreshTokens)
+    .set({ usedAt: now, replacedByTokenId: next.id })
+    .where(eq(refreshTokens.id, tokenId));
+  await tx
+    .update(sessions)
+    .set({ idleExpiresAt: refreshExpiresAt, lastUsedAt: now })
+    .where(eq(sessions.id, session.id));
+  return { sessionId: session.id, refreshToken: next.refreshToken, refreshExpiresAt };
+}
+
+async function revokeForReuse(
+  tx: Transaction,
+  session: LockedSession,
+  reason: RefreshReuseReason,
+  now: Date
+): Promise<RefreshOutcome> {
+  await revokeSessions(tx, { userId: session.userId, sessionId: session.id }, "refresh_reuse", now);
+  return { kind: "reuse", userId: session.userId, sessionId: session.id, reason };
+}
+
+/**
+ * Rotate a refresh token inside `tx` [SEC].
+ *
+ * Locking: the token's **session** row is locked first (`SELECT … FOR UPDATE`),
+ * then its token rows. Every token mutation of a session happens under that
+ * lock, so two concurrent refreshes of one session (two tabs, or a reload that
+ * re-sends a token whose rotation is still committing) serialize, always in
+ * the same order (no deadlock between a predecessor and its successor).
+ *
+ * Outcomes for the presented token `P`:
+ * - unused and unexpired: rotate it (`rotated`).
+ * - used more than {@link REFRESH_REUSE_GRACE_MS} ago: reuse, revoke the session.
+ * - used within the window (WP-4.6): look at its immediate successor `S`
+ *   (`P.replaced_by_token_id`, same session). If `S` is unused and unexpired,
+ *   rotate `S` and return a fresh token (`grace_reissued`); a client that lost
+ *   the rotation response (page reload, dropped connection) is healed instead
+ *   of logged out. If `S` was already used, `P` is being replayed a second time
+ *   (the grace is spent) or behind a chain that moved on: reuse, revoke. A
+ *   successor missing from the session also revokes (fail closed); an expired
+ *   one is `invalid`.
  *
  * @param tx - Open transaction (the caller commits even for `reuse`, so the revocation sticks).
  * @param config - Idle lifetime.
@@ -167,56 +248,79 @@ export async function rotateRefreshToken(
   rawToken: string,
   now: Date
 ): Promise<RefreshOutcome> {
-  const [row] = await tx
+  const tokenHash = hashToken(rawToken);
+  // Which session? (No lock yet: the session lock comes first, see above.)
+  const [owner] = await tx
+    .select({ sessionId: refreshTokens.sessionId })
+    .from(refreshTokens)
+    .where(eq(refreshTokens.tokenHash, tokenHash))
+    .limit(1);
+  if (owner === undefined) return { kind: "invalid" };
+
+  const [session] = await tx
     .select({
-      tokenId: refreshTokens.id,
-      tokenExpiresAt: refreshTokens.expiresAt,
-      usedAt: refreshTokens.usedAt,
-      sessionId: sessions.id,
+      id: sessions.id,
       userId: sessions.userId,
       revokedAt: sessions.revokedAt,
       idleExpiresAt: sessions.idleExpiresAt,
       absoluteExpiresAt: sessions.absoluteExpiresAt,
       userStatus: users.status
     })
-    .from(refreshTokens)
-    .innerJoin(sessions, eq(sessions.id, refreshTokens.sessionId))
+    .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
-    .where(eq(refreshTokens.tokenHash, hashToken(rawToken)))
+    .where(eq(sessions.id, owner.sessionId))
     .limit(1)
-    .for("update", { of: [refreshTokens, sessions] });
-
-  if (row === undefined) return { kind: "invalid" };
+    .for("update", { of: sessions });
+  if (session === undefined) return { kind: "invalid" };
   const sessionDead =
-    row.revokedAt !== null ||
-    row.userStatus !== "active" ||
-    row.idleExpiresAt <= now ||
-    row.absoluteExpiresAt <= now;
+    session.revokedAt !== null ||
+    session.userStatus !== "active" ||
+    session.idleExpiresAt <= now ||
+    session.absoluteExpiresAt <= now;
   if (sessionDead) return { kind: "invalid" };
 
-  if (row.usedAt !== null) {
-    if (now.getTime() - row.usedAt.getTime() <= REFRESH_REUSE_GRACE_MS) return { kind: "race", userId: row.userId, sessionId: row.sessionId };
-    await revokeSessions(tx, { userId: row.userId, sessionId: row.sessionId }, "refresh_reuse", now);
-    return { kind: "reuse", userId: row.userId, sessionId: row.sessionId };
-  }
-  if (row.tokenExpiresAt <= now) return { kind: "invalid" };
+  // Re-read under the session lock: a concurrent refresh may have just used it.
+  const [token] = await tx
+    .select({
+      id: refreshTokens.id,
+      expiresAt: refreshTokens.expiresAt,
+      usedAt: refreshTokens.usedAt,
+      replacedByTokenId: refreshTokens.replacedByTokenId
+    })
+    .from(refreshTokens)
+    .where(and(eq(refreshTokens.tokenHash, tokenHash), eq(refreshTokens.sessionId, session.id)))
+    .limit(1)
+    .for("update");
+  if (token === undefined) return { kind: "invalid" };
 
-  const refreshExpiresAt = idleExpiry(config, now, row.absoluteExpiresAt);
-  const next = await insertRefreshToken(tx, row.sessionId, refreshExpiresAt);
-  await tx
-    .update(refreshTokens)
-    .set({ usedAt: now, replacedByTokenId: next.id })
-    .where(eq(refreshTokens.id, row.tokenId));
-  await tx
-    .update(sessions)
-    .set({ idleExpiresAt: refreshExpiresAt, lastUsedAt: now })
-    .where(eq(sessions.id, row.sessionId));
+  if (token.usedAt === null) {
+    if (token.expiresAt <= now) return { kind: "invalid" };
+    const issued = await rotateTokenRow(tx, config, session, token.id, now);
+    return { kind: "rotated", userId: session.userId, ...issued };
+  }
+
+  if (now.getTime() - token.usedAt.getTime() > REFRESH_REUSE_GRACE_MS) {
+    return revokeForReuse(tx, session, "after_grace", now);
+  }
+  // [SEC] Only the immediate successor, only in the same session.
+  if (token.replacedByTokenId === null) return revokeForReuse(tx, session, "successor_missing", now);
+  const [successor] = await tx
+    .select({ id: refreshTokens.id, expiresAt: refreshTokens.expiresAt, usedAt: refreshTokens.usedAt })
+    .from(refreshTokens)
+    .where(and(eq(refreshTokens.id, token.replacedByTokenId), eq(refreshTokens.sessionId, session.id)))
+    .limit(1)
+    .for("update");
+  if (successor === undefined) return revokeForReuse(tx, session, "successor_missing", now);
+  if (successor.expiresAt <= now) return { kind: "invalid" };
+  if (successor.usedAt !== null) return revokeForReuse(tx, session, "successor_used", now);
+
+  const issued = await rotateTokenRow(tx, config, session, successor.id, now);
   return {
-    kind: "rotated",
-    userId: row.userId,
-    sessionId: row.sessionId,
-    refreshToken: next.refreshToken,
-    refreshExpiresAt
+    kind: "grace_reissued",
+    userId: session.userId,
+    presentedTokenId: token.id,
+    successorTokenId: successor.id,
+    ...issued
   };
 }
 

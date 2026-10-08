@@ -30,6 +30,7 @@ export const AuthAuditAction = {
   SessionsRevoked: AuditAction.SessionsRevoked,
   RefreshReuseDetected: AuditAction.RefreshReuseDetected,
   RefreshRace: AuditAction.RefreshRace,
+  RefreshGraceReissued: AuditAction.RefreshGraceReissued,
   PasswordChanged: AuditAction.PasswordChanged,
   PasswordReset: AuditAction.PasswordReset,
   PasswordResetRequested: AuditAction.PasswordResetRequested,
