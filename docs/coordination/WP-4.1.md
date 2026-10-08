@@ -82,6 +82,11 @@ Built on WP-4.0 (contracts, migration 0004, ADR 0001 §6) and merged with `origi
 - **UI:** "Deshacer" now opens a confirmation sheet with "Al deshacer, la persona y sus relaciones quedarán registradas como agregadas por un administrador."
 - **Tests:** the circle and permission rules (L1, 2 tests), the admin-only death fields and the aligned `/me` (L2, 4 tests), a route-matrix rule probe (`ADMIN_ONLY_FIELD`, with state), an updated `/me` mass-assignment probe, RTL tests for the hidden fields and the revert confirmation, and the e2e journey 13 confirm step.
 
+## Review fixes (PR #46, Tech Lead)
+- **Lock order:** every family write locks the family tree first, then the person row, then invites, the same order invite accept uses (person, then invite). The admin person delete, admin PATCH and the self edit now take the tree advisory lock before locking the person row. A race test (admin delete against a member edit and a self edit, 8 rounds) reproduces the 500 deadlock on the old order and passes on the new one. The #44 invite race tests still pass.
+- **Undo of an addition:** undoing a `person.create` goes through the same cleanup as a delete. Pending invites are revoked in the transaction (`revokePendingInvites`, shared with `deletePersonTx`), and tree-photo objects are deleted after the commit.
+- **After merging PR #45 (WP-4.4):** the "Detalles" accordion renders contacts with WP-4.4's `ContactList`.
+
 ## Tests
 - **Server:**
   - `member-editing.test.ts` (23): the circle rule (depth bound, a planted non-qualifying member edge, fail-closed when the creator is gone); create, edit and delete with every error code and state checks; no sequence of member requests reaches someone else's relatives; `userId` and existing-to-existing edges → 400, and no member relationship route; `PersonDetails` privacy; the rate limit; merged dates on `PATCH /family/me`.

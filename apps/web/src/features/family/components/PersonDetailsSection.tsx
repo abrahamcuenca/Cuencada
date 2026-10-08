@@ -1,5 +1,6 @@
 import type { PersonDetails } from "@cuencada/types";
 import type { ReactNode } from "react";
+import { ContactList } from "../../directory/components/ContactList";
 import styles from "../family.module.css";
 
 const LONG_DATE = new Intl.DateTimeFormat("es-MX", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
@@ -63,17 +64,7 @@ export function PersonDetailsSection({ person, actions }: PersonDetailsSectionPr
           </dl>
         ) : null}
         {person.bio !== null ? <p className={styles.detailsBio}>{person.bio}</p> : null}
-        {person.contacts.length > 0 ? (
-          <ul className={styles.detailsContacts} aria-label="Contacto">
-            {person.contacts.map((item) => (
-              <li key={`${item.kind}:${item.href}`}>
-                <a href={item.href} rel="noopener noreferrer nofollow" target="_blank">
-                  <span className={styles.contactLabel}>{item.label}</span> {item.display}
-                </a>
-              </li>
-            ))}
-          </ul>
-        ) : null}
+        <ContactList contacts={person.contacts} ownerName={person.fullName} />
         {empty ? <p className={styles.empty}>Aún no hay más datos de {person.fullName}.</p> : null}
         {actions ? <div className={styles.detailsActions}>{actions}</div> : null}
       </div>

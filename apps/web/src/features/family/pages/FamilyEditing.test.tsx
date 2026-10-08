@@ -50,7 +50,7 @@ describe("Detalles accordion", { timeout: 15_000 }, () => {
     expect(screen.getByText("Pueblo Norte")).toBeVisible();
     expect(screen.getByText("Carpintero del pueblo.")).toBeVisible();
     expect(screen.queryByRole("img", { name: /Foto de/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("list", { name: "Contacto" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: /^Contacto/ })).not.toBeInTheDocument();
   });
 
   it("renders the photo and contacts slots when present (links as sent, rel=noopener)", async () => {
@@ -64,7 +64,8 @@ describe("Detalles accordion", { timeout: 15_000 }, () => {
     await focus(/^Ana Morales Vega/);
     await user.click(await screen.findByText("Detalles"));
     expect(screen.getByRole("img", { name: "Foto de Ana Morales Vega" })).toBeInTheDocument();
-    const link = within(screen.getByRole("list", { name: "Contacto" })).getByRole("link");
+    // WP-4.4's ContactList renders the server-built card.
+    const link = within(screen.getByRole("list", { name: "Contacto de Ana Morales Vega" })).getByRole("link");
     expect(link).toHaveAttribute("href", "https://wa.me/525550001111");
     expect(link).toHaveAttribute("rel", "noopener noreferrer nofollow");
   });

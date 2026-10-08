@@ -157,7 +157,7 @@ Still open:
 
 ### WP-4.1 follow-ups
 - **WP-4.3 merge:** `modules/family/personPhotoObjects.ts` is an interim helper for the admin person delete (current photo derivatives by the `people/…-<size>.webp` key layout + pending `person_photo_uploads` keys). Replace it with WP-4.3's helper once merged, and have WP-4.3 photo writes call `insertRevision(... "person.photo" ...)`.
-- **WP-4.4 merge:** the tree's "Detalles" accordion renders `PersonDetails.contacts` with a minimal list (`href` as-is, `rel="noopener noreferrer nofollow"`); switch it to WP-4.4's `ContactList` once merged.
+- [x] **WP-4.4 merge:** the tree's "Detalles" accordion uses WP-4.4's `ContactList` (done in WP-4.1 after merging PR #45).
 - The "Deshacer" of a `person.update` refuses (409) when the person changed afterwards; an admin undoes newer changes first. A "restore this version" (overwrite) action could come later.
 
 ## Post-launch (after the 2026-10-07 deploy)
