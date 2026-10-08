@@ -105,8 +105,14 @@ export function inviteeName(project: ProjectKey): string {
 }
 
 /** Family-tree people per project (no accounts unless linked). */
-export function familyNames(project: ProjectKey): { parent: string; partner: string } {
-  return { parent: `Ramón ${SURNAMES[project]}`, partner: `Sofía ${SURNAMES[project]}` };
+export function familyNames(project: ProjectKey): { parent: string; partner: string; grandparent: string; greatGrandparent: string } {
+  return {
+    parent: `Ramón ${SURNAMES[project]}`,
+    partner: `Sofía ${SURNAMES[project]}`,
+    // WP-4.3: a deceased line above the parent (the tree-photo journey frames a photo for the great-grandparent).
+    grandparent: `Lucía ${SURNAMES[project]}`,
+    greatGrandparent: `Tomás ${SURNAMES[project]}`
+  };
 }
 
 /** The fictional future edition the RSVP journeys use. */

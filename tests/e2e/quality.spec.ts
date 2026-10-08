@@ -14,6 +14,7 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Page, TestInfo } from "@playwright/test";
 import { CastRole, castMember, FUTURE_YEAR, ProjectKey, SEEDED_YEAR } from "./harness/people.js";
 import { expect, login, test } from "./support/fixtures.js";
+import { generateJpeg } from "./support/images.js";
 import { type GateFinding, horizontalOverflow, type OverflowResult, recordTransientOverflow, smallInputFonts, smallTouchTargets } from "./support/gates.js";
 
 const WIDTHS = [320, 375] as const;
@@ -217,6 +218,27 @@ test.describe("mobile quality gates", () => {
       { name: "mas-badge", open: "/mas" }
     ]);
     await expect(page.getByRole("navigation", { name: "Navegación inferior" }).getByRole("link", { name: /Chat.*sin leer/ })).toBeVisible();
+    assertGates(results);
+  });
+
+  test("the image cropper (WP-4.3) open over /perfil", async ({ page }, testInfo) => {
+    test.setTimeout(120_000);
+    await recordTransientOverflow(page.context());
+    await login(page, castMember(ProjectKey.Iphone, CastRole.Fede));
+    const results = await checkRoutes(page, testInfo, [
+      {
+        name: "perfil-recorte",
+        open: async (target) => {
+          await target.goto("/perfil");
+          await expect(target.getByRole("heading", { name: "Mi perfil", level: 1 })).toBeVisible();
+          const jpeg = await generateJpeg(target, "gates");
+          await target.getByTestId("avatar-file-input").setInputFiles({ name: "gates.jpg", mimeType: "image/jpeg", buffer: jpeg });
+          const cropper = target.getByRole("dialog", { name: "Ajustar foto" });
+          await expect(cropper.getByRole("button", { name: "Guardar" })).toBeEnabled();
+        }
+      }
+    ]);
+    await expect(page.getByRole("dialog", { name: "Ajustar foto" })).toBeVisible();
     assertGates(results);
   });
 

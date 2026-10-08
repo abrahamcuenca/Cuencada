@@ -20,7 +20,6 @@ import { randomUUID } from "node:crypto";
 import {
   AuditAction,
   AuditEntityType,
-  FamilyIssueCode,
   idParamSchema,
   type PersonDetails,
   PersonRevisionAction,
@@ -56,7 +55,7 @@ import {
   personPhotoDerivativeKeys,
   personPhotoKeys
 } from "./personPhoto.js";
-import { canEditPersonPhoto } from "./photoAccess.js";
+import { photoEditDenial } from "./photoAccess.js";
 import { findPerson, type PersonViewRow, type Viewer } from "./repository.js";
 
 const PERSON_NOT_FOUND = "No encontramos a esa persona.";
@@ -90,12 +89,12 @@ async function requirePerson(app: FastifyInstance, id: string): Promise<PersonVi
 }
 
 /**
- * 403 unless `viewer` may change `person`'s photo. The detail code tells the
- * client why: linked to another account, or not a close relative.
+ * 403 unless `viewer` may change `person`'s photo. The detail code
+ * (`photoEditDenial`) never tells a non-relative that a person is linked.
  */
 async function requirePhotoEditor(app: FastifyInstance, viewer: Viewer, person: PersonViewRow): Promise<void> {
-  if (await canEditPersonPhoto(app.db, viewer, person)) return;
-  const code = person.userId !== null ? FamilyIssueCode.PersonLinkedToOther : FamilyIssueCode.NotInCircle;
+  const code = await photoEditDenial(app.db, viewer, person);
+  if (code === null) return;
   throw new AppError("FORBIDDEN", NOT_ALLOWED, { details: [{ path: "id", message: NOT_ALLOWED, code }] });
 }
 

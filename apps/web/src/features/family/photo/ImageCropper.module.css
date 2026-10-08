@@ -8,7 +8,8 @@
 .stage {
   position: relative;
   width: 100%;
-  max-width: 22rem;
+  /* Short phones: keep the controls and the footer on screen. */
+  max-width: min(22rem, 44dvh);
   margin-inline: auto;
   border-radius: var(--radius-md);
   cursor: grab;
@@ -47,7 +48,7 @@
 
 .controls {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: center;
   gap: var(--space-2);
@@ -55,8 +56,8 @@
 }
 
 .slider {
-  flex: 1 1 8rem;
-  min-width: 0;
+  flex: 1 1 6rem;
+  min-width: 3rem;
   height: var(--tap-min);
   accent-color: var(--color-primary);
   cursor: pointer;

@@ -282,7 +282,7 @@ export function ImageCropper({ file, title = CROPPER_TITLE, onCancel, onCropped 
       open
       onClose={onCancel}
       title={title}
-      description="Arrastra para mover la foto y pellizca o usa el control para acercarla. Lo que quede dentro del círculo es lo que verá la familia."
+      description="Arrastra y acerca la foto. La familia verá lo que quede dentro del círculo."
       closeOnBackdrop={false}
       className={styles.dialog}
       footer={

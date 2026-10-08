@@ -108,7 +108,11 @@ async function seedAnnouncedEdition(sql: Sql): Promise<void> {
             'Edición anunciada de prueba: la fecha y el lugar aún no se definen.', '#0b5e55', true, now())`;
 }
 
-/** Two people per project, the parent linked to Ana with a `parent_of` edge; the partner edge is left for journey 7. */
+/**
+ * Per project: Ana and Beto, their parent (`parent_of` edges; the partner edge
+ * is left for journey 7), and a deceased grandparent and great-grandparent
+ * above the parent (WP-4.3 tree-photo journey).
+ */
 async function seedFamily(sql: Sql, project: ProjectKey, anaUserId: string, betoUserId: string): Promise<void> {
   const names = familyNames(project);
   const ana = castMember(project, CastRole.Ana);
@@ -120,6 +124,12 @@ async function seedFamily(sql: Sql, project: ProjectKey, anaUserId: string, beto
            (null, ${names.parent}, 'Norte', 1960),
            (null, ${names.partner}, 'Norte', 1962)
     returning id, full_name`;
+  const ancestors = await sql<{ id: string; full_name: string }[]>`
+    insert into people (user_id, full_name, family_branch, birth_year, death_year, deceased)
+    values (null, ${names.grandparent}, 'Norte', 1935, 2010, true),
+           (null, ${names.greatGrandparent}, 'Norte', 1905, 1980, true)
+    returning id, full_name`;
+  rows.push(...ancestors);
   const id = (fullName: string): string => {
     const found = rows.find((row) => row.full_name === fullName);
     if (found === undefined) throw new Error("e2e seed: person missing");
@@ -128,7 +138,9 @@ async function seedFamily(sql: Sql, project: ProjectKey, anaUserId: string, beto
   await sql`
     insert into person_relationships (kind, from_person_id, to_person_id)
     values ('parent_of', ${id(names.parent)}, ${id(ana.displayName)}),
-           ('parent_of', ${id(names.parent)}, ${id(beto.displayName)})`;
+           ('parent_of', ${id(names.parent)}, ${id(beto.displayName)}),
+           ('parent_of', ${id(names.grandparent)}, ${id(names.parent)}),
+           ('parent_of', ${id(names.greatGrandparent)}, ${id(names.grandparent)})`;
 }
 
 /**

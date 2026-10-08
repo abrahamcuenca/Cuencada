@@ -17,7 +17,7 @@
  * endpoint people. Anything else (incl. after the creator's account was
  * deleted, `created_by_user_id` null) does not qualify: fail closed.
  */
-import { RelationshipKind } from "@cuencada/types";
+import { FamilyIssueCode, RelationshipKind } from "@cuencada/types";
 import { and, eq, or, type SQL, sql } from "drizzle-orm";
 import { people, personRelationships } from "../../db/schema/index.js";
 import type { DbOrTx } from "../../lib/audit.js";
@@ -74,9 +74,30 @@ export async function isCloseRelative(db: DbOrTx, a: string, b: string): Promise
  * @param target - The person whose photo would change.
  */
 export async function canEditPersonPhoto(db: DbOrTx, viewer: Viewer, target: Pick<PersonRow, "id" | "userId">): Promise<boolean> {
-  if (viewer.role === "admin") return true;
-  if (target.userId !== null) return target.userId === viewer.id;
+  return (await photoEditDenial(db, viewer, target)) === null;
+}
+
+/**
+ * Why `viewer` may not change `target`'s photo, or `null` when they may.
+ *
+ * [SEC] `PERSON_LINKED_TO_OTHER` is only told to **close relatives** (who
+ * already know the family; accepted risk A13). Anyone else gets
+ * `FAMILY_NOT_IN_CIRCLE`, so the code never reveals that an unlisted account
+ * is linked to a node outside the caller's family.
+ *
+ * @param db - Client or transaction.
+ * @param viewer - The caller.
+ * @param target - The person whose photo would change.
+ */
+export async function photoEditDenial(
+  db: DbOrTx,
+  viewer: Viewer,
+  target: Pick<PersonRow, "id" | "userId">
+): Promise<FamilyIssueCode | null> {
+  if (viewer.role === "admin") return null;
+  if (target.userId !== null && target.userId === viewer.id) return null;
   const own = await findPersonByUserId(db, viewer.id);
-  if (own === undefined) return false;
-  return isCloseRelative(db, own.id, target.id);
+  const close = own !== undefined && (await isCloseRelative(db, own.id, target.id));
+  if (!close) return FamilyIssueCode.NotInCircle;
+  return target.userId === null ? null : FamilyIssueCode.PersonLinkedToOther;
 }

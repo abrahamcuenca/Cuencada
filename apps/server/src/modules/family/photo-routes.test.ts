@@ -79,8 +79,12 @@ async function orientedJpeg(): Promise<Buffer> {
     .toBuffer();
 }
 
-async function intent(auth: AuthInjectOptions, personId: string, byteSize: number, mimeType = "image/jpeg") {
-  return app.inject({ method: "POST", url: `/api/family/people/${personId}/photo/uploads`, ...auth, payload: { mimeType, byteSize } });
+/** A completed `inject()` response. */
+type InjectResponse = Awaited<ReturnType<App["inject"]>>;
+
+async function intent(auth: AuthInjectOptions, personId: string, byteSize: number, mimeType = "image/jpeg"): Promise<InjectResponse> {
+  const response = await app.inject({ method: "POST", url: `/api/family/people/${personId}/photo/uploads`, ...auth, payload: { mimeType, byteSize } });
+  return response;
 }
 
 async function objectKeyOf(uploadId: string): Promise<string> {
@@ -89,13 +93,14 @@ async function objectKeyOf(uploadId: string): Promise<string> {
   return row.objectKey;
 }
 
-function confirm(auth: AuthInjectOptions, personId: string, uploadId: string, payload: unknown = {}) {
-  return app.inject({
+async function confirm(auth: AuthInjectOptions, personId: string, uploadId: string, payload: Record<string, unknown> = {}): Promise<InjectResponse> {
+  const response = await app.inject({
     method: "POST",
     url: `/api/family/people/${personId}/photo/uploads/${uploadId}/confirm`,
     ...auth,
     payload
   });
+  return response;
 }
 
 /** Intent → simulated browser PUT → confirm. */
@@ -299,6 +304,14 @@ describe("who may change a tree photo", () => {
     const response = await intent(tree.me.auth, tree.parent, 100);
     expect(response.statusCode).toBe(403);
     expect(errorOf(response.body).detailCode).toBe("PERSON_LINKED_TO_OTHER");
+  });
+
+  it("never tells a non-relative that a person is linked (unlisted account): 403 FAMILY_NOT_IN_CIRCLE", async () => {
+    const stranger = await linkedMember();
+    const hidden = await linkedMember({ profile: { listedInDirectory: false } });
+    const response = await intent(stranger.auth, hidden.personId, 100);
+    expect(response.statusCode).toBe(403);
+    expect(errorOf(response.body).detailCode).toBe("FAMILY_NOT_IN_CIRCLE");
   });
 
   it("ignores a member-made edge whose creator created neither endpoint (planted), and honours a valid one", async () => {
