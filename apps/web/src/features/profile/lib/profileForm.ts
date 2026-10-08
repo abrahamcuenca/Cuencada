@@ -5,14 +5,17 @@
  * server profile ("baseline"). The PATCH carries the fields whose normalised
  * value differs from the baseline, nothing else, and is validated with the
  * contract's `updateProfileInputSchema` (strict on the server: contract keys only).
+ *
+ * WP-4.4: the phone and the email/phone "Mostrar" switches moved to the
+ * Contacto section (`contactForm.ts`, `PATCH /api/profile/me/contacts`).
  */
 import { type OwnProfile, type UpdateProfileRequest, updateProfileInputSchema } from "@cuencada/types";
 
 /** Text inputs of the form. */
-export type ProfileTextField = "fullName" | "displayName" | "familyBranch" | "city" | "phone" | "bio";
+export type ProfileTextField = "fullName" | "displayName" | "familyBranch" | "city" | "bio";
 
 /** Switches of the privacy section (the `visibility` flags). */
-export type ProfileSwitchField = "listedInDirectory" | "showEmail" | "showPhone" | "showCity";
+export type ProfileSwitchField = "listedInDirectory" | "showCity";
 
 /** Every editable field. */
 export type ProfileField = ProfileTextField | ProfileSwitchField;
@@ -27,12 +30,12 @@ export type ProfileFormErrors = Partial<Record<ProfileField, string>>;
 export type ProfilePatchResult = { ok: true; patch: UpdateProfileRequest | null } | { ok: false; errors: ProfileFormErrors };
 
 /** Text fields in form order; the first invalid one gets focus. */
-export const PROFILE_TEXT_FIELDS: readonly ProfileTextField[] = ["fullName", "displayName", "familyBranch", "city", "phone", "bio"];
+export const PROFILE_TEXT_FIELDS: readonly ProfileTextField[] = ["fullName", "displayName", "familyBranch", "city", "bio"];
 
 /** Switches in display order. */
-export const PROFILE_SWITCH_FIELDS: readonly ProfileSwitchField[] = ["listedInDirectory", "showEmail", "showPhone", "showCity"];
+export const PROFILE_SWITCH_FIELDS: readonly ProfileSwitchField[] = ["listedInDirectory", "showCity"];
 
-const NULLABLE_TEXT: ReadonlySet<ProfileTextField> = new Set(["familyBranch", "city", "phone", "bio"]);
+const NULLABLE_TEXT: ReadonlySet<ProfileTextField> = new Set(["familyBranch", "city", "bio"]);
 
 /**
  * @param profile - The server profile.
@@ -44,11 +47,8 @@ export function toFormValues(profile: OwnProfile): ProfileFormValues {
     displayName: profile.displayName,
     familyBranch: profile.familyBranch ?? "",
     city: profile.city ?? "",
-    phone: profile.phone ?? "",
     bio: profile.bio ?? "",
     listedInDirectory: profile.visibility.listedInDirectory,
-    showEmail: profile.visibility.showEmail,
-    showPhone: profile.visibility.showPhone,
     showCity: profile.visibility.showCity
   };
 }
@@ -87,7 +87,7 @@ export function buildProfilePatch(baseline: ProfileFormValues, values: ProfileFo
 
   const body: Record<string, string | boolean | null> = {};
   for (const field of changed) {
-    if (field === "listedInDirectory" || field === "showEmail" || field === "showPhone" || field === "showCity") {
+    if (field === "listedInDirectory" || field === "showCity") {
       body[field] = values[field];
     } else {
       const value = values[field].trim();

@@ -11,7 +11,7 @@ same guard config. `401`/`403` cells are guard denials (`UNAUTHENTICATED`,
 `PASSWORD_CHANGE_REQUIRED`, `FORBIDDEN`, `EMAIL_UNVERIFIED`); other non-2xx
 cells are handler answers for that principal's own data.
 
-Total: 101 routes (14 public, 38 user, 47 admin, 2 cookie).
+Total: 102 routes (14 public, 39 user, 47 admin, 2 cookie).
 
 | Method | Path | auth | Verified email | Pending pw allowed | Anon | Member | Unverified | Pending pw | Disabled | Revoked | Admin | Other member (IDOR) | Scope / notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -114,5 +114,6 @@ Total: 101 routes (14 public, 38 user, 47 admin, 2 cookie).
 | DELETE | `/api/profile/me/avatar` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
 | POST | `/api/profile/me/avatar/confirm` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 404 | own upload intents only (404 for another user's uploadId) |
 | POST | `/api/profile/me/avatar/uploads` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
+| PATCH | `/api/profile/me/contacts` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 2xx | self only (no id in path or body; another member's contacts never change); mass assignment: extra keys (userId/showCity/listedInDirectory/email) → 400 |
 | GET | `/health` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
 | GET | `/health/ready` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |

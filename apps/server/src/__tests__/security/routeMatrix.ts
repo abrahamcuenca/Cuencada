@@ -309,6 +309,27 @@ async function listedMember(): Promise<TestUser> {
   });
 }
 
+/** A member's contact columns and visibility (compared before/after a probe). */
+function contactsState(userId: string): () => Promise<unknown> {
+  return async () =>
+    getTestDb()
+      .select({
+        phone: profiles.phone,
+        whatsapp: profiles.whatsapp,
+        instagram: profiles.instagram,
+        github: profiles.github,
+        website: profiles.website,
+        showEmail: profiles.showEmail,
+        showPhone: profiles.showPhone,
+        showCity: profiles.showCity,
+        listedInDirectory: profiles.listedInDirectory,
+        contactVisibility: profiles.contactVisibility,
+        updatedAt: profiles.updatedAt
+      })
+      .from(profiles)
+      .where(eq(profiles.userId, userId));
+}
+
 const json = (url: string, payload?: unknown): BuiltRequest => (payload === undefined ? { url } : { url, payload });
 
 const NOT_FOUND: Expectation = { status: 404, code: "NOT_FOUND" };
@@ -640,6 +661,39 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     url: "/api/profile/me",
     auth: "user",
     build: async () => json("/api/profile/me", { city: "Mérida" })
+  },
+  {
+    method: "PATCH",
+    url: "/api/profile/me/contacts",
+    auth: "user",
+    owner: "self only (no id in path or body; another member's contacts never change)",
+    build: async () => json("/api/profile/me/contacts", { instagram: "prima.ficticia", visibility: { instagram: true } }),
+    probes: [
+      {
+        label: "another member's contacts and visibility (before/after)",
+        kind: "idor",
+        build: async (ctx) => ({
+          ...json("/api/profile/me/contacts", { github: "mia-ficticia", visibility: { github: true, email: true } }),
+          state: contactsState(ctx.other.user.id)
+        }),
+        expect: "2xx"
+      },
+      {
+        label: "extra keys (userId/showCity/listedInDirectory/email)",
+        kind: "mass-assignment",
+        build: async (ctx) => ({
+          ...json("/api/profile/me/contacts", {
+            instagram: "mia.ficticia",
+            userId: ctx.other.user.id,
+            showCity: true,
+            listedInDirectory: false,
+            email: "otra@example.com"
+          }),
+          state: async () => ({ mine: await contactsState(ctx.actor.user.id)(), theirs: await contactsState(ctx.other.user.id)() })
+        }),
+        expect: { status: 400, code: "VALIDATION" }
+      }
+    ]
   },
   {
     method: "POST",

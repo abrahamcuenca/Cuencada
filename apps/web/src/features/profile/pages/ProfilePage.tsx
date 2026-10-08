@@ -12,6 +12,7 @@ import { TextInput } from "../../../shared/ui/TextInput";
 import { useToast } from "../../../shared/ui/Toast";
 import { useGetProfileQuery, useUpdateProfileMutation } from "../api";
 import { AvatarEditor } from "../components/AvatarEditor";
+import { ContactSection } from "../components/ContactSection";
 import {
   buildProfilePatch,
   dirtyFields,
@@ -31,7 +32,9 @@ export const PROFILE_SAVED_MESSAGE = "Cambios guardados.";
 
 /**
  * `/perfil`: the caller's own profile. Avatar, personal data and the privacy
- * switches; "Guardar cambios" sends only the fields that changed.
+ * switches; "Guardar cambios" sends only the fields that changed. Contacts
+ * (phone, email switch, WhatsApp, social networks, website) have their own
+ * "Contacto" section and save button (WP-4.4).
  */
 export function ProfilePage(): ReactNode {
   const { data, error, isLoading, refetch } = useGetProfileQuery();
@@ -87,14 +90,6 @@ const TEXT_FIELDS: Record<ProfileTextField, TextFieldSpec> = {
   displayName: { label: "Cómo te dicen", hint: "Así te verá la familia en el chat y en las fotos.", required: true, autoComplete: "nickname", maxLength: 80 },
   familyBranch: { label: "Rama familiar", hint: "Por ejemplo: Rama Norte.", autoComplete: "off", maxLength: 120 },
   city: { label: "Ciudad", autoComplete: "address-level2", maxLength: 120 },
-  phone: {
-    label: "Teléfono / WhatsApp",
-    hint: "Con lada, por ejemplo +52 555 010 0101.",
-    type: "tel",
-    inputMode: "tel",
-    autoComplete: "tel",
-    maxLength: 30
-  },
   bio: { label: "Sobre mí", hint: "Unas líneas para que la familia te conozca.", autoComplete: "off", maxLength: 500 }
 };
 
@@ -104,11 +99,6 @@ interface SwitchSpec {
 }
 
 const SWITCH_FIELDS: Record<ProfileSwitchField, SwitchSpec> = {
-  showEmail: {
-    label: "Mostrar mi correo a la familia",
-    hint: (profile) => `Tu correo (${profile.email}) aparecerá en tu ficha del directorio.`
-  },
-  showPhone: { label: "Mostrar mi teléfono a la familia", hint: () => "Podrán llamarte o escribirte por WhatsApp desde el directorio." },
   showCity: { label: "Mostrar mi ciudad a la familia", hint: () => "Aparecerá en tu ficha y podrán encontrarte al buscar por ciudad." },
   listedInDirectory: {
     label: "Aparecer en el directorio",
@@ -255,6 +245,8 @@ function ProfileForm({ profile }: { profile: OwnProfile }): ReactNode {
             </Button>
           </div>
         </form>
+
+        <ContactSection profile={profile} />
       </div>
 
       <Button to="/perfil/sesiones" variant="ghost" icon="🔐" iconEnd="›" className={styles.sessionsLink}>
