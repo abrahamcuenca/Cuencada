@@ -40,16 +40,20 @@ export const REFRESH_PATH = "/auth/refresh";
 export const LOGOUT_PATH = "/auth/logout";
 /** Headers every cookie-authenticated call (refresh, logout) must send. */
 export const CSRF_HEADERS: Readonly<Record<string, string>> = { [CSRF_HEADER]: "1" };
-/** Pause before retrying a refresh that lost a `REFRESH_RACE`, letting the winner finish. */
-export const REFRESH_RACE_RETRY_DELAY_MS = 150;
 /**
- * Pause before the last retry after a SECOND consecutive `REFRESH_RACE`: just
- * past the server's 10 s reuse-grace window (`REFRESH_REUSE_GRACE_MS`), so a
- * slow winner (e.g. another tab on a bad connection) has surely stored its new
- * cookie. If the cookie jar still holds the old token by then, the server treats
- * it as reuse and revokes the session, which is the correct outcome.
+ * Pauses before each retry of a refresh answered 409 `REFRESH_RACE`: about 1 s,
+ * at most twice, so every retry lands well inside the server's 10 s grace
+ * window (`REFRESH_REUSE_GRACE_MS`). Then the refresh gives up (local logout).
+ *
+ * WP-4.6: since the server's grace re-issue, `POST /auth/refresh` no longer
+ * answers 409 at all. A token presented again inside the window gets a fresh
+ * cookie (200), and a second use is reuse (401). The bounded retry is kept
+ * only for a server that still sends the contract's `REFRESH_RACE` (an older
+ * build during a deploy or rollback). The former 11 s wait past the window is
+ * gone: it turned a lost rotation response (a reload mid-refresh) into reuse
+ * and logged real users out.
  */
-export const REFRESH_RACE_GRACE_WAIT_MS = 11_000;
+export const REFRESH_RACE_RETRY_DELAYS_MS: readonly number[] = [1_000, 1_000];
 
 type ApiBaseQuery = BaseQueryFn<string | FetchArgs, unknown, FetchBaseQueryError, object, FetchBaseQueryMeta>;
 type QueryResult = Awaited<ReturnType<ApiBaseQuery>>;
@@ -77,10 +81,11 @@ export const rawBaseQuery: ApiBaseQuery = fetchBaseQuery({
 
 /**
  * Runs `task` while holding the cross-tab `cuencada-refresh` Web Lock, so two
- * tabs never present the same refresh cookie at once (which the server would
- * treat as reuse). Falls back to running `task` directly where the Web Locks
- * API is missing (older Safari, jsdom); the in-tab mutex still applies there,
- * and the server's `REFRESH_RACE` grace window covers the cross-tab case.
+ * tabs never present the same refresh cookie at once (the server re-issues
+ * once inside its grace window, and treats a second use as reuse). Falls back
+ * to running `task` directly where the Web Locks API is missing (older Safari,
+ * jsdom); the in-tab mutex still applies there, and the server's one-time
+ * grace re-issue covers two tabs racing (a third concurrent one is reuse).
  *
  * @param task - The work to run under the lock.
  * @returns Whatever `task` resolves to.
@@ -161,9 +166,9 @@ async function refreshOnce(api: BaseQueryApi): Promise<boolean> {
 
   let result = await requestRefresh(api);
   if (loggedOutMeanwhile()) return false;
-  // Another tab rotated the cookie inside the grace window: retry after a short pause and,
-  // if that races too, once more after the grace window has passed. Then give up.
-  for (const pause of [REFRESH_RACE_RETRY_DELAY_MS, REFRESH_RACE_GRACE_WAIT_MS]) {
+  // Only an older server answers REFRESH_RACE (see REFRESH_RACE_RETRY_DELAYS_MS): retry a
+  // bounded number of times inside its grace window, then give up.
+  for (const pause of REFRESH_RACE_RETRY_DELAYS_MS) {
     if (!isRefreshRace(result)) break;
     await delay(pause);
     if (loggedOutMeanwhile()) return false;
@@ -188,7 +193,7 @@ async function refreshOnce(api: BaseQueryApi): Promise<boolean> {
     return false;
   }
 
-  // The server answered with a refusal (401, 403 CSRF_FAILED, 409 after the retry, other 4xx).
+  // The server answered with a refusal (401, 403 CSRF_FAILED, 409 after the retries, other 4xx).
   cancelOnlineRefreshRetry();
   api.dispatch(loggedOut());
   return false;
@@ -245,7 +250,7 @@ function scheduleOnlineRefreshRetry(api: Pick<BaseQueryApi, "dispatch" | "getSta
 /**
  * Cancels a pending "retry the refresh when back online" (after success,
  * logout, and between tests). The store's `loggedOut` listener calls it, so it
- * also ends a pending REFRESH_RACE pause (up to 11 s) right away.
+ * also ends a pending REFRESH_RACE pause right away.
  */
 export function cancelOnlineRefreshRetry(): void {
   cancelRaceWait();
@@ -262,10 +267,10 @@ let refreshInFlight: { epoch: number; promise: Promise<boolean> } | null = null;
  *
  * Single-flight: concurrent callers in this tab share one request. Across
  * tabs the request runs under {@link withRefreshLock}. On 409 `REFRESH_RACE`
- * it retries once. Success dispatches `tokenRefreshed`. No usable answer
+ * (older servers only) it retries after about 1 s, at most twice. Success dispatches `tokenRefreshed`. No usable answer
  * (network error, 5xx, non-JSON or off-contract 200) keeps the session,
  * dispatches `refreshDeferredOffline` and retries on the next `online` event.
- * A refusal (401, 403 `CSRF_FAILED`, 409 after the retry) dispatches
+ * A refusal (401, 403 `CSRF_FAILED`, 409 after the retries) dispatches
  * `loggedOut`. A result that arrives after a logout is discarded.
  *
  * @param api - Supplies `dispatch`/`getState`; its abort signal is not used.
