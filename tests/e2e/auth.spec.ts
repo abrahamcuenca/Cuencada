@@ -1,8 +1,9 @@
 /**
- * Journeys 1, 2, 3 and 9: first admin login, invites (+ email
- * verification), magic link (+ the "sesión abierta" interstitial) and
- * logout everywhere.
+ * Journeys 1, 2, 3, 9 and 9b: first admin login, invites (+ email
+ * verification), magic link (+ the "sesión abierta" interstitial), logout
+ * everywhere, and a reload that cuts a refresh short (WP-4.6 grace re-issue).
  */
+import type { Cookie, Page } from "@playwright/test";
 import { inviteeEmail, inviteeName, NEW_ADMIN_PASSWORD } from "./harness/people.js";
 import { appLinkIn, waitForMail } from "./support/mail.js";
 import { CastRole, expect, journeyShot, login, test } from "./support/fixtures.js";
@@ -189,4 +190,52 @@ test.describe("auth journeys", () => {
     await expect(other).toHaveURL(/\/entrar/);
     await expect(other.getByRole("button", { name: "Salir" })).toHaveCount(0);
   });
+
+  test("9b · a reload that cuts a refresh short keeps the session (grace re-issue) @desktop", async ({ page, cast }) => {
+    await login(page, cast(CastRole.Dario));
+    const before = await refreshCookie(page);
+
+    // The next boot refresh reaches the API, which rotates the token and commits, but the
+    // browser never gets the answer (the page reloads first): the old cookie stays in the jar.
+    let rotated = false;
+    await page.route(
+      "**/api/auth/refresh",
+      async (route) => {
+        const response = await route.fetch();
+        rotated = response.status() === 200;
+        // route.fetch() may store the new cookie itself: put the old one back, as a browser
+        // whose response was cut off would still have it.
+        await page.context().addCookies([before]);
+        await route.abort("aborted");
+      },
+      { times: 1 }
+    );
+    await page.goto("/");
+    await expect.poll(() => rotated).toBe(true);
+    expect((await refreshCookie(page)).value).toBe(before.value);
+
+    // The reload presents the already-rotated token inside the 10 s grace window: the API
+    // re-issues a fresh cookie for the same session (before WP-4.6: 409, an 11 s wait, then
+    // reuse detection revoked the session and the member was logged out).
+    const started = Date.now();
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Salir" })).toBeVisible({ timeout: 5_000 });
+    expect(Date.now() - started).toBeLessThan(5_000);
+    const reissued = await refreshCookie(page);
+    expect(reissued.value).not.toBe(before.value);
+
+    // The re-issued cookie is an ordinary one: further reloads and member pages keep working.
+    await page.reload();
+    await expect(page.getByRole("button", { name: "Salir" })).toBeVisible();
+    await page.goto("/directorio");
+    await expect(page).toHaveURL(/\/directorio$/);
+    await expect(page.getByRole("button", { name: "Salir" })).toBeVisible();
+  });
 });
+
+/** The refresh-token cookie in the page's jar (`__Secure-cuencada_rt` or `cuencada_rt`). */
+async function refreshCookie(page: Page): Promise<Cookie> {
+  const cookie = (await page.context().cookies()).find((candidate) => /cuencada_rt$/.test(candidate.name));
+  if (cookie === undefined) throw new Error("no refresh cookie in the browser context");
+  return cookie;
+}

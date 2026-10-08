@@ -111,8 +111,11 @@ const sessionRoutes: FastifyPluginAsyncZod = async (app) => {
 
   /**
    * `POST /api/auth/refresh` (cookie + CSRF): rotate the refresh token.
-   * 401 for unknown/expired/revoked, 409 `REFRESH_RACE` inside the grace
-   * window, and reuse after it revokes the session.
+   * 401 for unknown/expired/revoked. A used token inside the grace window gets
+   * a grace re-issue (200, its unused successor rotated once more, WP-4.6);
+   * reuse after the window, or a second grace use, revokes the session (401).
+   * The route never answers 409 `REFRESH_RACE` any more; the code stays in the
+   * contract for older clients.
    */
   app.post(
     "/auth/refresh",
@@ -129,14 +132,16 @@ const sessionRoutes: FastifyPluginAsyncZod = async (app) => {
       const now = app.clock.now();
       const outcome = await app.db.transaction(async (tx) => {
         const result = await rotateRefreshToken(tx, app.config, rawToken, now);
-        if (result.kind === "race") {
-          // Benign multi-tab races and a thief racing the victim look the same here;
-          // the audit trail lets an admin spot a pattern (no token data).
+        if (result.kind === "grace_reissued") {
+          // A lost rotation response (reload, second tab) and a thief replaying a just-rotated
+          // token look the same here; the audit trail lets an admin spot a pattern. Ids only.
           await recordAudit(tx, {
             actorUserId: result.userId,
-            action: AuthAuditAction.RefreshRace,
+            action: AuthAuditAction.RefreshGraceReissued,
             entityType: "session",
             entityId: result.sessionId,
+            // `refresh_tokens` row ids (keys avoid "token", which the audit scrubber redacts).
+            metadata: { presentedId: result.presentedTokenId, successorId: result.successorTokenId },
             ip: request.ip
           });
         }
@@ -146,7 +151,7 @@ const sessionRoutes: FastifyPluginAsyncZod = async (app) => {
             action: AuthAuditAction.RefreshReuseDetected,
             entityType: "session",
             entityId: result.sessionId,
-            metadata: { userId: result.userId },
+            metadata: { userId: result.userId, reason: result.reason },
             ip: request.ip
           });
         }
@@ -155,9 +160,8 @@ const sessionRoutes: FastifyPluginAsyncZod = async (app) => {
 
       switch (outcome.kind) {
         case "rotated":
+        case "grace_reissued":
           return issueAuthResponse(app, reply, outcome, outcome.userId, now);
-        case "race":
-          throw new AppError("REFRESH_RACE");
         case "reuse":
           request.log.warn({ sessionId: outcome.sessionId }, "refresh token reuse detected; session revoked");
           closeChatSockets(app, { sessionIds: [outcome.sessionId] });

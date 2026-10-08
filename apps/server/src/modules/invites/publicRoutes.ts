@@ -72,7 +72,9 @@ type AcceptOutcome =
       adminAlert: { plan: AdminAlertPlan; details: AdminAlert } | null;
     }
   | { kind: "invalid" }
-  | { kind: "exists" };
+  | { kind: "exists" }
+  /** The locked invite names another person than the one locked (a concurrent merge): retry on it. */
+  | { kind: "repointed"; personId: string };
 
 /** Display name of the admin who created the invite (`null` once that account is gone). */
 async function inviterName(tx: Transaction, userId: string | null): Promise<string> {
@@ -147,125 +149,142 @@ const publicInviteRoutes: FastifyPluginAsyncZod = async (app) => {
         .from(invites)
         .where(eq(invites.tokenHash, tokenHash))
         .limit(1);
-      const requestedPersonId = named?.personId ?? null;
+      const firstPersonId = named?.personId ?? null;
 
-      const outcome = await app.db.transaction(async (tx): Promise<AcceptOutcome> => {
-        // WP-4.2: held until commit, so no admin link, delete or death can slip in.
-        const locked = requestedPersonId === null ? undefined : await lockPerson(tx, requestedPersonId);
-        const [invite] = await tx
-          .select()
-          .from(invites)
-          .where(eq(invites.tokenHash, tokenHash))
-          .limit(1)
-          .for("update");
-        if (invite === undefined || !isInviteUsable(invite, now)) return { kind: "invalid" };
-        // Bound invites: the typed address must be the bound one (generic failure on mismatch).
-        if (invite.email !== null && invite.email.toLowerCase() !== email) return { kind: "invalid" };
+      /**
+       * One accept attempt. `requestedPersonId` is locked first. With `allowRepoint`, the
+       * attempt stops before any write when the locked invite now names a different person:
+       * a concurrent "Fusionar personas" moved the invite from the removed duplicate to the
+       * kept person after the first read (WP-4.6, TL note on PR #49). The caller then retries
+       * once on that person, keeping the person → invite lock order.
+       */
+      const attempt = (requestedPersonId: string | null, allowRepoint: boolean): Promise<AcceptOutcome> =>
+        app.db.transaction(async (tx): Promise<AcceptOutcome> => {
+          // WP-4.2: held until commit, so no admin link, delete or death can slip in.
+          const locked = requestedPersonId === null ? undefined : await lockPerson(tx, requestedPersonId);
+          const [invite] = await tx
+            .select()
+            .from(invites)
+            .where(eq(invites.tokenHash, tokenHash))
+            .limit(1)
+            .for("update");
+          if (invite === undefined || !isInviteUsable(invite, now)) return { kind: "invalid" };
+          // Bound invites: the typed address must be the bound one (generic failure on mismatch).
+          if (invite.email !== null && invite.email.toLowerCase() !== email) return { kind: "invalid" };
+          if (allowRepoint && invite.personId !== null && invite.personId !== requestedPersonId) {
+            return { kind: "repointed", personId: invite.personId };
+          }
 
-        const [existing] = await tx
-          .select({ id: users.id })
-          .from(users)
-          .where(sql`lower(${users.email}) = ${email}`)
-          .limit(1);
-        if (existing !== undefined) return { kind: "exists" };
+          const [existing] = await tx
+            .select({ id: users.id })
+            .from(users)
+            .where(sql`lower(${users.email}) = ${email}`)
+            .limit(1);
+          if (existing !== undefined) return { kind: "exists" };
 
-        // Verified only when the invite was bound to this address AND delivered by email.
-        const emailVerified = invite.email !== null && invite.lastSentAt !== null;
-        const [user] = await tx
-          .insert(users)
-          .values({
-            email,
-            displayName,
-            passwordHash,
-            role: invite.role,
-            emailVerifiedAt: emailVerified ? now : null,
-            passwordChangedAt: now,
-            invitedByInviteId: invite.id,
-            lastLoginAt: now
-          })
-          .onConflictDoNothing()
-          .returning({ id: users.id });
-        // A concurrent accept (another invite) took the address between the check and the insert.
-        if (user === undefined) return { kind: "exists" };
+          // Verified only when the invite was bound to this address AND delivered by email.
+          const emailVerified = invite.email !== null && invite.lastSentAt !== null;
+          const [user] = await tx
+            .insert(users)
+            .values({
+              email,
+              displayName,
+              passwordHash,
+              role: invite.role,
+              emailVerifiedAt: emailVerified ? now : null,
+              passwordChangedAt: now,
+              invitedByInviteId: invite.id,
+              lastLoginAt: now
+            })
+            .onConflictDoNothing()
+            .returning({ id: users.id });
+          // A concurrent accept (another invite) took the address between the check and the insert.
+          if (user === undefined) return { kind: "exists" };
 
-        await tx.insert(profiles).values({ userId: user.id, fullName: displayName });
-        const link = await linkAcceptedPerson(tx, {
-          requestedPersonId,
-          invitePersonId: invite.personId,
-          inviteEmail: invite.email,
-          locked,
-          userId: user.id,
-          fullName: displayName
-        });
-
-        const useCount = invite.useCount + 1;
-        // Effective limit: open invites created before WP-2.3b stop at 10 uses.
-        const maxUses = effectiveInviteMaxUses(invite);
-        const exhausted = useCount >= maxUses;
-        await tx
-          .update(invites)
-          .set({ useCount, ...(exhausted ? { status: "accepted" as const, acceptedAt: now } : {}) })
-          .where(eq(invites.id, invite.id));
-
-        const issued = await startSession(tx, app.config, user.id, sessionOrigin(request), now);
-        const open = invite.email === null;
-        const plan = open ? await planInviteAcceptedAlert(app, tx, now) : null;
-        // Admin-role invites (always email-bound) create an admin: tell the other admins (Security P1).
-        const adminPlan = invite.role === UserRole.Admin ? await planNewAdminAlert(tx, user.id) : null;
-        const auditId = await recordAudit(tx, {
-          actorUserId: user.id,
-          action: AuditAction.InviteAccepted,
-          entityType: "invite",
-          entityId: invite.id,
-          metadata: {
+          await tx.insert(profiles).values({ userId: user.id, fullName: displayName });
+          const link = await linkAcceptedPerson(tx, {
+            requestedPersonId,
+            invitePersonId: invite.personId,
+            inviteEmail: invite.email,
+            locked,
             userId: user.id,
-            role: invite.role,
-            emailVerified,
-            open,
-            useCount,
-            maxUses,
-            // Ids and an enum only (no names): which person the account got.
-            personId: link.personId,
-            personLink: link.outcome,
-            ...(link.outcome === PersonLinkOutcome.Fallback
-              ? { requestedPersonId: link.requestedPersonId, personFallbackReason: link.reason }
-              : {}),
-            ...(plan === null ? {} : inviteAlertMetadata(plan)),
-            ...(adminPlan === null ? {} : adminAlertMetadata(adminPlan))
-          },
-          ip: request.ip
+            fullName: displayName
+          });
+
+          const useCount = invite.useCount + 1;
+          // Effective limit: open invites created before WP-2.3b stop at 10 uses.
+          const maxUses = effectiveInviteMaxUses(invite);
+          const exhausted = useCount >= maxUses;
+          await tx
+            .update(invites)
+            .set({ useCount, ...(exhausted ? { status: "accepted" as const, acceptedAt: now } : {}) })
+            .where(eq(invites.id, invite.id));
+
+          const issued = await startSession(tx, app.config, user.id, sessionOrigin(request), now);
+          const open = invite.email === null;
+          const plan = open ? await planInviteAcceptedAlert(app, tx, now) : null;
+          // Admin-role invites (always email-bound) create an admin: tell the other admins (Security P1).
+          const adminPlan = invite.role === UserRole.Admin ? await planNewAdminAlert(tx, user.id) : null;
+          const auditId = await recordAudit(tx, {
+            actorUserId: user.id,
+            action: AuditAction.InviteAccepted,
+            entityType: "invite",
+            entityId: invite.id,
+            metadata: {
+              userId: user.id,
+              role: invite.role,
+              emailVerified,
+              open,
+              useCount,
+              maxUses,
+              // Ids and an enum only (no names): which person the account got.
+              personId: link.personId,
+              personLink: link.outcome,
+              ...(link.outcome === PersonLinkOutcome.Fallback
+                ? { requestedPersonId: link.requestedPersonId, personFallbackReason: link.reason }
+                : {}),
+              ...(plan === null ? {} : inviteAlertMetadata(plan)),
+              ...(adminPlan === null ? {} : adminAlertMetadata(adminPlan))
+            },
+            ip: request.ip
+          });
+          const adminAlert =
+            adminPlan === null
+              ? null
+              : {
+                  plan: adminPlan,
+                  details: {
+                    auditId,
+                    actorName: await inviterName(tx, invite.createdByUserId),
+                    targetName: displayName,
+                    changes: [AdminAccountChange.Promoted],
+                    changedAt: now
+                  }
+                };
+          const alert =
+            plan === null
+              ? null
+              : {
+                  plan,
+                  details: {
+                    auditId,
+                    inviteId: invite.id,
+                    inviteNote: invite.note,
+                    memberUserId: user.id,
+                    memberName: displayName,
+                    useCount,
+                    maxUses,
+                    acceptedAt: now
+                  }
+                };
+          return { kind: "accepted", userId: user.id, issued, alert, adminAlert };
         });
-        const adminAlert =
-          adminPlan === null
-            ? null
-            : {
-                plan: adminPlan,
-                details: {
-                  auditId,
-                  actorName: await inviterName(tx, invite.createdByUserId),
-                  targetName: displayName,
-                  changes: [AdminAccountChange.Promoted],
-                  changedAt: now
-                }
-              };
-        const alert =
-          plan === null
-            ? null
-            : {
-                plan,
-                details: {
-                  auditId,
-                  inviteId: invite.id,
-                  inviteNote: invite.note,
-                  memberUserId: user.id,
-                  memberName: displayName,
-                  useCount,
-                  maxUses,
-                  acceptedAt: now
-                }
-              };
-        return { kind: "accepted", userId: user.id, issued, alert, adminAlert };
-      });
+
+      let outcome = await attempt(firstPersonId, true);
+      // Bounded: one retry. If the invite moves again meanwhile, the second attempt falls back
+      // to a new person (`personFallbackReason: "deleted"`), as before WP-4.6.
+      if (outcome.kind === "repointed") outcome = await attempt(outcome.personId, false);
+      if (outcome.kind === "repointed") throw new Error("accept invite: repointed twice");
 
       if (outcome.kind === "invalid") throw new AppError("INVITE_INVALID");
       if (outcome.kind === "exists") throw new AppError("CONFLICT", ACCOUNT_EXISTS_MESSAGE);

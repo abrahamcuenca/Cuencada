@@ -9,7 +9,7 @@ import { baseApi } from "./baseApi";
 import { AUTH_CHANNEL_NAME, startAuthSync } from "../../features/auth/authSync";
 import { cancelOnlineLogoutRetry, logout } from "../../features/auth/session";
 import { isAbortError } from "./errors";
-import { cancelOnlineRefreshRetry, REFRESH_LOCK_NAME, REFRESH_RACE_GRACE_WAIT_MS, refreshAccessToken } from "./reauth";
+import { cancelOnlineRefreshRetry, REFRESH_LOCK_NAME, REFRESH_RACE_RETRY_DELAYS_MS, refreshAccessToken } from "./reauth";
 
 interface PingResponse {
   ok: boolean;
@@ -121,29 +121,43 @@ describe("baseQueryWithReauth", () => {
     expect(request).toHaveBeenCalledWith(REFRESH_LOCK_NAME, { mode: "exclusive" }, expect.any(Function));
   });
 
-  it("retries the refresh once after a 409 REFRESH_RACE and then succeeds", async () => {
-    fake.refreshPlan = [{ status: 409, code: "REFRESH_RACE" }, { status: 200 }];
+  it("retries the refresh about 1 s after a 409 REFRESH_RACE and then succeeds", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout"] });
+    try {
+      fake.refreshPlan = [{ status: 409, code: "REFRESH_RACE" }, { status: 200 }];
 
-    const result = await store.dispatch(testApi.endpoints.ping.initiate(1));
+      const pending = store.dispatch(testApi.endpoints.ping.initiate(1));
+      await vi.waitFor(() => expect(fake.refreshCalls).toBe(1));
+      await vi.advanceTimersByTimeAsync(1_100);
+      const result = await pending;
 
-    expect(result).toEqual({ data: { ok: true } });
-    expect(fake.refreshCalls).toBe(2);
-    expect(store.getState().auth.status).toBe("authenticated");
+      expect(result).toEqual({ data: { ok: true } });
+      expect(fake.refreshCalls).toBe(2);
+      expect(store.getState().auth.status).toBe("authenticated");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("after a second REFRESH_RACE waits past the 10 s grace window, retries once and succeeds", async () => {
+  it("retries at most twice, about 1 s apart, all well inside the server's 10 s grace window", async () => {
+    expect(REFRESH_RACE_RETRY_DELAYS_MS).toEqual([1_000, 1_000]);
+    // [SEC] No retry may wait past the grace window: that turned a lost rotation into reuse (WP-4.6).
+    expect(REFRESH_RACE_RETRY_DELAYS_MS.reduce((sum, ms) => sum + ms, 0)).toBeLessThan(10_000);
     vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout"] });
     try {
       fake.refreshPlan = [{ status: 409, code: "REFRESH_RACE" }, { status: 409, code: "REFRESH_RACE" }, { status: 200 }];
 
       const pending = store.dispatch(testApi.endpoints.ping.initiate(1));
+      await vi.waitFor(() => expect(fake.refreshCalls).toBe(1));
+      // Let the 409 land, then nothing happens before the ~1 s pause ends.
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.advanceTimersByTimeAsync(800);
+      expect(fake.refreshCalls).toBe(1);
+      await vi.advanceTimersByTimeAsync(300);
       await vi.waitFor(() => expect(fake.refreshCalls).toBe(2));
-      // Still inside the grace window: no third attempt yet, and the session is kept.
-      await vi.advanceTimersByTimeAsync(10_000);
-      expect(fake.refreshCalls).toBe(2);
       expect(store.getState().auth.status).toBe("authenticated");
 
-      await vi.advanceTimersByTimeAsync(REFRESH_RACE_GRACE_WAIT_MS - 10_000 + 100);
+      await vi.advanceTimersByTimeAsync(1_200);
       const result = await pending;
 
       expect(result).toEqual({ data: { ok: true } });
@@ -154,19 +168,21 @@ describe("baseQueryWithReauth", () => {
     }
   });
 
-  it("logs out when the refresh loses REFRESH_RACE three times", async () => {
+  it("logs out when the refresh loses REFRESH_RACE three times, without waiting past the grace window", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout"] });
     try {
       fake.refreshPlan = [{ status: 409, code: "REFRESH_RACE" }];
 
       const pending = store.dispatch(testApi.endpoints.ping.initiate(1));
-      await vi.waitFor(() => expect(fake.refreshCalls).toBe(2));
-      await vi.advanceTimersByTimeAsync(REFRESH_RACE_GRACE_WAIT_MS + 100);
+      await vi.advanceTimersByTimeAsync(2_500);
       const result = await pending;
 
       expect(result).not.toHaveProperty("data");
       expect(fake.refreshCalls).toBe(3);
       expect(store.getState().auth.status).toBe("anonymous");
+      // No late attempt after the window (it would be reuse on an older server).
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(fake.refreshCalls).toBe(3);
     } finally {
       vi.useRealTimers();
     }
@@ -179,15 +195,14 @@ describe("baseQueryWithReauth", () => {
 
       const pending = store.dispatch(testApi.endpoints.ping.initiate(1));
       await vi.waitFor(() => expect(fake.refreshCalls).toBe(2));
-      // Let the second 409 land, so the 11 s pause is running.
+      // Let the second 409 land, so the second ~1 s pause is running.
       await vi.advanceTimersByTimeAsync(200);
       const started = Date.now();
       store.dispatch(loggedOut());
-      // The logout ends the pause at once (the clock only moves with real time here, and the
-      // test would time out long before the 11 s pause ended on its own).
+      // The logout ends the pause at once (the clock only moves with real time here).
       await pending;
 
-      expect(Date.now() - started).toBeLessThan(2_000);
+      expect(Date.now() - started).toBeLessThan(500);
       expect(fake.refreshCalls).toBe(2);
     } finally {
       vi.useRealTimers();

@@ -37,6 +37,12 @@ async function auditCount(action: string, entityId?: string): Promise<number> {
   return rows.length;
 }
 
+/** The stored row of a raw refresh token (looked up by hash). */
+async function tokenRow(token: string): Promise<typeof refreshTokens.$inferSelect | undefined> {
+  const [row] = await getTestDb().select().from(refreshTokens).where(eq(refreshTokens.tokenHash, hashToken(token)));
+  return row;
+}
+
 function refresh(instance: App, token: string): Promise<LightMyRequestResponse> {
   return instance.inject({ method: "POST", url: "/api/auth/refresh", ...withRefreshCookie(token) });
 }
@@ -243,25 +249,154 @@ describe("POST /api/auth/refresh", () => {
     expect(code(foreign)).toBe("CSRF_FAILED");
   });
 
-  it("answers 409 REFRESH_RACE for a token reused inside the grace window without revoking", async () => {
+  it("re-issues once inside the grace window when the rotation response was lost (reload), and audits ids only", async () => {
     const clock = new TestClock();
     app = await createTestApp({ clock });
     const user = await createUser();
     const login = await loginFull(app, user);
-    expect((await refresh(app, login.refreshToken)).statusCode).toBe(200);
-    clock.advance(REFRESH_REUSE_GRACE_MS - 1000);
+    // The server rotates, but the browser never stores this cookie (the page reloaded).
+    const lost = await refresh(app, login.refreshToken);
+    expect(lost.statusCode).toBe(200);
+    const lostToken = refreshCookie(lost)?.value ?? "";
+    clock.advance(1000);
 
-    const race = await refresh(app, login.refreshToken);
+    const healed = await refresh(app, login.refreshToken);
 
-    expect(race.statusCode).toBe(409);
-    expect(code(race)).toBe("REFRESH_RACE");
+    expect(healed.statusCode).toBe(200);
+    const body = healed.json<{ accessToken: string; user: { id: string } }>();
+    expect(body.user.id).toBe(user.id);
+    const fresh = refreshCookie(healed)?.value ?? "";
+    expect(fresh).not.toBe("");
+    expect([login.refreshToken, lostToken]).not.toContain(fresh);
     const [session] = await getTestDb().select().from(sessions).where(eq(sessions.userId, user.id));
     expect(session?.revokedAt).toBeNull();
-    expect(REFRESH_REUSE_GRACE_MS).toBe(10_000);
-    const audits = await getTestDb().select().from(auditLogs).where(eq(auditLogs.action, "auth.refresh_race"));
+    expect(session?.idleExpiresAt.getTime()).toBe(clock.now().getTime() + 30 * DAY_MS);
+    // The lost successor was rotated on the client's behalf: it is used and links to the fresh token.
+    const successor = await tokenRow(lostToken);
+    const freshRow = await tokenRow(fresh);
+    expect(successor?.usedAt?.getTime()).toBe(clock.now().getTime());
+    expect(successor?.replacedByTokenId).toBe(freshRow?.id);
+    expect(freshRow?.sessionId).toBe(session?.id);
+    const audits = await getTestDb().select().from(auditLogs).where(eq(auditLogs.action, "auth.refresh_grace_reissued"));
     expect(audits).toHaveLength(1);
     expect(audits[0]?.entityId).toBe(session?.id);
-    expect(JSON.stringify(audits[0])).not.toContain(login.refreshToken);
+    expect(audits[0]?.actorUserId).toBe(user.id);
+    const presented = await tokenRow(login.refreshToken);
+    expect(audits[0]?.metadata).toEqual({ presentedId: presented?.id, successorId: successor?.id });
+    for (const secret of [login.refreshToken, lostToken, fresh, hashToken(login.refreshToken)]) {
+      expect(JSON.stringify(audits[0])).not.toContain(secret);
+    }
+    expect(await auditCount("auth.refresh_race")).toBe(0);
+    expect(await auditCount("auth.refresh_reuse_detected")).toBe(0);
+
+    // The re-issued token and access token work.
+    const me = await app.inject({ method: "GET", url: "/api/me", headers: { authorization: `Bearer ${body.accessToken}` } });
+    expect(me.statusCode).toBe(200);
+    clock.advance(60_000);
+    expect((await refresh(app, fresh)).statusCode).toBe(200);
+  });
+
+  it("treats a second grace use of the same token as reuse: revokes the session and the re-issued chain", async () => {
+    const clock = new TestClock();
+    app = await createTestApp({ clock });
+    const user = await createUser();
+    const login = await loginFull(app, user);
+    await refresh(app, login.refreshToken);
+    clock.advance(1000);
+    const first = await refresh(app, login.refreshToken);
+    expect(first.statusCode).toBe(200);
+    const reissued = refreshCookie(first)?.value ?? "";
+    clock.advance(1000);
+
+    const second = await refresh(app, login.refreshToken);
+
+    expect(second.statusCode).toBe(401);
+    expect(code(second)).toBe("UNAUTHENTICATED");
+    expect(refreshCookie(second)?.value).toBe("");
+    const [session] = await getTestDb().select().from(sessions).where(eq(sessions.userId, user.id));
+    expect(session?.revokedReason).toBe("refresh_reuse");
+    const [audit] = await getTestDb().select().from(auditLogs).where(eq(auditLogs.action, "auth.refresh_reuse_detected"));
+    expect(audit?.metadata).toEqual({ userId: user.id, reason: "successor_used" });
+    expect((await refresh(app, reissued)).statusCode).toBe(401);
+  });
+
+  it("gives no grace to an older token whose successor was already rotated normally (not the immediate predecessor)", async () => {
+    const clock = new TestClock();
+    app = await createTestApp({ clock });
+    const user = await createUser();
+    const login = await loginFull(app, user);
+    const second = refreshCookie(await refresh(app, login.refreshToken))?.value ?? "";
+    clock.advance(500);
+    const third = refreshCookie(await refresh(app, second))?.value ?? "";
+    clock.advance(500);
+
+    const stale = await refresh(app, login.refreshToken);
+
+    expect(stale.statusCode).toBe(401);
+    const [session] = await getTestDb().select().from(sessions).where(eq(sessions.userId, user.id));
+    expect(session?.revokedReason).toBe("refresh_reuse");
+    expect((await refresh(app, third)).statusCode).toBe(401);
+  });
+
+  it("binds the grace re-issue to the token's own session: another session is untouched, a cross-session link revokes", async () => {
+    const clock = new TestClock();
+    app = await createTestApp({ clock });
+    const user = await createUser();
+    const phone = await loginFull(app, user);
+    const laptop = await loginFull(app, user);
+    await refresh(app, phone.refreshToken);
+    const laptopNext = refreshCookie(await refresh(app, laptop.refreshToken))?.value ?? "";
+    clock.advance(1000);
+
+    // Grace on the phone's session issues a token of the phone's session only.
+    const healed = await refresh(app, phone.refreshToken);
+    expect(healed.statusCode).toBe(200);
+    const healedToken = refreshCookie(healed)?.value ?? "";
+    const healedRow = await tokenRow(healedToken);
+    const phoneRow = await tokenRow(phone.refreshToken);
+    expect(healedRow?.sessionId).toBe(phoneRow?.sessionId);
+    expect((await tokenRow(laptopNext))?.usedAt).toBeNull();
+
+    // A used token whose successor link points into another session (tampering) never re-issues
+    // that session's token: its own session is revoked and the other one keeps working.
+    const laptopRow = await tokenRow(laptop.refreshToken);
+    await getTestDb()
+      .update(refreshTokens)
+      .set({ replacedByTokenId: healedRow?.id ?? null })
+      .where(eq(refreshTokens.id, laptopRow?.id ?? ""));
+    const crossed = await refresh(app, laptop.refreshToken);
+    expect(crossed.statusCode).toBe(401);
+    const [laptopSession] = await getTestDb().select().from(sessions).where(eq(sessions.id, laptopRow?.sessionId ?? ""));
+    expect(laptopSession?.revokedReason).toBe("refresh_reuse");
+    const [audit] = await getTestDb()
+      .select()
+      .from(auditLogs)
+      .where(and(eq(auditLogs.action, "auth.refresh_reuse_detected"), eq(auditLogs.entityId, laptopRow?.sessionId ?? "")));
+    expect(audit?.metadata).toEqual({ userId: user.id, reason: "successor_missing" });
+    expect((await tokenRow(healedToken))?.usedAt).toBeNull();
+    expect((await refresh(app, healedToken)).statusCode).toBe(200);
+  });
+
+  it("checks CSRF and Origin before a grace re-issue (nothing changes on 403)", async () => {
+    const clock = new TestClock();
+    app = await createTestApp({ clock });
+    const user = await createUser();
+    const login = await loginFull(app, user);
+    const lostToken = refreshCookie(await refresh(app, login.refreshToken))?.value ?? "";
+    clock.advance(1000);
+
+    const foreign = await app.inject({
+      method: "POST",
+      url: "/api/auth/refresh",
+      headers: { ...CSRF_HEADERS, origin: "https://evil.example" },
+      cookies: { cuencada_rt: login.refreshToken }
+    });
+
+    expect(foreign.statusCode).toBe(403);
+    expect(code(foreign)).toBe("CSRF_FAILED");
+    expect((await tokenRow(lostToken))?.usedAt).toBeNull();
+    expect(await auditCount("auth.refresh_grace_reissued")).toBe(0);
+    expect((await refresh(app, login.refreshToken)).statusCode).toBe(200);
   });
 
   it("detects reuse after the grace window: revokes the session, audits and answers 401", async () => {
@@ -280,22 +415,44 @@ describe("POST /api/auth/refresh", () => {
     const [session] = await getTestDb().select().from(sessions).where(eq(sessions.userId, user.id));
     expect(session?.revokedReason).toBe("refresh_reuse");
     expect(await auditCount("auth.refresh_reuse_detected", session?.id)).toBe(1);
+    const [audit] = await getTestDb().select().from(auditLogs).where(eq(auditLogs.action, "auth.refresh_reuse_detected"));
+    expect(audit?.metadata).toEqual({ userId: user.id, reason: "after_grace" });
     // The legitimate holder of the newest token is logged out too.
     expect((await refresh(app, newToken)).statusCode).toBe(401);
     const me = await app.inject({ method: "GET", url: "/api/me", ...login.auth });
     expect(me.statusCode).toBe(401);
   });
 
-  it("lets exactly one of two concurrent refreshes rotate; the other gets 409", async () => {
+  it("serializes two concurrent refreshes of one token (two tabs): one rotates, the other gets a grace re-issue", async () => {
     app = await createTestApp();
     const user = await createUser();
     const login = await loginFull(app, user);
 
     const results = await Promise.all([refresh(app, login.refreshToken), refresh(app, login.refreshToken)]);
 
-    expect(results.map((response) => response.statusCode).sort()).toEqual([200, 409]);
+    expect(results.map((response) => response.statusCode)).toEqual([200, 200]);
+    const cookies = results.map((response) => refreshCookie(response)?.value);
+    expect(new Set(cookies).size).toBe(2);
     const tokens = await getTestDb().select().from(refreshTokens);
-    expect(tokens).toHaveLength(2);
+    expect(tokens).toHaveLength(3);
+    // Exactly one live token: the chain stays linear (login → rotated → re-issued).
+    expect(tokens.filter((token) => token.usedAt === null)).toHaveLength(1);
+    expect(await auditCount("auth.refresh_grace_reissued")).toBe(1);
+    const [session] = await getTestDb().select().from(sessions).where(eq(sessions.userId, user.id));
+    expect(session?.revokedAt).toBeNull();
+  });
+
+  it("revokes when a third concurrent refresh presents the same token (the grace is spent)", async () => {
+    const instance = await createTestApp();
+    app = instance;
+    const user = await createUser();
+    const login = await loginFull(instance, user);
+
+    const results = await Promise.all([1, 2, 3].map(() => refresh(instance, login.refreshToken)));
+
+    expect(results.map((response) => response.statusCode).sort()).toEqual([200, 200, 401]);
+    const [session] = await getTestDb().select().from(sessions).where(eq(sessions.userId, user.id));
+    expect(session?.revokedReason).toBe("refresh_reuse");
   });
 
   it("answers 401 once the idle expiry passes", async () => {
