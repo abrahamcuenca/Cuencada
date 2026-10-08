@@ -1,5 +1,8 @@
 import type {
   AdminForcePasswordResetResult,
+  AdminInviteCandidate,
+  AdminInviteCandidates,
+  AdminInviteCandidatesQueryRequest,
   AdminInviteCreated,
   AdminInviteCreateRequest,
   AdminInviteListItem,
@@ -19,6 +22,8 @@ export const ADMIN_PAGE_SIZE = 25;
 
 /** Every invite list (all filters). */
 const INVITE_LIST = { type: "Invite", id: "LIST" } as const;
+/** Invite picker rows and per-person invite status (WP-4.2): any invite write can change `pendingInvite`. */
+const INVITE_CANDIDATES = { type: "Invite", id: "CANDIDATES" } as const;
 /** Every admin users list; T6's account picker provides the same tag, so it refreshes too. */
 const USER_LIST = { type: "AdminUser", id: "LIST" } as const;
 /** The dashboard counters. They depend on users and invites, so their writes invalidate it. */
@@ -82,12 +87,22 @@ export const adminApi = baseApi.injectEndpoints({
     /** `POST /admin/invites`. The result may carry the one-time `inviteUrl`: never cache or log it. */
     createAdminInvite: build.mutation<AdminInviteCreated, AdminInviteCreateRequest>({
       query: (body) => ({ url: "/admin/invites", method: "POST", body }),
-      invalidatesTags: (_result, error) => (error ? [] : [INVITE_LIST, SUMMARY, AUDIT_LIST])
+      invalidatesTags: (_result, error) => (error ? [] : [INVITE_LIST, INVITE_CANDIDATES, SUMMARY, AUDIT_LIST])
     }),
     /** `POST /admin/invites/:id/revoke` (idempotent; 409 once accepted). */
     revokeAdminInvite: build.mutation<AdminInviteListItem, string>({
       query: (id) => ({ url: `/admin/invites/${encodeURIComponent(id)}/revoke`, method: "POST" }),
-      invalidatesTags: (_result, error) => (error ? [] : [INVITE_LIST, SUMMARY, AUDIT_LIST])
+      invalidatesTags: (_result, error) => (error ? [] : [INVITE_LIST, INVITE_CANDIDATES, SUMMARY, AUDIT_LIST])
+    }),
+    /** `GET /admin/invites/people?q=` (WP-4.2): living people without an account, for the invite picker. */
+    searchInviteCandidates: build.query<AdminInviteCandidates, AdminInviteCandidatesQueryRequest>({
+      query: (params) => ({ url: "/admin/invites/people", params }),
+      providesTags: [INVITE_CANDIDATES]
+    }),
+    /** `GET /admin/invites/people/:id` (WP-4.2): one person's invite status (linked, deceased, pending). */
+    getInviteCandidate: build.query<AdminInviteCandidate, string>({
+      query: (id) => ({ url: `/admin/invites/people/${encodeURIComponent(id)}` }),
+      providesTags: [INVITE_CANDIDATES]
     }),
     /** `POST /admin/invites/:id/resend`: new token by email; the previous link stops working. */
     resendAdminInvite: build.mutation<AdminInviteListItem, string>({
@@ -137,6 +152,8 @@ export const {
   useCreateAdminInviteMutation,
   useRevokeAdminInviteMutation,
   useResendAdminInviteMutation,
+  useSearchInviteCandidatesQuery,
+  useGetInviteCandidateQuery,
   useListAdminUsersInfiniteQuery,
   useUpdateAdminUserMutation,
   useRevokeAdminUserSessionsMutation,
