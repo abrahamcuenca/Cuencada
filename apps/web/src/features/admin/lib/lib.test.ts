@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { readAuditFilters, toAuditQuery, writeAuditFilters, zonedMidnight } from "./auditFilters";
-import { changeInviteDelivery, INVITE_FORM_DEFAULTS, normalizeInviteForm, validateInviteForm } from "./inviteForm";
+import {
+  candidateBlockedReason,
+  changeInviteDelivery,
+  describeCandidate,
+  INVITE_FORM_DEFAULTS,
+  normalizeInviteForm,
+  validateInviteForm
+} from "./inviteForm";
 import { auditActionLabel, auditEntityLabel } from "./labels";
 import { alertFlags, formatMetadataValue, METADATA_VALUE_MAX, metadataRows } from "./metadata";
 import { LAST_ADMIN_MESSAGE, SELF_CHANGE_MESSAGE, userActionErrorMessage } from "./userErrors";
@@ -78,6 +85,39 @@ describe("validateInviteForm", () => {
     const result = validateInviteForm({ ...INVITE_FORM_DEFAULTS, email: "no-es-correo" });
     expect(result.ok).toBe(false);
     expect(result.ok ? null : result.errors.email).toEqual(expect.any(String));
+  });
+});
+
+describe("invite person (WP-4.2)", () => {
+  const ana = { id: "00000000-0000-4000-8000-000000000002", fullName: "Ana Ejemplo" };
+
+  it("sends personId only on an email invite", () => {
+    const result = validateInviteForm({ ...INVITE_FORM_DEFAULTS, email: "ana@example.com", person: ana });
+    expect(result).toEqual({
+      ok: true,
+      request: { email: "ana@example.com", role: "member", maxUses: 1, expiresInDays: 7, sendEmail: true, note: null, personId: ana.id }
+    });
+  });
+
+  it("drops the person when switching to an open link, and never sends it on one", () => {
+    const withPerson = { ...INVITE_FORM_DEFAULTS, person: ana };
+    expect(changeInviteDelivery(withPerson, "link").person).toBeNull();
+    const forced = validateInviteForm({ ...withPerson, delivery: "link" });
+    expect(forced.ok && "personId" in forced.request).toBe(false);
+  });
+
+  it("describes namesakes by nickname, birth year and branch", () => {
+    expect(describeCandidate({ nickname: null, birthYear: 1990, familyBranch: "Rama Norte" })).toBe("n. 1990 · Rama Norte");
+    expect(describeCandidate({ nickname: "Chata", birthYear: null, familyBranch: null })).toBe("«Chata»");
+    expect(describeCandidate({ nickname: null, birthYear: null, familyBranch: null })).toBe("");
+  });
+
+  it("explains why a person cannot be picked", () => {
+    const base = { deceased: false, linked: false, pendingInvite: false };
+    expect(candidateBlockedReason(base)).toBeNull();
+    expect(candidateBlockedReason({ ...base, linked: true })).toBe("Ya tiene cuenta");
+    expect(candidateBlockedReason({ ...base, deceased: true })).toBe("Falleció");
+    expect(candidateBlockedReason({ ...base, pendingInvite: true })).toBe("Invitación pendiente");
   });
 });
 

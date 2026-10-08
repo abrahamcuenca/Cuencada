@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  ADMIN_INVITE_CANDIDATES_MAX,
+  adminInviteCandidatesQuerySchema,
+  adminInviteCandidateSchema,
   adminInviteCreateInputSchema,
+  adminInviteListItemSchema,
+  isInvitableCandidate,
   OPEN_INVITE_DEFAULT_DAYS,
   OPEN_INVITE_DEFAULT_USES,
   OPEN_INVITE_MAX_DAYS,
@@ -236,5 +241,61 @@ describe("displayNameSchema via inviteAcceptInputSchema", () => {
     const base = { token: validToken, email: "a@b.mx", password: "contraseña-segura" };
     expect(inviteAcceptInputSchema.safeParse({ ...base, displayName: "\u202E" }).success).toBe(false);
     expect(inviteAcceptInputSchema.safeParse({ ...base, displayName: "Admin\u200B" }).success).toBe(false);
+  });
+});
+
+describe("WP-4.2 invite person contracts", () => {
+  const item = {
+    id: "00000000-0000-4000-8000-000000000001",
+    email: "ana@example.test",
+    role: "member",
+    status: "pending",
+    maxUses: 1,
+    useCount: 0,
+    expiresAt: "2026-10-14T00:00:00.000Z",
+    createdAt: "2026-10-07T00:00:00.000Z",
+    createdByName: null,
+    personId: null,
+    note: null,
+    lastSentAt: null
+  };
+
+  it("parses list items with and without the optional person (older servers)", () => {
+    expect(adminInviteListItemSchema.safeParse(item).success).toBe(true);
+    expect(adminInviteListItemSchema.safeParse({ ...item, person: null }).success).toBe(true);
+    const withPerson = { ...item, personId: "00000000-0000-4000-8000-000000000002", person: { id: "00000000-0000-4000-8000-000000000002", fullName: "Ana Ejemplo" } };
+    expect(adminInviteListItemSchema.parse(withPerson).person?.fullName).toBe("Ana Ejemplo");
+    expect(adminInviteListItemSchema.safeParse({ ...item, person: { id: "x", fullName: "Ana" } }).success).toBe(false);
+  });
+
+  it("strips unknown keys from candidates so an account id never leaks through the schema", () => {
+    const parsed = adminInviteCandidateSchema.parse({
+      id: "00000000-0000-4000-8000-000000000002",
+      userId: "00000000-0000-4000-8000-000000000003",
+      fullName: "Ana Ejemplo",
+      nickname: null,
+      familyBranch: "Rama Norte",
+      birthYear: 1990,
+      deathYear: null,
+      deceased: false,
+      linked: false,
+      pendingInvite: false
+    });
+    expect(parsed).not.toHaveProperty("userId");
+  });
+
+  it("requires a non-empty query and caps the limit", () => {
+    expect(adminInviteCandidatesQuerySchema.safeParse({}).success).toBe(false);
+    expect(adminInviteCandidatesQuerySchema.safeParse({ q: "  " }).success).toBe(false);
+    expect(adminInviteCandidatesQuerySchema.parse({ q: " ana " })).toEqual({ q: "ana", limit: 8 });
+    expect(adminInviteCandidatesQuerySchema.safeParse({ q: "ana", limit: String(ADMIN_INVITE_CANDIDATES_MAX + 1) }).success).toBe(false);
+  });
+
+  it("isInvitableCandidate is true only for living, unlinked people with nothing pending", () => {
+    const base = { deceased: false, linked: false, pendingInvite: false };
+    expect(isInvitableCandidate(base)).toBe(true);
+    expect(isInvitableCandidate({ ...base, deceased: true })).toBe(false);
+    expect(isInvitableCandidate({ ...base, linked: true })).toBe(false);
+    expect(isInvitableCandidate({ ...base, pendingInvite: true })).toBe(false);
   });
 });

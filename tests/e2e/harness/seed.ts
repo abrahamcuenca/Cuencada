@@ -19,6 +19,7 @@ import {
   castMember,
   FUTURE_YEAR,
   familyNames,
+  invitedPerson,
   MEMBER_PASSWORD,
   PROJECT_KEYS,
   ProjectKey,
@@ -108,9 +109,13 @@ async function seedAnnouncedEdition(sql: Sql): Promise<void> {
             'Edición anunciada de prueba: la fecha y el lugar aún no se definen.', '#0b5e55', true, now())`;
 }
 
-/** Two people per project, the parent linked to Ana with a `parent_of` edge; the partner edge is left for journey 7. */
+/**
+ * Tree people per project: the parent of Ana and Beto, a partner (the edge is
+ * left for journey 7) and a child without an account whom journey 10 invites (WP-4.2).
+ */
 async function seedFamily(sql: Sql, project: ProjectKey, anaUserId: string, betoUserId: string): Promise<void> {
   const names = familyNames(project);
+  const invited = invitedPerson(project);
   const ana = castMember(project, CastRole.Ana);
   const beto = castMember(project, CastRole.Beto);
   const rows = await sql<{ id: string; full_name: string }[]>`
@@ -118,7 +123,8 @@ async function seedFamily(sql: Sql, project: ProjectKey, anaUserId: string, beto
     values (${anaUserId}, ${ana.displayName}, 'Norte', 1990),
            (${betoUserId}, ${beto.displayName}, 'Norte', 1992),
            (null, ${names.parent}, 'Norte', 1960),
-           (null, ${names.partner}, 'Norte', 1962)
+           (null, ${names.partner}, 'Norte', 1962),
+           (null, ${invited.fullName}, 'Norte', 1995)
     returning id, full_name`;
   const id = (fullName: string): string => {
     const found = rows.find((row) => row.full_name === fullName);
@@ -128,7 +134,8 @@ async function seedFamily(sql: Sql, project: ProjectKey, anaUserId: string, beto
   await sql`
     insert into person_relationships (kind, from_person_id, to_person_id)
     values ('parent_of', ${id(names.parent)}, ${id(ana.displayName)}),
-           ('parent_of', ${id(names.parent)}, ${id(beto.displayName)})`;
+           ('parent_of', ${id(names.parent)}, ${id(beto.displayName)}),
+           ('parent_of', ${id(names.parent)}, ${id(invited.fullName)})`;
 }
 
 /**

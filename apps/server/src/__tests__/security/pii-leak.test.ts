@@ -416,6 +416,7 @@ describe("admin console never serializes secrets", () => {
     const bodies: Array<[string, unknown]> = [
       ["GET /api/admin/users", await get("/api/admin/users", admin.auth)],
       ["GET /api/admin/invites", await get("/api/admin/invites", admin.auth)],
+      ["GET /api/admin/invites/people", await get("/api/admin/invites/people?q=a", admin.auth)],
       ["GET /api/admin/audit-logs", await get("/api/admin/audit-logs?limit=100", admin.auth)],
       ["GET /api/admin/media", await get("/api/admin/media", admin.auth)],
       ["GET /api/admin/media/:id/reports", await get(`/api/admin/media/${mediaId}/reports`, admin.auth)],

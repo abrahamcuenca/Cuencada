@@ -1,6 +1,6 @@
 import type { AdminInviteCreated, UserRole } from "@cuencada/types";
 import { type FormEvent, type ReactNode, useId, useState } from "react";
-import { getApiErrorMessage, isAbortError } from "../../../shared/api/errors";
+import { getApiErrorMessage, isAbortError, parseApiError } from "../../../shared/api/errors";
 import { Button } from "../../../shared/ui/Button";
 import { Field } from "../../../shared/ui/Field";
 import { Select } from "../../../shared/ui/Select";
@@ -14,8 +14,10 @@ import {
   INVITE_FORM_DEFAULTS,
   type InviteDelivery,
   type InviteFormErrors,
+  type InviteFormPerson,
   type InviteFormValues,
   normalizeInviteForm,
+  OPEN_INVITE_PERSON_NOTE,
   OPEN_INVITE_MAX_DAYS,
   OPEN_INVITE_MAX_HOURS,
   OPEN_INVITE_MAX_USES,
@@ -24,12 +26,15 @@ import {
 } from "../lib/inviteForm";
 import { ROLE_LABEL } from "../lib/labels";
 import { Notice } from "./common";
+import { InvitePersonPicker } from "./InvitePersonPicker";
 
 /** Props for {@link InviteForm}. */
 export interface InviteFormProps {
   /** Called with the server's answer; `inviteUrl` is set only for copy-link invites. */
   onCreated: (created: AdminInviteCreated) => void;
   onCancel: () => void;
+  /** Pre-chosen tree person (the "Invitar" button on a person page): an email invite for them. */
+  initialPerson?: InviteFormPerson | null;
 }
 
 const ROLE_OPTIONS = [
@@ -43,8 +48,8 @@ const ROLE_OPTIONS = [
  * email and goes by email; an open link allows ≤ 10 uses and ≤ 72 hours
  * (defaults 5 uses and 72 hours) and alerts the admins on every use.
  */
-export function InviteForm({ onCreated, onCancel }: InviteFormProps): ReactNode {
-  const [values, setValues] = useState<InviteFormValues>(INVITE_FORM_DEFAULTS);
+export function InviteForm({ onCreated, onCancel, initialPerson = null }: InviteFormProps): ReactNode {
+  const [values, setValues] = useState<InviteFormValues>({ ...INVITE_FORM_DEFAULTS, person: initialPerson });
   const [errors, setErrors] = useState<InviteFormErrors>({});
   const dispatch = useAppDispatch();
   const [isLoading, setIsLoading] = useState(false);
@@ -72,7 +77,9 @@ export function InviteForm({ onCreated, onCancel }: InviteFormProps): ReactNode 
       onCreated(created);
     } catch (error) {
       if (isAbortError(error)) return;
-      setErrors({ form: getApiErrorMessage(error) });
+      // WP-4.2: a refused person (deceased, linked, pending invite) is shown on the picker.
+      const personIssue = parseApiError(error)?.error.details?.find((detail) => detail.path === "personId");
+      setErrors(personIssue === undefined ? { form: getApiErrorMessage(error) } : { personId: personIssue.message });
     } finally {
       setIsLoading(false);
     }
@@ -149,6 +156,21 @@ export function InviteForm({ onCreated, onCancel }: InviteFormProps): ReactNode 
         </Field>
       )}
 
+      {byEmail ? (
+        <InvitePersonPicker
+          value={values.person}
+          error={errors.personId}
+          onChange={(person) => {
+            setErrors(({ personId: _cleared, ...rest }) => rest);
+            update({ person: person === null ? null : { id: person.id, fullName: person.fullName } });
+          }}
+        />
+      ) : (
+        <p className={styles.muted} role="note">
+          {OPEN_INVITE_PERSON_NOTE}
+        </p>
+      )}
+
       <Field
         label="Vence en (días)"
         hint={byEmail ? `Máximo ${maxDays} días.` : `Máximo ${maxDays} días (${OPEN_INVITE_MAX_HOURS} horas).`}
@@ -173,6 +195,7 @@ export function InviteForm({ onCreated, onCancel }: InviteFormProps): ReactNode 
           {OPEN_INVITE_SECURITY_HELP}
         </p>
       )}
+
 
       <Field label="Nota para el equipo" hint="Solo la ven los administradores." error={errors.note} showOptional>
         {(control) => (
