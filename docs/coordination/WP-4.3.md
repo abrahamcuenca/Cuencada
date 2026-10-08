@@ -9,7 +9,7 @@ Based on `origin/main` after PR #43 (WP-4.0 contracts and migration 0004). Imple
   - `POST /api/family/people/:id/photo/uploads` (`personPhotoUploadInputSchema` → `PersonPhotoUploadResponse`, 201). Re-checks the permission; at most 5 open intents per uploader; presigned PUT bound to type and length for `people/{personId}/{uploadId}.{ext}`.
   - `POST /api/family/people/:id/photo/uploads/:uploadId/confirm` (params `personPhotoUploadParamsSchema`, body `personPhotoConfirmBodySchema` = optional `crop`) → `PersonDetails`. **Uploader-only**: an upload of another user, or under another person's path, is 404. The permission is checked again (it may have changed since the intent).
   - `DELETE /api/family/people/:id/photo` → `PersonDetails`; idempotent.
-- **Who** (`modules/family/photoAccess.ts`, one place): admins; the linked person; a **close relative** (parent, child, partner) over a **qualifying** edge, and only for people **without an account**. `qualifyingEdge()` is the Security M1 SQL predicate (admin edge, or member edge whose creator created an endpoint), `isCloseRelative(db, a, b)` one indexed query; `photoEditDenial()` returns the 403 detail code. WP-4.1 can reuse `qualifyingEdge()` for the circle walk.
+- **Who** (`modules/family/photoAccess.ts`, one place): admins; the linked person; a **close relative** (parent, child, partner over qualifying edges: WP-4.1's `loadFamilyCircle(...).close`), and only for people **without an account**. `photoEditDenial(viewer, target, circle)` is pure and returns the 403 detail code; `loadPhotoEditDenial`/`canEditPersonPhoto` load the circle first.
 - **Pipeline**, shared with avatars rather than copied:
   - `profile/uploadPipeline.ts`: browser PUT headers, HEAD size/type + magic bytes + full-length read (`readVerifiedUpload`), WebP derivative upload with `private, max-age=3600`, quiet deletes.
   - `profile/avatar.ts`: `processSquareImage(input, type, { sizes, crop? })` checks the format and the 24 MP cap on the header (oriented size), runs `.rotate()` **before** `clampCropRect` + `extract()`, decodes once under the shared semaphore, and encodes WebP without metadata (EXIF/GPS dropped). `processAvatar` wraps it at 256/64; tree photos use 512/256/64.
@@ -18,7 +18,7 @@ Based on `origin/main` after PR #43 (WP-4.0 contracts and migration 0004). Imple
 - **Cleanup**: the profile module's job runs the same two passes over `person_photo_uploads` (abandoned after the grace, confirmed rows after 24 h); counts are summed in the result.
 - **`resolvePersonPhoto`** (`modules/family/personPhoto.ts`, signature kept, `size` widened to `PersonPhotoSize`): the linked account's avatar wins, else the tree photo, else `null`; storage failures fall through. `personPhotoRowFor(row, viewer)` (`repository.ts`) nulls each key the viewer may not see: the avatar by `canSeeAvatar`, the tree photo by `canSeePersonPhoto` (people without an account: always; linked people: the **avatar's unlisted/disabled rules**). The tree's `presignPersonAvatars` uses the same precedence, so `Person.avatarUrl` shows tree photos (64 px rings, 256 px focus). Linking an account keeps the tree photo as the fallback.
 - **For WP-4.1's admin delete**: `personPhotoObjectKeys(tx, personId)` (current derivatives + upload originals, read before the delete) and `deletePersonPhotoObjects(app, keys)` (after the commit).
-- **Interim `PersonDetails` builder** (`modules/family/personDetails.ts`): `GET /api/family/people/:id` now returns `PersonDetails` so the web can read `canEditPhoto`. Deliberately conservative until WP-4.1 replaces it: living people's dates and birthplace and `canEdit` for self and admins only, `contacts: []`.
+- **`PersonDetails`**: WP-4.1's `buildPersonDetails` (`details.ts`) is the only builder; WP-4.3 fills its photo (`resolvePersonPhoto` on `personPhotoRowFor`: `avatarUrl` 256 px, `photoUrl` 512 px) and `canEditPhoto` (`photoEditDenial`).
 
 ### Web
 - **`ImageCropper`** (`features/family/photo/ImageCropper.tsx`, lazy chunk ≈ 3.1 kB gzip + 0.5 kB CSS, no new dependency): a square canvas stage with a circular mask; Pointer Events drag and two-finger pinch (anchored at the midpoint), wheel and slider zoom (1×–5×), 90° rotate, keyboard on the focused stage (arrows pan, Shift for bigger steps, `+`/`-` zoom, `R` rotates); 44 px targets; Spanish copy ("Ajustar foto", "Alejar", "Acercar", "Girar", "Guardar", "Cancelar"). It never animates on its own; button transitions honour `prefers-reduced-motion`. Styles only from the CSS Module.
@@ -26,7 +26,7 @@ Based on `origin/main` after PR #43 (WP-4.0 contracts and migration 0004). Imple
 - **Output**: `cropImageToSquare` runs a `crop` job in the existing resize worker (`gallery/lib/cropCore.ts` + `resizeCore.decodeAndCrop`: EXIF orientation, decode ≤ 4096 px, rotate, crop, white background, 1024² JPEG q 0.9, metadata dropped) with the main-thread fallback. Preview: `createImageBitmap` at ≤ 2048 px, or a `blob:` image in old WebViews.
 - **Upload**: `useAvatarUpload` became `usePhotoUpload(endpoints)`; avatars and tree photos share the origin check of the presigned URL, the credential-less PUT and the abort on unmount. `useCropStep` is the "pick → frame → upload" glue (type and upload-origin checks before the cropper opens).
 - **`AvatarEditor`** frames the member's photo with the cropper (replaces the server's centre crop).
-- **`PersonPhotoEditor`** (exported from `features/family/photo/`): "Agregar foto"/"Cambiar foto", "Quitar foto" behind a confirmation; wired with a minimal change into the tree's focus card (`FamilyTreePage`) when `PersonDetails.canEditPhoto` (one extra `GET /family/people/:id`). WP-4.1's person page should render it the same way.
+- **`PersonPhotoEditor`** (exported from `features/family/photo/`): "Agregar foto"/"Cambiar foto", "Quitar foto" behind a confirmation; rendered in the focus card's "Detalles" panel (`PersonDetailsSection`'s `photoEditor` slot, WP-4.1 layout) when `PersonDetails.canEditPhoto`.
 - `getPerson` is typed `PersonDetails`; the photo mutations invalidate the person, the tree and the people list.
 
 ## Decisions
@@ -39,11 +39,24 @@ Based on `origin/main` after PR #43 (WP-4.0 contracts and migration 0004). Imple
 - **Cleanup counts are summed** across the two upload tables (the result shape is unchanged).
 - **CSP harness** (`docs/security/csp-check.mjs`): fixed the bucket substitution (the doc names the production bucket literally) and added `CSP_CHECK_DB` so parallel worktrees don't share a scratch database.
 
-## Interfaces for WP-4.1 (expect a small merge)
-- `GET /api/family/people/:id` handler and `personDetails.ts`: replace the interim builder; keep `canEditPhoto: await canEditPersonPhoto(db, viewer, row)` and `resolvePersonPhoto(deps, personPhotoRowFor(row, viewer), PersonPhotoSize.Display)`.
+## Interfaces for WP-4.1 (historical; see the reconciliation)
+- Done in the reconciliation below.
 - `repository.ts`: `personViewColumns` gained `photoKey`; `presignPersonAvatars` now resolves avatar → tree photo.
-- `FamilyTreePage.tsx`: the focus card's `actions` gained `photoEditor` (three lines).
+- `FamilyTreePage.tsx`: `photoEditor` passed to `PersonDetailsSection`.
 - Admin person delete: `personPhotoObjectKeys` before, `deletePersonPhotoObjects` after the commit.
+
+## Reconciliation with WP-4.1/4.4 (PR #47 review, merge of main @ 341de98)
+- **Builder**: the interim `personDetails.ts` is deleted; `GET /api/family/people/:id`, the member write routes and the photo routes all use WP-4.1's `buildPersonDetails(deps, row, viewer, circle)`. WP-4.3 only changed its photo part (`personPhotoRowFor`, 512 px `photoUrl`) and `canEditPhoto`.
+- **Permission**: `photoAccess.ts` now uses WP-4.1's circle (`close` set). `qualifyingEdge()` and `isCloseRelative()` are deleted (`circle.ts` owns `qualifyingEdgesSql`). Rules unchanged: relatives only for people without an account; self or admins otherwise; confirm uploader-only; `PERSON_LINKED_TO_OTHER` only for close relatives (A13).
+- **Photo objects**: WP-4.1's stand-in `personPhotoObjects.ts` is deleted; the admin delete and the revert-of-create cleanup call `personPhotoObjectKeys(tx, id)` / `deletePersonPhotoObjects(app, keys)` from `personPhoto.ts`.
+- **Lock order and revisions**: photo writes take the tree lock, then the person row (**tree → person**), re-check the permission under the lock (the circle is read after the lock), and write `person.photo` through `insertRevision` in the same transaction. Confirm keeps an early check before the decode.
+- **Web**: `PersonPhotoEditor` moved into "Detalles"; `InvitePersonButton` and the add/edit/delete actions are WP-4.1's. Photo mutations also invalidate the revision list.
+- **Behaviour changes vs. what was on main**:
+  - `canEditPhoto` is now `false` for a close relative who is **linked to another account** (main had `true` from `circle.close`); the routes already refused that. WP-4.1's test updated.
+  - `PersonDetails.photoUrl` is the 512 px derivative for tree photos (main: 256); `avatarUrl` stays 256.
+  - A linked person's tree photo is hidden from other members when the account is unlisted or disabled (main passed `photoKey` through unfiltered).
+  - Photo-object cleanup only deletes keys in the server layout `people/{uuid}/{uuid}-{512|256|64}.webp` plus the upload rows' original keys (the stand-in accepted any `people/…-<size>.webp`); WP-4.1's fixtures now use real keys.
+  - The e2e admin journey opens "Detalles" before "Agregar foto".
 
 ## Verification
 - `pnpm lint`, `pnpm turbo run typecheck --force`, `pnpm test`, `pnpm build` (initial JS 177.2 kB gzip of 190 kB; the cropper is a lazy chunk), `pnpm e2e` — results in the final report of the PR.
