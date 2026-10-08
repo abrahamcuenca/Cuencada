@@ -192,6 +192,7 @@ const publicInviteRoutes: FastifyPluginAsyncZod = async (app) => {
         const link = await linkAcceptedPerson(tx, {
           requestedPersonId,
           invitePersonId: invite.personId,
+          inviteEmail: invite.email,
           locked,
           userId: user.id,
           fullName: displayName

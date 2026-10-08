@@ -50,7 +50,12 @@ export const PersonLinkFallbackReason = {
   /** Linked to another account meanwhile. */
   Linked: "linked",
   /** Marked deceased meanwhile. */
-  Deceased: "deceased"
+  Deceased: "deceased",
+  /**
+   * The invite is not email-bound (a legacy row, or any path that skipped the
+   * create check): an open link never claims a named person (Security L1, PR #44).
+   */
+  NotBound: "not_bound"
 } as const;
 export type PersonLinkFallbackReason = (typeof PersonLinkFallbackReason)[keyof typeof PersonLinkFallbackReason];
 
@@ -169,15 +174,18 @@ export async function linkAcceptedPerson(
   input: {
     requestedPersonId: string | null;
     invitePersonId: string | null;
+    /** The invite's bound address; `null` for an open link. */
+    inviteEmail: string | null;
     locked: LockedPerson | undefined;
     userId: string;
     fullName: string;
   }
 ): Promise<PersonLinkResult> {
-  const { requestedPersonId, invitePersonId, locked, userId, fullName } = input;
+  const { requestedPersonId, invitePersonId, inviteEmail, locked, userId, fullName } = input;
   let reason: PersonLinkFallbackReason | null = null;
   if (requestedPersonId !== null) {
-    if (locked === undefined || invitePersonId !== requestedPersonId) reason = PersonLinkFallbackReason.Deleted;
+    if (inviteEmail === null) reason = PersonLinkFallbackReason.NotBound;
+    else if (locked === undefined || invitePersonId !== requestedPersonId) reason = PersonLinkFallbackReason.Deleted;
     else if (locked.userId !== null) reason = PersonLinkFallbackReason.Linked;
     else if (locked.deceased) reason = PersonLinkFallbackReason.Deceased;
     else {

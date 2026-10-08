@@ -542,6 +542,33 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
           };
         },
         expect: "2xx"
+      },
+      {
+        label: "open link naming an unlinked person (legacy row; falls back, never links)",
+        kind: "rule",
+        build: async () => {
+          const person = await insertPerson({ fullName: "Persona Sin Cuenta" });
+          const token = createOpaqueToken();
+          await getTestDb()
+            .insert(invites)
+            .values({
+              tokenHash: hashToken(token),
+              email: null,
+              personId: person.id,
+              maxUses: 5,
+              expiresAt: new Date(Date.now() + 86_400_000)
+            });
+          return {
+            ...json("/api/invites/accept", {
+              token,
+              email: `invitado-${randomUUID()}@example.test`,
+              displayName: "Persona Invitada",
+              password: "una-frase-larga-y-segura-2026"
+            }),
+            state: async () => getTestDb().select({ userId: people.userId }).from(people).where(eq(people.id, person.id))
+          };
+        },
+        expect: "2xx"
       }
     ]
   },

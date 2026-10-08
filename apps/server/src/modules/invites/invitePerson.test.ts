@@ -363,6 +363,31 @@ describe("POST /api/invites/accept with a person", () => {
     expect(await acceptAudit("ana@example.test")).toMatchObject({ personLink: "created" });
   });
 
+  it("never links a person named by an open link (legacy row): falls back with not_bound (Security L1)", async () => {
+    const { app: instance } = await setup();
+    const ana = await insertPerson({ fullName: "Ana Ejemplo" });
+    const token = createOpaqueToken();
+    await getTestDb()
+      .insert(invites)
+      .values({ tokenHash: hashToken(token), email: null, personId: ana.id, maxUses: 5, expiresAt: new Date(Date.now() + 86_400_000) });
+
+    const response = await accept(instance, token, "quien.sea@example.test", "Quien Sea");
+
+    expect(response.statusCode).toBe(201);
+    const [row] = await getTestDb().select().from(people).where(eq(people.id, ana.id));
+    expect(row?.userId).toBeNull();
+    const userId = response.json<{ user: { id: string } }>().user.id;
+    const mine = await peopleOf(userId);
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).not.toBe(ana.id);
+    expect(await acceptAudit("quien.sea@example.test")).toMatchObject({
+      personId: mine[0],
+      personLink: "fallback",
+      requestedPersonId: ana.id,
+      personFallbackReason: "not_bound"
+    });
+  });
+
   describe("races under the person lock", () => {
     it("an admin link that commits while the accept waits wins; the accept falls back", async () => {
       const { app: instance } = await setup();
