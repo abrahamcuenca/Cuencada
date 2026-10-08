@@ -34,6 +34,8 @@ export interface PersonDetailsSectionProps {
   person: PersonDetails;
   /** "Editar" / "Eliminar" buttons, shown inside the panel. */
   actions?: ReactNode;
+  /** WP-4.3: the tree-photo controls (`PersonPhotoEditor`), under the photo slot. */
+  photoEditor?: ReactNode;
 }
 
 /**
@@ -42,7 +44,7 @@ export interface PersonDetailsSectionProps {
  * only when present. The server already applied the privacy rules (living
  * people's dates only for their circle), so missing values simply don't show.
  */
-export function PersonDetailsSection({ person, actions }: PersonDetailsSectionProps): ReactNode {
+export function PersonDetailsSection({ person, actions, photoEditor }: PersonDetailsSectionProps): ReactNode {
   const rows = detailRows(person);
   const hasPhoto = person.photoUrl !== null && person.photoSource === "person";
   const empty = rows.length === 0 && person.bio === null && !hasPhoto && person.contacts.length === 0;
@@ -53,6 +55,7 @@ export function PersonDetailsSection({ person, actions }: PersonDetailsSectionPr
         {hasPhoto && person.photoUrl !== null ? (
           <img className={styles.detailsPhoto} src={person.photoUrl} alt={`Foto de ${person.fullName}`} loading="lazy" decoding="async" />
         ) : null}
+        {photoEditor ?? null}
         {rows.length > 0 ? (
           <dl className={styles.detailsList}>
             {rows.map(([label, value]) => (

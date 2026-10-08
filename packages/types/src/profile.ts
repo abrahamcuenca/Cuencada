@@ -267,11 +267,6 @@ export const avatarUploadResponseSchema = z.object({
   expiresAt: dateTimeSchema
 }) satisfies z.ZodType<AvatarUploadResponse>;
 
-/** `POST /api/profile/me/avatar/confirm` body. Responds with the updated `OwnProfile`. */
-export const avatarConfirmInputSchema = z.object({ uploadId: idSchema });
-export type AvatarConfirmInput = z.infer<typeof avatarConfirmInputSchema>;
-export type AvatarConfirmRequest = z.input<typeof avatarConfirmInputSchema>;
-
 /* -------------------------------------------------------------------------- */
 /* Image crop (WP-4.0: person photos; avatars may adopt it in WP-4.3)          */
 /* -------------------------------------------------------------------------- */
@@ -338,3 +333,14 @@ export function clampCropRect(rect: ImageCropRect, width: number, height: number
   const top = Math.min(Math.max(0, Math.trunc(rect.y)), height - side);
   return { left, top, width: side, height: side };
 }
+
+/**
+ * `POST /api/profile/me/avatar/confirm` body. Responds with the updated
+ * `OwnProfile`. `crop` (WP-4.3) is optional: the web's `ImageCropper` crops
+ * client-side and omits it; when sent, the server clamps it with
+ * {@link clampCropRect} before `extract()`.
+ */
+export const avatarConfirmInputSchema = z.object({ uploadId: idSchema, crop: imageCropRectSchema.exactOptional() });
+export type AvatarConfirmInput = z.infer<typeof avatarConfirmInputSchema>;
+export type AvatarConfirmRequest = z.input<typeof avatarConfirmInputSchema>;
+

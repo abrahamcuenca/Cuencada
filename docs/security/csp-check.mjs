@@ -38,7 +38,9 @@ const postgres = requireFromServer("postgres");
 const { chromium } = requireFromRoot("@playwright/test");
 
 const ADMIN_URL = process.env.CSP_CHECK_ADMIN_URL ?? "postgres://cuencada:cuencada@127.0.0.1:55432/cuencada_test";
-const DB_NAME = "w23_csp_check";
+// Overridable so parallel worktrees don't drop each other's scratch database.
+const DB_NAME = process.env.CSP_CHECK_DB ?? "w23_csp_check";
+if (!/^[a-z][a-z0-9_]*_csp_check$/.test(DB_NAME)) throw new Error("CSP_CHECK_DB must end in _csp_check");
 const WEB_PORT = Number(process.env.CSP_CHECK_WEB_PORT ?? 47_310);
 const API_PORT = Number(process.env.CSP_CHECK_API_PORT ?? 47_311);
 const WEB_ORIGIN = `http://127.0.0.1:${WEB_PORT}`;
@@ -73,6 +75,8 @@ export function policiesFromDoc(markdown) {
     .filter((part) => part !== "" && part !== "upgrade-insecure-requests")
     .join("; ")
     .replaceAll("<bucket>", BUCKET)
+    // csp.md now names the production bucket host literally (WP-2.4); swap it for the harness bucket too.
+    .replaceAll("https://cuencada.us-east-1.linodeobjects.com", BUCKET_ORIGIN)
     .replaceAll("wss://cuencada.com", `ws://127.0.0.1:${WEB_PORT}`);
   return { production, local };
 }
@@ -372,6 +376,49 @@ async function main() {
     );
     if (resizeWorkers.length === 0 || intent === undefined) {
       log("FAIL: the large-photo upload did not go through the resize worker");
+      process.exitCode = 1;
+    }
+
+    // WP-4.3: frame a photo in the ImageCropper (canvas preview, pointer drag,
+    // zoom, rotate) and save it: the 1024² JPEG is rendered in the resize
+    // module worker, then the avatar intent is created.
+    const workersBeforeCrop = workers.length;
+    const portrait = await sharp({ create: { width: 3000, height: 4000, channels: 3, background: "#e8b84a" } })
+      .jpeg({ quality: 80 })
+      .toBuffer();
+    const portraitPath = path.join(workDir, "retrato-recorte.jpg");
+    await writeFile(portraitPath, portrait);
+    await page.goto(`${WEB_ORIGIN}/perfil`, { waitUntil: "networkidle" });
+    await page.locator('[data-testid="avatar-file-input"]').setInputFiles(portraitPath);
+    const cropper = page.getByRole("dialog", { name: "Ajustar foto" });
+    await cropper.getByRole("button", { name: "Guardar" }).waitFor({ state: "visible", timeout: 10_000 });
+    await page.waitForFunction(() => !document.querySelector('[data-testid="image-cropper-canvas"]')?.getAttribute("aria-busy")?.includes("true"));
+    await cropper.getByRole("button", { name: "Acercar" }).click();
+    const stage = await cropper.getByTestId("image-cropper-canvas").boundingBox();
+    if (stage !== null) {
+      await page.mouse.move(stage.x + stage.width / 2, stage.y + stage.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(stage.x + stage.width / 2 + 30, stage.y + stage.height / 2 + 20, { steps: 4 });
+      await page.mouse.up();
+    }
+    await cropper.getByRole("button", { name: "Girar" }).click();
+    await cropper.getByRole("button", { name: "Guardar" }).click();
+    const avatarIntents = postgres(databaseUrl, { max: 1, onnotice: () => {} });
+    let avatarIntent;
+    for (let attempt = 0; attempt < 60 && avatarIntent === undefined; attempt += 1) {
+      [avatarIntent] = await avatarIntents`select byte_size, mime_type from avatar_uploads order by created_at desc limit 1`;
+      if (avatarIntent === undefined) await page.waitForTimeout(500);
+    }
+    await avatarIntents.end();
+    await page.waitForTimeout(1000);
+    for (const violation of await page.evaluate(() => window.__cspViolations.splice(0))) {
+      violations.push({ route: "/perfil (cropper)", ...violation });
+    }
+    const cropWorkers = workers.slice(workersBeforeCrop).filter((url) => /\/assets\/resize\.worker-[\w-]+\.js$/.test(url));
+    log(`cropper: resize worker loaded for the crop: ${cropWorkers.join(", ") || "none"}`);
+    log(avatarIntent === undefined ? "cropper: avatar intent none" : `cropper: avatar intent ${avatarIntent.mime_type}, ${avatarIntent.byte_size} bytes`);
+    if (cropWorkers.length === 0 || avatarIntent === undefined) {
+      log("FAIL: the cropped avatar did not go through the resize worker");
       process.exitCode = 1;
     }
 

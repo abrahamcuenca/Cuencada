@@ -20,6 +20,7 @@ import { Breadcrumbs, FocusCard, type OpenPerson, RelativeBand, SiblingStrip } f
 import styles from "../family.module.css";
 import { useCachedPersonNames, usePrefersReducedMotion } from "../lib/hooks";
 import { type TrailEntry, type TreeLocationState, extendedGenerations, nextTrail, readTrail, resolveTrail } from "../lib/tree";
+import { PersonPhotoEditor } from "../photo";
 import { InvitePersonButton } from "../../admin/components/InvitePersonButton";
 
 // The sheets download only when opened.
@@ -118,6 +119,8 @@ function TreeView({ view, busy, trail, expanded, onToggleExpanded, onOpen }: Tre
   const [remove, removeState] = useDeleteFamilyPersonMutation();
   const navigate = useNavigate();
   const toast = useToast();
+  // WP-4.3: `PersonDetails.canEditPhoto` decides whether the tree-photo controls show (in "Detalles").
+  const photoEditor = details?.canEditPhoto === true ? <PersonPhotoEditor person={details} /> : null;
 
   // After a re-centre (not on first load), move focus to the new person's
   // name so keyboard and screen-reader users land on what changed.
@@ -248,7 +251,7 @@ function TreeView({ view, busy, trail, expanded, onToggleExpanded, onOpen }: Tre
             person={focus}
             headingRef={headingRef}
             actions={actions}
-            details={details === undefined ? null : <PersonDetailsSection person={details} />}
+            details={details === undefined ? null : <PersonDetailsSection person={details} photoEditor={photoEditor} />}
           />
           <RelativeBand
             title={view.partners.length === 1 ? "Pareja" : "Parejas"}

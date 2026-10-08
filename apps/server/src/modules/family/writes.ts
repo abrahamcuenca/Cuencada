@@ -51,9 +51,7 @@ export const FamilyAuditAction = {
   Linked: "person.user_linked",
   Unlinked: "person.user_unlinked",
   RevisionReverted: "person.revision_reverted",
-  RevisionsPurged: "person.revisions_purged",
-  /** "Fusionar personas" (WP-4.5): ids and counts only. */
-  Merged: "person.merged"
+  RevisionsPurged: "person.revisions_purged"
 } as const;
 
 /** Every editable column of a person (what a create inserts and a PATCH may set). */

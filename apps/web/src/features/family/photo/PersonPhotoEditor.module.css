@@ -1,0 +1,40 @@
+/* WP-4.3 tree-photo controls under the focus card. */
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+}
+
+.status {
+  min-height: 1.25em;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.status:empty {
+  min-height: 0;
+}
+
+.error {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  text-align: center;
+}

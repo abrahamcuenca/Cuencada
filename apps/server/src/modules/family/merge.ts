@@ -15,10 +15,9 @@
  *   through `insertRelationship` (cycle and 2-parent checks under the tree
  *   lock). Exact duplicates of keep's edges and keep↔duplicate links are
  *   dropped. Any rule failure → 409 `MERGE_CONFLICT`, one detail per edge.
- * - **Photo:** keep's tree photo stays; else the duplicate's moves. When
- *   both had one, the duplicate's objects are returned for deletion after
- *   the commit (`mergePhoto.ts`). Pending `person_photo_uploads`
- *   move to keep.
+ * - **Photo:** keep's tree photo stays; else the duplicate's moves. The
+ *   duplicate's other photo objects (a losing photo, pending uploads, whose
+ *   rows cascade) are returned for deletion after the commit (`mergePhoto.ts`).
  * - **Other references to `people.id`:** invites (pending ones move only
  *   when keep can still be invited: unlinked, living, no pending invite of
  *   its own; otherwise they are revoked; every invite ends up naming keep,
@@ -56,7 +55,7 @@ import {
   personDatesIssue
 } from "@cuencada/types";
 import { and, count, eq, inArray, isNull, or, sql } from "drizzle-orm";
-import { cuencadaAttendance, invites, people, personPhotoUploads, personRelationships, personRevisions } from "../../db/schema/index.js";
+import { cuencadaAttendance, invites, people, personRelationships, personRevisions } from "../../db/schema/index.js";
 import { recordAudit, type Transaction } from "../../lib/audit.js";
 import { AppError, isAppError } from "../../lib/errors.js";
 import { invitePendingSql } from "../invites/service.js";
@@ -391,9 +390,8 @@ async function applyMerge(
   actor: WriteActor
 ): Promise<MergeResult> {
   const { keep, duplicate } = plan;
-  // Pending uploads follow the person; then only the duplicate's current photo can lose.
-  await tx.update(personPhotoUploads).set({ personId: keep.id }).where(eq(personPhotoUploads.personId, duplicate.id));
-  const photoKeys = plan.photo.keep && plan.photo.duplicate ? await losingPhotoKeys(tx, duplicate.id, duplicateInternals.photoKey) : [];
+  // Everything of the duplicate's tree photo except a photo that moves to keep (read before the delete).
+  const photoKeys = await losingPhotoKeys(tx, duplicate.id, plan.photo.moved ? duplicateInternals.photoKey : null);
 
   if (plan.linkMoves) {
     await tx.update(people).set({ userId: null, updatedByUserId: actor.id }).where(eq(people.id, duplicate.id));
@@ -484,7 +482,7 @@ async function applyMerge(
   const countOf = (outcome: MergeEdgeOutcome): number => plan.edges.filter((edge) => edge.outcome === outcome).length;
   await recordAudit(tx, {
     actorUserId: actor.id,
-    action: FamilyAuditAction.Merged,
+    action: AuditAction.PersonMerged,
     entityType: AuditEntityType.Person,
     entityId: keep.id,
     metadata: {
@@ -547,7 +545,8 @@ function rowMatches(row: PersonRow, snapshot: PersonRevisionPersonSnapshot): boo
  * it moved to keep; a photo deleted because keep had one is not restored),
  * its relationships with their original ids and provenance (re-checked for
  * cycles and parents), its attendance and the invites that moved. Revoked
- * invites stay revoked; moved pending uploads stay with keep.
+ * invites stay revoked (and name the duplicate again); dropped pending
+ * uploads are gone.
  *
  * @param tx - Open transaction holding the tree lock and the locked revision.
  * @param revision - The `person.merge` revision.

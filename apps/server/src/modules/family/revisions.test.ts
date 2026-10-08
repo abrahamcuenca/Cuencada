@@ -3,6 +3,7 @@
  * purge, the activity feed, retention, and person delete with photo
  * objects. Fictional people only.
  */
+import { randomUUID } from "node:crypto";
 import type { FamilyActivityItem, Page, PersonDetails, PersonRevision } from "@cuencada/types";
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -13,6 +14,7 @@ import { FakeStorage } from "../../../test/helpers/fakes.js";
 import { insertParentOf, insertPerson } from "../../../test/helpers/family.js";
 import type { App } from "../../app.js";
 import { auditLogs, invites, people, personPhotoUploads, personRelationships, personRevisions } from "../../db/schema/index.js";
+import { personPhotoKeys } from "./personPhoto.js";
 import { purgeExpiredRevisions } from "./revisions.js";
 
 let app: App;
@@ -176,7 +178,8 @@ describe("POST /api/admin/revisions/:revisionId/revert", () => {
     const self = await insertPerson({ userId: member.id });
     const created = await call("POST", "/api/family/people", { fullName: "Hija Con Foto", relateTo: { personId: self.id, kind: "child_of" } }, memberAuth);
     const childId = created.json<PersonDetails>().id;
-    const base = `people/${childId}/foto`;
+    // Server-generated key layout (WP-4.3): only keys in it are ever deleted.
+    const base = personPhotoKeys(childId, randomUUID(), "image/jpeg").large.replace(/-256\.webp$/, "");
     for (const size of [512, 256, 64]) await storage.put({ key: `${base}-${size}.webp`, body: new Uint8Array([1]), contentType: "image/webp" });
     await storage.put({ key: `people/${childId}/pendiente.jpg`, body: new Uint8Array([1]), contentType: "image/jpeg" });
     await getTestDb().update(people).set({ photoKey: `${base}-256.webp`, photoUpdatedAt: new Date() }).where(eq(people.id, childId));
@@ -332,7 +335,7 @@ describe("history purge and person delete", () => {
 
   it("deletes the photo objects (current derivatives and pending uploads) with the person", async () => {
     const person = await insertPerson({ fullName: "Con Foto" });
-    const base = `people/${person.id}/foto`;
+    const base = personPhotoKeys(person.id, randomUUID(), "image/jpeg").large.replace(/-256\.webp$/, "");
     for (const size of [512, 256, 64]) await storage.put({ key: `${base}-${size}.webp`, body: new Uint8Array([1]), contentType: "image/webp" });
     await storage.put({ key: `people/${person.id}/pendiente.jpg`, body: new Uint8Array([1]), contentType: "image/jpeg" });
     await storage.put({ key: "people/otra/foto-256.webp", body: new Uint8Array([1]), contentType: "image/webp" });

@@ -109,6 +109,14 @@ export const AuditAction = {
   PersonCreated: "person.created",
   PersonUpdated: "person.updated",
   PersonDeleted: "person.deleted",
+  /** WP-4.3: a confirmed upload set or replaced a person's tree photo (metadata: ids, `replaced`). */
+  PersonPhotoUpdated: "person.photo_updated",
+  /** WP-4.3: a person's tree photo was removed. */
+  PersonPhotoRemoved: "person.photo_removed",
+  /** WP-4.3: a tree-photo upload was refused at confirm (`metadata.reason`). */
+  PersonPhotoRejected: "person.photo_rejected",
+  /** WP-4.5: a duplicate person was merged into another (metadata: ids and counts only). */
+  PersonMerged: "person.merged",
   RelationshipCreated: "relationship.created",
   RelationshipDeleted: "relationship.deleted",
   ChatMessageDeleted: "chat_message.deleted"

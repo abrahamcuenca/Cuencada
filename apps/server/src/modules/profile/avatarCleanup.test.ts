@@ -5,7 +5,9 @@ import { mutableClock } from "../../../test/helpers/cuencadas.js";
 import { getTestDb } from "../../../test/helpers/db.js";
 import { createUser } from "../../../test/helpers/factories.js";
 import { FakeStorage } from "../../../test/helpers/fakes.js";
-import { avatarUploads } from "../../db/schema/index.js";
+import { insertPerson } from "../../../test/helpers/family.js";
+import { avatarUploads, personPhotoUploads } from "../../db/schema/index.js";
+import { personPhotoKeys } from "../family/personPhoto.js";
 import { avatarKeys } from "./avatar.js";
 import { cleanupAvatarUploads } from "./avatarCleanup.js";
 import { AVATAR_CLEANUP_INTERVAL_MS } from "./constants.js";
@@ -145,6 +147,46 @@ describe("cleanupAvatarUploads", () => {
     });
     expect(warnings).toHaveLength(1);
     expect(JSON.stringify(warnings)).not.toContain(upload.keys.original);
+  });
+});
+
+describe("cleanupAvatarUploads: tree photos (WP-4.3)", () => {
+  it("reclaims abandoned and retired person_photo_uploads rows and their originals only", async () => {
+    const clock = mutableClock("2026-10-06T12:00:00Z");
+    const now = clock.now().getTime();
+    const storage = new FakeStorage();
+    const user = await createUser();
+    const person = await insertPerson();
+    const insert = async (expiresAt: Date, confirmedAt: Date | null) => {
+      const id = randomUUID();
+      const keys = personPhotoKeys(person.id, id, "image/png");
+      await getTestDb().insert(personPhotoUploads).values({
+        id,
+        personId: person.id,
+        uploadedByUserId: user.id,
+        objectKey: keys.original,
+        mimeType: "image/png",
+        byteSize: 3,
+        expiresAt,
+        confirmedAt
+      });
+      await storage.put({ key: keys.original, body: new Uint8Array([1, 2, 3]), contentType: "image/png" });
+      return { id, keys };
+    };
+    const abandoned = await insert(new Date(now - 2 * HOUR), null);
+    const open = await insert(new Date(now + HOUR), null);
+    const retired = await insert(new Date(now - 30 * HOUR), new Date(now - 25 * HOUR));
+    await storage.put({ key: retired.keys.large, body: new Uint8Array([9]), contentType: "image/webp" });
+
+    const result = await cleanupAvatarUploads({ db: getTestDb(), storage, clock, log: silentLog });
+
+    expect(result).toEqual({ abandonedDeleted: 1, confirmedPurged: 1, objectDeleteFailures: 0 });
+    const remaining = await getTestDb().select({ id: personPhotoUploads.id }).from(personPhotoUploads);
+    expect(remaining.map((row) => row.id)).toEqual([open.id]);
+    expect(storage.objects.has(abandoned.keys.original)).toBe(false);
+    expect(storage.objects.has(retired.keys.original)).toBe(false);
+    expect(storage.objects.has(retired.keys.large)).toBe(true);
+    expect(storage.objects.has(open.keys.original)).toBe(true);
   });
 });
 

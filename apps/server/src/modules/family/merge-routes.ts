@@ -240,7 +240,7 @@ const mergeRoutes: FastifyPluginAsyncZod = async (app) => {
         return { result, view };
       });
       // The duplicate's losing tree photo goes after the commit (best effort, like a person delete).
-      await deleteLosingPhotoObjects(app, outcome.result.duplicateId, outcome.result.photoKeys);
+      await deleteLosingPhotoObjects(app, outcome.result.photoKeys);
       return {
         person: await toPersonWithAvatar(app, outcome.view, admin),
         revisionId: outcome.result.revisionId,

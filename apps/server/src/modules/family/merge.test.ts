@@ -3,6 +3,7 @@
  * duplicados". Fictional people only.
  */
 import type { Page, PersonMergePreview, PersonMergeResponse, PersonRevision, PossibleDuplicate } from "@cuencada/types";
+import { randomUUID } from "node:crypto";
 import { eq, inArray, or, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createTestApp } from "../../../test/helpers/app.js";
@@ -282,26 +283,36 @@ describe("POST /api/admin/people/:id/merge", () => {
     expect((await merge(keep.id, { duplicateId: other.id, fields: { userId: "duplicate" } })).statusCode).toBe(400);
   });
 
-  it("moves the duplicate's photo when the kept person has none; deletes the losing objects when both have one", async () => {
+  it("moves the duplicate's photo when the kept person has none; drops pending uploads; deletes a losing photo after the commit", async () => {
+    const put = async (key: string): Promise<void> => storage.put({ key, body: new Uint8Array([1]), contentType: "image/webp" });
+    const photoOf = async (personId: string): Promise<string> => {
+      const base = `people/${personId}/${randomUUID()}`;
+      for (const size of [512, 256, 64]) await put(`${base}-${size}.webp`);
+      return base;
+    };
     const keep = await insertPerson({ fullName: "Fede Ejemplo" });
     const duplicate = await insertPerson({ fullName: "Fede Ejemplo" });
     const taken = new Date("2026-01-02T03:04:05.000Z");
-    await getTestDb().update(people).set({ photoKey: `people/${duplicate.id}/a-256.webp`, photoUpdatedAt: taken }).where(eq(people.id, duplicate.id));
+    const moved = await photoOf(duplicate.id);
+    await getTestDb().update(people).set({ photoKey: `${moved}-256.webp`, photoUpdatedAt: taken }).where(eq(people.id, duplicate.id));
+    const pendingKey = `people/${duplicate.id}/${randomUUID()}.jpg`;
+    await put(pendingKey);
     await getTestDb()
       .insert(personPhotoUploads)
-      .values({ personId: duplicate.id, objectKey: `people/${duplicate.id}/pendiente.jpg`, mimeType: "image/jpeg", byteSize: 1, expiresAt: new Date(Date.now() + 60_000) });
+      .values({ personId: duplicate.id, objectKey: pendingKey, mimeType: "image/jpeg", byteSize: 1, expiresAt: new Date(Date.now() + 60_000) });
     expect((await merge(keep.id, { duplicateId: duplicate.id })).statusCode).toBe(200);
-    expect(await personRow(keep.id)).toMatchObject({ photoKey: `people/${duplicate.id}/a-256.webp`, photoUpdatedAt: taken });
-    expect(await getTestDb().select({ personId: personPhotoUploads.personId }).from(personPhotoUploads)).toEqual([{ personId: keep.id }]);
+    expect(await personRow(keep.id)).toMatchObject({ photoKey: `${moved}-256.webp`, photoUpdatedAt: taken });
+    expect(await getTestDb().select().from(personPhotoUploads)).toEqual([]);
+    expect([...storage.objects.keys()].sort()).toEqual([`${moved}-256.webp`, `${moved}-512.webp`, `${moved}-64.webp`].sort());
 
     const both = await insertPerson({ fullName: "Fede Ejemplo" });
-    const base = `people/${both.id}/b`;
-    for (const size of [512, 256, 64]) await storage.put({ key: `${base}-${size}.webp`, body: new Uint8Array([1]), contentType: "image/webp" });
-    await storage.put({ key: `people/${duplicate.id}/a-256.webp`, body: new Uint8Array([1]), contentType: "image/webp" });
-    await getTestDb().update(people).set({ photoKey: `${base}-256.webp`, photoUpdatedAt: new Date() }).where(eq(people.id, both.id));
+    const losing = await photoOf(both.id);
+    await getTestDb().update(people).set({ photoKey: `${losing}-256.webp`, photoUpdatedAt: new Date() }).where(eq(people.id, both.id));
+    const preview = (await call("GET", `/api/admin/people/${keep.id}/merge-preview?duplicateId=${both.id}`)).json<PersonMergePreview>();
+    expect(preview.photo).toEqual({ result: "keep", deletesDuplicatePhoto: true });
     expect((await merge(keep.id, { duplicateId: both.id })).statusCode).toBe(200);
-    expect((await personRow(keep.id))?.photoKey).toBe(`people/${duplicate.id}/a-256.webp`);
-    expect([...storage.objects.keys()]).toEqual([`people/${duplicate.id}/a-256.webp`]);
+    expect((await personRow(keep.id))?.photoKey).toBe(`${moved}-256.webp`);
+    expect([...storage.objects.keys()].sort()).toEqual([`${moved}-256.webp`, `${moved}-512.webp`, `${moved}-64.webp`].sort());
   });
 
   it("moves a pending invite to an unlinked kept person, revokes it when the kept person is linked, keeps history invites", async () => {
@@ -423,6 +434,19 @@ describe("undo a merge (POST /api/admin/revisions/:revisionId/revert)", () => {
     const [row] = await getTestDb().select().from(personRevisions).where(eq(personRevisions.id, merged.revisionId));
     expect(row?.revertedByRevisionId).not.toBeNull();
     expect((await call("POST", `/api/admin/revisions/${merged.revisionId}/revert`)).statusCode).toBe(409);
+  });
+
+  it("gives a moved tree photo back to the duplicate", async () => {
+    const keep = await insertPerson({ fullName: "Hilda Ejemplo" });
+    const duplicate = await insertPerson({ fullName: "Hilda Ejemplo" });
+    const key = `people/${duplicate.id}/${randomUUID()}-256.webp`;
+    const taken = new Date("2026-02-03T04:05:06.000Z");
+    await getTestDb().update(people).set({ photoKey: key, photoUpdatedAt: taken }).where(eq(people.id, duplicate.id));
+    const merged = (await merge(keep.id, { duplicateId: duplicate.id })).json<PersonMergeResponse>();
+    expect((await personRow(keep.id))?.photoKey).toBe(key);
+    expect((await call("POST", `/api/admin/revisions/${merged.revisionId}/revert`)).statusCode).toBe(200);
+    expect(await personRow(keep.id)).toMatchObject({ photoKey: null, photoUpdatedAt: null });
+    expect(await personRow(duplicate.id)).toMatchObject({ photoKey: key, photoUpdatedAt: taken });
   });
 
   it("refuses (409) when anything changed after the merge, and changes nothing", async () => {

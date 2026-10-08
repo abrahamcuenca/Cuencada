@@ -30,7 +30,7 @@ import { personRevisions } from "../../db/schema/index.js";
 import { recordAudit } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
 import { authUser } from "../../plugins/auth.js";
-import { deletePersonPhotoObjects } from "./personPhotoObjects.js";
+import { deletePersonPhotoObjects } from "./personPhoto.js";
 import { revertRevisionTx } from "./revert.js";
 import {
   activityNames,
@@ -148,7 +148,7 @@ const revisionRoutes: FastifyPluginAsyncZod = async (app) => {
         return { revision: toPersonRevision(row), result: outcome };
       });
       // An undone addition goes like any deleted person: its photo objects after the commit.
-      if (result.deletedPersonId !== null) await deletePersonPhotoObjects(app, result.deletedPersonId, result.photoKeys);
+      if (result.deletedPersonId !== null) await deletePersonPhotoObjects(app, result.photoKeys);
       return revision;
     }
   );
