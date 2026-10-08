@@ -15,7 +15,7 @@ Based on `origin/main` (bcaa262). Plan: WP-4 "Family tree people, invite linking
   - `family.ts`: `FAMILY_TREE_MAX_DEPTH = 4`; `Person` gains optional `birthDate`/`deathDate`/`birthplace`/`bio`; `PersonDetails` + `PersonPhotoSource`; `FamilyIssueCode`; `RelateKind`/`relateToSchema`; `adminCreatePersonInputSchema`, `memberCreatePersonInputSchema`, `adminUpdatePersonInputSchema`, `memberUpdatePersonInputSchema`; `personDatesIssue`; `PersonRevisionAction`, `PersonRevisionSnapshot` (+ variants), `PersonRevision`, `personRevisionsQuerySchema`, `revertPersonRevisionInputSchema`; `personPhotoUploadInputSchema`/`ResponseSchema`/`personPhotoConfirmInputSchema`. `createPersonInputSchema`/`updatePersonInputSchema` are kept, marked `@deprecated`.
   - `auth.ts`: `InviteIssueCode` (`INVITE_PERSON_DECEASED`, `INVITE_PERSON_REQUIRES_BOUND`).
 - **Cross-track edits:** `member-routes.test.ts` (T6 clamp test now expects depth 4), `admin.test.ts` (same in the contract). No mapper changes were needed: every new response field is optional.
-- **Docs:** ADR 0001 §6, threat model (assets, STRIDE rows, accepted risks A10/A11).
+- **Docs:** ADR 0001 §6, threat model (assets, STRIDE rows, accepted risks A12/A13).
 
 ## Why it is expand-only
 - New columns are nullable, or NOT NULL with a constant default (`contact_visibility '{}'`): old inserts and updates are unaffected and `ADD COLUMN` is metadata-only.
@@ -64,7 +64,7 @@ Based on `origin/main` (bcaa262). Plan: WP-4 "Family tree people, invite linking
 - Backlog: E.164 backfill of `profiles.phone`; `person_revisions` retention job (WP-4.1).
 
 ## Verification (2026-10-07)
-- `pnpm lint`, `pnpm turbo run typecheck --force` (6/6), `pnpm test` (164 files, 2120 tests) and `pnpm build`: green (see the PR for the post-merge re-run).
+- `pnpm lint`, `pnpm turbo run typecheck --force` (6/6), `pnpm test` (164 files, 2120 tests) and `pnpm build` (4/4): green before and after merging `origin/main` (fc9f2f9; threat-model accepted risks renumbered to A12/A13 because main added A10/A11).
 - `drizzle-kit generate`: "No schema changes, nothing to migrate".
 - Migration test "migration 0004" (4 cases): a seeded 0003 database (user, profile with a free-form phone and `show_*` flags, a linked person, a deceased ancestor, a relationship) is migrated to latest; the old columns of `people` and `profiles` are identical, new columns are null / `{}`, the phone is untouched, and an old-shape insert still works. Date CHECKs (year required and equal, order, death ⇒ deceased, same-day allowed), character-length CHECKs (120/1000, multibyte), photo CHECK. Contact CHECKs agree with `isValidHandle`/`isE164` on a 36-value corpus per network; website and visibility-map CHECKs. Upload MIME/size/unique CHECKs; revision action and snapshot CHECKs, self-revert refused, deleting a revert row unlinks; deleting a user sets `updated_by_user_id`/`uploaded_by_user_id`/`actor_user_id` null; deleting a person cascades uploads and keeps revisions with `person_id` null; the PII table comment is present.
 - Contract tests: `contacts.test.ts` (rules, normalizer, inputs, `buildContactCard` with an injection corpus, href schema, response compatibility), `family.test.ts` (date derivation and rules, strictness, member vs admin, read models, revisions, crop clamp, issue codes).

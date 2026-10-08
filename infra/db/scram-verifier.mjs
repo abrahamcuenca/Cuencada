@@ -4,7 +4,8 @@
  * from stdin (WP-2.4, Security L2). Use it to set a role password without the
  * plain password ever reaching the server, its logs, shell history or `ps`:
  *
- *   read -rs PW && printf '%s' "$PW" | node infra/db/scram-verifier.mjs; unset PW
+ *   printf 'password: '; read -rs PW; echo   # zsh and bash; never `read -p` (zsh)
+ *   printf '%s' "$PW" | node infra/db/scram-verifier.mjs; unset PW
  *   # then, in psql as a superuser:
  *   ALTER ROLE cuencada_app PASSWORD 'SCRAM-SHA-256$4096:…';
  *

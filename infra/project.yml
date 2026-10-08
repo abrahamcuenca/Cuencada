@@ -63,7 +63,7 @@ deploy:
     VITE_PLATFORM_DOMAIN: cuencada.com
     # Must equal https://<S3_BUCKET>.<S3_ENDPOINT host>: the presigned PUT
     # origin. Unset or wrong = gallery uploads are refused. The bucket name is
-    # not a secret (it is in the CSP). OPEN QUESTION (owner): bucket name.
+    # not a secret (it is in the CSP). Bucket `cuencada` in us-east-1 (owner, 2026-10-07).
     VITE_MEDIA_UPLOAD_ORIGIN: https://cuencada.us-east-1.linodeobjects.com
 
 tls:

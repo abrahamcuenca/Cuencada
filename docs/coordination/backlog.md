@@ -148,15 +148,29 @@ Still open:
 - `person_revisions` 1-year retention job (WP-4.1).
 - Remove the deprecated `createPersonInputSchema`/`updatePersonInputSchema` once the admin form uses the WP-4 schemas (WP-4.1).
 
+## Post-launch (after the 2026-10-07 deploy)
+
+First production deploy and seed: 2026-10-07 (WP-3.2 recorded the lessons in
+the runbook). Owner = **O**, agent = **A**.
+
+- [ ] **O:** rotate the WhatsApp and OneDrive links (runbook § 2), then update them in Panel → edit the 2026 edition. Closes accepted risk A10.
+- [ ] **O:** adopt `cuencada_app` for the runtime: run `infra/db/roles.sql` with `-v owner_role=<admin role>`, set its password, allow it in `pg_hba`, switch `vault_cuencada_database_url`, redeploy, check `/health/ready` (runbook § 3). Closes accepted risk A11.
+- [ ] **O:** install the systemd hardening and memory drop-in and run the M1 secrets check (runbook § 4), if not done yet.
+- [ ] **O:** Grafana alerts from runbook § 10: `mail.cap_reached`, `mail.queue_full`, process restarts / crash loop, `password.breach_check_unavailable`.
+- [ ] **A:** retire the legacy root site: `git rm` `index.html`, `cuencada2026.html`, `images/fotos`, and `mensajes.txt` once the seed no longer needs it. `SEED_DAILY_MESSAGES_FILE` defaults to the root `mensajes.txt` (`DEFAULT_DAILY_MESSAGES_FILE` in `apps/server/src/seed.ts`), so move the file under `apps/server/` or change the default first. Update the Biome ignore list and AGENTS.md.
+- [ ] **O:** wait about a day after the deploy before publishing the first undated edition.
+- [ ] **A:** bump the dev/test Postgres from 16 to 18 to match production (`postgres:16-alpine` in `scripts/test-db.sh`, `scripts/dev-db.sh`, `.github/workflows/ci.yml` and `e2e.yml`).
+- [ ] **A:** minimum client version mechanism (force-update stale PWAs), then "bump min client version" in the release checklist (runbook § 9, § 11).
+
 ## Cutover checklist (WP-2.4–2.5)
 
 WP-2.4 prepared every item below; **the owner applies them** following
 [`docs/deploy/runbook.md`](../deploy/runbook.md). [x] = done in the repo,
 [ ] = owner action (or a later WP) still to do.
 
-- [x] **Platform:** Acleron `nginx.site_template` + `server.credentials` (LoadCredential=, Security M1), on branch `cuencada-nginx-credentials` (commits `03f8049`, `1023ab9`, `46d71eb`: project sites copied verbatim, rejected nginx sites rolled back, stale credstores removed, systemd ≥ 247 asserted) in the local `acleron-platform` checkout; tests 66/66. [ ] Owner reviews it, merges it and pushes it. `deploy-preflight` blocks on a platform without it.
-- [ ] **Bucket name:** replace `<bucket>` in `infra/project.yml` (2 lines) and `infra/nginx/cuencada.conf` (3 CSP lines).
-- [ ] Reset the WhatsApp group invite link and the OneDrive share links; new values only in the vault (`vault_cuencada_seed_*_url`) or the admin UI. [x] The legacy links are gone from `seed-data.ts` (dev uses example.com placeholders).
+- [x] **Platform:** Acleron `nginx.site_template` + `server.credentials` (LoadCredential=, Security M1), on branch `cuencada-nginx-credentials` (commits `03f8049`, `1023ab9`, `46d71eb`: project sites copied verbatim, rejected nginx sites rolled back, stale credstores removed, systemd ≥ 247 asserted) in the local `acleron-platform` checkout; tests 66/66. [x] Merged into the platform. `deploy-preflight` blocks on a platform without it.
+- [x] **Bucket name:** `cuencada` in `us-east-1`, in `infra/project.yml` and the `infra/nginx/cuencada.conf` CSP.
+- [ ] Reset the WhatsApp group invite link and the OneDrive share links; new values only in the vault (`vault_cuencada_seed_*_url`) or the admin UI. **Deferred by the owner at launch** (accepted risk A10; see "Post-launch"). [x] The legacy links are gone from `seed-data.ts` (dev uses example.com placeholders).
 - [x] The production seed refuses to run unless **all** `SEED_*_URL` are set (links only reach the edition row on first insert). [ ] Owner runs the seed once, manually, over the tunnel, after the first migration (runbook § 6).
 - [x] Separate DB roles: `infra/db/roles.sql` (owner for `MIGRATE_DATABASE_URL` through the tunnel, DML-only runtime for `DATABASE_URL` over the VPC; passwords via `\password` or SCRAM verifiers only), proven by `infra/db/verify-roles.sh`. [ ] Owner creates them on the PG18 server, with `pg_hba` (`hostssl` from server_1's VPC IP; owner from loopback) and TLS (runbook § 3).
 - [ ] Recreate any local dev DB that applied the pre-review 0001.

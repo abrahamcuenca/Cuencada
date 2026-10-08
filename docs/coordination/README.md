@@ -55,7 +55,9 @@ PRs #1–#30 are merged. Deferred and cross-track items live in [`backlog.md`](b
 | 2.2 | E2E + mobile quality gates [SEC] | Frontend + UI/UX | TL, Sec | wp/2.2-e2e | #37 | in review |
 | 2.3 | Security audit [SEC] | Security | TL | wp/2.3-security-audit | | in review |
 | 2.3c | Breached-password check (ASVS 2.1.7) [SEC] | Backend | TL, Sec | wp/2.3c-breached-passwords | | in review |
-| 2.4–2.5 | Cutover (see backlog checklist) | Tech Lead | Sec | — | | todo |
+| 2.4–2.5 | Cutover (see backlog checklist) | Tech Lead | Sec | — | | done |
+| Launch | First production deploy and seed of cuencada.com | Owner | TL | main | — | deployed 2026-10-07 |
+| 3.2 | Post-launch cleanup (runbook, accepted risks, backlog) | Tech Lead | — | wp/3.2-post-launch | | in review |
 | 4.0 | Family contracts + migration 0004 [SEC] | Architect | TL, Sec | wp/4.0-family-contracts | | in review |
 
 ## WP file template
