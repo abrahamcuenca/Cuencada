@@ -35,7 +35,7 @@ async function member(options: CreateUserOptions = {}): Promise<{ user: TestUser
   return { user, auth: await bearerFor(user, await createSession(user.id)) };
 }
 
-async function patchContacts(auth: AuthInjectOptions, payload: unknown): Promise<{ status: number; body: string }> {
+async function patchContacts(auth: AuthInjectOptions, payload: Record<string, unknown>): Promise<{ status: number; body: string }> {
   const response = await app.inject({ method: "PATCH", url: "/api/profile/me/contacts", ...auth, payload });
   return { status: response.statusCode, body: response.body };
 }
