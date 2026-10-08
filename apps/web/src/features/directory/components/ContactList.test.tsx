@@ -19,7 +19,9 @@ describe("ContactList", () => {
       "https://instagram.com/rosa.ejemplo"
     ]);
     expect(links[3]).toHaveTextContent("Instagram@rosa.ejemplo");
-    expect(links[1]).toHaveTextContent("Teléfono+525550100101");
+    // Phones are grouped for reading; the href keeps the E.164 number.
+    expect(links[1]).toHaveTextContent("Teléfono+52 555 010 0101");
+    expect(links[2]).toHaveTextContent("WhatsApp+52 555 010 0101");
   });
 
   it("opens https links in a new tab with noopener noreferrer nofollow, and tel:/mailto: natively", () => {
@@ -52,7 +54,7 @@ describe("ContactList", () => {
   it("renders round icon chips with the label, owner and value as accessible name", () => {
     render(<ContactList contacts={SAMPLE_CARD} variant="chips" ownerName="Rosa" />);
 
-    expect(screen.getByRole("link", { name: "Teléfono de Rosa: +525550100101" })).toHaveAttribute("href", "tel:+525550100101");
+    expect(screen.getByRole("link", { name: "Teléfono de Rosa: +52 555 010 0101" })).toHaveAttribute("href", "tel:+525550100101");
     expect(screen.getByRole("link", { name: "Instagram de Rosa: @rosa.ejemplo (se abre en otra pestaña)" })).toHaveAttribute("target", "_blank");
     // Inline SVG icons only: no images, no icon-font text.
     expect(document.querySelectorAll("svg[aria-hidden='true']")).toHaveLength(3);

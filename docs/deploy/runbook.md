@@ -654,6 +654,26 @@ Pino levels are numeric: 50 = error, 60 = fatal.
 7. Record the release (commit, time, migrations) in the PR or the release
    notes.
 
+### Next deploy notes
+
+Clear these items once the release that carries them is live.
+
+- **0004 `family_people_contacts`** (WP-4.0): expand-only (new nullable columns
+  and tables). No data step.
+- **0005 `whatsapp_carryover`** (WP-4.4b): **0005 backfills WhatsApp from
+  E.164 phones.**
+  - Data only, no schema change.
+  - For every profile whose `phone` is already E.164 and whose `whatsapp` is
+    empty: `whatsapp = phone`, and the WhatsApp switch copies `show_phone`
+    unless the member already set it. Members who showed their phone before
+    WP-4.4 therefore keep their WhatsApp button in the directory.
+  - Legacy free-form phones are untouched (their owners get the "Confirma tu
+    teléfono" prompt), and `show_phone` never changes.
+  - Idempotent: a re-run matches no rows. It prints nothing per row, so no PII
+    reaches the deploy output.
+  - Run 0004 and 0005 in the same `mise run deploy` (the migrator applies
+    both in order).
+
 ---
 
 ## Resend DNS

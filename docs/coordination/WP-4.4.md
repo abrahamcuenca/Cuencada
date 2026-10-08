@@ -72,3 +72,26 @@ Built on WP-4.0 (contracts and migration 0004). Runs in parallel with WP-4.1 (fa
   - Updated `ProfilePage.test.tsx` and `profileForm.test.ts`.
 - **E2E** (`tests/e2e/contacts.spec.ts`, phones + desktop): Darío fills in his contacts (a pasted Instagram link gets the Spanish error) and turns on exactly phone, WhatsApp and Instagram. Ana sees exactly those 3 in the list chips and the detail. The `GET /api/directory/:id` JSON has `contacts` kinds `[phone, whatsapp, instagram]` and no trace of the hidden GitHub or website.
 - **Screenshots:** `docs/ux/screenshots/t5/{perfil-contacto,directorio-contactos,directorio-detalle-contactos}-{375,1280}.webp`.
+
+## WP-4.4b: WhatsApp carry-over and review fixes
+Branch: `wp/4.4b-whatsapp-carryover` (from main 6386594, after PR #45).
+
+- **Problem:** after #45, members who had shown their phone lost the directory WhatsApp button, because WhatsApp became its own field, empty and hidden by default.
+- **Owner decision:** carry over what they already shared.
+- **Migration `0005_whatsapp_carryover`:** data only, no schema change; `drizzle-kit generate` reports no changes.
+  - It covers profiles whose `phone` matches `E164_PATTERN` (the same regex as `profiles_whatsapp_check`; a test asserts the SQL uses it) and whose `whatsapp` is null.
+  - For those: `whatsapp = phone`, and `contact_visibility || {"whatsapp": show_phone}` **only when the `whatsapp` key is absent**.
+  - It never touches legacy free-form phones (they keep the "Confirma tu teléfono" prompt), existing WhatsApp values, existing keys, or `show_phone`.
+  - It is idempotent (a re-run updates 0 rows), returns no rows, and logs nothing.
+  - The runbook's "Next deploy notes" (§ 11) records it.
+- **Migration test** (seeded 0004 database), covering:
+  - E.164 + shown → WhatsApp copied and shown
+  - E.164 + hidden → copied but hidden
+  - legacy phone and no phone → untouched
+  - an existing WhatsApp value → untouched
+  - an existing visibility key → preserved, while the number is still copied
+  - re-running the statement → 0 rows and identical data
+- **TL review (#45):**
+  - The Contacto copy now says that shown contacts are visible to all family members with a verified account (directory and tree), and to nobody else.
+  - Phone and WhatsApp numbers are grouped for reading (`+52 555 010 0144`) by `features/directory/lib/phoneDisplay.ts`. Only +52 and +1 ten-digit numbers are grouped; anything else is shown as the server sends it, and `href` is unchanged.
+  - The selected-row accent is a positioned `::before` on the whole entry. Before, the hovered card link painted over the wrapper's inset shadow at 1280, leaving the accent only beside the chip row.
