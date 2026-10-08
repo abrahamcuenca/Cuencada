@@ -56,6 +56,36 @@ const HIDDEN = {
   birthplace: "Lugar-Privado-W41",
   birthDate: "1977-11-23"
 };
+/**
+ * WP-4.4: social contacts planted on the hidden member with every switch off,
+ * and on the unlisted and disabled members with every switch **on**. None may
+ * surface in a member-facing body (matched verbatim, and WhatsApp on digits).
+ */
+const HIDDEN_CONTACTS = {
+  whatsapp: "+12025550199",
+  instagram: "oculta.w44",
+  facebook: "oculta.w44.fb",
+  tiktok: "oculta_w44",
+  linkedin: "oculta-w44",
+  github: "oculta-w44-gh",
+  website: "https://oculta-w44.example.com/"
+};
+const UNLISTED_CONTACTS = { instagram: "nolistada.w44", whatsapp: "+12025550188", website: "https://nolistada-w44.example.com/" };
+const DISABLED_CONTACTS = { instagram: "baja.w44", whatsapp: "+12025550177", website: "https://baja-w44.example.com/" };
+const ALL_SWITCHES_ON = {
+  showEmail: true,
+  showPhone: true,
+  contactVisibility: { whatsapp: true, instagram: true, facebook: true, tiktok: true, linkedin: true, github: true, website: true }
+};
+/** Planted contact strings that must never reach a member-facing body. */
+const PLANTED_CONTACT_STRINGS = [
+  ...Object.values(HIDDEN_CONTACTS).map((value) => value.replace(/^\+/, "")),
+  ...Object.values(UNLISTED_CONTACTS).map((value) => value.replace(/^\+/, "")),
+  ...Object.values(DISABLED_CONTACTS).map((value) => value.replace(/^\+/, "")),
+  "oculta-w44.example.com",
+  "nolistada-w44.example.com",
+  "baja-w44.example.com"
+];
 const UNLISTED_NAME = "Persona No Listada";
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
@@ -90,6 +120,7 @@ const FORBIDDEN_KEYS = [
   "showCity",
   "listedInDirectory",
   "visibility",
+  "contactVisibility",
   "notes",
   "mustChangePassword"
 ];
@@ -104,6 +135,7 @@ let admin: { user: TestUser; auth: AuthInjectOptions };
 let hidden: TestUser;
 let open: TestUser;
 let unlisted: TestUser;
+let disabled: TestUser;
 let roomId: string;
 let mediaId: string;
 let personId: string;
@@ -139,7 +171,9 @@ beforeEach(async () => {
       showCity: false,
       phone: HIDDEN.phone,
       city: HIDDEN.city,
-      avatarKey: `avatars/${randomUUID()}/large.webp`
+      avatarKey: `avatars/${randomUUID()}/large.webp`,
+      ...HIDDEN_CONTACTS,
+      contactVisibility: {}
     }
   });
   open = await createUser({
@@ -147,7 +181,17 @@ beforeEach(async () => {
     displayName: "Persona Abierta",
     profile: { listedInDirectory: true, showEmail: true, showPhone: true, showCity: true, phone: "5551112222", city: "Mérida" }
   });
-  unlisted = await createUser({ emailVerified: true, displayName: UNLISTED_NAME, profile: { listedInDirectory: false } });
+  unlisted = await createUser({
+    emailVerified: true,
+    displayName: UNLISTED_NAME,
+    profile: { listedInDirectory: false, ...UNLISTED_CONTACTS, ...ALL_SWITCHES_ON }
+  });
+  disabled = await createUser({
+    emailVerified: true,
+    status: "disabled",
+    displayName: "Persona Dada De Baja",
+    profile: { listedInDirectory: true, ...DISABLED_CONTACTS, ...ALL_SWITCHES_ON }
+  });
 
   // Sessions with a planted IP and user agent, through the real login.
   const login = await app.inject({
@@ -299,6 +343,11 @@ function scan(label: string, body: unknown, options: ScanOptions = {}): string[]
     }
     if (text.replace(/\D/g, "").includes(HIDDEN.phoneDigits)) problems.push(`${label}: hidden phone`);
     if (text.includes(HIDDEN.city)) problems.push(`${label}: hidden city`);
+    const digitsOnly = text.replace(/\D/g, "");
+    for (const planted of PLANTED_CONTACT_STRINGS) {
+      const leaked = /^[0-9]+$/.test(planted) ? digitsOnly.includes(planted) : text.includes(planted);
+      if (leaked) problems.push(`${label}: hidden/unlisted/disabled contact ${planted}`);
+    }
     if (text.includes(BUCKET)) problems.push(`${label}: bucket name`);
     if (text.includes(HIDDEN.userAgent)) problems.push(`${label}: another member's user agent`);
     if (options.allowIp !== true && IPV4.test(text)) problems.push(`${label}: IP address`);
@@ -332,7 +381,24 @@ describe("member-facing reads never leak PII", () => {
     expect(one).not.toHaveProperty("email");
     expect(one).not.toHaveProperty("phone");
     expect(one).not.toHaveProperty("city");
+    // WP-4.4: every switch off → an empty card; nothing hidden is in the body.
+    expect(one).toHaveProperty("contacts", []);
     expect(JSON.stringify(list)).not.toContain(unlisted.id);
+    expect(JSON.stringify(list)).not.toContain(disabled.id);
+    const gone = await app.inject({ method: "GET", url: `/api/directory/${disabled.id}`, ...viewer.auth });
+    expect(gone.statusCode).toBe(404);
+    expect(scan("GET /api/directory/:disabled", gone.json(), { directory: true })).toEqual([]);
+  });
+
+  it("directory contacts never reach an unverified viewer", async () => {
+    const unverified = await createUser({ emailVerified: false, displayName: "Persona Sin Verificar" });
+    const auth = await bearerFor(unverified, await createSession(unverified.id));
+    for (const url of ["/api/directory", `/api/directory/${open.id}`, `/api/directory/${hidden.id}`]) {
+      const response = await app.inject({ method: "GET", url, ...auth });
+      expect(response.statusCode, url).toBe(403);
+      expect(response.body).not.toContain("contacts");
+      expect(scan(`unverified ${url}`, response.json())).toEqual([]);
+    }
   });
 
   it("family: people, person detail and tree carry no contact data, and unlisted accounts are not linked", async () => {
@@ -512,7 +578,10 @@ describe("the PII scanner itself", () => {
       planted: `prefix ${secrets[0] ?? "missing"} suffix`,
       body: HIDDEN.deletedChatBody,
       name: UNLISTED_NAME,
-      birthplace: HIDDEN.birthplace
+      birthplace: HIDDEN.birthplace,
+      contacts: [{ kind: "instagram", href: `https://instagram.com/${HIDDEN_CONTACTS.instagram}` }],
+      wa: "wa.me/1 202 555 0199",
+      contactVisibility: {}
     };
     const problems = scan("synthetic", leaky, { directory: true });
     for (const fragment of [
@@ -532,7 +601,10 @@ describe("the PII scanner itself", () => {
       "original object",
       'storage URL in "link"',
       'forbidden key "showPhone"',
-      "birth date or birthplace outside their circle"
+      "birth date or birthplace outside their circle",
+      'forbidden key "contactVisibility"',
+      `contact ${HIDDEN_CONTACTS.instagram}`,
+      "contact 12025550199"
     ]) {
       expect(
         problems.some((problem) => problem.includes(fragment)),

@@ -91,7 +91,8 @@ describe("GET /api/directory", () => {
       fullName: "Ana Morales",
       familyBranch: null,
       avatarUrl: null,
-      bio: null
+      bio: null,
+      contacts: []
     });
     expect(first !== undefined && "phone" in first).toBe(false);
     expect(page.items[1]?.city).toBe("Mérida");

@@ -6,6 +6,7 @@ import { Button } from "../../../shared/ui/Button";
 import { cx } from "../../../shared/ui/cx";
 import { Skeleton } from "../../../shared/ui/Skeleton";
 import styles from "../directory.module.css";
+import { ContactList } from "./ContactList";
 
 /** Props for {@link DirectoryList}. */
 export interface DirectoryListProps {
@@ -19,7 +20,8 @@ export interface DirectoryListProps {
 
 /**
  * Member cards (avatar, name, branch, city when visible), each a link to
- * `/directorio/:userId`. The next page loads when the sentinel nears the
+ * `/directorio/:userId`, with a row of tappable contact chips underneath
+ * (only the contacts the member chose to show; WP-4.4). The next page loads when the sentinel nears the
  * viewport, with a "Cargar más" button as the fallback (keyboard and
  * screen-reader users, browsers without IntersectionObserver).
  */
@@ -64,17 +66,21 @@ export function DirectoryList({ entries, selectedId, hasMore, loadingMore, onLoa
 function EntryRow({ entry, selected }: { entry: DirectoryEntry; selected: boolean }): ReactNode {
   const name = entry.fullName || entry.displayName;
   const meta = [entry.city, entry.familyBranch].filter((part): part is string => typeof part === "string" && part !== "").join(" · ");
+  const contacts = entry.contacts ?? [];
   return (
-    <Link to={`/directorio/${entry.userId}`} className={cx(styles.row, selected && styles.rowSelected)} aria-current={selected ? "true" : undefined}>
-      <AvatarCircle name={name} src={entry.avatarUrl ?? undefined} size="md" decorative />
-      <span className={styles.rowText}>
-        <span className={styles.rowName}>{name}</span>
-        {meta !== "" ? <span className={styles.rowMeta}>{meta}</span> : null}
-      </span>
-      <span aria-hidden="true" className={styles.chevron}>
-        ›
-      </span>
-    </Link>
+    <div className={cx(styles.entry, selected && styles.rowSelected)}>
+      <Link to={`/directorio/${entry.userId}`} className={styles.row} aria-current={selected ? "true" : undefined}>
+        <AvatarCircle name={name} src={entry.avatarUrl ?? undefined} size="md" decorative />
+        <span className={styles.rowText}>
+          <span className={styles.rowName}>{name}</span>
+          {meta !== "" ? <span className={styles.rowMeta}>{meta}</span> : null}
+        </span>
+        <span aria-hidden="true" className={styles.chevron}>
+          ›
+        </span>
+      </Link>
+      {contacts.length > 0 ? <ContactList contacts={contacts} variant="chips" ownerName={name} className={styles.rowChips} /> : null}
+    </div>
   );
 }
 

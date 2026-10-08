@@ -77,6 +77,28 @@ describe("GET /api/profile/me", () => {
       bio: "Hola",
       avatarUrl: null,
       visibility: { showEmail: false, showPhone: false, showCity: false, listedInDirectory: true },
+      contacts: {
+        whatsapp: null,
+        instagram: null,
+        facebook: null,
+        tiktok: null,
+        linkedin: null,
+        github: null,
+        website: null,
+        visibility: {
+          email: false,
+          phone: false,
+          whatsapp: false,
+          instagram: false,
+          facebook: false,
+          tiktok: false,
+          linkedin: false,
+          github: false,
+          website: false
+        }
+      },
+      // The legacy free-form phone is not E.164: the owner is asked to confirm it.
+      phoneNeedsConfirmation: true,
       updatedAt: user.profile.updatedAt.toISOString()
     });
   });

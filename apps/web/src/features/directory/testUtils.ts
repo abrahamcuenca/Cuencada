@@ -2,7 +2,7 @@
  * Test fixtures and MSW handlers for the directory (tests only). Entries are
  * built with the contract's `toDirectoryEntry`, so hidden fields are absent.
  */
-import { type DirectoryEntry, directoryEntrySchema, directoryQuerySchema, errorHttpStatus, toDirectoryEntry } from "@cuencada/types";
+import { type ContactCard, type DirectoryEntry, directoryEntrySchema, directoryQuerySchema, errorHttpStatus, toDirectoryEntry } from "@cuencada/types";
 import { HttpResponse, http, type HttpHandler } from "msw";
 import { apiUrl, errorBody } from "../../../test/auth";
 
@@ -23,25 +23,37 @@ export interface MemberContact {
  * @param overrides - Name, branch, bio and the shared contact fields.
  * @returns A `DirectoryEntry` as the server would serialize it.
  */
-export function makeEntry(n: number, overrides: Partial<Pick<DirectoryEntry, "fullName" | "displayName" | "familyBranch" | "bio" | "personId" | "avatarUrl">> & MemberContact = {}): DirectoryEntry {
-  const { email = null, phone = null, city = null, ...rest } = overrides;
-  return directoryEntrySchema.parse(
-    toDirectoryEntry({
-      userId: memberId(n),
-      personId: null,
-      displayName: `Primo ${n}`,
-      fullName: `Primo ${n} Ejemplo`,
-      familyBranch: "Rama Norte",
-      avatarUrl: null,
-      bio: null,
-      ...rest,
-      email,
-      phone,
-      city,
-      visibility: { showEmail: email !== null, showPhone: phone !== null, showCity: city !== null }
-    })
-  );
+export function makeEntry(
+  n: number,
+  overrides: Partial<Pick<DirectoryEntry, "fullName" | "displayName" | "familyBranch" | "bio" | "personId" | "avatarUrl">> &
+    MemberContact & { contacts?: ContactCard } = {}
+): DirectoryEntry {
+  const { email = null, phone = null, city = null, contacts, ...rest } = overrides;
+  const entry = toDirectoryEntry({
+    userId: memberId(n),
+    personId: null,
+    displayName: `Primo ${n}`,
+    fullName: `Primo ${n} Ejemplo`,
+    familyBranch: "Rama Norte",
+    avatarUrl: null,
+    bio: null,
+    ...rest,
+    email,
+    phone,
+    city,
+    visibility: { showEmail: email !== null, showPhone: phone !== null, showCity: city !== null }
+  });
+  // WP-4.4 servers add the server-built card; omitted here = an older server.
+  if (contacts !== undefined) entry.contacts = contacts;
+  return directoryEntrySchema.parse(entry);
 }
+
+/** A card as `buildContactCard` would serialize it (fictional values). */
+export const SAMPLE_CARD: ContactCard = [
+  { kind: "phone", label: "Teléfono", href: "tel:+525550100101", display: "+525550100101" },
+  { kind: "whatsapp", label: "WhatsApp", href: "https://wa.me/525550100101", display: "+525550100101" },
+  { kind: "instagram", label: "Instagram", href: "https://instagram.com/rosa.ejemplo", display: "@rosa.ejemplo" }
+];
 
 /** Mutable state behind {@link directoryHandlers}. */
 export interface FakeDirectoryDb {

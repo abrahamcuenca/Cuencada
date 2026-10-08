@@ -8,6 +8,8 @@
  * card itself is the shared `buildContactCard` from `@cuencada/types`.
  */
 import { type ContactCard, type ContactSource, buildContactCard, toContactVisibility } from "@cuencada/types";
+import { and, eq, inArray } from "drizzle-orm";
+import { profiles, users } from "../../db/schema/index.js";
 import type { DbOrTx } from "../../lib/audit.js";
 
 /** A linked account's stored contacts plus its visibility columns. */
@@ -36,18 +38,38 @@ export function personContactCard(row: PersonContactRow | null): ContactCard {
  * Load the contact rows of several linked accounts in **one** query
  * (`users.email` + `profiles` contact columns), keyed by user id.
  *
+ * Defense in depth: besides the caller's own clearance, the query itself
+ * only returns **active** accounts that kept "Aparecer en el directorio" on,
+ * so a disabled or unlisted account always gets an empty card.
+ *
  * @param db - Client or transaction.
  * @param userIds - Accounts the caller already cleared for this viewer.
- * @returns `userId → row`; accounts without a profile are absent.
+ * @returns `userId → row`; accounts without a profile, disabled or unlisted are absent.
  */
 export async function loadPersonContactRows(
   db: DbOrTx,
   userIds: readonly string[]
 ): Promise<ReadonlyMap<string, PersonContactRow>> {
-  // TODO(WP-4.4): select users.email and profiles.{phone, whatsapp, instagram, facebook,
-  // tiktok, linkedin, github, website, show_email, show_phone, contact_visibility}
-  // where user_id = any(userIds). Until then every card is empty (fail closed).
-  void db;
-  void userIds;
-  return new Map();
+  const ids = [...new Set(userIds)];
+  if (ids.length === 0) return new Map();
+  const rows = await db
+    .select({
+      userId: users.id,
+      email: users.email,
+      phone: profiles.phone,
+      whatsapp: profiles.whatsapp,
+      instagram: profiles.instagram,
+      facebook: profiles.facebook,
+      tiktok: profiles.tiktok,
+      linkedin: profiles.linkedin,
+      github: profiles.github,
+      website: profiles.website,
+      showEmail: profiles.showEmail,
+      showPhone: profiles.showPhone,
+      contactVisibility: profiles.contactVisibility
+    })
+    .from(users)
+    .innerJoin(profiles, eq(profiles.userId, users.id))
+    .where(and(inArray(users.id, ids), eq(users.status, "active"), eq(profiles.listedInDirectory, true)));
+  return new Map(rows.map(({ userId, ...row }) => [userId, row]));
 }

@@ -10,7 +10,12 @@ import {
   avatarUploadResponseSchema,
   errorHttpStatus,
   type OwnProfile,
+  CONTACT_KINDS,
+  type OwnContacts,
   ownProfileSchema,
+  toContactVisibility,
+  type UpdateContactsInput,
+  updateContactsInputSchema,
   updateProfileInputSchema
 } from "@cuencada/types";
 import { HttpResponse, http, type HttpHandler } from "msw";
@@ -56,6 +61,8 @@ export interface FakeProfileDb {
   profile: OwnProfile;
   /** PATCH bodies, in order. */
   patches: unknown[];
+  /** `PATCH /profile/me/contacts` bodies, in order (WP-4.4). */
+  contactPatches: unknown[];
   /** Intent and confirm bodies, in order. */
   intents: unknown[];
   confirms: unknown[];
@@ -69,7 +76,7 @@ export interface FakeProfileDb {
 
 /** A fresh fake database. */
 export function makeProfileDb(profile: OwnProfile = makeProfile()): FakeProfileDb {
-  return { profile, patches: [], intents: [], confirms: [], deletes: 0, uploadUrl: AVATAR_PUT_URL, patchStatus: 200 };
+  return { profile, patches: [], contactPatches: [], intents: [], confirms: [], deletes: 0, uploadUrl: AVATAR_PUT_URL, patchStatus: 200 };
 }
 
 /** Applies a validated PATCH to the fake profile (contract fields and the proposed extensions). */
@@ -83,6 +90,45 @@ function applyPatch(profile: OwnProfile, body: Record<string, unknown>): OwnProf
   }
   next.updatedAt = new Date().toISOString();
   return next;
+}
+
+/** Empty own contacts (what a WP-4.4 server returns for a new member). */
+export function emptyContacts(profile: OwnProfile): OwnContacts {
+  return {
+    whatsapp: null,
+    instagram: null,
+    facebook: null,
+    tiktok: null,
+    linkedin: null,
+    github: null,
+    website: null,
+    visibility: toContactVisibility(profile.visibility.showEmail, profile.visibility.showPhone, {})
+  };
+}
+
+/** Applies a validated contacts PATCH like the server (visibility.email/phone → show flags). */
+function applyContactsPatch(profile: OwnProfile, body: UpdateContactsInput): OwnProfile {
+  const contacts: OwnContacts = { ...(profile.contacts ?? emptyContacts(profile)) };
+  const visibility = { ...contacts.visibility };
+  for (const kind of CONTACT_KINDS) {
+    const flag = body.visibility?.[kind];
+    if (flag !== undefined) visibility[kind] = flag;
+  }
+  contacts.visibility = visibility;
+  for (const key of ["whatsapp", "instagram", "facebook", "tiktok", "linkedin", "github", "website"] as const) {
+    const value = body[key];
+    if (value !== undefined) contacts[key] = value;
+  }
+  const next: OwnProfile = {
+    ...profile,
+    contacts,
+    visibility: { ...profile.visibility, showEmail: contacts.visibility.email, showPhone: contacts.visibility.phone },
+    updatedAt: new Date().toISOString()
+  };
+  if (body.phone === undefined) return next;
+  // A saved phone is E.164, so the server stops asking for confirmation.
+  const { phoneNeedsConfirmation: _confirmed, ...rest } = next;
+  return { ...rest, phone: body.phone };
 }
 
 /**
@@ -100,6 +146,16 @@ export function profileHandlers(db: FakeProfileDb): HttpHandler[] {
       const parsed = updateProfileInputSchema.safeParse(body);
       if (!parsed.success) return HttpResponse.json(errorBody("VALIDATION"), { status: 400 });
       db.profile = applyPatch(db.profile, parsed.data);
+      return HttpResponse.json(db.profile);
+    }),
+    http.patch(apiUrl("/profile/me/contacts"), async ({ request }) => {
+      const body: unknown = await request.json();
+      db.contactPatches.push(body);
+      if (db.patchStatus === 429) return HttpResponse.json(errorBody("RATE_LIMITED"), { status: errorHttpStatus.RATE_LIMITED });
+      if (db.patchStatus === 500) return HttpResponse.json(errorBody("INTERNAL", "Algo salió mal en el servidor."), { status: 500 });
+      const parsed = updateContactsInputSchema.safeParse(body);
+      if (!parsed.success) return HttpResponse.json(errorBody("VALIDATION"), { status: 400 });
+      db.profile = ownProfileSchema.parse(applyContactsPatch(db.profile, parsed.data));
       return HttpResponse.json(db.profile);
     }),
     http.post(apiUrl("/profile/me/avatar/uploads"), async ({ request }) => {
