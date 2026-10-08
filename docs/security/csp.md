@@ -124,6 +124,24 @@ added.
 - Repeat the browser-console check on production after the cutover (runbook
   § 7).
 
+**WP-4.3 re-run (2026-10-07, branch `wp/4.3-photos-crop`):**
+
+- The harness now also opens the `ImageCropper` on `/perfil` with a
+  generated 12 MP JPEG, zooms, drags and rotates, and saves: the canvas
+  preview, the CSS Module styles and the 1024² crop rendered in
+  `/assets/resize.worker-*.js` (a fresh same-origin module worker under
+  `worker-src 'self'`) raised **no violation**, and the avatar intent
+  reached the API as `image/jpeg`. The cropper uses no inline `<style>` and
+  no `style=""`; the old-WebView fallback preview is a `blob:` image
+  (`img-src blob:`).
+- Harness fix: `csp.md` names the production bucket host literally, but the
+  harness only swapped a `<bucket>` placeholder, so the harness bucket's
+  presigned PUT was blocked by `connect-src` (gallery and avatar alike). It
+  now swaps the production bucket origin for the harness bucket too.
+  `CSP_CHECK_DB` (must end in `_csp_check`) lets parallel worktrees use
+  their own scratch database.
+- Result: 0 unexpected violations; the known zod probes only.
+
 ## Future hardening (optional)
 
 - `require-trusted-types-for 'script'`: React 19 DOM writes are compatible,

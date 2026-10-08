@@ -18,6 +18,26 @@ import {
   profileHandlers
 } from "../testUtils";
 
+/**
+ * WP-4.3: the avatar now goes through the lazy `ImageCropper` (canvas, not
+ * available in jsdom). The stub records the file and "saves" it unchanged at
+ * once, so these tests keep exercising the upload pipeline; the cropper's own
+ * behaviour is covered by `ImageCropper.test.tsx`, `cropMath.test.ts` and e2e.
+ */
+const croppedFiles = vi.hoisted(() => [] as File[]);
+vi.mock("../../family/photo/ImageCropper", async () => {
+  const { useEffect } = await import("react");
+  return {
+    ImageCropper: ({ file, onCropped }: { file: File; onCropped: (file: File) => void }) => {
+      useEffect(() => {
+        croppedFiles.push(file);
+        onCropped(file);
+      }, [file, onCropped]);
+      return null;
+    }
+  };
+});
+
 const server = createTestServer();
 let db: FakeProfileDb;
 let objectUrls: string[];
@@ -181,8 +201,11 @@ describe("ProfilePage avatar", () => {
     const file = fileOf("yo.jpg", "image/jpeg");
 
     expect(screen.getByTestId("avatar-file-input")).toHaveAttribute("accept", "image/jpeg,image/png,image/webp");
+    croppedFiles.length = 0;
     await user.upload(screen.getByTestId("avatar-file-input"), file);
 
+    // The picked file goes through the cropper first (WP-4.3).
+    await waitFor(() => expect(croppedFiles).toEqual([file]));
     expect(createObjectURL).toHaveBeenCalledWith(file);
     const xhr = await waitForXhr();
     expect(db.intents).toEqual([{ mimeType: "image/jpeg", byteSize: 2048 }]);

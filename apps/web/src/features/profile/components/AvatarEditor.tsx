@@ -5,6 +5,7 @@ import { Button } from "../../../shared/ui/Button";
 import { cx } from "../../../shared/ui/cx";
 import { Dialog } from "../../../shared/ui/Dialog";
 import { useToast } from "../../../shared/ui/Toast";
+import { useCropStep } from "../../family/photo/useCropStep";
 import { useExpiredUrlRefetch } from "../../gallery";
 import { useDeleteAvatarMutation, useGetProfileQuery } from "../api";
 import { AVATAR_ACCEPT, useAvatarUpload } from "../lib/useAvatarUpload";
@@ -28,14 +29,17 @@ function statusText(phase: string, progress: number): string {
 }
 
 /**
- * The big round avatar with "Cambiar foto" (file picker, local preview, a
- * progress ring while it uploads, the result in a live region) and
- * "Quitar foto" behind a confirmation.
+ * The big round avatar with "Cambiar foto" (file picker, then the
+ * `ImageCropper` to frame it (WP-4.3, replaces the server's centre crop),
+ * local preview, a progress ring while it uploads, the result in a live
+ * region) and "Quitar foto" behind a confirmation.
  */
 export function AvatarEditor({ name, avatarUrl }: AvatarEditorProps): ReactNode {
   const input = useRef<HTMLInputElement>(null);
   const toast = useToast();
   const upload = useAvatarUpload();
+  const crop = useCropStep(upload.start);
+  const error = crop.pickError ?? upload.error;
   const [deleteAvatar, { isLoading: removing }] = useDeleteAvatarMutation();
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   // `avatarUrl` is a 1h presigned GET: when it fails to load, fetch a fresh profile once.
@@ -50,7 +54,7 @@ export function AvatarEditor({ name, avatarUrl }: AvatarEditorProps): ReactNode 
     const file = event.target.files?.[0];
     // Reset so picking the same file again (after an error) fires `change`.
     event.target.value = "";
-    if (file) upload.start(file);
+    if (file) crop.pick(file);
   };
 
   const onRemove = (): void => {
@@ -96,13 +100,14 @@ export function AvatarEditor({ name, avatarUrl }: AvatarEditorProps): ReactNode 
       <output className={styles.avatarStatus} aria-live="polite">
         {statusText(upload.phase, upload.progress)}
       </output>
-      {upload.error !== null ? (
+      {error !== null ? (
         <p className={styles.avatarError} role="alert">
           <span aria-hidden="true">⚠️ </span>
-          {upload.error}
+          {error}
         </p>
       ) : null}
       <p className={styles.avatarHint}>JPG, PNG o WebP, hasta 10 MB.</p>
+      {crop.cropper}
 
       <Dialog
         open={confirmingRemove}

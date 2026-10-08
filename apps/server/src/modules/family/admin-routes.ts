@@ -24,7 +24,7 @@ import { z } from "zod";
 import { recordAudit } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
 import { authUser } from "../../plugins/auth.js";
-import { deletePersonPhotoObjects, personPhotoObjectKeys } from "./personPhotoObjects.js";
+import { deletePersonPhotoObjects, personPhotoObjectKeys } from "./personPhoto.js";
 import { lockFamilyTree } from "./relationships.js";
 import { findPerson, type PersonViewRow, toPersonWithAvatar } from "./repository.js";
 import { purgePersonRevisions } from "./revisions.js";
@@ -158,7 +158,7 @@ const adminFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
         const view = row === undefined ? undefined : await findPerson(tx, id);
         if (row === undefined || view === undefined) throw new AppError("NOT_FOUND", PERSON_NOT_FOUND);
         if (row.userId !== null) throw new AppError("CONFLICT", LINKED_DELETE);
-        const photoKeys = await personPhotoObjectKeys(tx, id, view.photoKey);
+        const photoKeys = await personPhotoObjectKeys(tx, id);
         if (purgeHistory) {
           const deleted = await purgePersonRevisions(tx, id);
           await recordAudit(tx, {
@@ -173,7 +173,7 @@ const adminFamilyRoutes: FastifyPluginAsyncZod = async (app) => {
         await deletePersonTx(tx, row, { id: admin.id, ip: request.ip }, { recordRevisions: !purgeHistory });
         return photoKeys;
       });
-      await deletePersonPhotoObjects(app, id, keys);
+      await deletePersonPhotoObjects(app, keys);
       return reply.code(204).send(null);
     }
   );

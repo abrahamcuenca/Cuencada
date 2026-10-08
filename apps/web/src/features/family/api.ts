@@ -7,6 +7,9 @@ import type {
   PeopleQueryRequest,
   Person,
   PersonDetails,
+  PersonPhotoConfirmBodyRequest,
+  PersonPhotoUploadRequest,
+  PersonPhotoUploadResponse,
   PersonSummary,
   SelfEditPersonRequest
 } from "@cuencada/types";
@@ -75,6 +78,24 @@ export const familyApi = baseApi.injectEndpoints({
     deleteFamilyPerson: build.mutation<void, string>({
       query: (id) => ({ url: `/family/people/${encodeURIComponent(id)}`, method: "DELETE" }),
       invalidatesTags: (_result, _error, id) => [{ type: "Person", id }, FAMILY_TREE_ALL, PERSON_LIST, REVISION_LIST]
+    }),
+    /** `POST /family/people/:id/photo/uploads` (WP-4.3): presigned PUT for a tree photo. */
+    createPersonPhotoUpload: build.mutation<PersonPhotoUploadResponse, PersonPhotoUploadRequest & { personId: string }>({
+      query: ({ personId, ...body }) => ({ url: `/family/people/${encodeURIComponent(personId)}/photo/uploads`, method: "POST", body })
+    }),
+    /** `POST /family/people/:id/photo/uploads/:uploadId/confirm`: the server checks, crops and stores the photo. */
+    confirmPersonPhoto: build.mutation<PersonDetails, PersonPhotoConfirmBodyRequest & { personId: string; uploadId: string }>({
+      query: ({ personId, uploadId, ...body }) => ({
+        url: `/family/people/${encodeURIComponent(personId)}/photo/uploads/${encodeURIComponent(uploadId)}/confirm`,
+        method: "POST",
+        body
+      }),
+      invalidatesTags: (_result, _error, { personId }) => [FAMILY_TREE_ALL, PERSON_LIST, REVISION_LIST, { type: "Person" as const, id: personId }]
+    }),
+    /** `DELETE /family/people/:id/photo`: removes the tree photo. */
+    deletePersonPhoto: build.mutation<PersonDetails, string>({
+      query: (personId) => ({ url: `/family/people/${encodeURIComponent(personId)}/photo`, method: "DELETE" }),
+      invalidatesTags: (_result, _error, personId) => [FAMILY_TREE_ALL, PERSON_LIST, REVISION_LIST, { type: "Person" as const, id: personId }]
     })
   })
 });
@@ -86,5 +107,8 @@ export const {
   useUpdateMyPersonMutation,
   useCreateFamilyPersonMutation,
   useUpdateFamilyPersonMutation,
-  useDeleteFamilyPersonMutation
+  useDeleteFamilyPersonMutation,
+  useCreatePersonPhotoUploadMutation,
+  useConfirmPersonPhotoMutation,
+  useDeletePersonPhotoMutation
 } = familyApi;

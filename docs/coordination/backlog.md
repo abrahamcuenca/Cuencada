@@ -147,8 +147,13 @@ Still open:
 - Backfill `profiles.phone` to E.164 with `normalizePhoneE164` (contract from WP-4.0); until then every non-E.164 phone is left out of the `ContactCard` (no `tel:` guess at read time, Security L1); unreadable values stay as-is for an admin to fix. Then add a CHECK. Supersedes the two T5 E.164 items above.
 - [x] `person_revisions` 1-year retention job (done in WP-4.1: `purgeExpiredRevisions`, family module timer).
 - Future (Security M1 follow-up): "member proposes a link between two existing people, an admin approves" (a pending-proposal table and an admin queue). Until then only admins relate existing people.
-- Avatars have 256/64 px derivatives only; consider a 512 px derivative so `PersonDetails.photoUrl` is sharp on large screens (WP-4.3).
+- Avatars have 256/64 px derivatives only; consider a 512 px derivative so `PersonDetails.photoUrl` is sharp on large screens. WP-4.3 added 512 px for **tree photos** only (avatars at 512 fall back to 256).
 - [x] Remove the deprecated `createPersonInputSchema`/`updatePersonInputSchema` (done in WP-4.1).
+
+### WP-4.3 follow-ups
+- [x] Reconciled with WP-4.1 (PR #46): the interim builder is gone, `canEditPhoto` uses the circle's `close` set, `personPhotoObjects.ts` is replaced by `personPhotoObjectKeys`/`deletePersonPhotoObjects` in `personPhoto.ts`.
+- Avatar changes don't invalidate the web's family-tree cache (`FamilyTree`), so the tree shows a new avatar after the next refetch. Add the tag to the avatar mutations if it matters.
+- Optional: an admin "Foto" control on `/admin/familia/:id` (today admins use the same controls on `/arbol/:id`, inside "Detalles").
 
 ### WP-4.2 follow-ups
 - [x] Deleting a person (admin and member delete) **revokes** that person's pending invites in the same transaction, audited `invite.revoked` with ids and `reason: "person_deleted"` (done in WP-4.1).

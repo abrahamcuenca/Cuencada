@@ -480,6 +480,27 @@ describe("POST /api/profile/me/avatar/confirm", () => {
     expect(pixel(128, 235).r).toBeLessThan(60);
   });
 
+  it("applies an optional crop rect after auto-orient (WP-4.3), clamped to the image", async () => {
+    const { user, auth } = await member();
+    const body = await orientedJpeg();
+    const intent = await createIntent(auth, "image/jpeg", body.byteLength);
+    await storage.simulateUpload(await objectKeyOf(intent.uploadId), body, "image/jpeg");
+    const confirm = await app.inject({
+      method: "POST",
+      url: "/api/profile/me/avatar/confirm",
+      ...auth,
+      payload: { uploadId: intent.uploadId, crop: { x: 5000, y: 100, size: 100 } }
+    });
+    expect(confirm.statusCode).toBe(200);
+    const { data, info } = await sharp(storedObject(avatarKeys(user.id, intent.uploadId, "image/jpeg").large))
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const offset = (128 * info.width + 128) * info.channels;
+    // Bottom square of the upright portrait: blue.
+    expect(data[offset + 2] ?? 0).toBeGreaterThan(200);
+    expect(data[offset] ?? 255).toBeLessThan(60);
+  });
+
   it("deletes the previous avatar's objects when it is replaced", async () => {
     const { user, auth } = await member();
     const first = await uploadAvatar(auth, await jpegWithGps());

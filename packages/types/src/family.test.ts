@@ -9,14 +9,35 @@ import {
   memberUpdatePersonInputSchema,
   personDatesIssue,
   personDetailsSchema,
+  personPhotoConfirmBodySchema,
   personPhotoConfirmInputSchema,
+  personPhotoUploadParamsSchema,
   personRevisionSchema,
   personSchema,
   personRevisionSnapshotSchema,
   purgePersonRevisionsInputSchema,
   revertPersonRevisionInputSchema,
 } from "./family.js";
-import { clampCropRect, imageCropRectSchema } from "./profile.js";
+import { avatarConfirmInputSchema, clampCropRect, imageCropRectSchema } from "./profile.js";
+
+describe("person photo confirm wire shapes (WP-4.3)", () => {
+  const person = "1b2c3d4e-5f60-4b7c-9d8e-0f1a2b3c4d5e";
+  const upload = "2c3d4e5f-6071-4c8d-8e9f-1a2b3c4d5e6f";
+  it("takes the upload id from the path and only an optional, strict, integer crop in the body", () => {
+    expect(personPhotoConfirmBodySchema.parse({})).toEqual({});
+    expect(personPhotoConfirmBodySchema.parse({ crop: { x: 1, y: 2, size: 3 } })).toEqual({ crop: { x: 1, y: 2, size: 3 } });
+    expect(personPhotoConfirmBodySchema.safeParse({ crop: { x: 1.5, y: 0, size: 3 } }).success).toBe(false);
+    expect(personPhotoConfirmBodySchema.safeParse({ crop: { x: 0, y: 0, size: 3, extra: 1 } }).success).toBe(false);
+    expect(personPhotoUploadParamsSchema.safeParse({ id: person, uploadId: upload }).success).toBe(true);
+    expect(personPhotoUploadParamsSchema.safeParse({ id: person, uploadId: "x" }).success).toBe(false);
+  });
+
+  it("lets avatar confirms carry the same optional crop", () => {
+    expect(avatarConfirmInputSchema.parse({ uploadId: upload, crop: { x: 0, y: 0, size: 10 } }).crop).toEqual({ x: 0, y: 0, size: 10 });
+    expect(avatarConfirmInputSchema.parse({ uploadId: upload })).toEqual({ uploadId: upload });
+    expect(avatarConfirmInputSchema.safeParse({ uploadId: upload, crop: { x: -1, y: 0, size: 10 } }).success).toBe(false);
+  });
+});
 
 const anchor = "1b2c3d4e-5f60-4b7c-9d8e-0f1a2b3c4d5e";
 const other = "2c3d4e5f-6071-4c8d-8e9f-1a2b3c4d5e6f";

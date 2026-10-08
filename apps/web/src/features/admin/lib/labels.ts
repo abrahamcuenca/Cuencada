@@ -78,6 +78,9 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   [AuditAction.PersonCreated]: "Agregó a una persona",
   [AuditAction.PersonUpdated]: "Editó a una persona",
   [AuditAction.PersonDeleted]: "Eliminó a una persona",
+  [AuditAction.PersonPhotoUpdated]: "Cambió la foto de una persona",
+  [AuditAction.PersonPhotoRemoved]: "Quitó la foto de una persona",
+  [AuditAction.PersonPhotoRejected]: "Foto de una persona rechazada",
   [AuditAction.RelationshipCreated]: "Agregó un parentesco",
   [AuditAction.RelationshipDeleted]: "Eliminó un parentesco",
   [AuditAction.ChatMessageDeleted]: "Eliminó un mensaje del chat"

@@ -27,8 +27,8 @@ import { people, personRelationships, personRevisions } from "../../db/schema/in
 import { recordAudit, type Transaction } from "../../lib/audit.js";
 import { AppError, isAppError } from "../../lib/errors.js";
 import { lockFamilyTree } from "./relationships.js";
-import { personPhotoObjectKeys } from "./personPhotoObjects.js";
-import { findPerson, type PersonRow, personColumns, relationshipColumns, toRelationship } from "./repository.js";
+import { personPhotoObjectKeys } from "./personPhoto.js";
+import { type PersonRow, personColumns, relationshipColumns, toRelationship } from "./repository.js";
 import { insertRevision, isRevertibleAction, personSnapshot, relationshipSnapshot } from "./revisions.js";
 import {
   FamilyAuditAction,
@@ -319,8 +319,7 @@ export async function revertRevisionTx(tx: Transaction, revisionId: string, acto
     // Same cleanup as any person delete (PR #46 TL): pending invites revoked
     // in this transaction (row already locked: tree → person → invite), photo
     // objects collected for deletion after the commit.
-    const view = await findPerson(tx, deleteId);
-    photoKeys = await personPhotoObjectKeys(tx, deleteId, view?.photoKey ?? null);
+    photoKeys = await personPhotoObjectKeys(tx, deleteId);
     await revokePendingInvites(tx, deleteId, actor);
     await tx.delete(people).where(eq(people.id, deleteId));
   }

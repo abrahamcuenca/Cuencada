@@ -96,13 +96,13 @@ const PRESIGNED_PUT = /x-id=PutObject|X-Fake-Signature=put/i;
 const SIGNED_STORAGE_URL = /linodeobjects\.com\/[^"]*X-Amz-Signature/i;
 const JWT = /eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/;
 /** Raw object keys (outside presigned URLs, which are masked first). */
-const S3_KEY = /(?:cuencadas\/\d{4}\/(?:originals|thumbs|display)\/|avatars\/[0-9a-f-]{8,}\/)/;
+const S3_KEY = /(?:cuencadas\/\d{4}\/(?:originals|thumbs|display)\/|avatars\/[0-9a-f-]{8,}\/|people\/[0-9a-f-]{8,}\/)/;
 /** Opaque tokens are 32 random bytes in base64url (43 chars). */
 const OPAQUE_TOKEN = /^[A-Za-z0-9_-]{43}$/;
 /** Keys whose values are opaque by design (pagination cursors). */
 const CURSOR_KEYS = new Set(["nextCursor", "nextBefore", "cursor"]);
 /** Keys whose values may be presigned GET URLs. */
-const SIGNED_URL_KEYS = new Set(["thumbUrl", "displayUrl", "avatarUrl"]);
+const SIGNED_URL_KEYS = new Set(["thumbUrl", "displayUrl", "avatarUrl", "photoUrl"]);
 /** Keys that must never be serialized to non-admins. */
 const FORBIDDEN_KEYS = [
   "passwordHash",
@@ -111,6 +111,7 @@ const FORBIDDEN_KEYS = [
   "thumbKey",
   "displayKey",
   "avatarKey",
+  "photoKey",
   "bucket",
   "requestIp",
   "ipAddress",
@@ -125,7 +126,7 @@ const FORBIDDEN_KEYS = [
   "mustChangePassword"
 ];
 /** Keys that must never be serialized to anyone, admins included. */
-const NEVER_KEYS = ["passwordHash", "tokenHash", "objectKey", "thumbKey", "displayKey", "avatarKey", "token", "refreshToken"];
+const NEVER_KEYS = ["passwordHash", "tokenHash", "objectKey", "thumbKey", "displayKey", "avatarKey", "photoKey", "token", "refreshToken"];
 
 let app: App;
 let storage: S3Storage;
@@ -139,6 +140,7 @@ let disabled: TestUser;
 let roomId: string;
 let mediaId: string;
 let personId: string;
+let relativeId: string;
 /** Raw secrets planted in the database/cookies: none may ever appear in a body or frame. */
 let secrets: string[] = [];
 
@@ -248,7 +250,13 @@ beforeEach(async () => {
     })
   ).id;
   await insertPerson({ userId: unlisted.id, fullName: UNLISTED_NAME });
-  const relative = await insertPerson({ fullName: "Pariente Sin Cuenta" });
+  // WP-4.3: the unlinked relative has a tree photo (only ever served as a presigned URL).
+  const relative = await insertPerson({
+    fullName: "Pariente Sin Cuenta",
+    photoKey: `people/${randomUUID()}/${randomUUID()}-256.webp`,
+    photoUpdatedAt: new Date()
+  });
+  relativeId = relative.id;
   await getTestDb().insert(cuencadaAttendance).values({ cuencadaId: edition.id, personId: relative.id });
   const viewerPerson = await insertPerson({ userId: viewer.user.id, fullName: "Persona Lectora" });
   // A member edge the viewer "made" between two people they did not create
@@ -413,6 +421,31 @@ describe("member-facing reads never leak PII", () => {
       ...scan("GET /api/family/tree", own)
     ]).toEqual([]);
     for (const body of [people, tree, own]) expect(JSON.stringify(body)).not.toContain(unlisted.id);
+  });
+
+  it("family tree photos (WP-4.3): presigned only in avatarUrl/photoUrl; the photo routes return no keys or bucket", async () => {
+    const detail = await get(`/api/family/people/${relativeId}`, viewer.auth);
+    expect(JSON.stringify(detail)).toContain("-512.webp");
+    const removed = await app.inject({
+      method: "DELETE",
+      url: `/api/family/people/${relativeId}/photo`,
+      remoteAddress: "203.0.113.51",
+      ...admin.auth
+    });
+    expect(removed.statusCode).toBe(200);
+    const intent = await app.inject({
+      method: "POST",
+      url: `/api/family/people/${relativeId}/photo/uploads`,
+      remoteAddress: "203.0.113.51",
+      ...admin.auth,
+      payload: { mimeType: "image/jpeg", byteSize: 1000 }
+    });
+    expect(intent.statusCode).toBe(201);
+    // The intent legitimately carries a presigned PUT; it must not expose the key as a field.
+    expect(Object.keys(intent.json<Record<string, unknown>>()).sort()).toEqual(["expiresAt", "headers", "uploadId", "uploadUrl"]);
+    expect(
+      [...scan("GET /api/family/people/:id (tree photo)", detail), ...scan("DELETE /api/family/people/:id/photo", removed.json(), { admin: true })]
+    ).toEqual([]);
   });
 
   it("family (WP-4.1): living people's dates and birthplace stay inside the circle; revision routes are admin-only", async () => {
@@ -584,6 +617,9 @@ describe("the PII scanner itself", () => {
       contactVisibility: {}
     };
     const problems = scan("synthetic", leaky, { directory: true });
+    expect(scan("synthetic tree photo", { photo: "people/0f2c4e1a-0000-4000-8000-000000000000/0f2c4e1a-0000-4000-8000-000000000001-256.webp", photoKey: "x" })).toEqual(
+      expect.arrayContaining([expect.stringContaining("raw object key"), expect.stringContaining('forbidden key "photoKey"')])
+    );
     for (const fragment of [
       "JWT",
       "raw object key",

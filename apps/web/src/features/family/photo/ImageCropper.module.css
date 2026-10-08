@@ -1,0 +1,81 @@
+/* WP-4.3 ImageCropper: a square stage (canvas, circular mask drawn on it) and a control row. */
+
+.dialog {
+  /* A little wider than the default sheet on desktop so the stage is comfortable. */
+  max-width: min(100%, 30rem);
+}
+
+.stage {
+  position: relative;
+  width: 100%;
+  /* Short phones: keep the controls and the footer on screen. */
+  max-width: min(22rem, 44dvh);
+  margin-inline: auto;
+  border-radius: var(--radius-md);
+  cursor: grab;
+  /* The stage handles drag and pinch itself; no page scroll or browser zoom while framing. */
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.stage:active {
+  cursor: grabbing;
+}
+
+.stage:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+.canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--radius-md);
+  background: #16201d;
+}
+
+.loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--color-text-inverse);
+  font-size: var(--text-sm);
+}
+
+.controls {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.slider {
+  flex: 1 1 6rem;
+  min-width: 3rem;
+  height: var(--tap-min);
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+.rotate {
+  flex: 0 0 auto;
+}
+
+.error {
+  margin: var(--space-3) 0 0;
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas,
+  .slider {
+    transition: none;
+  }
+}

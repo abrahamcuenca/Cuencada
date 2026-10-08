@@ -2,6 +2,7 @@
  * Decode → downscale → re-encode, shared by the resize worker and the
  * main-thread fallback (see `resizeImage.ts`). No React, no store.
  */
+import { drawSquareCrop, type SquareCropSpec } from "./cropCore";
 import type { ImageSize } from "./imageSize";
 
 /** When and how much to shrink. */
@@ -98,7 +99,7 @@ function fitSize(size: ImageSize, policy: ResizePolicy): ImageSize {
  * kept), so a 200 MP photo never sits in memory at full size. Decoders that
  * refuse the resize options get a plain decode.
  */
-async function decode(blob: Blob, target: ImageSize | null): Promise<ImageBitmap> {
+export async function decode(blob: Blob, target: ImageSize | null): Promise<ImageBitmap> {
   if (target !== null) {
     try {
       return await createImageBitmap(blob, { imageOrientation: "from-image", resizeWidth: target.width, resizeQuality: "high" });
@@ -107,6 +108,50 @@ async function decode(blob: Blob, target: ImageSize | null): Promise<ImageBitmap
     }
   }
   return createImageBitmap(blob, { imageOrientation: "from-image" });
+}
+
+/** Long edge the crop job decodes at most (memory bound; the output is 1024 px). */
+export const CROP_DECODE_MAX_EDGE = 4096;
+
+/**
+ * Decodes `blob` (EXIF orientation applied, at most
+ * {@link CROP_DECODE_MAX_EDGE} on the long edge when the header size is
+ * known), then draws the rotated square crop onto an `output × output`
+ * canvas and encodes it. Re-encoding drops every metadata block (EXIF/GPS).
+ * The bitmap and canvas are freed before returning.
+ *
+ * @param blob - The picked image.
+ * @param spec - Rotation and crop, in fractions of the rotated image.
+ * @param output - Output side (px).
+ * @param encode - Output format.
+ * @param stored - Size read from the header, when known.
+ * @throws {ImageDecodeError} When the image can't be decoded; other errors for canvas or encode failures.
+ */
+export async function decodeAndCrop(
+  blob: Blob,
+  spec: SquareCropSpec,
+  output: number,
+  encode: EncodeOptions,
+  stored: ImageSize | null = null
+): Promise<Blob> {
+  const planned = stored === null ? null : targetSize(stored, { kind: "maxEdge", maxEdge: CROP_DECODE_MAX_EDGE });
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await decode(blob, planned);
+  } catch {
+    throw new ImageDecodeError();
+  }
+  try {
+    const canvas = makeCanvas({ width: output, height: output });
+    try {
+      drawSquareCrop(canvas.context, bitmap, { width: bitmap.width, height: bitmap.height }, spec, output);
+      return await canvas.encode(encode);
+    } finally {
+      canvas.free();
+    }
+  } finally {
+    bitmap.close();
+  }
 }
 
 /**

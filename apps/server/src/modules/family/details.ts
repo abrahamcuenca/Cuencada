@@ -3,8 +3,11 @@
  * card for `GET /api/family/people/:id` and the member write routes.
  *
  * - Privacy of `Person` fields: `toPerson` with the viewer's qualifying circle.
- * - Photo: `resolvePersonPhoto` (WP-4.3), with `avatarKey: null` whenever the
- *   viewer may not see the linked account's avatar (unlisted/disabled rules).
+ * - Photo: `resolvePersonPhoto` (WP-4.3) on `personPhotoRowFor` (the avatar
+ *   and a linked person's tree photo follow the unlisted/disabled rules):
+ *   `avatarUrl` at 256 px, `photoUrl` at 512 px (tree photos; avatars stop at 256).
+ * - `canEditPhoto`: `photoEditDenial` (WP-4.3: admins, self, close relatives of
+ *   people without an account).
  * - Contacts: `personContactCard` + `loadPersonContactRows` (WP-4.4), only
  *   for linked, listed, active accounts (every family read is verified-only).
  * - `canEdit`, `canEditPhoto`, `canAddRelative`, `canDelete` are UX hints;
@@ -17,10 +20,11 @@ import { personRelationships } from "../../db/schema/index.js";
 import type { DbOrTx } from "../../lib/audit.js";
 import type { AvatarUrlDeps } from "../profile/avatar.js";
 import { AvatarSize } from "../profile/constants.js";
+import { photoEditDenial } from "./photoAccess.js";
 import type { FamilyCircle } from "./circle.js";
 import { loadPersonContactRows, personContactCard } from "./personContacts.js";
-import { resolvePersonPhoto } from "./personPhoto.js";
-import { type PersonViewRow, type Viewer, canSeeAvatar, canSeeLink, toPerson } from "./repository.js";
+import { PersonPhotoSize, resolvePersonPhoto } from "./personPhoto.js";
+import { type PersonViewRow, type Viewer, canSeeLink, personPhotoRowFor, toPerson } from "./repository.js";
 
 /** What the builder needs from the app. */
 export type PersonDetailsDeps = AvatarUrlDeps & { db: DbOrTx };
@@ -78,14 +82,13 @@ export async function buildPersonDetails(
   circle: FamilyCircle
 ): Promise<PersonDetails> {
   const admin = viewer.role === "admin";
-  const isSelf = row.userId !== null && row.userId === viewer.id;
   const scoped: Viewer = { ...viewer, circle: circle.ids };
-  const photo = await resolvePersonPhoto(
-    deps,
-    { avatarKey: canSeeAvatar(row, scoped) ? row.avatarKey : null, photoKey: row.photoKey },
-    AvatarSize.Large
-  );
-  const person = toPerson(row, scoped, new Map([[row.id, photo?.photoUrl ?? null]]));
+  const photoRow = personPhotoRowFor(row, scoped);
+  const [avatar, photo] = await Promise.all([
+    resolvePersonPhoto(deps, photoRow, AvatarSize.Large),
+    resolvePersonPhoto(deps, photoRow, PersonPhotoSize.Display)
+  ]);
+  const person = toPerson(row, scoped, new Map([[row.id, avatar?.photoUrl ?? null]]));
 
   const contactsAllowed = row.userId !== null && row.listedInDirectory !== false && row.userStatus === "active";
   let contacts: PersonDetails["contacts"] = [];
@@ -110,7 +113,7 @@ export async function buildPersonDetails(
     photoSource: photo?.photoSource ?? null,
     isLinked: canSeeLink(row, scoped),
     canEdit: admin || memberCanEdit(row, viewer, circle),
-    canEditPhoto: admin || isSelf || circle.close.has(row.id),
+    canEditPhoto: photoEditDenial(viewer, row, circle) === null,
     contacts,
     canAddRelative: admin || circle.ids.has(row.id),
     canDelete

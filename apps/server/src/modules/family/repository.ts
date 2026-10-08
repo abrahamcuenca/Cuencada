@@ -18,13 +18,17 @@
  *   Only the member themself and admins see the link and the avatar.
  * - Avatars are presigned (via the profile module's `avatarUrlFor`) only
  *   for linked, listed, **active** accounts, or for the member/admins.
+ * - Tree photos (WP-4.3) fill `avatarUrl` when there is no visible avatar:
+ *   always for people without an account, and under the avatar's rules for
+ *   linked people (see `canSeePersonPhoto`).
  */
 import type { Person, PersonSummary, Relationship, UserRole, UserStatus } from "@cuencada/types";
 import { eq, type SQL } from "drizzle-orm";
 import { people, personRelationships, profiles, users } from "../../db/schema/index.js";
 import type { DbOrTx } from "../../lib/audit.js";
-import { type AvatarUrlDeps, avatarUrlFor } from "../profile/avatar.js";
+import type { AvatarUrlDeps } from "../profile/avatar.js";
 import { AvatarSize } from "../profile/constants.js";
+import { type PersonPhotoRow, type ResolvedPersonPhoto, resolvePersonPhoto } from "./personPhoto.js";
 
 /** Columns every read selects (never `created_by_user_id` or timestamps). */
 export const personColumns = {
@@ -182,13 +186,47 @@ export function canSeeAvatar(row: PersonViewRow, viewer: Viewer): boolean {
   return canSeeAllFields(row, viewer) || row.userStatus === "active";
 }
 
-/** `person id → avatar URL | null`, from {@link presignPersonAvatars}. */
+/**
+ * True when `row`'s tree photo (WP-4.3) may be presigned for `viewer`
+ * (route-level: verified members only). People without an account: always.
+ * A linked person's tree photo follows the **same** unlisted and disabled
+ * rules as their avatar ({@link canSeeLink}, active account), so it can't be
+ * used to picture someone who opted out of the directory.
+ *
+ * @param row - The person, with the linked profile and account.
+ * @param viewer - The caller.
+ */
+export function canSeePersonPhoto(row: PersonViewRow, viewer: Viewer): boolean {
+  if (row.photoKey === null) return false;
+  if (row.userId === null) return true;
+  if (!canSeeLink(row, viewer)) return false;
+  return canSeeAllFields(row, viewer) || row.userStatus === "active";
+}
+
+/**
+ * The keys `resolvePersonPhoto` may use for `viewer`: each one `null` unless
+ * visible ({@link canSeeAvatar}, {@link canSeePersonPhoto}). WP-4.1's
+ * `PersonDetails` builder passes this straight to the resolver.
+ *
+ * @param row - The person, with the linked profile and account.
+ * @param viewer - The caller.
+ */
+export function personPhotoRowFor(row: PersonViewRow, viewer: Viewer): PersonPhotoRow {
+  return {
+    avatarKey: canSeeAvatar(row, viewer) ? row.avatarKey : null,
+    photoKey: canSeePersonPhoto(row, viewer) ? row.photoKey : null
+  };
+}
+
+/** `person id → photo URL | null`, from {@link presignPersonAvatars}. */
 export type PersonAvatarUrls = ReadonlyMap<string, string | null>;
 
 /**
- * Presign the avatars `viewer` may see among `rows`, once per distinct key
- * (batched, in parallel). Rows the viewer may not see get no entry, so the
- * mapper falls back to `null`; a storage failure also degrades to `null`.
+ * Presign the photo `viewer` may see for each of `rows` (`Person.avatarUrl`):
+ * the linked account's avatar, else the tree photo (WP-4.3, same precedence
+ * as `resolvePersonPhoto`), once per distinct key pair (in parallel). Rows
+ * with nothing visible get no entry, so the mapper falls back to `null`; a
+ * storage failure on the avatar falls back to the tree photo, then `null`.
  *
  * @param deps - Storage and logger.
  * @param rows - People to map.
@@ -201,14 +239,22 @@ export async function presignPersonAvatars(
   viewer: Viewer,
   size: AvatarSize
 ): Promise<PersonAvatarUrls> {
-  const keyByPerson = new Map<string, string>();
-  for (const row of rows) {
-    if (row.avatarKey !== null && canSeeAvatar(row, viewer)) keyByPerson.set(row.id, row.avatarKey);
-  }
-  const keys = [...new Set(keyByPerson.values())];
-  const urls = await Promise.all(keys.map((key) => avatarUrlFor(deps, key, size)));
-  const urlByKey = new Map(keys.map((key, index) => [key, urls[index] ?? null]));
-  return new Map([...keyByPerson].map(([personId, key]) => [personId, urlByKey.get(key) ?? null]));
+  const visible = rows
+    .map((row) => ({ id: row.id, keys: personPhotoRowFor(row, viewer) }))
+    .filter(({ keys }) => keys.avatarKey !== null || keys.photoKey !== null);
+  const cache = new Map<string, Promise<ResolvedPersonPhoto | null>>();
+  const resolved = await Promise.all(
+    visible.map(({ keys }) => {
+      const cacheKey = `${keys.avatarKey ?? ""}|${keys.photoKey ?? ""}`;
+      let pending = cache.get(cacheKey);
+      if (pending === undefined) {
+        pending = resolvePersonPhoto(deps, keys, size);
+        cache.set(cacheKey, pending);
+      }
+      return pending;
+    })
+  );
+  return new Map(visible.map(({ id }, index) => [id, resolved[index]?.photoUrl ?? null]));
 }
 
 /**

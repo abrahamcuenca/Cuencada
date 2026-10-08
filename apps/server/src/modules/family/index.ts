@@ -2,6 +2,7 @@
  * Family module (T6, WP-4.1). Registered under `/api` by `app.ts`:
  * - `/family/*` (verified members): search, person card, tree, self edit,
  *   and own-family editing (create with `relateTo`, edit, delete own additions).
+ * - `/family/people/:id/photo*` (verified members; WP-4.3): tree photos.
  * - `/admin/people*`, `/admin/relationships*` (admins): people CRUD,
  *   account linking and relationships with cycle prevention.
  * - `/admin/people/:id/revisions*`, `/admin/revisions/:id/revert`,
@@ -13,6 +14,7 @@
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import adminFamilyRoutes from "./admin-routes.js";
 import memberFamilyRoutes from "./member-routes.js";
+import personPhotoRoutes from "./photo-routes.js";
 import revisionRoutes from "./revision-routes.js";
 import { REVISION_CLEANUP_INTERVAL_MS, purgeExpiredRevisions } from "./revisions.js";
 
@@ -20,6 +22,7 @@ import { REVISION_CLEANUP_INTERVAL_MS, purgeExpiredRevisions } from "./revisions
 const familyModule: FastifyPluginAsyncZod = async (app) => {
   await app.register(memberFamilyRoutes);
   await app.register(adminFamilyRoutes);
+  await app.register(personPhotoRoutes);
   await app.register(revisionRoutes);
 
   let timer: NodeJS.Timeout | null = null;

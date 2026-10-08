@@ -22,26 +22,18 @@ import { avatarUploads, profiles } from "../../db/schema/index.js";
 import { recordAudit } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
 import { authUser } from "../../plugins/auth.js";
+import { type AvatarKeys, avatarKeys, derivativeKeysFor, processAvatar } from "./avatar.js";
 import {
-  type AvatarKeys,
-  avatarKeys,
-  avatarSignatureMatches,
-  derivativeKeysFor,
-  normalizeContentType,
-  processAvatar
-} from "./avatar.js";
-import {
-  AVATAR_CACHE_CONTROL,
   AVATAR_CONFIRM_GRACE_MS,
   AVATAR_CONFIRM_RATE_LIMIT,
   AVATAR_DELETE_RATE_LIMIT,
   AVATAR_INTENT_RATE_LIMIT,
   AVATAR_MAX_OPEN_INTENTS,
-  AVATAR_UPLOAD_URL_TTL_SECONDS,
-  MAGIC_BYTES_LENGTH
+  AVATAR_UPLOAD_URL_TTL_SECONDS
 } from "./constants.js";
 import { loadOwnProfile, toOwnProfile } from "./service.js";
-import { errorName, rateLimitByUser, t5ErrorResponses } from "./shared.js";
+import { rateLimitByUser, t5ErrorResponses } from "./shared.js";
+import { browserUploadHeaders, deleteObjectsQuietly, putWebpDerivatives, readVerifiedUpload } from "./uploadPipeline.js";
 
 /** Audit actions written by the avatar routes. */
 export const AvatarAuditAction = {
@@ -68,29 +60,6 @@ type RejectReason =
   | "pixel_limit_exceeded"
   | "format_mismatch"
   | "decode_failed";
-
-/** Headers the browser must send on the PUT: the signed Content-Type plus any `x-amz-*` the signer adds. */
-function browserUploadHeaders(required: Record<string, string>, mimeType: string): Record<string, string> {
-  const headers: Record<string, string> = { "Content-Type": mimeType };
-  for (const [name, value] of Object.entries(required)) {
-    if (name.toLowerCase().startsWith("x-amz-")) headers[name] = value;
-  }
-  return headers;
-}
-
-/**
- * Delete objects, logging (without keys) and continuing on failure; the
- * cleanup job retries originals of confirmed rows.
- */
-async function deleteObjectsQuietly(app: FastifyInstance, keys: readonly string[]): Promise<void> {
-  for (const key of keys) {
-    try {
-      await app.storage.delete(key);
-    } catch (error) {
-      app.log.warn({ errorName: errorName(error) }, "avatar object delete failed");
-    }
-  }
-}
 
 /**
  * Drop a rejected, unconfirmed upload (row, then object), audit the reason
@@ -223,39 +192,19 @@ const avatarRoutes: FastifyPluginAsyncZod = async (app) => {
         return rejectUpload(app, upload, "expired", request.ip, UPLOAD_EXPIRED);
       }
 
-      const head = await app.storage.head(upload.objectKey);
-      if (head === null) throw new AppError("UPLOAD_INVALID", UPLOAD_NOT_RECEIVED);
-      if (head.contentLength !== upload.byteSize) {
-        return rejectUpload(app, upload, "size_mismatch", request.ip, UPLOAD_MISMATCH);
+      const checked = await readVerifiedUpload(app, upload);
+      if (!checked.ok) {
+        if (checked.notReceived) throw new AppError("UPLOAD_INVALID", UPLOAD_NOT_RECEIVED);
+        return rejectUpload(app, upload, checked.failure, request.ip, UPLOAD_MISMATCH);
       }
-      if (normalizeContentType(head.contentType) !== upload.mimeType) {
-        return rejectUpload(app, upload, "content_type_mismatch", request.ip, UPLOAD_MISMATCH);
-      }
-      const leading = await app.storage.getRange(upload.objectKey, 0, MAGIC_BYTES_LENGTH - 1);
-      if (!avatarSignatureMatches(upload.mimeType, leading)) {
-        return rejectUpload(app, upload, "signature_mismatch", request.ip, UPLOAD_MISMATCH);
-      }
-
-      const input = await app.storage.getRange(upload.objectKey, 0, upload.byteSize - 1);
-      if (input.byteLength !== upload.byteSize) {
-        return rejectUpload(app, upload, "size_mismatch", request.ip, UPLOAD_MISMATCH);
-      }
-      const processed = await processAvatar(input, upload.mimeType);
+      const processed = await processAvatar(checked.input, upload.mimeType, request.body.crop);
       if (!processed.ok) return rejectUpload(app, upload, processed.failure, request.ip, UPLOAD_UNREADABLE);
 
       const keys: AvatarKeys = avatarKeys(user.id, upload.id, upload.mimeType);
-      await app.storage.put({
-        key: keys.large,
-        body: processed.avatar.large,
-        contentType: "image/webp",
-        cacheControl: AVATAR_CACHE_CONTROL
-      });
-      await app.storage.put({
-        key: keys.small,
-        body: processed.avatar.small,
-        contentType: "image/webp",
-        cacheControl: AVATAR_CACHE_CONTROL
-      });
+      await putWebpDerivatives(app, [
+        { key: keys.large, body: processed.avatar.large },
+        { key: keys.small, body: processed.avatar.small }
+      ]);
 
       const outcome = await app.db.transaction(async (tx) => {
         const claimed = await tx

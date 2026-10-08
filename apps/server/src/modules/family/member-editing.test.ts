@@ -399,7 +399,10 @@ describe("GET /api/family/people/:id (PersonDetails privacy, WP-4.1)", () => {
     const partnerUser = await createUser({ emailVerified: true });
     await getTestDb().update(people).set({ userId: partnerUser.id }).where(eq(people.id, f.partner.id));
     const partner = (await app.inject({ method: "GET", url: `/api/family/people/${f.partner.id}`, ...memberAuth })).json<PersonDetails>();
-    expect(partner).toMatchObject({ canEdit: false, canEditPhoto: true, canAddRelative: true, isLinked: true });
+    // WP-4.3: close relatives change the photo of people without an account only; a linked person's photo is theirs.
+    expect(partner).toMatchObject({ canEdit: false, canEditPhoto: false, canAddRelative: true, isLinked: true });
+    const child = (await app.inject({ method: "GET", url: `/api/family/people/${f.child.id}`, ...memberAuth })).json<PersonDetails>();
+    expect(child).toMatchObject({ canEditPhoto: true });
     const grand = (await app.inject({ method: "GET", url: `/api/family/people/${f.grandparent.id}`, ...memberAuth })).json<PersonDetails>();
     expect(grand).toMatchObject({ canEdit: true, canEditPhoto: false });
   });

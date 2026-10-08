@@ -11,7 +11,7 @@ same guard config. `401`/`403` cells are guard denials (`UNAUTHENTICATED`,
 `PASSWORD_CHANGE_REQUIRED`, `FORBIDDEN`, `EMAIL_UNVERIFIED`); other non-2xx
 cells are handler answers for that principal's own data.
 
-Total: 109 routes (14 public, 42 user, 51 admin, 2 cookie).
+Total: 112 routes (14 public, 45 user, 51 admin, 2 cookie).
 
 | Method | Path | auth | Verified email | Pending pw allowed | Anon | Member | Unverified | Pending pw | Disabled | Revoked | Admin | Other member (IDOR) | Scope / notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -106,6 +106,9 @@ Total: 109 routes (14 public, 42 user, 51 admin, 2 cookie).
 | DELETE | `/api/family/people/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | creator only (unlinked, no other edges); probe: own addition with another edge → 409; probe: own addition linked to an account → 403 |
 | GET | `/api/family/people/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | PATCH | `/api/family/people/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | self, or the qualifying circle minus people linked to another account; mass assignment: userId key → 400; probe: death data on the caller's own linked node (ADMIN_ONLY_FIELD) → 403 |
+| DELETE | `/api/family/people/:id/photo` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | same rule as the upload intent (WP-4.3); probe: a person who is not a close relative → 403 |
+| POST | `/api/family/people/:id/photo/uploads` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | admins, the linked person, close relatives of a person without account (WP-4.3); probe: a person who is not a close relative → 403 |
+| POST | `/api/family/people/:id/photo/uploads/:uploadId/confirm` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | uploader only (404 for another user's uploadId or another person's path) |
 | PATCH | `/api/family/people/me` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | self-scoped alias of /api/family/me; mass assignment: extra keys (userId/deceased/deathYear/deathDate/id) → 2xx |
 | GET | `/api/family/tree` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | POST | `/api/invites/accept` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  | probe: invite naming another member's linked person (falls back, never relinks) → 2xx; probe: open link naming an unlinked person (legacy row; falls back, never links) → 2xx |

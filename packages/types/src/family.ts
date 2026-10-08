@@ -847,13 +847,27 @@ export type PersonPhotoUploadResponse = AvatarUploadResponse;
 export const personPhotoUploadResponseSchema = avatarUploadResponseSchema;
 
 /**
- * `POST /api/family/people/:id/photo/confirm`; responds with the updated
- * {@link PersonDetails}. `crop` is optional: the web crops client-side and
- * omits it. When sent, the server clamps it to the decoded image with
- * `clampCropRect` before `extract()`, then resizes as for avatars.
+ * The confirm payload as one object (`uploadId` + optional `crop`); responds
+ * with the updated {@link PersonDetails}. `crop` is optional: the web crops
+ * client-side and omits it. When sent, the server clamps it to the decoded
+ * image with `clampCropRect` before `extract()`, then resizes as for avatars.
+ *
+ * On the wire (WP-4.3) the upload id travels in the path:
+ * `POST /api/family/people/:id/photo/uploads/:uploadId/confirm`
+ * ({@link personPhotoUploadParamsSchema}) with body
+ * {@link personPhotoConfirmBodySchema}.
  */
 export const personPhotoConfirmInputSchema = avatarConfirmInputSchema.extend({
   crop: imageCropRectSchema.exactOptional()
 });
 export type PersonPhotoConfirmInput = z.infer<typeof personPhotoConfirmInputSchema>;
 export type PersonPhotoConfirmRequest = z.input<typeof personPhotoConfirmInputSchema>;
+
+/** Body of `POST /api/family/people/:id/photo/uploads/:uploadId/confirm` (WP-4.3). */
+export const personPhotoConfirmBodySchema = personPhotoConfirmInputSchema.omit({ uploadId: true });
+export type PersonPhotoConfirmBody = z.infer<typeof personPhotoConfirmBodySchema>;
+export type PersonPhotoConfirmBodyRequest = z.input<typeof personPhotoConfirmBodySchema>;
+
+/** Path params of the person-photo confirm route: the person and the upload intent. */
+export const personPhotoUploadParamsSchema = z.object({ id: idSchema, uploadId: idSchema });
+export type PersonPhotoUploadParams = z.infer<typeof personPhotoUploadParamsSchema>;

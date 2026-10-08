@@ -1,6 +1,7 @@
 /**
- * Avatar upload: local preview, then intent → direct PUT to the bucket →
- * confirm, with progress. Same pipeline and guards as the gallery (WP-T4-FE):
+ * Photo upload (avatars, and WP-4.3 tree photos through {@link usePhotoUpload}):
+ * local preview, then intent → direct PUT to the bucket → confirm, with
+ * progress. Same pipeline and guards as the gallery (WP-T4-FE):
  *
  * - [SEC] the intent is validated with `avatarUploadResponseSchema` and its
  *   `uploadUrl` must be on `VITE_MEDIA_UPLOAD_ORIGIN` (unset: refused), so the
@@ -13,7 +14,7 @@
  * request, the upload and the confirm request.
  */
 import { type AvatarUploadInput, type AvatarUploadResponse, avatarUploadInputSchema, avatarUploadResponseSchema } from "@cuencada/types";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getApiErrorCode, isAbortError } from "../../../shared/api/errors";
 import { env } from "../../../shared/lib/env";
 import { AVATAR_RESIZE, ImageDecodeError, isAllowedUploadUrl, putToPresignedUrl, shrinkImageIfNeeded, UploadTransferError, uploadsConfigured } from "../../gallery";
@@ -89,12 +90,42 @@ function describeFailure(error: unknown): string | null {
 
 const IDLE: AvatarUploadState = { phase: "idle", progress: 0, previewUrl: null, error: null };
 
+/** An in-flight RTK Query mutation (what a mutation trigger returns). */
+export interface PendingRequest {
+  unwrap: () => Promise<unknown>;
+  abort: () => void;
+  reset?: () => void;
+}
+
+/** The two calls that differ between avatars and tree photos. */
+export interface PhotoUploadEndpoints {
+  /** `POST …/uploads` with the validated type and size. */
+  createUpload: (input: AvatarUploadInput) => PendingRequest;
+  /** `POST …/confirm` for the upload id. */
+  confirm: (uploadId: string) => PendingRequest;
+}
+
 /**
- * @returns Upload state and `start(file)`.
+ * @returns Avatar upload state and `start(file)`.
  */
 export function useAvatarUpload(): AvatarUploadApi {
   const [createUpload] = useCreateAvatarUploadMutation();
   const [confirmAvatar] = useConfirmAvatarMutation();
+  const endpoints = useMemo<PhotoUploadEndpoints>(
+    () => ({ createUpload: (input) => createUpload(input), confirm: (uploadId) => confirmAvatar({ uploadId }) }),
+    [createUpload, confirmAvatar]
+  );
+  return usePhotoUpload(endpoints);
+}
+
+/**
+ * The shared upload flow; `endpoints` must be stable (memoised).
+ *
+ * @param endpoints - Intent and confirm calls.
+ * @returns Upload state and `start(file)`.
+ */
+export function usePhotoUpload(endpoints: PhotoUploadEndpoints): AvatarUploadApi {
+  const { createUpload, confirm: confirmUpload } = endpoints;
   const [state, setState] = useState<AvatarUploadState>(IDLE);
   const previewRef = useRef<string | null>(null);
   const controllerRef = useRef<AbortController | null>(null);
@@ -140,7 +171,7 @@ export function useAvatarUpload(): AvatarUploadApi {
         // `reset` drops the intent (and its signed URL) from the store once read.
         const raw: unknown = await request.unwrap().finally(() => {
           controller.signal.removeEventListener("abort", abortRequest);
-          request.reset();
+          request.reset?.();
         });
         if (controller.signal.aborted) return;
         const intent = parseAvatarIntent(raw);
@@ -165,7 +196,7 @@ export function useAvatarUpload(): AvatarUploadApi {
         if (controller.signal.aborted) return;
 
         setState((current) => ({ ...current, phase: "confirming", progress: 1 }));
-        const confirm = confirmAvatar({ uploadId: intent.uploadId });
+        const confirm = confirmUpload(intent.uploadId);
         const abortConfirm = (): void => confirm.abort();
         controller.signal.addEventListener("abort", abortConfirm, { once: true });
         await confirm.unwrap().finally(() => controller.signal.removeEventListener("abort", abortConfirm));
@@ -178,7 +209,7 @@ export function useAvatarUpload(): AvatarUploadApi {
         if (controllerRef.current === controller) controllerRef.current = null;
       }
     },
-    [confirmAvatar, createUpload, setPreview]
+    [confirmUpload, createUpload, setPreview]
   );
 
   const start = useCallback(

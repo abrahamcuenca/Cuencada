@@ -13,8 +13,9 @@
  *   decoded bitmaps in memory at once.
  */
 import { IMAGE_HEADER_BYTES, readImageSize } from "./imageSize";
-import { decodeAndScale, type EncodeOptions, ImageDecodeError, type ResizePolicy, targetSize } from "./resizeCore";
-import type { ResizeWorkerRequest, ResizeWorkerResponse } from "./resize.worker";
+import type { SquareCropSpec } from "./cropCore";
+import { decode, decodeAndCrop, decodeAndScale, type EncodeOptions, ImageDecodeError, type ResizePolicy, targetSize } from "./resizeCore";
+import type { ResizeCropRequest, ResizeScaleRequest, ResizeWorkerRequest, ResizeWorkerResponse } from "./resize.worker";
 
 export { ImageDecodeError } from "./resizeCore";
 
@@ -125,7 +126,7 @@ export async function shrinkImageIfNeeded(file: File, options: ResizeOptions): P
   let blob: Blob | null;
   try {
     blob = await oneAtATime(async () => {
-      const request: ResizeWorkerRequest = { blob: file, policy: options.policy, encode: options.encode, stored: known };
+      const request: ResizeScaleRequest = { blob: file, policy: options.policy, encode: options.encode, stored: known };
       if (canUseWorker()) {
         try {
           return await inWorker(request);
@@ -145,4 +146,61 @@ export async function shrinkImageIfNeeded(file: File, options: ResizeOptions): P
   }
   if (blob === null) return null;
   return new File([blob], renamed(file.name, options.encode.type), { type: options.encode.type, lastModified: file.lastModified });
+}
+
+/**
+ * Decodes `file` for an on-screen preview (EXIF orientation applied), at most
+ * `maxEdge` on the long edge when the header size is known, so a 200 MP photo
+ * never sits in memory at full size.
+ *
+ * @param file - The picked image.
+ * @param maxEdge - Longest preview edge (px).
+ * @throws {ImageDecodeError} When the browser can't decode it (or lacks `createImageBitmap`).
+ */
+export async function decodeForPreview(file: Blob, maxEdge: number): Promise<ImageBitmap> {
+  if (typeof createImageBitmap !== "function") throw new ImageDecodeError();
+  const known = await headerSize(file);
+  const planned = known === null ? null : targetSize(known, { kind: "maxEdge", maxEdge });
+  try {
+    return await decode(file, planned);
+  } catch {
+    throw new ImageDecodeError();
+  }
+}
+
+/** Side of the square JPEG the `ImageCropper` produces (WP-4.3). */
+export const CROP_OUTPUT_SIZE = 1024;
+
+/** JPEG quality of the cropped photo (the server re-encodes to WebP anyway). */
+export const CROP_JPEG_QUALITY = 0.9;
+
+/**
+ * Renders the cropper's result: `file` decoded (EXIF orientation applied),
+ * rotated, cropped to the square in `crop` and re-encoded as a
+ * {@link CROP_OUTPUT_SIZE}² JPEG without metadata. Runs in the resize worker
+ * when the browser supports OffscreenCanvas there, else on the main thread.
+ * One image at a time, like {@link shrinkImageIfNeeded}.
+ *
+ * @param file - The picked JPEG/PNG/WebP.
+ * @param crop - Rotation and crop from the cropper (fractions of the rotated image).
+ * @returns A new JPEG `File`.
+ * @throws {ImageDecodeError} When the file can't be decoded; other errors when the canvas fails.
+ */
+export async function cropImageToSquare(file: File, crop: SquareCropSpec): Promise<File> {
+  const known = await headerSize(file);
+  const encode: EncodeOptions = { type: "image/jpeg", quality: CROP_JPEG_QUALITY };
+  const blob = await oneAtATime(async () => {
+    const request: ResizeCropRequest = { kind: "crop", blob: file, crop, output: CROP_OUTPUT_SIZE, encode, stored: known };
+    if (canUseWorker()) {
+      try {
+        const result = await inWorker(request);
+        if (result !== null) return result;
+      } catch (error) {
+        if (error instanceof ImageDecodeError) throw error;
+        // No OffscreenCanvas/createImageBitmap in this worker: do it here instead.
+      }
+    }
+    return decodeAndCrop(file, crop, CROP_OUTPUT_SIZE, encode, known);
+  });
+  return new File([blob], renamed(file.name, encode.type), { type: encode.type, lastModified: file.lastModified });
 }
