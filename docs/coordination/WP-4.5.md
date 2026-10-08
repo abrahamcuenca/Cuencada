@@ -59,4 +59,4 @@ Based on `origin/main` 341de98 (WP-4.0, 4.1, 4.2, 4.4, 4.4b), then merged with d
 - **Screenshots** (`docs/ux/screenshots/t6/`, 375 and 1280, fictional data): `posibles-duplicados`, `fusionar-vista-previa`, `fusionar-confirmar`.
 
 ## Verification
-See the final report of the run: `pnpm lint`, `pnpm turbo run typecheck --force`, `pnpm test`, `pnpm build` and `pnpm e2e` (isolated ports 3550/3551/4550 and the `cuencada_w45_e2e` database), after merging `origin/main`.
+After merging `origin/main` (de1b07a): `pnpm lint` clean; `pnpm turbo run typecheck --force` 6/6; `pnpm test` 185 files, 2428 tests; `pnpm build` 4/4; `pnpm e2e` on isolated ports 3550/3551/4550 and the `cuencada_w45_e2e` database: journeys and mobile gates 67/67, Lighthouse 1/1. Two earlier full runs each hit one intermittent failure in journey 11b (Ana's session gone on a reload, a different project each time); 11b passes alone (9/9) and in the final full run.
