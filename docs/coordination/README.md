@@ -56,6 +56,7 @@ PRs #1–#30 are merged. Deferred and cross-track items live in [`backlog.md`](b
 | 2.3 | Security audit [SEC] | Security | TL | wp/2.3-security-audit | | in review |
 | 2.3c | Breached-password check (ASVS 2.1.7) [SEC] | Backend | TL, Sec | wp/2.3c-breached-passwords | | in review |
 | 2.4–2.5 | Cutover (see backlog checklist) | Tech Lead | Sec | — | | todo |
+| 4.0 | Family contracts + migration 0004 [SEC] | Architect | TL, Sec | wp/4.0-family-contracts | | in review |
 
 ## WP file template
 

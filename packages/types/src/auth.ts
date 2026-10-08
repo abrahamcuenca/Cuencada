@@ -350,6 +350,21 @@ export const BOUND_INVITE_DEFAULT_DAYS = 7;
 export const BOUND_INVITE_MAX_DAYS = 30;
 
 /**
+ * Stable reasons on a refused `personId` in `POST /api/admin/invites`
+ * (WP-4.2): 400 `VALIDATION` with `details: [{ path: "personId", message,
+ * code }]`, the open detail-code channel of ADR 0001 §4. A person that already
+ * has an account answers 409 `CONFLICT` with `FamilyIssueCode.PersonLinkedToOther`
+ * (`PERSON_LINKED_TO_OTHER`, `family.ts`).
+ */
+export const InviteIssueCode = {
+  /** The person is deceased: nobody can accept an invite for them. */
+  PersonDeceased: "INVITE_PERSON_DECEASED",
+  /** `personId` needs an email-bound, single-use invite (never an open multi-use link). */
+  PersonRequiresBound: "INVITE_PERSON_REQUIRES_BOUND"
+} as const;
+export type InviteIssueCode = (typeof InviteIssueCode)[keyof typeof InviteIssueCode];
+
+/**
  * `POST /api/admin/invites`.
  * - Admin invites: bound to an email, single-use, and **must be sent by email**
  *   (no copy-link), so holding the token implies controlling the mailbox.

@@ -29,6 +29,13 @@
       "when": 1791404226944,
       "tag": "0003_undated_editions",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791424653933,
+      "tag": "0004_family_people_contacts",
+      "breakpoints": true
     }
   ]
 }

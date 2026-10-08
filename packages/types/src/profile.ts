@@ -17,6 +17,11 @@ import {
 } from "./common.js";
 import { displayNameSchema } from "./auth.js";
 import { AVATAR_MAX_BYTES, MediaMimeType } from "./media.js";
+import { type ContactCard, type OwnContacts, contactCardSchema, ownContactsSchema } from "./contacts.js";
+
+// WP-4.0: contact contracts live in their own file; re-exported here because
+// the `index.ts` barrel is frozen.
+export * from "./contacts.js";
 
 /**
  * Who may see each optional contact field (all default to hidden), and
@@ -55,6 +60,11 @@ export interface OwnProfile {
   bio: string | null;
   avatarUrl: string | null;
   visibility: ProfileVisibility;
+  /**
+   * Social contacts and per-field visibility (WP-4.0 contract, filled from
+   * WP-4.4). Optional so responses from servers before WP-4.4 still parse.
+   */
+  contacts?: OwnContacts;
   updatedAt: string;
 }
 
@@ -70,6 +80,7 @@ export const ownProfileSchema = z.object({
   bio: z.string().max(500).nullable(),
   avatarUrl: z.string().max(4096).nullable(),
   visibility: profileVisibilitySchema,
+  contacts: ownContactsSchema.exactOptional(),
   updatedAt: dateTimeSchema
 }) satisfies z.ZodType<OwnProfile>;
 
@@ -88,6 +99,12 @@ export interface DirectoryEntry {
   email?: string;
   phone?: string;
   city?: string;
+  /**
+   * Visible contacts as server-built links (WP-4.0 contract, filled from
+   * WP-4.4 by `buildContactCard`). Absent from older servers; an empty array
+   * when nothing is visible.
+   */
+  contacts?: ContactCard;
 }
 
 export const directoryEntrySchema = z.object({
@@ -100,7 +117,8 @@ export const directoryEntrySchema = z.object({
   bio: z.string().max(500).nullable(),
   email: z.string().max(254).exactOptional(),
   phone: z.string().max(30).exactOptional(),
-  city: z.string().max(120).exactOptional()
+  city: z.string().max(120).exactOptional(),
+  contacts: contactCardSchema.exactOptional()
 }) satisfies z.ZodType<DirectoryEntry>;
 
 /**
@@ -108,7 +126,7 @@ export const directoryEntrySchema = z.object({
  * the contact visibility flags. `listedInDirectory` is not needed here: the
  * directory query filters unlisted members out before mapping.
  */
-export interface DirectoryEntrySource extends Omit<DirectoryEntry, "email" | "phone" | "city"> {
+export interface DirectoryEntrySource extends Omit<DirectoryEntry, "email" | "phone" | "city" | "contacts"> {
   email: string | null;
   phone: string | null;
   city: string | null;
@@ -241,3 +259,64 @@ export const avatarUploadResponseSchema = z.object({
 export const avatarConfirmInputSchema = z.object({ uploadId: idSchema });
 export type AvatarConfirmInput = z.infer<typeof avatarConfirmInputSchema>;
 export type AvatarConfirmRequest = z.input<typeof avatarConfirmInputSchema>;
+
+/* -------------------------------------------------------------------------- */
+/* Image crop (WP-4.0: person photos; avatars may adopt it in WP-4.3)          */
+/* -------------------------------------------------------------------------- */
+
+/** Largest coordinate or side accepted in a crop rect (above the 24 MP decode cap's longest side). */
+export const IMAGE_CROP_MAX_PX = 30_000;
+
+/**
+ * Optional square crop in **source pixels** (after EXIF orientation), for a
+ * server-side `sharp().extract()`. The web normally crops client-side (the
+ * `ImageCropper` exports a 1024×1024 JPEG) and omits it; it exists for
+ * clients that upload the original. Integers ≥ 0, `size` ≥ 1. The server must
+ * clamp it to the decoded image with {@link clampCropRect}, never trust it.
+ */
+export interface ImageCropRect {
+  x: number;
+  y: number;
+  size: number;
+}
+
+const cropCoordinate = z
+  .number()
+  .int({ error: "Recorte inválido." })
+  .min(0, { error: "Recorte inválido." })
+  .max(IMAGE_CROP_MAX_PX, { error: "Recorte inválido." });
+
+export const imageCropRectSchema = z.strictObject({
+  x: cropCoordinate,
+  y: cropCoordinate,
+  size: cropCoordinate.min(1, { error: "Recorte inválido." })
+}) satisfies z.ZodType<ImageCropRect>;
+
+/** A crop clamped to an image, in `sharp().extract()` terms. */
+export interface ClampedCrop {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Clamps `rect` to a `width × height` image so `extract()` never reads out of
+ * bounds: the origin is pulled inside the image and the side shrinks to fit
+ * both dimensions (the result stays square, side ≥ 1).
+ *
+ * @param rect - Crop parsed by {@link imageCropRectSchema}.
+ * @param width - Image width in pixels after EXIF rotation (integer ≥ 1).
+ * @param height - Image height in pixels after EXIF rotation (integer ≥ 1).
+ * @returns The square region to extract.
+ * @throws RangeError when the image dimensions are not positive integers.
+ */
+export function clampCropRect(rect: ImageCropRect, width: number, height: number): ClampedCrop {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
+    throw new RangeError("clampCropRect: invalid image dimensions");
+  }
+  const left = Math.min(Math.max(0, Math.trunc(rect.x)), width - 1);
+  const top = Math.min(Math.max(0, Math.trunc(rect.y)), height - 1);
+  const side = Math.max(1, Math.min(Math.trunc(rect.size), width - left, height - top));
+  return { left, top, width: side, height: side };
+}

@@ -3,7 +3,23 @@
  * account. Tree data is PII: member-only, never public.
  */
 import { z } from "zod";
-import { cursorQuerySchema, displayTextSchema, idSchema, nullableDisplayTextSchema, nullableTextSchema } from "./common.js";
+import {
+  cursorQuerySchema,
+  dateSchema,
+  dateTimeSchema,
+  displayTextSchema,
+  idSchema,
+  nullableDisplayTextSchema,
+  nullableTextSchema
+} from "./common.js";
+import { type ContactCard, contactCardSchema } from "./contacts.js";
+import {
+  type AvatarUploadResponse,
+  avatarConfirmInputSchema,
+  avatarUploadInputSchema,
+  avatarUploadResponseSchema,
+  imageCropRectSchema
+} from "./profile.js";
 
 /**
  * Directed edge between two people. `parent_of`: from is a parent of to.
@@ -16,7 +32,13 @@ export const RelationshipKind = {
 export type RelationshipKind = (typeof RelationshipKind)[keyof typeof RelationshipKind];
 export const relationshipKindSchema = z.enum(RelationshipKind);
 
-export const FAMILY_TREE_MAX_DEPTH = 3;
+/** Generations the tree view walks in each direction (raised from 3 in WP-4.0 for great-great-grandparents). */
+export const FAMILY_TREE_MAX_DEPTH = 4;
+
+/** Max length of `people.birthplace` (also its CHECK). */
+export const PERSON_BIRTHPLACE_MAX_LENGTH = 120;
+/** Max length of `people.bio` (also its CHECK). */
+export const PERSON_BIO_MAX_LENGTH = 1000;
 
 /** A person in the tree. */
 export interface Person {
@@ -40,11 +62,26 @@ export interface Person {
   deathYear: number | null;
   deceased: boolean;
   /**
-   * Presigned avatar URL (from the linked profile; 256 px on `Person`, 64 px
-   * on `PersonSummary`) or `null`. `null` under the same unlisted rule as
-   * `userId`, and for other members when the account is disabled.
+   * Presigned photo URL (256 px on `Person`, 64 px on `PersonSummary`) or
+   * `null`. Until WP-4.3 it is the linked profile's avatar only; from WP-4.3
+   * it is the **resolved** photo: the linked account's own avatar wins, else
+   * the tree photo (`people.photo_key`). `null` under the same unlisted rule as
+   * `userId`, and for other members when the account is disabled (a tree
+   * photo of a person without an account has no such rule).
    */
   avatarUrl: string | null;
+  /**
+   * Full birth date `YYYY-MM-DD` (WP-4.0). Same visibility as `birthYear`
+   * (WP-4.1 widens "may see" to the viewer's own-family circle). Optional on
+   * the wire so responses from servers before WP-4.1 still parse.
+   */
+  birthDate?: string | null;
+  /** Full death date; only for deceased people. Optional on the wire (see `birthDate`). */
+  deathDate?: string | null;
+  /** Birthplace (≤ 120). Same visibility as `birthDate` for living people. Optional on the wire. */
+  birthplace?: string | null;
+  /** Short bio (≤ 1000), visible to verified members. Optional on the wire. */
+  bio?: string | null;
 }
 
 export const personSchema = z.object({
@@ -56,8 +93,70 @@ export const personSchema = z.object({
   birthYear: z.number().int().nullable(),
   deathYear: z.number().int().nullable(),
   deceased: z.boolean(),
-  avatarUrl: z.string().max(4096).nullable()
+  avatarUrl: z.string().max(4096).nullable(),
+  birthDate: dateSchema.nullable().exactOptional(),
+  deathDate: dateSchema.nullable().exactOptional(),
+  birthplace: z.string().max(PERSON_BIRTHPLACE_MAX_LENGTH).nullable().exactOptional(),
+  bio: z.string().max(PERSON_BIO_MAX_LENGTH).nullable().exactOptional()
 }) satisfies z.ZodType<Person>;
+
+/** Where {@link PersonDetails.photoUrl} comes from. */
+export const PersonPhotoSource = {
+  /** The linked account's own avatar (always wins). */
+  Avatar: "avatar",
+  /** The tree photo uploaded for this person (`people.photo_key`). */
+  Person: "person"
+} as const;
+export type PersonPhotoSource = (typeof PersonPhotoSource)[keyof typeof PersonPhotoSource];
+export const personPhotoSourceSchema = z.enum(PersonPhotoSource);
+
+/**
+ * One person's full card (`GET /api/family/people/:id/details`: the tree
+ * "Detalles" accordion and the person page; WP-4.1). Every {@link Person}
+ * field is present (dates and texts are `null` when hidden or empty).
+ */
+export interface PersonDetails extends Person {
+  birthDate: string | null;
+  deathDate: string | null;
+  birthplace: string | null;
+  bio: string | null;
+  /**
+   * Resolved photo at 512 px, server-side: the linked account's own avatar
+   * wins, else the person's tree photo, else `null`. Same visibility rules as
+   * `avatarUrl`.
+   */
+  photoUrl: string | null;
+  /** Which photo `photoUrl` is; `null` when there is none (or it is hidden). */
+  photoSource: PersonPhotoSource | null;
+  /**
+   * The person has an account. For other members it follows the unlisted
+   * rule of `userId` (`false` when the account is hidden from them).
+   */
+  isLinked: boolean;
+  /** The viewer may edit this person (admin, self, or own-family circle and not linked to another account). */
+  canEdit: boolean;
+  /** The viewer may upload or remove the tree photo (admins, close relatives, or the person themself; WP-4.3). */
+  canEditPhoto: boolean;
+  /**
+   * The linked account's visible contacts (`buildContactCard`, WP-4.4).
+   * Empty for people without an account, unlisted or disabled accounts, and
+   * when nothing is switched on.
+   */
+  contacts: ContactCard;
+}
+
+export const personDetailsSchema = personSchema.extend({
+  birthDate: dateSchema.nullable(),
+  deathDate: dateSchema.nullable(),
+  birthplace: z.string().max(PERSON_BIRTHPLACE_MAX_LENGTH).nullable(),
+  bio: z.string().max(PERSON_BIO_MAX_LENGTH).nullable(),
+  photoUrl: z.string().max(4096).nullable(),
+  photoSource: personPhotoSourceSchema.nullable(),
+  isLinked: z.boolean(),
+  canEdit: z.boolean(),
+  canEditPhoto: z.boolean(),
+  contacts: contactCardSchema
+}) satisfies z.ZodType<PersonDetails>;
 
 /** Lightweight node for rings and search results. */
 export type PersonSummary = Pick<Person, "id" | "userId" | "fullName" | "nickname" | "deceased" | "avatarUrl">;
@@ -146,6 +245,11 @@ export type PeopleQueryRequest = z.input<typeof peopleQuerySchema>;
 
 const yearValue = z.number().int().min(1800).max(2200);
 
+/** A full person date: `YYYY-MM-DD` whose year is in the same 1800–2200 range as the year columns. */
+const personDateValue = dateSchema.refine((value) => yearOf(value) >= 1800 && yearOf(value) <= 2200, {
+  error: "La fecha debe estar entre 1800 y 2200."
+});
+
 const personFields = {
   fullName: displayTextSchema(200),
   nickname: nullableDisplayTextSchema(80),
@@ -164,7 +268,11 @@ function yearsConsistent(value: { birthYear?: number | null | undefined; deathYe
 
 const yearsIssue = { error: "El año de fallecimiento no puede ser anterior al de nacimiento.", path: ["deathYear"] };
 
-/** `POST /api/admin/people`. */
+/**
+ * `POST /api/admin/people`.
+ * @deprecated WP-4.1 moves the admin form to {@link adminCreatePersonInputSchema}
+ * (dates, birthplace, bio, `relateTo`); kept until then so the current route compiles.
+ */
 export const createPersonInputSchema = z
   .object({
     ...personFields,
@@ -179,7 +287,13 @@ export const createPersonInputSchema = z
 export type CreatePersonInput = z.infer<typeof createPersonInputSchema>;
 export type CreatePersonRequest = z.input<typeof createPersonInputSchema>;
 
-/** `PATCH /api/admin/people/:id`. `userId` links/unlinks an account (unique). */
+/**
+ * `PATCH /api/admin/people/:id`. `userId` links/unlinks an account (unique).
+ * @deprecated WP-4.1 moves to {@link adminUpdatePersonInputSchema}. Once any
+ * row has a `birth_date`/`death_date`, a year patched through this schema can
+ * hit the migration-0004 CHECKs; the route must merge-check with
+ * {@link personDatesIssue} or be replaced.
+ */
 export const updatePersonInputSchema = z
   .object(personFields)
   .partial()
@@ -219,3 +333,432 @@ export const selfEditPersonInputSchema = z
   .refine((value) => Object.keys(value).length > 0, { error: "No hay cambios que guardar." });
 export type SelfEditPersonInput = z.infer<typeof selfEditPersonInputSchema>;
 export type SelfEditPersonRequest = z.input<typeof selfEditPersonInputSchema>;
+
+/* -------------------------------------------------------------------------- */
+/* WP-4.0: family editing by admins and members                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Stable reasons on family 403/409 errors (`error.details[0].code`, the open
+ * detail-code channel of ADR 0001 §4; `ErrorCode` itself stays closed).
+ */
+export const FamilyIssueCode = {
+  /** 403 `FORBIDDEN`: the target person is outside the member's own-family circle. */
+  NotInCircle: "FAMILY_NOT_IN_CIRCLE",
+  /**
+   * 403 `FORBIDDEN`: the person is linked to **another** account; only that
+   * member or an admin may edit them. Also 409 `CONFLICT` on an invite for a
+   * person that already has an account (WP-4.2).
+   */
+  PersonLinkedToOther: "PERSON_LINKED_TO_OTHER"
+} as const;
+export type FamilyIssueCode = (typeof FamilyIssueCode)[keyof typeof FamilyIssueCode];
+
+/**
+ * How a newly created person relates to an existing one (`relateTo.kind`),
+ * read as "the **new** person is … of `personId`". Stored as a
+ * {@link RelationshipKind} edge: `parent_of` → `new parent_of personId`,
+ * `child_of` → `personId parent_of new`, `partner_of` → one `partner_of` edge.
+ */
+export const RelateKind = {
+  ParentOf: "parent_of",
+  ChildOf: "child_of",
+  PartnerOf: "partner_of"
+} as const;
+export type RelateKind = (typeof RelateKind)[keyof typeof RelateKind];
+export const relateKindSchema = z.enum(RelateKind);
+
+/** The relationship created together with a new person (one transaction, same cycle/2-parent checks). */
+export const relateToSchema = z.strictObject({
+  personId: idSchema,
+  kind: relateKindSchema
+});
+export type RelateTo = z.infer<typeof relateToSchema>;
+
+/** Date and year fields of a person (any subset; `undefined` = not sent). */
+export interface PersonDateFields {
+  birthYear?: number | null | undefined;
+  deathYear?: number | null | undefined;
+  birthDate?: string | null | undefined;
+  deathDate?: string | null | undefined;
+  deceased?: boolean | undefined;
+}
+
+/** A person-date problem: the field to flag and a Spanish message. */
+export interface PersonDateIssue {
+  path: "birthYear" | "deathYear" | "birthDate" | "deathDate" | "deceased";
+  message: string;
+}
+
+/** Year of a `YYYY-MM-DD` date. */
+function yearOf(date: string): number {
+  return Number(date.slice(0, 4));
+}
+
+const YEAR_MISMATCH = {
+  birth: { path: "birthYear", message: "El año de nacimiento no coincide con la fecha." },
+  death: { path: "deathYear", message: "El año de fallecimiento no coincide con la fecha." }
+} as const satisfies Record<string, PersonDateIssue>;
+
+/**
+ * Checks the date/year rules on a **complete** row: a create after defaults,
+ * or the stored row merged with a PATCH (the server must do the latter
+ * before writing, to answer a Spanish 400 instead of a 500 from a CHECK).
+ * Mirrors the database:
+ *
+ * - a full date requires its year, and falls in it (`people_birth_date_year_check`,
+ *   `people_death_date_year_check`);
+ * - death not before birth, for years and dates (`people_years_order_check`,
+ *   `people_dates_order_check`);
+ * - a death year or date requires `deceased` (`people_death_implies_deceased_check`;
+ *   a death date always has its year, so the year check covers it).
+ *
+ * @param row - The merged values (missing = `null`, `deceased` missing = `false`).
+ * @returns The first problem, or `null` when consistent.
+ */
+export function personDatesIssue(row: PersonDateFields): PersonDateIssue | null {
+  const birthYear = row.birthYear ?? null;
+  const deathYear = row.deathYear ?? null;
+  const birthDate = row.birthDate ?? null;
+  const deathDate = row.deathDate ?? null;
+  if (birthDate !== null && birthYear !== yearOf(birthDate)) return YEAR_MISMATCH.birth;
+  if (deathDate !== null && deathYear !== yearOf(deathDate)) return YEAR_MISMATCH.death;
+  if (birthYear !== null && deathYear !== null && deathYear < birthYear) {
+    return { path: "deathYear", message: "El año de fallecimiento no puede ser anterior al de nacimiento." };
+  }
+  if (birthDate !== null && deathDate !== null && deathDate < birthDate) {
+    return { path: "deathDate", message: "La fecha de fallecimiento no puede ser anterior a la de nacimiento." };
+  }
+  if ((deathYear !== null || deathDate !== null) && row.deceased !== true) {
+    return { path: "deceased", message: "Marca «Ya falleció» para registrar el fallecimiento." };
+  }
+  return null;
+}
+
+/**
+ * Checks only the pairs a PATCH carries itself (the merged row is checked by
+ * the server with {@link personDatesIssue}). Runs after {@link deriveDateFields}.
+ */
+function patchDatesIssue(patch: PersonDateFields): PersonDateIssue | null {
+  if (typeof patch.birthDate === "string" && patch.birthYear !== undefined && patch.birthYear !== yearOf(patch.birthDate)) {
+    return YEAR_MISMATCH.birth;
+  }
+  if (typeof patch.deathDate === "string" && patch.deathYear !== undefined && patch.deathYear !== yearOf(patch.deathDate)) {
+    return YEAR_MISMATCH.death;
+  }
+  const pair = personDatesIssue({
+    birthYear: patch.birthYear ?? null,
+    deathYear: patch.deathYear ?? null,
+    birthDate: typeof patch.birthYear === "number" ? (patch.birthDate ?? null) : null,
+    deathDate: typeof patch.deathYear === "number" ? (patch.deathDate ?? null) : null,
+    deceased: patch.deceased !== false
+  });
+  return pair;
+}
+
+/** Fields derived from the sent ones, see {@link deriveDateFields}. */
+type DerivedDateFields = Pick<PersonDateFields, "birthYear" | "deathYear" | "deceased">;
+
+/**
+ * Date/year rule (WP-4.0 decision): **the year follows the date**. A full date
+ * sent without its year fills the year; when both are sent they must agree.
+ * A death year or date sent without `deceased` sets `deceased: true`. Only
+ * keys that are filled in appear in the result (a PATCH never gains keys
+ * it did not imply).
+ */
+function deriveDateFields(value: PersonDateFields): DerivedDateFields {
+  const derived: DerivedDateFields = {};
+  if (typeof value.birthDate === "string" && value.birthYear === undefined) derived.birthYear = yearOf(value.birthDate);
+  if (typeof value.deathDate === "string" && value.deathYear === undefined) derived.deathYear = yearOf(value.deathDate);
+  const dies = typeof (value.deathYear ?? derived.deathYear) === "number" || typeof value.deathDate === "string";
+  if (dies && value.deceased === undefined) derived.deceased = true;
+  return derived;
+}
+
+function toIssue(ctx: z.RefinementCtx, issue: PersonDateIssue | null): void {
+  if (issue !== null) ctx.addIssue({ code: "custom", path: [issue.path], message: issue.message });
+}
+
+/** Person fields shared by the WP-4 inputs (no defaults: a PATCH never resets omitted fields). */
+const personWriteFields = {
+  fullName: displayTextSchema(200),
+  nickname: nullableDisplayTextSchema(80),
+  familyBranch: nullableTextSchema(120),
+  birthYear: yearValue.nullable(),
+  deathYear: yearValue.nullable(),
+  birthDate: personDateValue.nullable(),
+  deathDate: personDateValue.nullable(),
+  birthplace: nullableDisplayTextSchema(PERSON_BIRTHPLACE_MAX_LENGTH),
+  bio: nullableTextSchema(PERSON_BIO_MAX_LENGTH),
+  deceased: z.boolean()
+};
+
+/** Create-only defaults; years and `deceased` default after derivation (see {@link completeCreate}). */
+const personCreateFields = {
+  ...personWriteFields,
+  nickname: nullableDisplayTextSchema(80).default(null),
+  familyBranch: nullableTextSchema(120).default(null),
+  birthYear: yearValue.nullable().optional(),
+  deathYear: yearValue.nullable().optional(),
+  birthDate: personDateValue.nullable().default(null),
+  deathDate: personDateValue.nullable().default(null),
+  birthplace: nullableDisplayTextSchema(PERSON_BIRTHPLACE_MAX_LENGTH).default(null),
+  bio: nullableTextSchema(PERSON_BIO_MAX_LENGTH).default(null),
+  deceased: z.boolean().optional()
+};
+
+/** A complete create row: years and `deceased` are always set. */
+interface CompletedDates {
+  birthYear: number | null;
+  deathYear: number | null;
+  deceased: boolean;
+}
+
+function completeCreate<TValue extends PersonDateFields>(value: TValue): Omit<TValue, keyof CompletedDates> & CompletedDates {
+  const derived = deriveDateFields(value);
+  return {
+    ...value,
+    birthYear: value.birthYear ?? derived.birthYear ?? null,
+    deathYear: value.deathYear ?? derived.deathYear ?? null,
+    deceased: value.deceased ?? derived.deceased ?? false
+  };
+}
+
+/**
+ * `POST /api/admin/family/people` (WP-4.1; supersedes `createPersonInputSchema`).
+ * Admins may create anyone, optionally linked to an account (`userId`) and
+ * optionally related to an existing person (`relateTo`, default `null`).
+ */
+export const adminCreatePersonInputSchema = z
+  .strictObject({
+    ...personCreateFields,
+    userId: idSchema.nullable().default(null),
+    relateTo: relateToSchema.nullable().default(null)
+  })
+  .transform(completeCreate)
+  .superRefine((value, ctx) => toIssue(ctx, personDatesIssue(value)));
+export type AdminCreatePersonInput = z.infer<typeof adminCreatePersonInputSchema>;
+export type AdminCreatePersonRequest = z.input<typeof adminCreatePersonInputSchema>;
+
+/**
+ * `POST /api/family/people` (WP-4.1): a member adds a relative. `relateTo` is
+ * **required** and its `personId` must be in the member's own-family circle
+ * (403 `FAMILY_NOT_IN_CIRCLE`). Members never link accounts: `userId` is not
+ * accepted (strict object → 400).
+ */
+export const memberCreatePersonInputSchema = z
+  .strictObject({
+    ...personCreateFields,
+    relateTo: relateToSchema
+  })
+  .transform(completeCreate)
+  .superRefine((value, ctx) => toIssue(ctx, personDatesIssue(value)));
+export type MemberCreatePersonInput = z.infer<typeof memberCreatePersonInputSchema>;
+export type MemberCreatePersonRequest = z.input<typeof memberCreatePersonInputSchema>;
+
+const noChanges = { error: "No hay cambios que guardar." };
+
+/**
+ * `PATCH /api/admin/family/people/:id` (WP-4.1; supersedes
+ * `updatePersonInputSchema`). Partial, no defaults. A date without its year
+ * fills the year; a death without `deceased` sets it. The server must then
+ * re-check the **merged** row with {@link personDatesIssue} (e.g. a new
+ * `birthYear` against a stored `birthDate`).
+ */
+export const adminUpdatePersonInputSchema = z
+  .strictObject({ ...personWriteFields, userId: idSchema.nullable() })
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, noChanges)
+  .transform((value) => ({ ...value, ...deriveDateFields(value) }))
+  .superRefine((value, ctx) => toIssue(ctx, patchDatesIssue(value)));
+export type AdminUpdatePersonInput = z.infer<typeof adminUpdatePersonInputSchema>;
+export type AdminUpdatePersonRequest = z.input<typeof adminUpdatePersonInputSchema>;
+
+/**
+ * `PATCH /api/family/people/:id` (WP-4.1): a member edits someone in their
+ * circle, or themself. Same rules as the admin patch, without `userId`
+ * (strict: 400). People linked to **another** account answer 403
+ * `PERSON_LINKED_TO_OTHER`.
+ */
+export const memberUpdatePersonInputSchema = z
+  .strictObject(personWriteFields)
+  .partial()
+  .refine((value) => Object.keys(value).length > 0, noChanges)
+  .transform((value) => ({ ...value, ...deriveDateFields(value) }))
+  .superRefine((value, ctx) => toIssue(ctx, patchDatesIssue(value)));
+export type MemberUpdatePersonInput = z.infer<typeof memberUpdatePersonInputSchema>;
+export type MemberUpdatePersonRequest = z.input<typeof memberUpdatePersonInputSchema>;
+
+/* -------------------------------------------------------------------------- */
+/* Revisions (admin-only undo history)                                         */
+/* -------------------------------------------------------------------------- */
+
+/** What a revision recorded (`person_revisions.action`, CHECK in migration 0004). */
+export const PersonRevisionAction = {
+  PersonCreate: "person.create",
+  PersonUpdate: "person.update",
+  PersonDelete: "person.delete",
+  RelationshipCreate: "relationship.create",
+  RelationshipDelete: "relationship.delete",
+  PersonPhoto: "person.photo",
+  PersonRevert: "person.revert"
+} as const;
+export type PersonRevisionAction = (typeof PersonRevisionAction)[keyof typeof PersonRevisionAction];
+export const personRevisionActionSchema = z.enum(PersonRevisionAction);
+
+/** Snapshot of a person's editable columns (`before`/`after` of person actions). */
+export interface PersonRevisionPersonSnapshot {
+  type: "person";
+  id: string;
+  userId: string | null;
+  fullName: string;
+  nickname: string | null;
+  familyBranch: string | null;
+  birthYear: number | null;
+  deathYear: number | null;
+  birthDate: string | null;
+  deathDate: string | null;
+  birthplace: string | null;
+  bio: string | null;
+  deceased: boolean;
+}
+
+/** Snapshot of a relationship (`after` of a create, `before` of a delete). */
+export interface PersonRevisionRelationshipSnapshot {
+  type: "relationship";
+  id: string;
+  kind: RelationshipKind;
+  fromPersonId: string;
+  toPersonId: string;
+}
+
+/**
+ * Snapshot of a photo change: only whether there was a photo and when.
+ * Object keys are never exposed, and replaced photo objects are deleted, so
+ * `person.photo` revisions are **not** revertible.
+ */
+export interface PersonRevisionPhotoSnapshot {
+  type: "photo";
+  id: string;
+  hasPhoto: boolean;
+  photoUpdatedAt: string | null;
+}
+
+/** `person_revisions.before`/`after` (jsonb), discriminated by `type`. */
+export type PersonRevisionSnapshot =
+  | PersonRevisionPersonSnapshot
+  | PersonRevisionRelationshipSnapshot
+  | PersonRevisionPhotoSnapshot;
+
+export const personRevisionSnapshotSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("person"),
+    id: idSchema,
+    userId: idSchema.nullable(),
+    fullName: z.string().max(200),
+    nickname: z.string().max(80).nullable(),
+    familyBranch: z.string().max(120).nullable(),
+    birthYear: z.number().int().nullable(),
+    deathYear: z.number().int().nullable(),
+    birthDate: dateSchema.nullable(),
+    deathDate: dateSchema.nullable(),
+    birthplace: z.string().max(PERSON_BIRTHPLACE_MAX_LENGTH).nullable(),
+    bio: z.string().max(PERSON_BIO_MAX_LENGTH).nullable(),
+    deceased: z.boolean()
+  }),
+  z.object({
+    type: z.literal("relationship"),
+    id: idSchema,
+    kind: relationshipKindSchema,
+    fromPersonId: idSchema,
+    toPersonId: idSchema
+  }),
+  z.object({
+    type: z.literal("photo"),
+    id: idSchema,
+    hasPhoto: z.boolean(),
+    photoUpdatedAt: dateTimeSchema.nullable()
+  })
+]) satisfies z.ZodType<PersonRevisionSnapshot>;
+
+/**
+ * One entry of the admin "Historial" (`GET /api/admin/family/revisions`).
+ * **Admin-only**: `before`/`after` hold PII (dates, birthplace, bio). Rows are
+ * kept one year (cleanup job, WP-4.1).
+ */
+export interface PersonRevision {
+  id: string;
+  /** `null` once the person is deleted (FK `ON DELETE SET NULL`); the snapshots keep the id. */
+  personId: string | null;
+  /** Set for `relationship.*` actions (no FK: the edge may be gone). */
+  relationshipId: string | null;
+  action: PersonRevisionAction;
+  /** Who made the change; `null` when the account was deleted. */
+  actor: { userId: string; displayName: string } | null;
+  before: PersonRevisionSnapshot | null;
+  after: PersonRevisionSnapshot | null;
+  /** The `person.revert` revision that undid this one, if any. */
+  revertedByRevisionId: string | null;
+  /** "Deshacer" is offered: not yet reverted, not a photo or revert action. The server re-checks on revert. */
+  revertible: boolean;
+  createdAt: string;
+}
+
+export const personRevisionSchema = z.object({
+  id: idSchema,
+  personId: idSchema.nullable(),
+  relationshipId: idSchema.nullable(),
+  action: personRevisionActionSchema,
+  actor: z.object({ userId: idSchema, displayName: z.string().max(80) }).nullable(),
+  before: personRevisionSnapshotSchema.nullable(),
+  after: personRevisionSnapshotSchema.nullable(),
+  revertedByRevisionId: idSchema.nullable(),
+  revertible: z.boolean(),
+  createdAt: dateTimeSchema
+}) satisfies z.ZodType<PersonRevision>;
+
+/** `GET /api/admin/family/revisions` query: newest first, optionally for one person. */
+export const personRevisionsQuerySchema = cursorQuerySchema.extend({
+  personId: idSchema.exactOptional()
+});
+export type PersonRevisionsQuery = z.infer<typeof personRevisionsQuerySchema>;
+export type PersonRevisionsQueryRequest = z.input<typeof personRevisionsQuerySchema>;
+
+/**
+ * `POST /api/admin/family/revisions/revert` ("Deshacer"): restores `before`
+ * (or removes/re-adds the relationship) in one transaction and records a
+ * `person.revert` revision that points back through `revertedByRevisionId`.
+ * 409 `CONFLICT` when it was already reverted or no longer applies.
+ */
+export const revertPersonRevisionInputSchema = z.strictObject({ revisionId: idSchema });
+export type RevertPersonRevisionInput = z.infer<typeof revertPersonRevisionInputSchema>;
+export type RevertPersonRevisionRequest = z.input<typeof revertPersonRevisionInputSchema>;
+
+/* -------------------------------------------------------------------------- */
+/* Person photos (WP-4.3)                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `POST /api/family/people/:id/photo/uploads`: same body and limits as the
+ * avatar upload intent (JPEG/PNG/WebP, ≤ 10 MB). The object key is generated
+ * server-side.
+ */
+export const personPhotoUploadInputSchema = avatarUploadInputSchema;
+export type PersonPhotoUploadInput = z.infer<typeof personPhotoUploadInputSchema>;
+export type PersonPhotoUploadRequest = z.input<typeof personPhotoUploadInputSchema>;
+
+/** Presigned PUT for a person photo (same shape as the avatar one). */
+export type PersonPhotoUploadResponse = AvatarUploadResponse;
+export const personPhotoUploadResponseSchema = avatarUploadResponseSchema;
+
+/**
+ * `POST /api/family/people/:id/photo/confirm`; responds with the updated
+ * {@link PersonDetails}. `crop` is optional: the web crops client-side and
+ * omits it. When sent, the server clamps it to the decoded image with
+ * `clampCropRect` before `extract()`, then resizes as for avatars.
+ */
+export const personPhotoConfirmInputSchema = avatarConfirmInputSchema.extend({
+  crop: imageCropRectSchema.exactOptional()
+});
+export type PersonPhotoConfirmInput = z.infer<typeof personPhotoConfirmInputSchema>;
+export type PersonPhotoConfirmRequest = z.input<typeof personPhotoConfirmInputSchema>;

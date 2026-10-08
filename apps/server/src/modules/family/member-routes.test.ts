@@ -210,14 +210,14 @@ describe("GET /api/family/tree", () => {
     expect(three.extended.relationships).toHaveLength(5);
   });
 
-  it("clamps the depth to 3 and rejects a depth below 1", async () => {
+  it("clamps the depth to 4 (FAMILY_TREE_MAX_DEPTH, WP-4.0) and rejects a depth below 1", async () => {
     const line = await insertLineage(6);
     const top = line[0];
     if (top === undefined) throw new Error("fixture");
     const clamped = await getTree(`?personId=${top.id}&depth=50`);
-    expect(clamped.depth).toBe(3);
+    expect(clamped.depth).toBe(4);
     expect(names(clamped.children)).toEqual(["Gen 1"]);
-    expect(names(clamped.extended.people)).toEqual(["Gen 2", "Gen 3"]);
+    expect(names(clamped.extended.people)).toEqual(["Gen 2", "Gen 3", "Gen 4"]);
 
     for (const depth of ["0", "-1", "1.5", "abc"]) {
       const response = await app.inject({ method: "GET", url: `/api/family/tree?personId=${top.id}&depth=${depth}`, ...memberAuth });

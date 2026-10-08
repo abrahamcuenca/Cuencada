@@ -143,6 +143,11 @@ Still open:
   - Option 2: HIBP range queries (k-anonymity) with a timeout that fails open.
   - It is on the pre-launch list in the cutover checklist.
 
+### WP-4.0 follow-ups
+- Backfill `profiles.phone` to E.164 with `normalizePhoneE164` (contract from WP-4.0); unreadable values stay as-is and are dropped from the `ContactCard` until fixed. Then add a CHECK. Supersedes the two T5 E.164 items above.
+- `person_revisions` 1-year retention job (WP-4.1).
+- Remove the deprecated `createPersonInputSchema`/`updatePersonInputSchema` once the admin form uses the WP-4 schemas (WP-4.1).
+
 ## Cutover checklist (WP-2.4–2.5)
 
 WP-2.4 prepared every item below; **the owner applies them** following
