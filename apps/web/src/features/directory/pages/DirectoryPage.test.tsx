@@ -7,7 +7,7 @@ import { createTestServer } from "../../../../test/msw";
 import { renderApp } from "../../../../test/renderApp";
 import { resetResendCooldown } from "../../auth/components/VerifyEmailBanner";
 import { DIRECTORY_PAGE_SIZE } from "../api";
-import { directoryHandlers, type FakeDirectoryDb, makeDirectoryDb, makeEntry, memberId } from "../testUtils";
+import { directoryHandlers, type FakeDirectoryDb, makeDirectoryDb, makeEntry, memberId, SAMPLE_CARD } from "../testUtils";
 
 const server = createTestServer();
 let db: FakeDirectoryDb;
@@ -327,5 +327,43 @@ describe("DirectoryPage detail", () => {
     renderApp(`/directorio/${memberId(99)}`, authenticatedState());
 
     expect(await screen.findByRole("heading", { name: "No encontramos a este familiar" })).toBeInTheDocument();
+  });
+});
+
+describe("DirectoryPage contacts (WP-4.4)", () => {
+  it("shows tappable contact chips under a member in the list, as separate links from the card", async () => {
+    db.entries = [makeEntry(6, { fullName: "Rosa Contactos Ejemplo", displayName: "Rosa", contacts: SAMPLE_CARD }), makeEntry(7, { contacts: [] })];
+    renderApp("/directorio", authenticatedState());
+
+    const card = await screen.findByRole("link", { name: /^Rosa Contactos Ejemplo/ });
+    expect(card).toHaveAttribute("href", `/directorio/${memberId(6)}`);
+    const chips = screen.getByRole("list", { name: "Contacto de Rosa Contactos Ejemplo" });
+    expect(within(chips).getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual([
+      "tel:+525550100101",
+      "https://wa.me/525550100101",
+      "https://instagram.com/rosa.ejemplo"
+    ]);
+    // A member with an empty card gets no chip row.
+    expect(screen.getAllByRole("list", { name: /^Contacto de/ })).toHaveLength(1);
+  });
+
+  it("lists every visible contact in the detail with the server's display text, and no legacy buttons", async () => {
+    db.entries = [makeEntry(8, { fullName: "Rosa Contactos Ejemplo", displayName: "Rosa", phone: "+525550100101", contacts: SAMPLE_CARD })];
+    renderApp(`/directorio/${memberId(8)}`, authenticatedState());
+
+    const card = await screen.findByRole("article", { name: "Rosa Contactos Ejemplo" });
+    const contacts = within(card).getByRole("list", { name: "Contacto de Rosa" });
+    expect(within(contacts).getAllByRole("link")).toHaveLength(3);
+    expect(within(contacts).getByRole("link", { name: /Instagram.*@rosa\.ejemplo/ })).toHaveAttribute("rel", "noopener noreferrer nofollow");
+    expect(within(card).queryByRole("link", { name: /Llamar al/ })).not.toBeInTheDocument();
+  });
+
+  it("says when the member shares no contact", async () => {
+    db.entries = [makeEntry(9, { fullName: "Sin Contacto Ejemplo", contacts: [] })];
+    renderApp(`/directorio/${memberId(9)}`, authenticatedState());
+
+    const card = await screen.findByRole("article", { name: "Sin Contacto Ejemplo" });
+    expect(within(card).getByText("No comparte datos de contacto.")).toBeInTheDocument();
+    expect(card.querySelector('a[href^="tel:"], a[href^="mailto:"], a[href^="https:"]')).toBeNull();
   });
 });
