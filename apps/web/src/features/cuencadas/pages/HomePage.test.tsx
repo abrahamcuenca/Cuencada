@@ -4,6 +4,7 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { apiUrl, authenticatedState, makeUser, statusState } from "../../../../test/auth";
 import { renderApp } from "../../../../test/renderApp";
+import { makeProfile } from "../../profile/testUtils";
 import {
   makeAnnouncedCuencada,
   makeAnnouncedHome,
@@ -18,7 +19,9 @@ const server = setupServer(
   http.get(apiUrl("/cuencadas/home"), () => HttpResponse.json(makeMemoriesHome())),
   http.get(apiUrl("/cuencadas"), () =>
     HttpResponse.json([makeSummary(), makeSummary({ id: fixtureId(2024), year: 2024, title: "Cuencada 2024", city: "Oaxaca" })])
-  )
+  ),
+  // WP-4.7: members' "Completa tu perfil" card reads the own profile.
+  http.get(apiUrl("/profile/me"), () => HttpResponse.json(makeProfile()))
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));

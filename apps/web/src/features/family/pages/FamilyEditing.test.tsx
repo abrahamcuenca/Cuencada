@@ -198,6 +198,29 @@ describe("editing my own linked node (PR #46 L2)", { timeout: 15_000 }, () => {
     const dialog = await screen.findByRole("dialog", { name: "Editar a Raúl Herrera Morales" });
     expect(within(dialog).getByLabelText(/Ya falleció/)).toBeInTheDocument();
   });
+
+  it("links my own node to the Contacto section of my profile, next to Editar mis datos (WP-4.7)", async () => {
+    const user = userEvent.setup();
+    const { router } = renderApp("/arbol", authenticatedState(me));
+    const heading = await focus(/^José Herrera Navarro/);
+    const card = heading.closest("article");
+    if (card === null) throw new Error("focus card");
+    await within(card).findByRole("button", { name: /Editar mis datos/ });
+
+    const link = within(card).getByRole("link", { name: /Editar mi contacto/ });
+    expect(link).toHaveAttribute("href", "/perfil#contacto");
+    await user.click(link);
+    await waitFor(() => expect(router.state.location.pathname).toBe("/perfil"));
+    expect(router.state.location.hash).toBe("#contacto");
+  });
+
+  it("has no Editar mi contacto on someone else's node", async () => {
+    db.flags.set(IDS.raul, { canEdit: true });
+    renderApp(`/arbol/${IDS.raul}`, authenticatedState(me));
+    await focus(/^Raúl Herrera Morales/);
+    await screen.findByRole("button", { name: "Editar" });
+    expect(screen.queryByRole("link", { name: /Editar mi contacto/ })).not.toBeInTheDocument();
+  });
 });
 
 describe("member delete", { timeout: 15_000 }, () => {

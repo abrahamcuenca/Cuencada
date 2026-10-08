@@ -76,7 +76,12 @@ function EntryRow({ entry, selected, isOwn }: { entry: DirectoryEntry; selected:
         <span className={styles.rowText}>
           <span className={styles.rowName}>
             {name}
-            {isOwn ? <span className={styles.youTag}> (tú)</span> : null}
+            {isOwn ? (
+              <>
+                {" "}
+                <span className={styles.youTag}>(tú)</span>
+              </>
+            ) : null}
           </span>
           {meta !== "" ? <span className={styles.rowMeta}>{meta}</span> : null}
         </span>

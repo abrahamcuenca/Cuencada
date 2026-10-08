@@ -7,6 +7,7 @@ import { createTestServer } from "../../../../test/msw";
 import { renderApp } from "../../../../test/renderApp";
 import { resetResendCooldown } from "../../auth/components/VerifyEmailBanner";
 import { DIRECTORY_PAGE_SIZE } from "../api";
+import { OWN_PROFILE_BANNER_TEXT } from "./DirectoryPage";
 import { directoryHandlers, type FakeDirectoryDb, makeDirectoryDb, makeEntry, memberId, SAMPLE_CARD } from "../testUtils";
 
 const server = createTestServer();
@@ -365,5 +366,41 @@ describe("DirectoryPage contacts (WP-4.4)", () => {
     const card = await screen.findByRole("article", { name: "Sin Contacto Ejemplo" });
     expect(within(card).getByText("No comparte datos de contacto.")).toBeInTheDocument();
     expect(card.querySelector('a[href^="tel:"], a[href^="mailto:"], a[href^="https:"]')).toBeNull();
+  });
+});
+
+describe("DirectoryPage own profile links (WP-4.7)", () => {
+  const me = makeUser();
+  const myEntry = (): ReturnType<typeof makeEntry> => ({ ...makeEntry(9, { fullName: "Prima Morales Ejemplo" }), userId: me.id });
+
+  it("shows an Editar mi perfil banner above the search", async () => {
+    renderApp("/directorio", authenticatedState(me));
+
+    await screen.findByRole("link", { name: /Rosa Elena Ejemplo/ });
+    expect(screen.getByText(OWN_PROFILE_BANNER_TEXT)).toBeInTheDocument();
+    expect(within(screen.getByRole("main")).getByRole("link", { name: /Editar mi perfil/ })).toHaveAttribute("href", "/perfil");
+  });
+
+  it("marks the member's own row with (tú) and no one else's", async () => {
+    db.entries = [...db.entries, myEntry()];
+    renderApp("/directorio", authenticatedState(me));
+
+    expect(await screen.findByRole("link", { name: /Prima Morales Ejemplo \(tú\)/ })).toHaveAttribute("href", `/directorio/${me.id}`);
+    expect(within(list()).getByRole("link", { name: /Rosa Elena Ejemplo/ })).not.toHaveTextContent("(tú)");
+  });
+
+  it("offers Editar mi perfil on the member's own card", async () => {
+    db.entries = [...db.entries, myEntry()];
+    renderApp(`/directorio/${me.id}`, authenticatedState(me));
+
+    const card = await screen.findByRole("article", { name: "Prima Morales Ejemplo" });
+    expect(within(card).getByRole("link", { name: /Editar mi perfil/ })).toHaveAttribute("href", "/perfil");
+  });
+
+  it("has no Editar mi perfil on someone else's card", async () => {
+    renderApp(`/directorio/${memberId(1)}`, authenticatedState(me));
+
+    const card = await screen.findByRole("article", { name: "Rosa Elena Ejemplo" });
+    expect(within(card).queryByRole("link", { name: /Editar mi perfil/ })).not.toBeInTheDocument();
   });
 });

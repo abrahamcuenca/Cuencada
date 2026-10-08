@@ -4,6 +4,7 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { apiUrl, authenticatedState, makeUser, statusState } from "../../../../test/auth";
 import { renderApp } from "../../../../test/renderApp";
+import { makeProfile } from "../../profile/testUtils";
 import { makeMemoriesHome } from "../testing/fixtures";
 import { MEMBER_TEASER_TEXT } from "./HomePage";
 
@@ -12,7 +13,9 @@ const server = setupServer(
   http.get(apiUrl("/cuencadas"), () => HttpResponse.json([])),
   // Members' extras on Home (announcements, gallery preview): empty answers are enough here.
   http.get(apiUrl("/announcements"), () => HttpResponse.json({ items: [], nextCursor: null })),
-  http.get(apiUrl("/cuencadas/2026/media"), () => HttpResponse.json({ items: [], nextCursor: null }))
+  http.get(apiUrl("/cuencadas/2026/media"), () => HttpResponse.json({ items: [], nextCursor: null })),
+  // WP-4.7: members' "Completa tu perfil" card reads the own profile.
+  http.get(apiUrl("/profile/me"), () => HttpResponse.json(makeProfile()))
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
