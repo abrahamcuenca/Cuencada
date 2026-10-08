@@ -93,7 +93,7 @@ test.describe("merge duplicate people", () => {
 
     // One Lucía left, with her parent and her partner.
     await page.goto("/admin/familia");
-    await page.getByRole("searchbox", { name: "Buscar persona" }).fill(`Lucía Arias`);
+    await page.getByRole("searchbox", { name: "Buscar persona" }).fill("Lucía Arias");
     const list = page.getByRole("region", { name: "Lista de personas" });
     await expect(list.getByRole("link", { name: new RegExp(names.treePerson) })).toHaveCount(1);
     await expect(list.getByRole("link", { name: new RegExp(names.typedName) })).toHaveCount(0);
@@ -123,7 +123,7 @@ test.describe("merge duplicate people", () => {
     await confirmUndo.getByRole("button", { name: "Deshacer" }).click();
     await expect(page.getByText("Deshicimos el cambio.")).toBeVisible();
     await page.goto("/admin/familia");
-    await page.getByRole("searchbox", { name: "Buscar persona" }).fill(`Lucía Arias`);
+    await page.getByRole("searchbox", { name: "Buscar persona" }).fill("Lucía Arias");
     await expect(list.getByRole("link", { name: new RegExp(names.typedName) })).toHaveCount(1);
     await phone.goto("/arbol");
     await expect(phone.getByRole("article", { name: names.typedName })).toBeVisible();

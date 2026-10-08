@@ -160,7 +160,7 @@ export function MergeSheet({ keepId, duplicateId, onClose, onSwap }: MergeSheetP
   );
 }
 
-function SideCard({ side, role, keep }: { side: PersonMergeSide; role: string; keep: boolean }): ReactNode {
+function SideCard({ side, label, keep }: { side: PersonMergeSide; label: string; keep: boolean }): ReactNode {
   const { person } = side;
   const facts = [
     side.accountName === null ? "Sin cuenta" : `Cuenta: ${side.accountName}`,
@@ -171,7 +171,7 @@ function SideCard({ side, role, keep }: { side: PersonMergeSide; role: string; k
     <div className={cx(styles.side, keep && styles.sideKeep)}>
       <AvatarCircle name={person.fullName} src={person.avatarUrl ?? undefined} size="md" decorative />
       <div className={styles.sideText}>
-        <span className={styles.sideRole}>{role}</span>
+        <span className={styles.sideRole}>{label}</span>
         <p className={styles.sideName}>{person.fullName}</p>
         <span className={styles.meta}>{facts.join(" · ")}</span>
       </div>
@@ -214,8 +214,8 @@ function MergePreviewBody({ preview, choices, datesIssue, serverError, onChoose,
   return (
     <div className={styles.body}>
       <div className={styles.sides}>
-        <SideCard side={keep} role="Se queda" keep />
-        <SideCard side={duplicate} role="Se quita" keep={false} />
+        <SideCard side={keep} label="Se queda" keep />
+        <SideCard side={duplicate} label="Se quita" keep={false} />
       </div>
       <Button variant="ghost" size="sm" onClick={onSwap}>
         Cambiar cuál se queda
