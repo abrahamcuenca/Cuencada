@@ -100,8 +100,8 @@ export function kindName(kind: RelationshipKind): string {
 /** Why a pair is listed under "Posibles duplicados". */
 export const DUPLICATE_REASON_LABELS: Record<DuplicateReason, string> = {
   same_name: "Mismo nombre",
-  similar_name: "Nombre parecido (un apellido de más)",
-  invite_fallback: "La invitación no se pudo vincular"
+  similar_name: "Nombre parecido",
+  invite_fallback: "Invitación sin vincular"
 };
 
 /**

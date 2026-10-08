@@ -71,7 +71,7 @@ export function FamilyActivityPage(): ReactNode {
   const duplicates = (
     <section aria-label="Posibles duplicados" className={styles.panel}>
       <p className={styles.muted}>
-        Personas que podrían ser la misma: mismo nombre y años compatibles, o una invitación que no se pudo vincular a su persona del árbol. Revisa cada
+        Personas que podrían ser la misma: mismo nombre (o con un apellido de más) y años compatibles, o una invitación que no se pudo vincular a su persona del árbol. Revisa cada
         par antes de fusionar.
       </p>
       <DuplicateList />

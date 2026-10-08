@@ -76,7 +76,7 @@ describe("Actividad del árbol · Posibles duplicados", { timeout: 20_000 }, () 
 
     const region = await screen.findByRole("region", { name: "Posibles duplicados" });
     const pair = await within(region).findByRole("listitem", { name: "Raúl Herrera Morales y Raúl Herrera M." });
-    expect(within(pair).getByText("Nombre parecido (un apellido de más)")).toBeInTheDocument();
+    expect(within(pair).getByText("Nombre parecido")).toBeInTheDocument();
     expect(within(pair).getByText(/n\. 1981 · Herrera Navarro · sin cuenta/)).toBeInTheDocument();
     await user.click(within(pair).getByRole("button", { name: "Revisar: Raúl Herrera Morales y Raúl Herrera M." }));
 
