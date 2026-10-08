@@ -17,6 +17,7 @@ import styles from "../admin.module.css";
 import { useDeletePersonMutation, usePurgePersonRevisionsMutation, useUpdatePersonMutation } from "../api";
 import { ADMIN_VERIFY_TITLE } from "./AdminFamilyPage";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { MergeWith } from "../components/MergeWith";
 import { PERSON_FORM_FIELDS, PersonForm, type PersonFormSubmit } from "../components/PersonForm";
 import { RelationshipManager } from "../components/RelationshipManager";
 import { RevisionFeed } from "../components/RevisionFeed";
@@ -115,6 +116,8 @@ function PersonEditor({ person }: { person: PersonDetails }): ReactNode {
         </h2>
         <RelationshipManager personId={person.id} personName={person.fullName} />
       </section>
+
+      <MergeWith person={person} />
 
       <section aria-labelledby="quitar-persona" className={styles.danger}>
         <h2 id="quitar-persona" className={styles.sectionTitle}>

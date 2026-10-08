@@ -15,7 +15,8 @@ export const REVISION_ACTION_LABELS: Record<PersonRevisionAction, string> = {
   "relationship.create": "Agregó un parentesco",
   "relationship.delete": "Quitó un parentesco",
   "person.photo": "Cambió la foto",
-  "person.revert": "Deshizo un cambio"
+  "person.revert": "Deshizo un cambio",
+  "person.merge": "Fusionó a dos personas"
 };
 
 /** Field labels for "Cambió: …" on edits. */
@@ -60,6 +61,10 @@ function kindLabel(snapshot: PersonRevisionSnapshot | null): string | null {
 /** One-line description of what a revision did. */
 export function revisionSummary(revision: PersonRevision): string {
   const label = REVISION_ACTION_LABELS[revision.action];
+  if (revision.before?.type === "merge") {
+    // WP-4.5: "Fusionó a dos personas: «duplicate» en «keep»".
+    return `${label}: «${revision.before.duplicate.fullName}» en «${revision.before.keep.fullName}»`;
+  }
   if (revision.action === "person.update") {
     const fields = changedFieldLabels(revision.before, revision.after);
     return fields.length === 0 ? label : `${label}: ${fields.join(", ")}`;

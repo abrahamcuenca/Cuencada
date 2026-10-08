@@ -14,6 +14,15 @@ const PAGE_SIZE = 20;
 /** Shown in the "Deshacer" confirmation: restored people and edges are recorded as the admin's (WP-4.1). */
 export const REVERT_PROVENANCE_NOTE = "Al deshacer, la persona y sus relaciones quedarán registradas como agregadas por un administrador.";
 
+/** Shown instead when undoing a merge (WP-4.5): the duplicate comes back as it was, provenance included. */
+export const REVERT_MERGE_NOTE =
+  "Al deshacer, las dos personas vuelven a quedar separadas, con sus datos, relaciones y cuenta como estaban antes de fusionarlas. Solo se puede si nadie las cambió después.";
+
+/** The note for the "Deshacer" confirmation of `revision`. */
+export function revertNote(revision: PersonRevision): string {
+  return revision.action === "person.merge" ? REVERT_MERGE_NOTE : REVERT_PROVENANCE_NOTE;
+}
+
 /** Which list to show. */
 export type RevisionSource =
   | { kind: "person"; personId: string }
@@ -74,7 +83,7 @@ export function RevisionFeed({ source, onFilterActor, emptyTitle }: RevisionFeed
       <ConfirmDialog
         open={confirming !== null}
         title="¿Deshacer este cambio?"
-        description={`${confirming === null ? "" : `«${revisionSummary(confirming)}». `}${REVERT_PROVENANCE_NOTE}`}
+        description={confirming === null ? "" : `«${revisionSummary(confirming)}». ${revertNote(confirming)}`}
         confirmLabel="Deshacer"
         busy={confirming !== null && revertingId === confirming.id}
         onConfirm={() => {

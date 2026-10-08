@@ -1,0 +1,218 @@
+/*
+ * "Fusionar personas" (WP-4.5). Mobile first: one column, stacked choices
+ * with 44px targets; side by side from 600px. `min-width` queries only.
+ */
+.body {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.sides {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.side {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.sideKeep {
+  border-color: var(--color-primary);
+}
+
+.sideText {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.sideRole {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sideName {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.section {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: var(--text-lg);
+}
+
+.field {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.legend {
+  padding: 0;
+  font-weight: var(--weight-semibold);
+}
+
+.choices {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.choice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-height: var(--tap-min);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.choice:has(input:checked) {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.choice:has(input:focus-visible) {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+.choice input {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin: 0.125rem 0 0;
+  accent-color: var(--color-primary);
+}
+
+.choiceText {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.choiceWho {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.choiceValue {
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.listItem {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--color-border-strong);
+  overflow-wrap: anywhere;
+}
+
+.conflict {
+  border-left-color: var(--color-danger);
+}
+
+.alert {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-md);
+  background: var(--color-danger-soft);
+  color: var(--color-text);
+}
+
+.alertTitle {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.facts {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pairs {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pair {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.pairPeople {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.pairActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+@media (min-width: 600px) {
+  /* Doubled class: wins over the Dialog's own width at the same breakpoint. */
+  .sheet.sheet {
+    width: min(720px, calc(100% - 2 * var(--space-8)));
+  }
+
+  .sides,
+  .choices,
+  .pairPeople {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
