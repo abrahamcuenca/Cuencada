@@ -177,12 +177,108 @@
     gap: var(--space-8);
   }
 
+  /* The photo spans both forms ("Tus datos" and "Contacto"), which stack on the right. */
   .identity {
     position: sticky;
     top: calc(var(--top-nav-height) + var(--space-4));
+    grid-row: 1 / span 2;
+  }
+
+  .contactForm {
+    grid-column: 2;
   }
 
   .saveBarDirty {
     bottom: var(--space-4);
   }
+}
+
+/* ------------------------------------------------------------ contacto --- */
+/* WP-4.4: the "Contacto" form (ContactSection). */
+
+.banner {
+  padding: var(--space-3) var(--space-4);
+  border-left: 4px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-soft);
+}
+
+.bannerTitle {
+  margin: 0;
+  font-weight: 700;
+}
+
+.bannerText {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm);
+}
+
+.contactCard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+
+.contactLabel {
+  margin: 0;
+  font-weight: 700;
+}
+
+.contactValue {
+  margin: 0;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.fieldError {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+.softWarning {
+  color: var(--color-accent-text);
+  font-weight: 600;
+}
+
+/* Phone: country picker + number; they stack on narrow screens. */
+.phoneRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.countryPicker {
+  flex: 1 1 11rem;
+  min-width: 0;
+}
+
+.phoneRow .phoneNumber {
+  flex: 1 1 9rem;
+  width: auto;
+  min-width: 0;
+}
+
+/* Handles: an inline "@" before the username. */
+.handleWrap {
+  position: relative;
+}
+
+.handlePrefix {
+  position: absolute;
+  top: 50%;
+  left: var(--space-4);
+  transform: translateY(-50%);
+  color: var(--color-text-muted);
+  font-size: max(16px, var(--text-md));
+  pointer-events: none;
+}
+
+.handleWrap .handleInput {
+  padding-left: calc(var(--space-4) + 1.25em);
 }

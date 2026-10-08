@@ -129,7 +129,7 @@ export function ContactSection({ profile }: ContactSectionProps): ReactNode {
   const site = websiteWarning(values.website);
 
   return (
-    <form ref={formRef} className={styles.form} noValidate onSubmit={onSubmit} aria-labelledby={titleId}>
+    <form ref={formRef} className={cx(styles.form, styles.contactForm)} noValidate onSubmit={onSubmit} aria-labelledby={titleId}>
       <h2 id={titleId} className={styles.sectionTitle}>
         Contacto
       </h2>
