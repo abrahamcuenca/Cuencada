@@ -108,6 +108,9 @@ function Editor({ detail }: { detail: AdminCuencadaDetail }): ReactNode {
         <h1 className={styles.pageTitle}>{cuencada.title}</h1>
         <Badge tone={cuencada.isPublished ? "success" : "neutral"}>{cuencada.isPublished ? "Publicada" : "Borrador"}</Badge>
       </div>
+      {cuencada.isHistorical === true ? (
+        <p className={styles.muted}>Cuencada anterior al portal: sin confirmaciones ni chat.</p>
+      ) : null}
       <div className={styles.publishRow}>
         <Switch
           label="Publicada"

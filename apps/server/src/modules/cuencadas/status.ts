@@ -40,6 +40,9 @@ export function localDateInZone(instant: Date, timeZone: string): string {
 /** The fields status depends on. Dates are both set or both `null` (DB CHECK). */
 export interface StatusInput {
   isPublished: boolean;
+  /** Before the portal existed (0007, WP-5.1). */
+  isHistorical: boolean;
+  year: number;
   startsAt: Date | null;
   endsAt: Date | null;
   timezone: string;
@@ -47,17 +50,26 @@ export interface StatusInput {
 
 /**
  * Status of an edition at `now`, by **calendar day in the edition's
- * timezone**: unpublished → `draft`; published without dates → `announced`;
- * today before the start day → `upcoming`; from the start day through the
- * end day (inclusive) → `active`; after the end day → `past`. So the whole
- * first and last days count as active, even when `startsAt` is in the evening.
+ * timezone**:
+ * 1. unpublished → `draft`;
+ * 2. historical (WP-5.1) → `past`, whatever its dates say: it happened before
+ *    the portal, so it never takes RSVPs or the Home hero;
+ * 3. published without dates → `past` when its `year` is before the current
+ *    year in its timezone (a past edition whose dates nobody remembers),
+ *    otherwise `announced`;
+ * 4. today before the start day → `upcoming`; from the start day through the
+ *    end day (inclusive) → `active`; after the end day → `past`. So the whole
+ *    first and last days count as active, even when `startsAt` is in the evening.
  *
- * @param edition - Publication flag, instants and IANA zone.
+ * @param edition - Publication and historical flags, year, instants and IANA zone.
  * @param now - Current instant (`app.clock.now()`).
  */
 export function computeCuencadaStatus(edition: StatusInput, now: Date): CuencadaStatus {
   if (!edition.isPublished) return CuencadaStatus.Draft;
-  if (edition.startsAt === null || edition.endsAt === null) return CuencadaStatus.Announced;
+  if (edition.isHistorical) return CuencadaStatus.Past;
+  if (edition.startsAt === null || edition.endsAt === null) {
+    return edition.year < localYearInZone(now, edition.timezone) ? CuencadaStatus.Past : CuencadaStatus.Announced;
+  }
   const today = localDateInZone(now, edition.timezone);
   const startDay = localDateInZone(edition.startsAt, edition.timezone);
   const endDay = localDateInZone(edition.endsAt, edition.timezone);
@@ -95,14 +107,33 @@ export interface HomeSelection<TEdition extends HomeCandidate> {
    * (no dates yet), else `null` (memories mode).
    */
   featured: TEdition | null;
-  /** The past edition that ended most recently, if any. */
+  /**
+   * The past edition that ended most recently, if any: by `endsAt`, and for an
+   * undated past edition by the end of its `year` (UTC), so newer years win.
+   */
   latestPast: TEdition | null;
 }
 
-/** Epoch ms of a date that the caller's status filter guarantees is set. */
+/** Epoch ms of a start date; `active`/`upcoming` editions always have one. */
 function time(value: Date | null): number {
-  // Only `active`/`upcoming`/`past` editions reach the sorts, and those have both dates.
   return value === null ? Number.POSITIVE_INFINITY : value.getTime();
+}
+
+/**
+ * Sort key of a past edition: its end instant, else (undated, WP-5.1) the last
+ * millisecond of its `year` in UTC. A dated edition that ended inside a later
+ * year still sorts after an undated earlier one.
+ */
+function pastEndKey(edition: Pick<HomeCandidate, "endsAt" | "year">): number {
+  return edition.endsAt === null ? Date.UTC(edition.year + 1, 0, 1) - 1 : edition.endsAt.getTime();
+}
+
+/**
+ * Newest-first comparator for past editions: by {@link pastEndKey}, then by
+ * `year` (descending) for a stable order on ties.
+ */
+export function comparePastNewestFirst(a: Pick<HomeCandidate, "endsAt" | "year">, b: Pick<HomeCandidate, "endsAt" | "year">): number {
+  return pastEndKey(b) - pastEndKey(a) || b.year - a.year;
 }
 
 /**
@@ -115,7 +146,9 @@ function time(value: Date | null): number {
  * 4. otherwise `memories` mode.
  *
  * `latestPast` is always the most recently ended past edition (Home links to
- * its memories in every mode). Drafts are ignored.
+ * its memories in every mode), undated past editions included (WP-5.1).
+ * Historical editions are always `past`, so they never compete for the hero.
+ * Drafts are ignored.
  *
  * @param editions - Published editions with their computed status.
  * @param now - Current instant (`app.clock.now()`), for "this year".
@@ -129,7 +162,7 @@ export function selectHome<TEdition extends HomeCandidate>(editions: readonly TE
     .sort((a, b) => a.year - b.year);
   const past = editions
     .filter((e) => e.status === CuencadaStatus.Past)
-    .sort((a, b) => time(b.endsAt) - time(a.endsAt));
+    .sort(comparePastNewestFirst);
 
   const latestPast = past[0] ?? null;
   const firstActive = active[0];

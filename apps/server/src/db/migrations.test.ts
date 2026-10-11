@@ -16,7 +16,8 @@ import { migrationsFolder } from "./migrate.js";
  * 0002: the same database is first taken 0000 → 0001, filled with rows in the
  * 0001 shape, then migrated to the latest version. Migration 0003: likewise
  * from 0002, migration 0004 from 0003, migration 0005 (data only) from
- * 0004, and migration 0006 (wider revision action CHECK) from 0005. The scratch database uses a
+ * 0004, migration 0006 (wider revision action CHECK) from 0005, and migration
+ * 0007 (historical editions) from 0006. The scratch database uses a
  * harness-style name so the global teardown also reclaims it.
  */
 
@@ -37,6 +38,7 @@ let upTo0002Folder: string;
 let upTo0003Folder: string;
 let upTo0004Folder: string;
 let upTo0005Folder: string;
+let upTo0006Folder: string;
 /** Number of migrations in the real journal (the "latest" version). */
 let latestCount: number;
 
@@ -83,6 +85,7 @@ beforeAll(async () => {
   upTo0003Folder = await migrationsUpTo(4);
   upTo0004Folder = await migrationsUpTo(5);
   upTo0005Folder = await migrationsUpTo(6);
+  upTo0006Folder = await migrationsUpTo(7);
   const journal = JSON.parse(await readFile(join(migrationsFolder, "meta", "_journal.json"), "utf8")) as Journal; // drizzle-kit's own file shape
   latestCount = journal.entries.length;
 });
@@ -109,6 +112,7 @@ afterAll(async () => {
   if (upTo0003Folder) await rm(upTo0003Folder, { recursive: true, force: true });
   if (upTo0004Folder) await rm(upTo0004Folder, { recursive: true, force: true });
   if (upTo0005Folder) await rm(upTo0005Folder, { recursive: true, force: true });
+  if (upTo0006Folder) await rm(upTo0006Folder, { recursive: true, force: true });
   await dropScratch();
 });
 
@@ -388,8 +392,9 @@ describe("migration 0003", () => {
     await migrate(drizzle(sql), { migrationsFolder });
     expect(await sql`select count(*)::int as count from drizzle.__drizzle_migrations`).toEqual([{ count: latestCount }]);
 
-    // Existing rows are byte-for-byte unchanged.
-    expect(await sql`select * from cuencadas order by year`).toEqual(before);
+    // Existing rows are byte-for-byte unchanged (columns added by later migrations aside).
+    const after = await sql`select * from cuencadas order by year`;
+    expect(after.map(({ is_historical: _laterColumn, ...rest }) => rest)).toEqual(before);
     expect(await sql`select status from cuencada_rsvps`).toEqual([{ status: "yes" }]);
 
     // An announced edition: no dates, no place, published.
@@ -839,5 +844,48 @@ describe("migration 0006 (person.merge revision action, expand-only)", () => {
     expect(
       await sql`select convalidated from pg_constraint where conname = 'person_revisions_action_check'`
     ).toEqual([{ convalidated: true }]);
+  });
+});
+
+describe("migration 0007 (historical editions, expand-only)", () => {
+  it("upgrades a seeded 0006 database: existing editions read is_historical = false, rows otherwise unchanged", async () => {
+    await migrate(drizzle(sql), { migrationsFolder: upTo0006Folder });
+    // Rows in the 0006 shape: a dated published edition with a chat room, an undated past one and a draft.
+    const dated = await insertId(sql`
+      insert into cuencadas (year, slug, title, starts_at, ends_at, city, state, description, is_published, first_published_at)
+      values (2025, '2025', 'Cuencada 2025', '2025-09-13T19:30:00-06:00', '2025-09-18T12:00:00-06:00',
+              'Ciudad Ficticia', 'Estado Ficticio', 'Reunión', true, '2025-01-15T12:00:00Z')
+      returning id
+    `);
+    await sql`insert into chat_rooms (kind, cuencada_id, title) values ('cuencada', ${dated}, 'Cuencada 2025')`;
+    await sql`
+      insert into cuencadas (year, slug, title, description, is_published, first_published_at)
+      values (2019, '2019', 'Cuencada 2019', 'Fechas desconocidas', true, now())
+    `;
+    await sql`insert into cuencadas (year, slug, title, description) values (2027, '2027', 'Cuencada 2027', 'Borrador')`;
+    expect(await sql`select column_name from information_schema.columns where table_name = 'cuencadas' and column_name = 'is_historical'`).toEqual([]);
+    const before = await sql`select * from cuencadas order by year`;
+
+    await migrate(drizzle(sql), { migrationsFolder });
+    expect(await sql`select count(*)::int as count from drizzle.__drizzle_migrations`).toEqual([{ count: latestCount }]);
+
+    // Every existing row is unchanged apart from the new column, which reads false.
+    const after = await sql`select * from cuencadas order by year`;
+    expect(after.map(({ is_historical: _flag, ...rest }) => rest)).toEqual(before);
+    expect(after.map((row) => row.is_historical)).toEqual([false, false, false]);
+    expect(await sql`select count(*)::int as count from chat_rooms where cuencada_id = ${dated}`).toEqual([{ count: 1 }]);
+
+    // The column is NOT NULL with a false default; 0006-era inserts (without the column) keep working.
+    expect(
+      await sql`select is_nullable, column_default from information_schema.columns where table_name = 'cuencadas' and column_name = 'is_historical'`
+    ).toEqual([{ is_nullable: "NO", column_default: "false" }]);
+    await sql`insert into cuencadas (year, slug, title, description) values (2018, '2018', 'Cuencada 2018', 'Sin bandera')`;
+    expect(await sql`select is_historical from cuencadas where year = 2018`).toEqual([{ is_historical: false }]);
+    await sql`
+      insert into cuencadas (year, slug, title, description, is_published, is_historical)
+      values (2017, '2017', 'Cuencada 2017', 'Antes del portal', true, true)
+    `;
+    expect(await sql`select is_historical from cuencadas where year = 2017`).toEqual([{ is_historical: true }]);
+    expect(await sqlState(sql`update cuencadas set is_historical = null where year = 2017`)).toBe("23502");
   });
 });

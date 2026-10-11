@@ -4,7 +4,14 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { apiUrl, authenticatedState, errorBody, makeUser, statusState } from "../../../../test/auth";
 import { renderApp, warmRoutes } from "../../../../test/renderApp";
-import { LINKS, makeAnnouncedCuencada, makeAnnouncement, makeMemberDetails, makePublicCuencada } from "../testing/fixtures";
+import {
+  LINKS,
+  makeAnnouncedCuencada,
+  makeAnnouncement,
+  makeHistoricalCuencada,
+  makeMemberDetails,
+  makePublicCuencada
+} from "../testing/fixtures";
 
 let memberRequests = 0;
 
@@ -221,5 +228,58 @@ describe("CuencadaYearPage", () => {
     expect(await within(familia).findByRole("heading", { level: 3, name: "No tienes acceso a la sección de la familia" })).toBeInTheDocument();
     expect(within(familia).queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Programa Cuencada 2026/ })).toBeInTheDocument();
+  });
+});
+
+describe("CuencadaYearPage for past editions (WP-5.1)", () => {
+  it("shows a historical edition with the before-the-portal note, its year as kicker and no empty sections", async () => {
+    server.use(http.get(apiUrl("/cuencadas/2019"), () => HttpResponse.json(makeHistoricalCuencada())));
+    renderApp("/cuencada/2019", statusState("anonymous"));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Cuencada 2019" })).toBeInTheDocument();
+    expect(screen.getByTestId("historical-note")).toHaveTextContent("Esta Cuencada ocurrió antes del portal.");
+    expect(screen.getByText("2019")).toBeInTheDocument();
+    expect(screen.queryByText(/por anunciar/i)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("pending-facts")).not.toBeInTheDocument();
+    expect(screen.queryByRole("timer")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Programa/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /¿Dónde estamos\?/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Ver programa" })).not.toBeInTheDocument();
+  });
+
+  it("hides the empty programa and places of a dated historical edition, but shows the ones with items", async () => {
+    server.use(
+      http.get(apiUrl("/cuencadas/2019"), () =>
+        HttpResponse.json(
+          makeHistoricalCuencada({
+            startsAt: "2019-09-10T06:00:00Z",
+            endsAt: "2019-09-16T05:59:00Z",
+            city: "Valladolid",
+            state: "Yucatán",
+            publicLocations: makePublicCuencada().publicLocations
+          })
+        )
+      )
+    );
+    renderApp("/cuencada/2019", statusState("anonymous"));
+
+    expect(await screen.findByTestId("historical-note")).toBeInTheDocument();
+    expect(screen.getByText(/Valladolid · Yucatán/)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /Programa/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /¿Dónde estamos\?/ })).toBeInTheDocument();
+  });
+
+  it("shows an undated past (non-historical) edition as history, not as Por anunciar", async () => {
+    server.use(
+      http.get(apiUrl("/cuencadas/2021"), () =>
+        HttpResponse.json(makeHistoricalCuencada({ year: 2021, slug: "2021", title: "Cuencada 2021", isHistorical: false, city: "Oaxaca" }))
+      )
+    );
+    renderApp("/cuencada/2021", statusState("anonymous"));
+
+    expect(await screen.findByText("La Cuencada 2021 en Oaxaca ya es parte de nuestra historia.")).toBeInTheDocument();
+    expect(screen.getByText("Oaxaca · 2021")).toBeInTheDocument();
+    expect(screen.queryByTestId("historical-note")).not.toBeInTheDocument();
+    expect(screen.queryByText(/por anunciar/i)).not.toBeInTheDocument();
   });
 });

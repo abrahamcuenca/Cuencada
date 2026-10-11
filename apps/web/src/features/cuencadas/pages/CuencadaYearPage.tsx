@@ -21,7 +21,17 @@ import { forecastUrl, WeatherWidget } from "../components/WeatherWidget";
 import styles from "../components/content.module.css";
 import { useNow } from "../hooks/useNow";
 import { useOnNewDay } from "../hooks/useZonedToday";
-import { countdownInstants, formatEditionDates, formatKicker, formatPlace, idFromHash, safeAssetUrl, TO_BE_ANNOUNCED } from "../lib/format";
+import {
+  BEFORE_PORTAL_NOTE,
+  countdownInstants,
+  formatEditionDates,
+  formatKicker,
+  formatPastKicker,
+  formatPlace,
+  idFromHash,
+  safeAssetUrl,
+  TO_BE_ANNOUNCED
+} from "../lib/format";
 
 /**
  * Parses the `:year` route param with the contract schema.
@@ -117,9 +127,14 @@ function CuencadaYearContent({ cuencada, members, stale, onRetry }: ContentProps
   const weatherUrl = cuencada.city === null ? null : forecastUrl(cuencada.weatherWidgetUrl);
   const songUrl = safeAssetUrl(cuencada.songUrl);
   // An announced edition (no dates yet) hides the programa and places until there is something in them.
+  // So does a historical one (WP-5.1): it was never organized here, so empty sections only add noise.
+  const historical = cuencada.isHistorical === true;
   const dated = hasDates(cuencada);
-  const showPrograma = dated || itinerary.length > 0;
-  const showLugares = dated || locations.length > 0;
+  const showEmptySections = dated && !historical;
+  const showPrograma = showEmptySections || itinerary.length > 0;
+  const showLugares = showEmptySections || locations.length > 0;
+  // A past edition without dates (forgotten, or before the portal) has nothing "por anunciar".
+  const undatedPast = !dated && cuencada.status === "past";
 
   const sectionLinks = [
     ...(showPrograma ? [{ id: "programa", label: "Programa" }] : []),
@@ -132,7 +147,7 @@ function CuencadaYearContent({ cuencada, members, stale, onRetry }: ContentProps
   return (
     <>
       <CuencadaHero
-        kicker={formatKicker(cuencada)}
+        kicker={undatedPast ? formatPastKicker(cuencada) : formatKicker(cuencada)}
         titleStyle="page"
         title={cuencada.title}
         lead={cuencada.description}
@@ -154,11 +169,20 @@ function CuencadaYearContent({ cuencada, members, stale, onRetry }: ContentProps
           ) : null
         }
       >
-        {hasDates(cuencada) ? (
+        {historical ? (
+          <p className={styles.pastNote} data-testid="historical-note">
+            {BEFORE_PORTAL_NOTE}.
+          </p>
+        ) : hasDates(cuencada) ? (
           <Countdown
             {...countdownInstants(cuencada.status, cuencada.startsAt, cuencada.endsAt, now)}
             pastMessage={`La Cuencada ${cuencada.year}${cuencada.city ? ` en ${cuencada.city}` : ""} ya es parte de nuestra historia. ¡Gracias por acompañarnos!`}
           />
+        ) : undatedPast ? (
+          <p className={styles.pastNote}>
+            La Cuencada {cuencada.year}
+            {cuencada.city ? ` en ${cuencada.city}` : ""} ya es parte de nuestra historia.
+          </p>
         ) : (
           <PendingFacts cuencada={cuencada} />
         )}
