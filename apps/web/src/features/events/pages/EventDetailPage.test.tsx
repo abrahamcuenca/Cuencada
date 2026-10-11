@@ -238,6 +238,50 @@ describe("EventDetailPage", { timeout: 20_000 }, () => {
     expect(db.log.some((line) => line.includes("/albums/"))).toBe(false);
   });
 
+  describe("admin chat access (Security M1 on #54)", () => {
+    function chatRoomSetup(): { roomId: string; chat: ReturnType<typeof makeChatDb> } {
+      const chat = makeChatDb();
+      const roomId = eventId(800);
+      chat.rooms = [];
+      chat.messages.set(roomId, [makeMessage(70, { roomId, sender: PEOPLE.tomas, body: "Mensaje a moderar" })]);
+      server.use(...chatHandlers(chat));
+      return { roomId, chat };
+    }
+
+    it("gives a non-participant admin a read-only, logged moderation view with delete and no socket", async () => {
+      const { roomId, chat } = chatRoomSetup();
+      putDetail(db, makeDetail({ visibility: "participants", hasChat: true, chatRoomId: roomId, viewerRole: null, canManage: true, canJoin: false, albums: [makeAlbum(1)] }));
+      const user = userEvent.setup();
+      renderApp(`${PATH}?vista=chat`, authenticatedState(makeUser({ role: "admin" })));
+
+      expect(await screen.findByRole("heading", { name: /Vista de moderación/ })).toBeInTheDocument();
+      expect(screen.getByText(/Esta consulta queda registrada/)).toBeInTheDocument();
+      expect(await screen.findByText("Mensaje a moderar")).toBeInTheDocument();
+      expect(chat.historyRequests.map((request) => request.roomId)).toContain(roomId);
+      expect(screen.queryByRole("textbox", { name: "Mensaje" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /Abrir en el chat/ })).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: /Opciones del mensaje de Tomás/ }));
+      await user.click(within(await screen.findByRole("dialog", { name: "Mensaje" })).getByRole("button", { name: "Eliminar" }));
+      await user.click(within(await screen.findByRole("alertdialog", { name: "¿Eliminar este mensaje?" })).getByRole("button", { name: "Eliminar" }));
+      await waitFor(() => expect(chat.deleted).toEqual([makeMessage(70).id]));
+      expect(await screen.findByText("Mensaje eliminado.")).toBeInTheDocument();
+      // No live connection: no ticket, no socket.
+      expect(chat.tickets).toEqual([]);
+      expect(FakeSocket.instances).toHaveLength(0);
+    });
+
+    it("gives an admin who participates the live conversation", async () => {
+      const { roomId, chat } = chatRoomSetup();
+      chat.rooms = [makeEventRoom({ id: roomId })];
+      putDetail(db, asOrganizer(makeDetail(), { chatRoomId: roomId }));
+      renderApp(`${PATH}?vista=chat`, authenticatedState(makeUser({ role: "admin" })));
+      expect(await screen.findByRole("textbox", { name: "Mensaje" })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: /Vista de moderación/ })).not.toBeInTheDocument();
+      await waitFor(() => expect(FakeSocket.instances.length).toBeGreaterThan(0));
+    });
+  });
+
   it("embeds the event chat, and reloads with a toast on room_removed", async () => {
     const chat = makeChatDb();
     const room = makeEventRoom({ id: eventId(800) });

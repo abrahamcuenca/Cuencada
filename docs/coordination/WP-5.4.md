@@ -63,6 +63,15 @@ Based on `origin/main` @ 484405d (WP-5.2 contracts). Built against the WP-5.2 co
   - all through `useRoomRemoved` (`chat/lib/useRoomRemoved.ts`)
 - **Chat tab:** it embeds `Conversation` (`embedded`: no back arrow, no "Ver evento") in a bounded card and opens the shared socket like `/chat`; "Abrir en el chat" goes full screen. Non-participants get "Apúntate para chatear" (or why there is no chat: draft, participants-only).
 
+### Admin moderation view of an event chat (Security M1 on #54)
+After #54's M1, an admin who is **not a participant** gets no event room in the chat list, no socket frames for it and cannot send; they may read the history through the audited REST endpoint and delete messages.
+- `usesModerationView(event, isAdmin)`: admin, `viewerRole === null`, `hasChat` and a `chatRoomId`.
+- `EventModerationChat` (Chat tab): "🛡️ Vista de moderación" with the note "No participas en este evento: ves el chat solo para moderarlo y no puedes escribir. Esta consulta queda registrada."
+- It shows the REST history (`GET /chat/rooms/:id/messages`, "Cargar anteriores" by cursor, "Actualizar") in the chat's own `MessageList`, and the message menu with delete only (`DELETE /chat/messages/:id`; a 404 tombstones it).
+- No composer, no socket or ticket, no read receipts, no "Abrir en el chat".
+- An admin who participates gets the live conversation like any participant.
+- Built behind MSW now; final integration once #54 merges (check that the history route's audit and the server's admin flags match).
+
 ### Consent notices (WP-5.3 contract)
 - The contract is copied shape for shape into `events/notices/contract.ts`: `EventNotice`, `EVENT_NOTICES_MAX`, and `parseEventNoticeList` standing in for `eventNoticeListSchema.parse` (the web has no direct zod dependency). It is not imported from WP-5.3's branch; when 5.3 merges, swap the imports and delete the file.
 - `GET /api/events/notices` (malformed items dropped, capped at 20); "Entendido" = `DELETE /api/events/:id/notice` (optimistic); "Salir" = `DELETE /api/events/:id/participants/me` (hidden when `canLeave` is false). Leaving invalidates the notice list.

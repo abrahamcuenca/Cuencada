@@ -383,6 +383,24 @@
   align-self: stretch;
 }
 
+/* Moderation view of an event chat (non-participant admins). */
+.moderationNote {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  align-self: stretch;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-soft);
+}
+
+.moderationFooter {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--space-1) var(--space-2);
+  border-top: 1px solid var(--color-border);
+}
+
 .photos {
   display: flex;
   flex-direction: column;
