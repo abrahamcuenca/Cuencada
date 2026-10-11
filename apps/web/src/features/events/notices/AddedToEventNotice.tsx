@@ -14,7 +14,7 @@ import { useLeaveEventMutation } from "../api";
 import styles from "../events.module.css";
 import { eventErrorMessage, eventPath } from "../lib/format";
 import { useDismissEventNoticeMutation, useListEventNoticesQuery } from "./api";
-import type { EventNotice } from "./contract";
+import type { EventNotice } from "@cuencada/types";
 
 /** Switch for the notices (on since WP-5.3's contract; WP-6 replaces them). */
 export const EVENT_NOTICES_AVAILABLE = true;

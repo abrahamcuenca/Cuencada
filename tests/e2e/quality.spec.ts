@@ -26,6 +26,8 @@ interface RouteCheck {
   open: string | ((page: Page) => Promise<void>);
   /** Heading that proves the page rendered its content (not an error state) before measuring. */
   ready?: string;
+  /** Match `ready` exactly (WP-5.4: "Eventos" must not match "No pudimos cargar los eventos"). */
+  readyExact?: true;
 }
 
 const PUBLIC_ROUTES: RouteCheck[] = [
@@ -55,8 +57,8 @@ const MEMBER_ROUTES: RouteCheck[] = [
   { name: "perfil", open: "/perfil" },
   { name: "sesiones", open: "/perfil/sesiones" },
   { name: "mas", open: "/mas" },
-  // WP-5.4: the events list (renders its heading even before WP-5.3's API is there).
-  { name: "eventos", open: "/eventos", ready: "Eventos" },
+  // WP-5.4: the events list.
+  { name: "eventos", open: "/eventos", ready: "Eventos", readyExact: true },
   // WP-4.7: the profile's Contacto section from a link, and the open account menu.
   { name: "perfil-contacto", open: "/perfil#contacto", ready: "Contacto" },
   {
@@ -83,7 +85,7 @@ const ADMIN_ROUTES: RouteCheck[] = [
   { name: "admin-duplicados", open: "/admin/familia/actividad?vista=duplicados", ready: "Actividad del árbol" },
   { name: "admin-cuencadas", open: "/admin/cuencadas" },
   // WP-5.4.
-  { name: "admin-eventos", open: "/admin/eventos", ready: "Eventos" },
+  { name: "admin-eventos", open: "/admin/eventos", ready: "Eventos", readyExact: true },
   // WP-5.1: the open "Agregar Cuencada anterior" form.
   {
     name: "admin-cuencada-anterior",
@@ -111,7 +113,9 @@ async function open(page: Page, route: RouteCheck): Promise<void> {
   await page.waitForLoadState("networkidle");
   // Let lazy routes, skeletons and fonts settle.
   await expect(page.locator("main")).toBeVisible();
-  if (route.ready !== undefined) await expect(page.getByRole("heading", { name: route.ready })).toBeVisible();
+  if (route.ready !== undefined) {
+    await expect(page.getByRole("heading", { name: route.ready, exact: route.readyExact === true })).toBeVisible();
+  }
   await page.waitForTimeout(400);
 }
 
@@ -271,8 +275,6 @@ test.describe("mobile quality gates", () => {
   });
 
   test("the event pages (WP-5.4): create sheet, event page and its tabs", async ({ page }, testInfo) => {
-    // Needs the events API (WP-5.3) to create an event; drop the fixme once it is merged.
-    test.fixme(true, "WP-5.3 (events server) is not merged yet");
     test.setTimeout(180_000);
     await recordTransientOverflow(page.context());
     await login(page, castMember(ProjectKey.Iphone, CastRole.Fede));

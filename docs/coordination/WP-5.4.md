@@ -1,7 +1,7 @@
 # WP-5.4 Events web ("Eventos")
 Owner: Senior JS frontend + UI/UX · Branch: `wp/5.4-eventos-web` · PR: (not opened)
 
-Based on `origin/main` @ 484405d (WP-5.2 contracts). Built against the WP-5.2 contracts (`packages/types/src/events.ts`, route list in `docs/coordination/WP-5.2.md`) and WP-5.3's notice contract, with MSW mocks; the server (WP-5.3) lands in parallel. ADR 0001 §7 WP-5.4 requirements: all met (see "Security").
+Based on `origin/main` @ 484405d (WP-5.2 contracts), built against the contracts with MSW mocks, then integrated with WP-5.3 (#54, merged as 7f402ee): `origin/main` merged into this branch, the notice contract imported from `@cuencada/types`, and the e2e journey and gates enabled against the real server. ADR 0001 §7 WP-5.4 requirements: all met (see "Security").
 
 ## What shipped
 ### Pages (all lazy)
@@ -73,10 +73,22 @@ After #54's M1, an admin who is **not a participant** gets no event room in the 
 - Built behind MSW now; final integration once #54 merges (check that the history route's audit and the server's admin flags match).
 
 ### Consent notices (WP-5.3 contract)
-- The contract is copied shape for shape into `events/notices/contract.ts`: `EventNotice`, `EVENT_NOTICES_MAX`, and `parseEventNoticeList` standing in for `eventNoticeListSchema.parse` (the web has no direct zod dependency). It is not imported from WP-5.3's branch; when 5.3 merges, swap the imports and delete the file.
+- `EventNotice`, `eventNoticeSchema` and `EVENT_NOTICES_MAX` come from `@cuencada/types` (WP-5.3). `parseEventNotices` validates item by item, so a malformed notice is dropped without hiding the others, capped at 20.
 - `GET /api/events/notices` (malformed items dropped, capped at 20); "Entendido" = `DELETE /api/events/:id/notice` (optimistic); "Salir" = `DELETE /api/events/:id/participants/me` (hidden when `canLeave` is false). Leaving invalidates the notice list.
-- The copy reads "Rosa te agregó (como organizador) a «…». Puedes salir cuando quieras."; without a name, "Te agregaron a «…»."
+- The copy reads "Rosa te agregó (como organizador) a «…». Puedes salir cuando quieras."; without a name, "Te agregaron a «…»." It fits both visibilities: WP-5.3 also creates notices for `members` events, so neither the notice nor the visibility help text ties the notice to "Solo participantes" (the participants-only help no longer says "Les avisaremos"; the picker's consent note says it once for both).
 - `EVENT_NOTICES_AVAILABLE = true`. It is isolated in `notices/` (its own API slice, its own component) for WP-6's notifications bell to replace.
+
+## Integration with WP-5.3 (#54) and the Tech Lead's review
+- **Merge:** `origin/main` @ 7f402ee merged (no conflicts). `events/notices/contract.ts` deleted; imports from `@cuencada/types`.
+- **Moderation view checked against the server:** a non-participant admin's `EventDetail` keeps `hasChat`/`chatRoomId` (WP-5.3 review response M1), and `GET /chat/rooms/:id/messages` resolves the room through `findModerationRoom` and audits `event.admin_viewed` (`surface: chat`) before answering; deletes go through the audited moderation delete.
+- **Status codes:** album upload intent 201 (fixture and a test through `createAlbumUpload`), event delete and leave 204 (void mutations).
+- **Removing or demoting yourself:** the write succeeds but the follow-up detail answers 404 when you can no longer see the event (participants-only, or a draft). The people sheet treats that as "you left": an info toast "Ya no participas en {evento}." and `/eventos`, never an error. Leaving a participants-only event or a draft from the page also goes to `/eventos`.
+- **Adding participants:** the server answers one generic 400 for any ineligible id (no oracle on hidden accounts), so the sheet shows one general message, `ADD_PARTICIPANTS_FAILED` ("No pudimos agregar a esas personas. Revisa que sigan en el directorio familiar e inténtalo de nuevo."), not per-person errors.
+- **e2e (blocking review items):**
+  - `nav.spec.ts` 11b/11c: `MEMBER_TOP` includes "Eventos" at 1280; `assertEventsBreakpoint` checks both sides of 1000 px (999: not in the TopNav, in the account menu; 1000: in the TopNav, not in the menu); `linkLabels` skips CSS-hidden links; phones check Más → Eventos.
+  - `quality.spec.ts`: `readyExact` for the "Eventos" headings (it also matched "No pudimos cargar los eventos").
+  - `events.spec.ts` and the event-page gate run (no `fixme`).
+- **Screenshots:** trimmed to the key 375 + 1280 set (the byte-identical `detalle-organizacion-*` and the extras are gone).
 
 ## Decisions
 1. **Nav fit: "Eventos" in the TopNav from 1000 px.**
@@ -84,7 +96,7 @@ After #54's M1, an admin who is **not a participant** gets no event room in the 
    - The new `NavItem.wideOnly` hides it below 1000 px (CSS) and `TOP_NAV_WIDE_MIN_PX` exports the threshold.
    - Below 1000 px the account menu lists "Eventos" after "Sesiones y seguridad", using the new `shared/lib/useMediaQuery` hook (rendered, not CSS-hidden, so the menu's arrow keys never land on a hidden entry).
    - Phones also have Más → Eventos. The BottomNav is unchanged.
-   - Screenshots: `nav-900`, `nav-menu-900`, `nav-999`, `nav-1000`, `lista-1280`.
+   - Verified at 900, 999 and 1000 px when the decision was taken; `nav.spec.ts` now asserts both sides of the breakpoint.
 2. **One `Event` cache tag** (`LIST`, `ADMIN-LIST`, `NOTICES`, one per event id), added to `API_TAG_TYPES`. Writes invalidate rather than hand-patch; participation and visibility writes also refresh the chat room list.
 3. **The 404 parity is enforced in one place** (`EventNotFound`, `EVENT_NOT_FOUND_TITLE`/`TEXT`):
    - a malformed address (`eventPathParamsSchema` fails: no request at all), a 400, a missing event and an invisible one render byte-identical pages
@@ -107,30 +119,22 @@ After #54's M1, an admin who is **not a participant** gets no event room in the 
   - `EventsPage`: cards, tabs/filters in the URL, Cargar más, empty state, create with the slug copy and no slug in the body, admin slug and endpoint
   - `EventDetailPage`: 404 parity, hero/participants "+N", Por anunciar, join/leave, the last-organizer note, member vs organizer vs admin controls (edit PATCH, admin slug PATCH → navigation, hide), the picker (consent copy, directory only, body), the last-organizer guard, the album 409 message, the Fotos album picker and grid, non-participant prompts, the embedded chat and `room_removed`
   - `AdminEventsPage`: list, filter, hide/unhide/delete, the Panel entry
-  - `HomeEvents`: the strip (max 3, hidden when empty), notices (copy, Entendido, Salir, `canLeave`), Más → Eventos, `parseEventNoticeList`
+  - `HomeEvents`: the strip (max 3, hidden when empty), notices (copy, Entendido, Salir, `canLeave`), Más → Eventos, `parseEventNotices`
 - **Chat:** `ChatPage.events.test.tsx` (icon/title, "Ver evento", `room_removed` closes the open room, clears the cache and toasts; another open room stays).
 - **Cropper:** 16:9 cases in `cropMath.test.ts`, `cropCore.test.ts` and `ImageCropper.test.tsx`; the square tests are unchanged and green.
 - **Nav:** `AccountMenu.test.tsx` (Eventos below 1000 px, dropped from 1000 px) and `AppLayout.test.tsx`.
-- **e2e:** `tests/e2e/events.spec.ts` covers the plan's combined pass: the participants-only trip with two relatives, the notice, chat, an album upload, a non-participant's list and 404s, the admin, and "Me apunto" on an all-members event. **`test.fixme` until WP-5.3 is merged:** flip `EVENTS_SERVER_PENDING`.
+- **e2e:** `tests/e2e/events.spec.ts` covers the plan's combined pass: the participants-only trip with two relatives, the notice, chat, an album upload, a non-participant's list and 404s, the admin, and "Me apunto" on an all-members event.
 - **Quality gates (`quality.spec.ts`, 320/375 + axe):**
-  - `eventos` (member) and `admin-eventos` (admin) run now; they render their headings even before WP-5.3
-  - "the event pages (WP-5.4)" (detail, chat and fotos tabs, the create sheet, the 404 screen) is `test.fixme` until WP-5.3, because it creates an event through the API
+  - `eventos` (member) and `admin-eventos` (admin), with exact heading matches
+  - "the event pages (WP-5.4)": detail, chat and fotos tabs, the create sheet and the 404 screen of an event created through the UI
 
 ## Screenshots
-`docs/ux/screenshots/eventos/`, 375 (2x) and 1280:
-- `lista`, `detalle`, `detalle-organizacion`, `participantes`, `chat`, `fotos`
-- `crear`, `crear-admin`, `agregar-personas`, `portada-recorte`
-- `no-encontrado`, `home`, `salas-chat`, `admin`, `mas`
-- also `lista-320`, `detalle-320`, and the nav fit at 900/999/1000 (`nav-*`, `nav-menu-900`)
+`docs/ux/screenshots/eventos/`, the key shots only, 375 (2x) and 1280: `lista`, `detalle`, `chat`, `fotos`, `crear`, `agregar-personas`, `portada-recorte`, `no-encontrado`, `home`, `admin`.
 
-They were taken with headless Chromium against the Vite dev server with `/api/**` stubbed by `page.route` and the socket by `page.routeWebSocket`; data is fictional and covers are generated SVGs. Horizontal overflow was 0 px on every shot.
+Taken with headless Chromium against the Vite dev server, `/api/**` stubbed by `page.route` and the socket by `page.routeWebSocket` (fictional data, generated SVG covers); 0 px horizontal overflow on every shot.
 
 ## Bundle
 Initial JS: **180.57 kB gzip** (budget 190). The events pages, the Home strip and notices (`HomeEvents`, about 0.6 kB plus the shared events chunks), the admin page and the cropper are all lazy chunks.
 
 ## Follow-ups
-- When WP-5.3 merges:
-  - flip `EVENTS_SERVER_PENDING` in `events.spec.ts` and remove the `test.fixme` in the quality gate
-  - replace `notices/contract.ts` with the `@cuencada/types` exports
-  - run `pnpm e2e`
 - WP-6: replace `notices/` with the notifications bell.

@@ -6,15 +6,11 @@
  * - an admin opens it;
  * - an all-members event: "Me apunto" → its chat room appears.
  *
- * `test.fixme` until WP-5.3 (the events server) is on main: written against
- * the WP-5.2 contracts and the WP-5.3 notice contract. Fictional data only.
+ * Runs against the WP-5.3 server (merged with #54). Fictional data only.
  */
 import type { Page } from "@playwright/test";
 import { CastRole, docShot, expect, login, setControl, test } from "./support/fixtures.js";
 import { generateJpeg } from "./support/images.js";
-
-/** Flip to `false` once WP-5.3 is merged (the events routes exist in the harness API). */
-const EVENTS_SERVER_PENDING = true;
 
 async function createEvent(page: Page, title: string, visibility: "Todos los miembros" | "Solo participantes"): Promise<string> {
   await page.goto("/eventos");
@@ -32,8 +28,6 @@ async function createEvent(page: Page, title: string, visibility: "Todos los mie
 }
 
 test.describe("eventos", () => {
-  test.fixme(EVENTS_SERVER_PENDING, "WP-5.3 (events server) is not merged yet");
-
   test("5.4 · a participants-only trip: add relatives, notice, chat, album; hidden from others; admin can open it @desktop", async ({
     page,
     cast,

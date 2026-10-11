@@ -6,7 +6,8 @@
  */
 import type { DirectoryEntry, EventDetail, EventParticipant } from "@cuencada/types";
 import { type ReactNode, useId, useMemo, useState } from "react";
-import { isAbortError } from "../../../shared/api/errors";
+import { useNavigate } from "react-router-dom";
+import { isAbortError, isFetchBaseQueryError } from "../../../shared/api/errors";
 import { AvatarCircle } from "../../../shared/ui/AvatarCircle";
 import { Badge } from "../../../shared/ui/Badge";
 import { Button } from "../../../shared/ui/Button";
@@ -20,7 +21,7 @@ import { useListDirectoryInfiniteQuery } from "../../directory/api";
 import { useDebouncedValue } from "../../directory/lib/useDebouncedValue";
 import { useAddParticipantsMutation, useRemoveParticipantMutation, useUpdateParticipantMutation } from "../api";
 import styles from "../events.module.css";
-import { eventErrorMessage, PARTICIPANT_CONSENT_NOTE } from "../lib/format";
+import { ADD_PARTICIPANTS_FAILED, eventErrorMessage, PARTICIPANT_CONSENT_NOTE } from "../lib/format";
 
 /** Participants shown before "+N". */
 export const PARTICIPANTS_PREVIEW = 8;
@@ -130,7 +131,11 @@ function AddParticipants({ event }: { event: EventDetail }): ReactNode {
         setSelected(new Map());
       })
       .catch((cause: unknown) => {
-        if (!isAbortError(cause)) toast.show({ message: eventErrorMessage(cause), tone: "danger" });
+        if (isAbortError(cause)) return;
+        // [SEC] The server answers one generic 400 for any ineligible id (no oracle on hidden
+        // accounts), so there is nothing per person to show: say it once, plainly.
+        const generic = isFetchBaseQueryError(cause) && cause.status === 400;
+        toast.show({ message: generic ? ADD_PARTICIPANTS_FAILED : eventErrorMessage(cause), tone: "danger" });
       });
   };
 
@@ -181,16 +186,32 @@ function AddParticipants({ event }: { event: EventDetail }): ReactNode {
   );
 }
 
+/**
+ * True when a write about yourself answered 404: you removed or demoted
+ * yourself out of an event you can no longer see (a participants-only event,
+ * or a draft). That is "you left", not an error (WP-5.3).
+ */
+function leftByOwnChange(participant: EventParticipant, cause: unknown): boolean {
+  return participant.isSelf && isFetchBaseQueryError(cause) && cause.status === 404;
+}
+
 function ManageList({ event }: { event: EventDetail }): ReactNode {
   const toast = useToast();
+  const navigate = useNavigate();
   const [updateRole, roleState] = useUpdateParticipantMutation();
   const [remove, removeState] = useRemoveParticipantMutation();
   const [removing, setRemoving] = useState<EventParticipant | null>(null);
   const organizers = event.participants.filter((p) => p.role === "organizer").length;
   const busy = roleState.isLoading || removeState.isLoading;
 
-  const fail = (cause: unknown): void => {
-    if (!isAbortError(cause)) toast.show({ message: eventErrorMessage(cause), tone: "danger" });
+  const fail = (cause: unknown, participant: EventParticipant): void => {
+    if (isAbortError(cause)) return;
+    if (leftByOwnChange(participant, cause)) {
+      toast.show({ message: `Ya no participas en ${event.title}.`, tone: "info" });
+      navigate("/eventos", { replace: true });
+      return;
+    }
+    toast.show({ message: eventErrorMessage(cause), tone: "danger" });
   };
 
   const onRole = (participant: EventParticipant): void => {
@@ -199,7 +220,7 @@ function ManageList({ event }: { event: EventDetail }): ReactNode {
     updateRole({ id: event.id, userId: participant.userId, role })
       .unwrap()
       .then(() => toast.show({ message: role === "organizer" ? `${participant.displayName} ahora organiza.` : `${participant.displayName} ya no organiza.`, tone: "success" }))
-      .catch(fail);
+      .catch((cause: unknown) => fail(cause, participant));
   };
 
   const onRemove = (): void => {
@@ -213,7 +234,7 @@ function ManageList({ event }: { event: EventDetail }): ReactNode {
       })
       .catch((cause: unknown) => {
         setRemoving(null);
-        fail(cause);
+        fail(cause, target);
       });
   };
 

@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { authenticatedState } from "../../../../test/auth";
 import { createTestServer } from "../../../../test/msw";
 import { renderApp, warmRoutes } from "../../../../test/renderApp";
-import { parseEventNoticeList } from "../notices/contract";
+import { parseEventNotices } from "../notices/api";
 import { addedToEventText } from "../notices/AddedToEventNotice";
 import { type EventsDb, eventId, eventsHandlers, makeEventsDb, makeSummary } from "../testing/fixtures";
 
@@ -78,13 +78,13 @@ describe("Home events (WP-5.4)", { timeout: 20_000 }, () => {
   });
 });
 
-describe("parseEventNoticeList", () => {
+describe("parseEventNotices", () => {
   it("keeps valid notices, drops malformed ones and caps the list at 20", () => {
     const raw = { items: [notice(1), { ...notice(2), canLeave: "sí" }, { ...notice(3), event: { id: "nope" } }, ...Array.from({ length: 25 }, (_, i) => notice(10 + i))] };
-    const parsed = parseEventNoticeList(raw);
-    expect(parsed.items[0]?.event.title).toBe("Viaje 1");
-    expect(parsed.items).toHaveLength(18);
-    expect(parseEventNoticeList(null)).toEqual({ items: [] });
+    const parsed = parseEventNotices(raw);
+    expect(parsed[0]?.event.title).toBe("Viaje 1");
+    expect(parsed).toHaveLength(18);
+    expect(parseEventNotices(null)).toEqual([]);
   });
 
   it("words a notice without the adder's name", () => {

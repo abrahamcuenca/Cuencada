@@ -17,6 +17,8 @@ export const EVENT_NOT_FOUND_TEXT = "Revisa la dirección o busca el evento en l
 export const SLUG_CODE_NOTE = "la dirección lleva un código corto";
 /** Consent copy of the participants picker (ADR 0001 §7, WP-5.4). */
 export const PARTICIPANT_CONSENT_NOTE = "Les avisaremos y podrán salir cuando quieran.";
+/** Adding participants failed with the server's generic 400 (any ineligible person; no per-person detail by design). */
+export const ADD_PARTICIPANTS_FAILED = "No pudimos agregar a esas personas. Revisa que sigan en el directorio familiar e inténtalo de nuevo.";
 /** Shown to the last organizer instead of "Salir del evento". */
 export const LAST_ORGANIZER_NOTE = "Eres la única persona que organiza. Para salir, nombra antes a alguien más como organizador.";
 

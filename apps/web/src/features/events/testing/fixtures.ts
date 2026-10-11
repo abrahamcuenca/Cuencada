@@ -6,7 +6,7 @@
 import type { EventAlbum, EventDetail, EventParticipant, EventSummary, MediaItem } from "@cuencada/types";
 import { HttpResponse, http, type HttpHandler } from "msw";
 import { apiUrl, errorBody } from "../../../../test/auth";
-import type { EventNotice } from "../notices/contract";
+import type { EventNotice } from "@cuencada/types";
 
 /** A v4-shaped UUID for fixture `n` (namespace 7 = events). */
 export function eventId(n: number): string {
@@ -363,7 +363,28 @@ export function eventsHandlers(db: EventsDb): HttpHandler[] {
       if (forced !== null) return forced;
       const event = findById(db, String(params.id));
       if (event === undefined) return notFoundResponse();
-      return save(db, { ...event, participants: event.participants.filter((p) => p.userId !== params.userId), participantCount: event.participantCount - 1 });
+      const after = { ...event, participants: event.participants.filter((p) => p.userId !== params.userId), participantCount: event.participantCount - 1 };
+      if (params.userId === ME_ID && event.visibility === "participants") {
+        // WP-5.3: removing yourself from a participants-only event: the write succeeds, the follow-up detail is invisible.
+        for (const [key, value] of db.details) if (value.id === event.id) db.details.delete(key);
+        return notFoundResponse();
+      }
+      return save(db, after);
+    }),
+    http.post(apiUrl("/events/:id/albums/:albumId/uploads"), async ({ params, request }) => {
+      const key = record(db, request);
+      await readBody(db, key, request);
+      // WP-5.3: the album intent answers 201, like the edition one.
+      return HttpResponse.json(
+        {
+          mediaId: eventId(700),
+          uploadUrl: `https://bucket.example/events/${String(params.id)}/${String(params.albumId)}/originals/x.jpg?X-Amz-Signature=s`,
+          method: "PUT",
+          headers: { "Content-Type": "image/jpeg" },
+          expiresAt: new Date(Date.now() + 15 * 60_000).toISOString()
+        },
+        { status: 201 }
+      );
     }),
     http.post(apiUrl("/events/:id/albums"), async ({ params, request }) => {
       const key = record(db, request);

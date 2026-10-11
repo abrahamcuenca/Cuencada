@@ -25,10 +25,14 @@ import styles from "../events.module.css";
 import { type EventFormValues, initialFormValues, previewYear, toCreateRequest, toUpdateRequest, yearOptions } from "../lib/form";
 import { eventErrorMessage, eventIssueCode, eventPath, SLUG_CODE_NOTE, slugPreview } from "../lib/format";
 
-/** Help text of the two visibility options. */
+/**
+ * Help text of the two visibility options. Anyone added by someone else gets
+ * the "te agregaron" notice in both cases (WP-5.3), so neither text promises
+ * or omits it; the participants picker says it once for both.
+ */
 export const VISIBILITY_HELP = {
   members: "Cualquier miembro de la familia lo ve y puede apuntarse.",
-  participants: "Solo lo ven las personas que agregues (y los administradores). Les avisaremos cuando las agregues."
+  participants: "Solo lo ven las personas que agregues (y los administradores)."
 } as const;
 
 /** Props for {@link EventFormSheet}. */

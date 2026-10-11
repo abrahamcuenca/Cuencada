@@ -149,8 +149,8 @@ function EventView({ event, onRefetch }: { event: EventDetail; onRefetch: () => 
       .then(() => {
         setConfirmLeave(false);
         toast.show({ message: `Saliste de ${event.title}.`, tone: "success" });
-        // A participants-only event is no longer visible once you leave it.
-        if (event.visibility === "participants" && !event.canManage) navigate("/eventos", { replace: true });
+        // A participants-only event (or a draft) is no longer visible once you leave it.
+        if ((event.visibility === "participants" || event.status === "draft") && !event.canManage) navigate("/eventos", { replace: true });
         else setTab("detalles");
       })
       .catch((cause: unknown) => {

@@ -9,7 +9,9 @@ import { resetChatEventsForTests } from "../../chat/events";
 import { configureChatSocketForTests, resetChatSocketForTests } from "../../chat/socket";
 import { createFakeSocket, FakeSocket } from "../../chat/testing/fakeSocket";
 import { chatHandlers, frames, makeChatDb, makeEventRoom, makeMessage, PEOPLE } from "../../chat/testing/fixtures";
-import { EVENT_NOT_FOUND_TEXT, EVENT_NOT_FOUND_TITLE } from "../lib/format";
+import { env } from "../../../shared/lib/env";
+import { galleryApi } from "../../gallery/api";
+import { ADD_PARTICIPANTS_FAILED, EVENT_NOT_FOUND_TEXT, EVENT_NOT_FOUND_TITLE } from "../lib/format";
 import { asOrganizer, type EventsDb, eventId, eventsHandlers, FOLKS, makeAlbum, makeAlbumMedia, makeDetail, makeEventsDb, makeParticipant, putDetail } from "../testing/fixtures";
 
 const server = createTestServer();
@@ -187,6 +189,55 @@ describe("EventDetailPage", { timeout: 20_000 }, () => {
     await user.click(within(sheet).getByRole("button", { name: "Agregar (1)" }));
     await waitFor(() => expect(db.bodies[`POST /events/${eventId(1)}/participants`]).toEqual({ userIds: [eventId(950)] }));
     expect(await screen.findByText("Agregaste a 1 persona.")).toBeInTheDocument();
+  });
+
+  it("treats removing myself from a participants-only event (404 afterwards) as having left", async () => {
+    putDetail(db, asOrganizer(makeDetail({ visibility: "participants" })));
+    server.use(directoryHandler());
+    const user = userEvent.setup();
+    const { router } = renderApp(PATH, authenticatedState());
+    await user.click(await screen.findByRole("button", { name: /Personas/ }));
+    const sheet = await screen.findByRole("dialog", { name: "Personas del evento" });
+    const me = within(sheet).getByText("Prima Morales").closest("li") as HTMLElement; // Safe: every manage row is an <li>.
+    await user.click(within(me).getByRole("button", { name: "Quitar" }));
+    await user.click(within(await screen.findByRole("alertdialog", { name: /Quitar a Prima Morales/ })).getByRole("button", { name: "Quitar del evento" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/eventos"));
+    expect(await screen.findByText("Ya no participas en Paseo a la laguna 1.")).toBeInTheDocument();
+    expect(screen.queryByText(/Ese evento ya no está disponible/)).not.toBeInTheDocument();
+  });
+
+  it("shows one general message when adding people fails with the generic 400", async () => {
+    putDetail(db, asOrganizer(makeDetail()));
+    server.use(directoryHandler());
+    db.failNext = { status: 400, code: "VALIDATION", message: "Alguna de esas personas no se puede agregar." };
+    const user = userEvent.setup();
+    renderApp(PATH, authenticatedState());
+    await user.click(await screen.findByRole("button", { name: /Personas/ }));
+    const sheet = await screen.findByRole("dialog", { name: "Personas del evento" });
+    await user.click(within(await within(sheet).findByRole("list", { name: "Personas del directorio" })).getByRole("checkbox", { name: /Marta/ }));
+    await user.click(within(sheet).getByRole("button", { name: "Agregar (1)" }));
+    expect(await screen.findByText(ADD_PARTICIPANTS_FAILED)).toBeInTheDocument();
+  });
+
+  it("accepts the album upload intent's 201", async () => {
+    const { store } = renderApp(PATH, authenticatedState());
+    const previous = env.mediaUploadOrigin;
+    env.mediaUploadOrigin = "https://bucket.example";
+    try {
+      const intent = await store
+        .dispatch(
+          galleryApi.endpoints.createAlbumUpload.initiate({
+            eventId: eventId(1),
+            albumId: makeAlbum(1).id,
+            body: { fileName: "paseo.jpg", mimeType: "image/jpeg", byteSize: 1000, caption: null }
+          })
+        )
+        .unwrap();
+      expect(intent.mediaId).toBe(eventId(700));
+      expect(db.log).toContain(`POST /events/${eventId(1)}/albums/${makeAlbum(1).id}/uploads`);
+    } finally {
+      env.mediaUploadOrigin = previous;
+    }
   });
 
   it("guards the last organizer in the people sheet", async () => {
