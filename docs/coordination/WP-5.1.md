@@ -73,8 +73,14 @@ The switcher **already listed every published edition** (`galleryYearsFrom` maps
 `docs/ux/screenshots/wp5/` at 375 and 1280 (`E2E_UPDATE_DOCS=1`): `cuencada-anterior-form`, `cuencada-anterior-agregada`, `home-anteriores`, `cuencada-anterior-pagina`.
 
 ## Verification
-See the PR description / final report for the command results (lint, typecheck --force, test, build, e2e on isolated ports 3851/3852/4851 with DB `cuencada_w51_e2e`).
+- `pnpm lint`: ok (764 files).
+- `pnpm turbo run typecheck --force`: 6/6.
+- `pnpm test`: 191 files, 2510 tests passed.
+- `pnpm build`: ok; main chunk 179.82 kB gzip (≤ 190 kB).
+- `pnpm e2e` on isolated ports 3851/3852/4851 with DB `cuencada_w51_e2e`: 76 passed (journeys on iphone-13, pixel-7 and desktop-1280, including the new 5.1 journey, plus the 320/375 + axe gates with `admin-cuencada-anterior`). Lighthouse 1/1.
+  - The e2e build bakes the storage origin in, so `pnpm e2e:build` must run with the same `E2E_STORAGE_PORT` as the run. A first run against a default-port build failed only the upload journeys.
+- `drizzle-kit generate` after the schema change produced exactly `0007`.
 
 ## Follow-ups (in `backlog.md`)
-- An "Cuencada anterior" switch on the edit page (un-flag/flag without the API).
+- A "Cuencada anterior" switch on the edit page (un-flag/flag without the API).
 - A cover upload for past editions (WP-5.4's cover pipeline).
