@@ -984,6 +984,16 @@ describe("migration events (WP-5.2, expand-only)", () => {
     expect(await insert({ slug: "pub-no-date", status: "published" })).toBe("23514");
     expect(await insert({ slug: "hidden-draft", status: "hidden" })).toBeUndefined();
     expect(await insert({ slug: "cover-half", cover_key: "u1" })).toBe("23514");
+    // The cover key must sit under this event's own prefix.
+    const [own, other] = await sql<{ id: string }[]>`select id from events order by slug limit 2`;
+    if (!own || !other) throw new Error("expected two events");
+    const upload = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+    const setCover = (key: string): Promise<string | undefined> =>
+      sqlState(sql`update events set cover_key = ${key}, cover_updated_at = now() where id = ${own.id}`);
+    expect(await setCover(`events/${own.id}/cover/${upload}-1280.webp`)).toBeUndefined();
+    expect(await setCover(`events/${other.id}/cover/${upload}-1280.webp`)).toBe("23514");
+    expect(await setCover(`events/${own.id}/cover/${upload}-640.webp`)).toBe("23514");
+    expect(await setCover(`events/${own.id}/cover/../x-1280.webp`)).toBe("23514");
 
     // Dates: both or neither, end after start; year = the start's year in the event's timezone.
     expect(await insert({ slug: "one-date", starts_at: "2026-11-20T10:00:00Z" })).toBe("23514");

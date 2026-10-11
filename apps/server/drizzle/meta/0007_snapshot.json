@@ -1,5 +1,5 @@
 {
-  "id": "65826640-6868-4d23-a24d-204f63666fa6",
+  "id": "5b08e623-c442-4e6a-a631-4af2c4667c72",
   "prevId": "b05c3270-ae73-48ca-9309-009b7a4951e0",
   "version": "7",
   "dialect": "postgresql",
@@ -2864,7 +2864,7 @@
         },
         "events_cover_check": {
           "name": "events_cover_check",
-          "value": "(\"cover_key\" is null) = (\"cover_updated_at\" is null)"
+          "value": "(\"cover_key\" is null) = (\"cover_updated_at\" is null) and (\"cover_key\" is null or \"cover_key\" ~ ('^events/' || \"id\"::text || '/cover/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-1280[.]webp$'))"
         },
         "events_visibility_check": {
           "name": "events_visibility_check",

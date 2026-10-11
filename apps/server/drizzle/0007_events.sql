@@ -87,7 +87,7 @@ CREATE TABLE "events" (
 	CONSTRAINT "events_summary_length_check" CHECK ("summary" is null or char_length("summary") <= 280),
 	CONSTRAINT "events_details_length_check" CHECK ("details" is null or char_length("details") <= 4000),
 	CONSTRAINT "events_location_text_length_check" CHECK ("location_text" is null or char_length("location_text") <= 160),
-	CONSTRAINT "events_cover_check" CHECK (("cover_key" is null) = ("cover_updated_at" is null)),
+	CONSTRAINT "events_cover_check" CHECK (("cover_key" is null) = ("cover_updated_at" is null) and ("cover_key" is null or "cover_key" ~ ('^events/' || "id"::text || '/cover/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-1280[.]webp$'))),
 	CONSTRAINT "events_visibility_check" CHECK ("visibility" in ('members', 'participants')),
 	CONSTRAINT "events_status_check" CHECK ("status" in ('draft', 'published', 'hidden')),
 	CONSTRAINT "events_published_check" CHECK ("status" <> 'published' or "first_published_at" is not null)

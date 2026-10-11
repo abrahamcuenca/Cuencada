@@ -42,7 +42,11 @@ export const events = pgTable(
     endsAt: timestamptz("ends_at"),
     timezone: text("timezone").notNull().default("America/Merida"),
     locationText: text("location_text"),
-    /** Upload id of the current cover; keys `events/{id}/cover/{coverKey}-{1280|640}.webp`. */
+    /**
+     * Key of the current cover's 1280 px WebP, `events/{id}/cover/{uploadId}-1280.webp`
+     * (the 640 px one swaps the suffix). Server-written; `events_cover_check`
+     * pins it to this event's own prefix.
+     */
     coverKey: text("cover_key"),
     coverUpdatedAt: timestamptz("cover_updated_at"),
     visibility: text("visibility").$type<EventVisibility>().notNull().default("members"),
@@ -86,7 +90,10 @@ export const events = pgTable(
       "events_location_text_length_check",
       sql.raw(`"location_text" is null or char_length("location_text") <= ${EVENT_LOCATION_MAX_LENGTH}`)
     ),
-    check("events_cover_check", sql`("cover_key" is null) = ("cover_updated_at" is null)`),
+    check(
+      "events_cover_check",
+      sql`("cover_key" is null) = ("cover_updated_at" is null) and ("cover_key" is null or "cover_key" ~ ('^events/' || "id"::text || '/cover/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-1280[.]webp$'))`
+    ),
     checkIn("events_visibility_check", "visibility", EventVisibility),
     checkIn("events_status_check", "status", EventStatus),
     check("events_published_check", sql`"status" <> 'published' or "first_published_at" is not null`)
