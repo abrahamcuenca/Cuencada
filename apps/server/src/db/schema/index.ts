@@ -9,6 +9,7 @@ export * from "./audit.js";
 export * from "./auth.js";
 export * from "./chat.js";
 export * from "./cuencadas.js";
+export * from "./events.js";
 export * from "./media.js";
 export * from "./people.js";
 export * from "./profiles.js";

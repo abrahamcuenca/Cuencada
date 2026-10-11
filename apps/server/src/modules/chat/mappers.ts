@@ -90,7 +90,9 @@ export function toChatRooms(rooms: readonly RoomListRecord[], lastMessages: read
       unreadCount: room.unreadCount,
       lastMessageAt: last?.createdAt.toISOString() ?? null,
       lastReadMessageId: room.lastReadMessageId,
-      lastMessage: last === undefined ? null : toLastMessage(last)
+      lastMessage: last === undefined ? null : toLastMessage(last),
+      // WP-5.2: event rooms are not listed until WP-5.3 extends the visibility rule.
+      event: null
     };
   });
   return mapped.sort(compareRooms);

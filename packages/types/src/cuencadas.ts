@@ -23,6 +23,10 @@ import {
 } from "./common.js";
 import { hasUnsafeChars } from "./common.js";
 
+// WP-5.2: event contracts live in their own file; re-exported here because
+// the `index.ts` barrel is frozen (the WP-4.0 `contacts.ts` precedent).
+export * from "./events.js";
+
 /* -------------------------------------------------------------------------- */
 /* Enums                                                                       */
 /* -------------------------------------------------------------------------- */

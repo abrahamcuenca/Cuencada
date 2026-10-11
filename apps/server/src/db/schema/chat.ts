@@ -1,12 +1,13 @@
 /**
- * Chat: one global room plus at most one room per Cuencada, messages with a
- * keyset index, and per-user read state.
+ * Chat: one global room plus at most one room per Cuencada and (WP-5.2) per
+ * event, messages with a keyset index, and per-user read state.
  */
 import { CHAT_BODY_MAX_LENGTH, ChatRoomKind } from "@cuencada/types";
 import { sql } from "drizzle-orm";
 import { check, index, pgTable, primaryKey, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { users } from "./auth.js";
 import { cuencadas } from "./cuencadas.js";
+import { events } from "./events.js";
 import { checkIn, createdAt, timestamptz, updatedAt } from "./helpers.js";
 
 export const chatRooms = pgTable(
@@ -15,16 +16,20 @@ export const chatRooms = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     kind: text("kind").$type<ChatRoomKind>().notNull(),
     cuencadaId: uuid("cuencada_id").references(() => cuencadas.id, { onDelete: "cascade" }),
+    /** WP-5.2: set exactly for `kind = 'event'`; deleting the event deletes the room and its messages. */
+    eventId: uuid("event_id").references(() => events.id, { onDelete: "cascade" }),
     title: text("title"),
     createdAt: createdAt()
   },
   (table) => [
     uniqueIndex("chat_rooms_global_unique").on(table.kind).where(sql`kind = 'global'`),
     uniqueIndex("chat_rooms_cuencada_unique").on(table.cuencadaId).where(sql`kind = 'cuencada'`),
+    uniqueIndex("chat_rooms_event_unique").on(table.eventId).where(sql`kind = 'event'`),
     checkIn("chat_rooms_kind_check", "kind", ChatRoomKind),
+    // Name kept from 0001; widened by the events migration to cover `event_id` (each kind sets exactly its own column).
     check(
       "chat_rooms_kind_cuencada_check",
-      sql`("kind" = 'global' and "cuencada_id" is null) or ("kind" = 'cuencada' and "cuencada_id" is not null)`
+      sql`("kind" = 'global' and "cuencada_id" is null and "event_id" is null) or ("kind" = 'cuencada' and "cuencada_id" is not null and "event_id" is null) or ("kind" = 'event' and "event_id" is not null and "cuencada_id" is null)`
     )
   ]
 );

@@ -198,30 +198,36 @@ export const galleryApi = galleryListApi.injectEndpoints({
     }),
 
     /** Uploader or admin edits the caption (optimistic; rolled back on failure). */
-    updateMediaCaption: build.mutation<MediaItem, { id: string; year: number; caption: string | null }>({
+    updateMediaCaption: build.mutation<MediaItem, { id: string; year: number | null; caption: string | null }>({
       query: ({ id, caption }) => ({ url: `/media/${id}`, method: "PATCH", body: { caption } }),
       async onQueryStarted({ id, year, caption }, { dispatch, queryFulfilled }) {
-        const patch = dispatch(
-          patchListItem(year, id, (item) => {
-            item.caption = caption;
-          })
-        );
+        // `year` is null for event-album media (WP-5.2): no year list to patch.
+        const patch =
+          year === null
+            ? null
+            : dispatch(
+                patchListItem(year, id, (item) => {
+                  item.caption = caption;
+                })
+              );
         try {
           const { data } = await queryFulfilled;
-          dispatch(upsertIntoList(year, [data]));
+          if (year !== null) dispatch(upsertIntoList(year, [data]));
         } catch {
-          patch.undo();
+          patch?.undo();
         }
       },
-      invalidatesTags: (_result, error, { year }) => (error ? [] : [mediaHeadTag(year), ADMIN_LIST_TAG])
+      invalidatesTags: (_result, error, { year }) => (error ? [] : year === null ? [ADMIN_LIST_TAG] : [mediaHeadTag(year), ADMIN_LIST_TAG])
     }),
 
     /** Uploader or admin soft-deletes an item; it is removed from the loaded list. */
-    deleteMedia: build.mutation<void, { id: string; year: number }>({
+    deleteMedia: build.mutation<void, { id: string; year: number | null }>({
       query: ({ id }) => ({ url: `/media/${id}`, method: "DELETE" }),
       async onQueryStarted({ id, year }, { dispatch, queryFulfilled }) {
         try {
           await queryFulfilled;
+          // `year` is null for event-album media (WP-5.2): no year list to patch.
+          if (year === null) return;
           dispatch(
             galleryListApi.util.updateQueryData("listMedia", year, (draft) => {
               for (const page of draft.pages) page.items = page.items.filter((item) => item.id !== id);
@@ -231,7 +237,8 @@ export const galleryApi = galleryListApi.injectEndpoints({
           // The caller shows the error.
         }
       },
-      invalidatesTags: (_result, error, { year }) => (error ? [] : [mediaHeadTag(year), YEARS_TAG, ADMIN_LIST_TAG])
+      invalidatesTags: (_result, error, { year }) =>
+        error ? [] : year === null ? [ADMIN_LIST_TAG] : [mediaHeadTag(year), YEARS_TAG, ADMIN_LIST_TAG]
     }),
 
     /** Any member reports an item (once per item). */

@@ -1,6 +1,7 @@
 /**
  * Gallery media (member-only) and member reports. Object keys are always
- * server-generated; URLs are presigned on read.
+ * server-generated; URLs are presigned on read. Each item belongs to exactly
+ * one scope (WP-5.2): an edition (`cuencada_id`) or an event album (`album_id`).
  */
 import {
   MediaKind,
@@ -13,6 +14,7 @@ import { sql } from "drizzle-orm";
 import { check, index, integer, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { users } from "./auth.js";
 import { cuencadas } from "./cuencadas.js";
+import { eventAlbums } from "./events.js";
 import { checkIn, createdAt, timestamptz, updatedAt } from "./helpers.js";
 
 /**
@@ -27,9 +29,21 @@ export const mediaItems = pgTable(
   "media_items",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    cuencadaId: uuid("cuencada_id")
-      .notNull()
-      .references(() => cuencadas.id, { onDelete: "cascade" }),
+    /** Edition scope; `null` for event-album media (nullable since WP-5.2, `media_items_scope_check`). */
+    cuencadaId: uuid("cuencada_id").references(() => cuencadas.id, { onDelete: "cascade" }),
+    /**
+     * WP-5.2 event-album scope. ON DELETE RESTRICT: an album (and its event)
+     * cannot be deleted while any media row, soft-deleted ones included,
+     * points at it; the service deletes the rows (and objects) first.
+     */
+    albumId: uuid("album_id").references(() => eventAlbums.id, { onDelete: "restrict" }),
+    /**
+     * WP-5.2: server-generated key prefix (`cuencadas/{year}` or
+     * `events/{eventId}/{albumId}`), so keys survive an edition's year change.
+     * `null` on legacy edition rows, whose prefix is `cuencadas/{year}`;
+     * required for album rows (`media_items_storage_prefix_check`).
+     */
+    storagePrefix: text("storage_prefix"),
     uploadedByUserId: uuid("uploaded_by_user_id").references(() => users.id, { onDelete: "set null" }),
     kind: text("kind").$type<MediaKind>().notNull(),
     /** Original upload key. */
@@ -69,6 +83,10 @@ export const mediaItems = pgTable(
     index("media_items_gallery_keyset_idx")
       .on(table.cuencadaId, table.createdAt.desc(), table.id.desc())
       .where(sql`deleted_at is null`),
+    // Album keyset pagination (newest first); also serves the RESTRICT check on album delete.
+    index("media_items_album_keyset_idx")
+      .on(table.albumId, table.createdAt.desc(), table.id.desc())
+      .where(sql`album_id is not null`),
     index("media_items_uploaded_by_user_id_idx").on(table.uploadedByUserId),
     index("media_items_moderated_by_user_id_idx").on(table.moderatedByUserId),
     index("media_items_deleted_by_user_id_idx").on(table.deletedByUserId),
@@ -85,6 +103,11 @@ export const mediaItems = pgTable(
     check(
       "media_items_kind_mime_check",
       sql`("kind" = 'video') = ("mime_type" like 'video/%')`
+    ),
+    check("media_items_scope_check", sql`num_nonnulls("cuencada_id", "album_id") = 1`),
+    check(
+      "media_items_storage_prefix_check",
+      sql`("album_id" is null or "storage_prefix" is not null) and ("storage_prefix" is null or "storage_prefix" ~ '^(cuencadas/[0-9]{4}|events/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$')`
     )
   ]
 );

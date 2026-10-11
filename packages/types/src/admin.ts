@@ -22,7 +22,9 @@ export const AuditEntityType = {
   Media: "media",
   Person: "person",
   Relationship: "relationship",
-  ChatMessage: "chat_message"
+  ChatMessage: "chat_message",
+  /** WP-5.2: events; participant, album and cover actions use it too (ids in `metadata`). */
+  Event: "event"
 } as const;
 export type AuditEntityType = (typeof AuditEntityType)[keyof typeof AuditEntityType];
 export const auditEntityTypeSchema = z.enum(AuditEntityType);
@@ -124,7 +126,47 @@ export const AuditAction = {
   PersonMerged: "person.merged",
   RelationshipCreated: "relationship.created",
   RelationshipDeleted: "relationship.deleted",
-  ChatMessageDeleted: "chat_message.deleted"
+  ChatMessageDeleted: "chat_message.deleted",
+  /*
+   * WP-5.2 events (`entityType: event`, `entityId` = event id). Metadata holds
+   * ids, field names, enums and counts only: never titles, details or names.
+   */
+  EventCreated: "event.created",
+  /** Metadata: changed field names. */
+  EventUpdated: "event.updated",
+  /** Written (in addition to `updated`) when `status` becomes `published`. */
+  EventPublished: "event.published",
+  /** An admin hid the event, or un-hid it (`metadata.hidden: false`). */
+  EventHidden: "event.hidden",
+  /** Metadata: `participantCount`, `mediaDeleted`, `byAdmin`. */
+  EventDeleted: "event.deleted",
+  /** An organizer or admin added participants (metadata: `userIds`, `role`). */
+  EventParticipantAdded: "event.participant_added",
+  /** An organizer or admin removed a participant (metadata: `userId`). */
+  EventParticipantRemoved: "event.participant_removed",
+  /** An organizer or admin promoted or demoted a participant (metadata: `userId`, `role`). */
+  EventParticipantRoleChanged: "event.participant_role_changed",
+  /** The member joined a `members` event by themself ("Me apunto"). */
+  EventJoined: "event.joined",
+  /** The member left the event. */
+  EventLeft: "event.left",
+  /** Metadata: `albumId`. */
+  EventAlbumCreated: "event.album_created",
+  /** Metadata: `albumId`, changed field names. */
+  EventAlbumUpdated: "event.album_updated",
+  /** Metadata: `albumId`. */
+  EventAlbumDeleted: "event.album_deleted",
+  /** Metadata: `uploadId`, `replaced`. */
+  EventCoverUpdated: "event.cover_updated",
+  EventCoverRemoved: "event.cover_removed",
+  /** A cover upload was refused at confirm (`metadata.reason`). */
+  EventCoverRejected: "event.cover_rejected",
+  /**
+   * An admin who is not a participant opened a `participants` event's detail,
+   * chat or media (`metadata.surface`: `detail` | `chat` | `media`, the first
+   * one in the window). At most once per admin per event per hour (ADR 0001 §7).
+   */
+  EventAdminViewed: "event.admin_viewed"
 } as const;
 export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
 
