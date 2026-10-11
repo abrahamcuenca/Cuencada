@@ -42,6 +42,8 @@ let upTo0005Folder: string;
 let upTo0006Folder: string;
 /** Every migration before the events one (WP-5.2). */
 let beforeEventsFolder: string;
+/** Every migration up to and including the events one (before WP-5.3's 0009). */
+let throughEventsFolder: string;
 /** Number of migrations in the real journal (the "latest" version). */
 let latestCount: number;
 
@@ -94,6 +96,7 @@ beforeAll(async () => {
   const eventsIndex = journal.entries.findIndex((entry) => entry.tag.endsWith("_events"));
   if (eventsIndex < 1) throw new Error("events migration not found in the journal");
   beforeEventsFolder = await migrationsUpTo(eventsIndex);
+  throughEventsFolder = await migrationsUpTo(eventsIndex + 1);
 });
 
 // Every test starts from a brand-new database migrated to 0000 only.
@@ -120,6 +123,7 @@ afterAll(async () => {
   if (upTo0005Folder) await rm(upTo0005Folder, { recursive: true, force: true });
   if (upTo0006Folder) await rm(upTo0006Folder, { recursive: true, force: true });
   if (beforeEventsFolder) await rm(beforeEventsFolder, { recursive: true, force: true });
+  if (throughEventsFolder) await rm(throughEventsFolder, { recursive: true, force: true });
   await dropScratch();
 });
 
@@ -1173,5 +1177,40 @@ describe("migration events (WP-5.2, expand-only)", () => {
     expect(await sql`select uploaded_by_user_id from event_cover_uploads where event_id = ${eventId}`).toEqual([
       { uploaded_by_user_id: null }
     ]);
+  });
+});
+
+describe("migration 0009 (WP-5.3 event notices and admin-view dedupe, expand-only)", () => {
+  it("adds a nullable notice column without touching participants and a deduping admin-view table that cascades", async () => {
+    await migrate(drizzle(sql), { migrationsFolder: throughEventsFolder });
+    const admin = await insertId(sql`insert into users (email, display_name, role) values ('admin@example.test', 'Admin', 'admin') returning id`);
+    const ana = await insertId(sql`insert into users (email, display_name) values ('ana@example.test', 'Ana') returning id`);
+    const eventId = await insertId(sql`
+      insert into events (slug, year, title, visibility, status, first_published_at)
+      values ('viaje-k7q2', 2026, 'Viaje', 'participants', 'published', now()) returning id
+    `);
+    await sql`insert into event_participants (event_id, user_id, role, added_by_user_id) values (${eventId}, ${ana}, 'participant', ${admin})`;
+    const before = await sql`select event_id, user_id, role, added_by_user_id, joined_at from event_participants`;
+
+    await migrate(drizzle(sql), { migrationsFolder });
+    expect(await sql`select count(*)::int as count from drizzle.__drizzle_migrations`).toEqual([{ count: latestCount }]);
+    expect(await sql`select event_id, user_id, role, added_by_user_id, joined_at from event_participants`).toEqual(before);
+    expect(await sql`select notice_seen_at from event_participants`).toEqual([{ notice_seen_at: null }]);
+    // 0008-era inserts (without the column) keep working.
+    const bea = await insertId(sql`insert into users (email, display_name) values ('bea@example.test', 'Bea') returning id`);
+    await sql`insert into event_participants (event_id, user_id) values (${eventId}, ${bea})`;
+
+    const bucket = "2026-10-11T10:00:00Z";
+    await sql`insert into event_admin_views (admin_user_id, event_id, hour_bucket) values (${admin}, ${eventId}, ${bucket})`;
+    expect(
+      await sqlState(sql`insert into event_admin_views (admin_user_id, event_id, hour_bucket) values (${admin}, ${eventId}, ${bucket})`)
+    ).toBe("23505");
+    const inserted = await sql`
+      insert into event_admin_views (admin_user_id, event_id, hour_bucket) values (${admin}, ${eventId}, ${bucket})
+      on conflict do nothing returning event_id
+    `;
+    expect(inserted).toEqual([]);
+    await sql`delete from events where id = ${eventId}`;
+    expect(await sql`select count(*)::int as count from event_admin_views`).toEqual([{ count: 0 }]);
   });
 });
