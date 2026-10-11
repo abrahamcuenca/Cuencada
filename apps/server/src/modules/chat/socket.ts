@@ -29,6 +29,7 @@ import {
 import type { WebSocket } from "@fastify/websocket";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { allowedOrigins } from "../../config.js";
+import type { EventViewer } from "../events/access.js";
 import { type ChatConnection, type ChatHub, CloseReason, WS_TRY_AGAIN_LATER } from "./hub.js";
 import { toChatMessages } from "./mappers.js";
 import { type ChatPrincipal, findVisibleRoom, insertMessageIdempotent, loadPrincipal, markRead } from "./repository.js";
@@ -103,6 +104,11 @@ function clientMessageIdOf(value: unknown): string | null {
   if (typeof value !== "object" || value === null || !("clientMessageId" in value)) return null;
   const parsed = idSchema.safeParse(value.clientMessageId);
   return parsed.success ? parsed.data : null;
+}
+
+/** The event-access subject of a socket (role loaded at connect; a role change closes the sockets). */
+function viewerOfPrincipal(principal: ChatPrincipal): EventViewer {
+  return { id: principal.userId, role: principal.role };
 }
 
 function errorFrame(code: ErrorCode, message: string, clientMessageId: string | null = null): WsServerMessage {
@@ -296,7 +302,7 @@ async function handleSend(ctx: FrameContext, frame: Extract<WsClientMessage, { t
     );
     return;
   }
-  const room = await findVisibleRoom(app.db, frame.roomId);
+  const room = await findVisibleRoom(app.db, frame.roomId, viewerOfPrincipal(conn.principal));
   if (room === null) {
     conn.send(errorFrame("NOT_FOUND", ROOM_NOT_FOUND, frame.clientMessageId));
     return;
@@ -318,7 +324,7 @@ async function handleSend(ctx: FrameContext, frame: Extract<WsClientMessage, { t
     });
     return;
   }
-  hub.fanOut((target) => ({
+  await hub.fanOutRoom(room.id, (target) => ({
     type: "message",
     message,
     clientMessageId: target === conn ? frame.clientMessageId : null
@@ -329,18 +335,19 @@ async function handleTyping(ctx: FrameContext, frame: Extract<WsClientMessage, {
   const { app, hub, conn } = ctx;
   const { userId, displayName } = conn.principal;
   if (!hub.typingThrottle.allow(`${userId}:${frame.roomId}`, app.clock.now().getTime())) return;
-  if ((await findVisibleRoom(app.db, frame.roomId)) === null) {
+  const room = await findVisibleRoom(app.db, frame.roomId, viewerOfPrincipal(conn.principal));
+  if (room === null) {
     conn.send(errorFrame("NOT_FOUND", ROOM_NOT_FOUND));
     return;
   }
-  hub.fanOut((target) =>
+  await hub.fanOutRoom(room.id, (target) =>
     target.principal.userId === userId ? null : { type: "typing", roomId: frame.roomId, userId, displayName }
   );
 }
 
 async function handleRead(ctx: FrameContext, frame: Extract<WsClientMessage, { type: "read" }>): Promise<void> {
   const { app, conn } = ctx;
-  const room = await findVisibleRoom(app.db, frame.roomId);
+  const room = await findVisibleRoom(app.db, frame.roomId, viewerOfPrincipal(conn.principal));
   const found =
     room !== null &&
     (await markRead(app.db, {

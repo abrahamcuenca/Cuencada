@@ -38,7 +38,7 @@ import {
   READ_CHUNK_BYTES,
   THUMB_WIDTH
 } from "../constants.js";
-import { mediaKeys, neutralizeVideoMetadata, readMp4DurationSeconds, signatureMatches } from "../files.js";
+import { mediaKeys, neutralizeVideoMetadata, readMp4DurationSeconds, signatureMatches, storagePrefixOf } from "../files.js";
 import { deleteObjectsQuietly } from "../objects.js";
 import { allObjectKeys, type MediaRow } from "../service.js";
 
@@ -172,7 +172,7 @@ async function readValidatedOriginal(deps: MediaJobDeps, row: MediaRow, signal: 
 async function processImage(
   deps: MediaJobDeps,
   row: MediaRow,
-  year: number,
+  prefix: string,
   signal: AbortSignal,
   created: string[]
 ): Promise<ProcessedFields> {
@@ -202,7 +202,7 @@ async function processImage(
   }
   signal.throwIfAborted();
 
-  const keys = mediaKeys(year, row.id, row.mimeType);
+  const keys = mediaKeys(prefix, row.id, row.mimeType);
   await stage(ProcessingErrorCode.StorageWrite, async () => {
     created.push(keys.display);
     await deps.storage.put({ key: keys.display, body: display, contentType: "image/webp", cacheControl: DERIVATIVE_CACHE_CONTROL });
@@ -227,7 +227,7 @@ async function processImage(
 async function processVideo(
   deps: MediaJobDeps,
   row: MediaRow,
-  year: number,
+  prefix: string,
   signal: AbortSignal,
   created: string[]
 ): Promise<ProcessedFields> {
@@ -241,7 +241,7 @@ async function processVideo(
   const durationSeconds = readMp4DurationSeconds(input);
   signal.throwIfAborted();
 
-  const keys = mediaKeys(year, row.id, row.mimeType);
+  const keys = mediaKeys(prefix, row.id, row.mimeType);
   await stage(ProcessingErrorCode.StorageWrite, async () => {
     created.push(keys.display);
     await deps.storage.put({ key: keys.display, body: input, contentType: row.mimeType, cacheControl: DERIVATIVE_CACHE_CONTROL });
@@ -263,11 +263,13 @@ export async function processMediaItem(deps: MediaJobDeps, mediaId: string, sign
   const [found] = await deps.db
     .select({ item: mediaItems, year: cuencadas.year })
     .from(mediaItems)
-    .innerJoin(cuencadas, eq(cuencadas.id, mediaItems.cuencadaId))
+    .leftJoin(cuencadas, eq(cuencadas.id, mediaItems.cuencadaId))
     .where(and(eq(mediaItems.id, mediaId), eq(mediaItems.uploadStatus, "processing"), isNull(mediaItems.deletedAt)))
     .limit(1);
   if (found === undefined) return;
   const { item, year } = found;
+  // Album media always carry their prefix; legacy edition rows derive it from the year.
+  const prefix = storagePrefixOf(item, year);
   const created: string[] = [];
   const stillProcessing = and(
     eq(mediaItems.id, mediaId),
@@ -288,8 +290,8 @@ export async function processMediaItem(deps: MediaJobDeps, mediaId: string, sign
   try {
     const fields =
       item.kind === "image"
-        ? await processImage(deps, item, year, signal, created)
-        : await processVideo(deps, item, year, signal, created);
+        ? await processImage(deps, item, prefix, signal, created)
+        : await processVideo(deps, item, prefix, signal, created);
     signal.throwIfAborted();
     const updated = await deps.db
       .update(mediaItems)
@@ -358,7 +360,7 @@ export async function recoverProcessingOnStart(deps: MediaJobDeps, startedAt: Da
   const rows = await deps.db
     .select({ item: mediaItems, year: cuencadas.year })
     .from(mediaItems)
-    .innerJoin(cuencadas, eq(cuencadas.id, mediaItems.cuencadaId))
+    .leftJoin(cuencadas, eq(cuencadas.id, mediaItems.cuencadaId))
     .where(leftover)
     .orderBy(mediaItems.confirmedAt);
   const result: StartupRecovery = { requeued: 0, failed: 0 };

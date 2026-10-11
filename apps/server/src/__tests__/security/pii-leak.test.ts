@@ -17,7 +17,8 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { App } from "../../app.js";
-import { cuencadaAttendance, MagicLinkPurpose, personRelationships } from "../../db/schema/index.js";
+import { eq } from "drizzle-orm";
+import { cuencadaAttendance, MagicLinkPurpose, personRelationships, profiles } from "../../db/schema/index.js";
 import { systemClock } from "../../lib/clock.js";
 import { S3Storage } from "../../lib/storage/s3.js";
 import { createEmailToken } from "../../modules/auth/emailTokens.js";
@@ -30,6 +31,7 @@ import { getTestDb } from "../../../test/helpers/db.js";
 import { type AuthInjectOptions, bearerFor, createSession, createUser, type TestUser } from "../../../test/helpers/factories.js";
 import { FakeMailer } from "../../../test/helpers/fakes.js";
 import { insertPerson } from "../../../test/helpers/family.js";
+import { addParticipant, insertAlbumMedia, insertEvent } from "../../../test/helpers/events.js";
 import { insertMedia } from "../../../test/helpers/media.js";
 
 const BUCKET = "w23-pii-bucket";
@@ -96,13 +98,13 @@ const PRESIGNED_PUT = /x-id=PutObject|X-Fake-Signature=put/i;
 const SIGNED_STORAGE_URL = /linodeobjects\.com\/[^"]*X-Amz-Signature/i;
 const JWT = /eyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/;
 /** Raw object keys (outside presigned URLs, which are masked first). */
-const S3_KEY = /(?:cuencadas\/\d{4}\/(?:originals|thumbs|display)\/|avatars\/[0-9a-f-]{8,}\/|people\/[0-9a-f-]{8,}\/)/;
+const S3_KEY = /(?:cuencadas\/\d{4}\/(?:originals|thumbs|display)\/|avatars\/[0-9a-f-]{8,}\/|people\/[0-9a-f-]{8,}\/|events\/[0-9a-f-]{8,}\/)/;
 /** Opaque tokens are 32 random bytes in base64url (43 chars). */
 const OPAQUE_TOKEN = /^[A-Za-z0-9_-]{43}$/;
 /** Keys whose values are opaque by design (pagination cursors). */
 const CURSOR_KEYS = new Set(["nextCursor", "nextBefore", "cursor"]);
 /** Keys whose values may be presigned GET URLs. */
-const SIGNED_URL_KEYS = new Set(["thumbUrl", "displayUrl", "avatarUrl", "photoUrl"]);
+const SIGNED_URL_KEYS = new Set(["thumbUrl", "displayUrl", "avatarUrl", "photoUrl", "coverUrl", "coverThumbUrl"]);
 /** Keys that must never be serialized to non-admins. */
 const FORBIDDEN_KEYS = [
   "passwordHash",
@@ -521,6 +523,44 @@ describe("member-facing reads never leak PII", () => {
     const item = await get(`/api/media/${mediaId}`, viewer.auth);
     expect([...scan("GET media list", list), ...scan("GET /api/media/:id", item)]).toEqual([]);
     expect(JSON.stringify(item)).toMatch(/X-Amz-Signature/);
+  });
+
+  it("events (WP-5.3): unlisted participants carry no id or avatar; a participants event's title never reaches a non-participant", async () => {
+    const organizer = await member({ displayName: "Organizadora W53" });
+    await getTestDb()
+      .update(profiles)
+      .set({ avatarKey: `avatars/${unlisted.id}/${randomUUID()}-256.webp` })
+      .where(eq(profiles.userId, unlisted.id));
+    const shared = await insertEvent({
+      title: "Comida abierta W53",
+      organizerId: organizer.user.id,
+      participantIds: [unlisted.id, viewer.user.id, hidden.id]
+    });
+    const secret = await insertEvent({ title: "Viaje secreto W53", visibility: "participants", organizerId: organizer.user.id, participantIds: [unlisted.id] });
+    await insertAlbumMedia(shared.album, { uploadedByUserId: organizer.user.id });
+    await insertAlbumMedia(secret.album, { uploadedByUserId: organizer.user.id });
+    await addParticipant(secret.event.id, hidden.id, "participant", organizer.user.id);
+    const bodies: Array<[string, unknown]> = [
+      ["GET /api/events", await get("/api/events?year=2026", viewer.auth)],
+      ["GET /api/events past", await get("/api/events?when=past", viewer.auth)],
+      ["GET event detail", await get(`/api/events/${shared.event.year}/${shared.event.slug}`, viewer.auth)],
+      ["GET /api/events/notices", await get("/api/events/notices", viewer.auth)],
+      ["GET /api/chat/rooms (events)", await get("/api/chat/rooms", viewer.auth)],
+      ["GET album media", await get(`/api/events/${shared.event.id}/albums/${shared.album.id}/media`, viewer.auth)]
+    ];
+    // `visibility` here is the event's audience enum (members | participants), not a profile flag.
+    const problems = bodies.flatMap(([label, body]) => scan(label, body, { allowKeys: ["visibility"] }));
+    for (const [label, body] of bodies) {
+      const text = JSON.stringify(body);
+      if (text.includes("Viaje secreto W53")) problems.push(`${label}: a participants event's title`);
+      if (text.includes(unlisted.id)) problems.push(`${label}: the unlisted participant's id`);
+    }
+    const detail = bodies[2]?.[1] as { participants: Array<{ displayName: string; avatarUrl: string | null; userId?: string }> }; // eventDetailSchema shape
+    const unlistedRow = detail.participants.find((row) => row.displayName === UNLISTED_NAME);
+    if (unlistedRow === undefined || unlistedRow.avatarUrl !== null || "userId" in unlistedRow) {
+      problems.push("event detail: the unlisted participant's avatar or id");
+    }
+    expect(problems).toEqual([]);
   });
 
   it("own profile, /me and own sessions show the caller's own data only", async () => {

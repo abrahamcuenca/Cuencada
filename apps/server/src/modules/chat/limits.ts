@@ -58,6 +58,11 @@ export class Throttle {
     return true;
   }
 
+  /** Forget one key (e.g. a user's typing state in a room they lost access to). */
+  forget(key: string): void {
+    this.last.delete(key);
+  }
+
   /** Forget keys older than the interval. */
   sweep(nowMs: number): void {
     for (const [key, at] of this.last) {

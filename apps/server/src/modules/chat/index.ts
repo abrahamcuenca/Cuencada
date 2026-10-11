@@ -13,7 +13,7 @@
  * 5-minute re-check. Both also burn unused tickets and are safe to call
  * before the chat module has seen any socket.
  */
-import { WS_PING_INTERVAL_MS } from "@cuencada/types";
+import { type UserRole, WS_PING_INTERVAL_MS } from "@cuencada/types";
 import type { FastifyInstance } from "fastify";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { rateLimitByIp } from "../../lib/rateLimit.js";
@@ -56,6 +56,16 @@ export function closeSocketsForSession(instance: FastifyInstance, sessionId: str
  */
 export function closeSocketsForUser(instance: FastifyInstance, userId: string): number {
   return chatHubOf(instance)?.closeUser(userId) ?? 0;
+}
+
+/**
+ * Tell the chat hub that a user's role changed (WP-5.3): event-room access
+ * and audiences depend on the admin role. Call after the change committed.
+ *
+ * @param instance - Any Fastify instance of the app.
+ */
+export function chatUserRoleChanged(instance: FastifyInstance, userId: string, role: UserRole): void {
+  chatHubOf(instance)?.setUserRole(userId, role);
 }
 
 /** Chat routes under `/api` plus the hub's timers. */

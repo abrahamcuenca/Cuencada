@@ -2,8 +2,10 @@
  * Chat REST routes (T7). Every route is `auth: "user"` with
  * `requireVerifiedEmail: true`: chat content is member-only PII.
  *
- * - `GET /chat/rooms`: visible rooms with unread counts and a preview.
- * - `GET /chat/rooms/:id/messages?before=&limit=`: keyset history (tombstones for deleted messages).
+ * - `GET /chat/rooms`: visible rooms with unread counts and a preview (WP-5.3: event rooms of the
+ *   caller's events, with `event`; admins see every event room).
+ * - `GET /chat/rooms/:id/messages?before=&limit=`: keyset history (tombstones for deleted messages);
+ *   an admin outside a `participants` event reading its room is audited first (`event.admin_viewed`).
  * - `POST /chat/rooms/:id/read`: monotonic read marker.
  * - `DELETE /chat/messages/:id`: soft delete by the sender or an admin (admin deletes of others' messages are audited); broadcasts `message_deleted`, and `room_preview` when the deleted message was the room's preview.
  * - `POST /chat/ticket`: single-use WebSocket ticket (10/min per user).
@@ -32,12 +34,15 @@ import { z } from "zod";
 import { recordAudit } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
 import { ipKey, type RateLimitWindow } from "../../lib/rateLimit.js";
-import { authUser } from "../../plugins/auth.js";
+import { type AuthUser, authUser } from "../../plugins/auth.js";
+import type { EventViewer } from "../events/access.js";
+import { AdminViewSurface, auditAdminEventView } from "../events/adminView.js";
 import { encodeChatCursor } from "./cursor.js";
 import type { ChatHub } from "./hub.js";
 import { toChatMessages, toChatRooms, toLastMessage } from "./mappers.js";
 import {
   findMessage,
+  findModerationRoom,
   findVisibleRoom,
   historyPage,
   lastMessagesFor,
@@ -78,6 +83,11 @@ function rateLimitByUser(prefix: string, window: RateLimitWindow): RateLimitOpti
   };
 }
 
+/** The room-visibility subject of a REST caller (role from the database, per request). */
+function viewerOf(user: AuthUser): EventViewer {
+  return { id: user.id, role: user.role };
+}
+
 /** Options for {@link chatRoutes}. */
 export interface ChatRoutesOptions {
   hub: ChatHub;
@@ -96,7 +106,7 @@ const chatRoutes: FastifyPluginAsyncZod<ChatRoutesOptions> = async (app, { hub }
     },
     async (request): Promise<ChatRoom[]> => {
       const user = authUser(request);
-      const rooms = await listVisibleRooms(app.db, user.id);
+      const rooms = await listVisibleRooms(app.db, viewerOf(user));
       const last = await lastMessagesFor(
         app.db,
         rooms.map((room) => room.id)
@@ -117,9 +127,20 @@ const chatRoutes: FastifyPluginAsyncZod<ChatRoutesOptions> = async (app, { hub }
       }
     },
     async (request): Promise<ChatHistoryPage> => {
-      authUser(request);
-      const room = await findVisibleRoom(app.db, request.params.id);
+      const viewer = viewerOf(authUser(request));
+      // Read-only moderation path: admins may read any event room's history (audited below).
+      const room = await findModerationRoom(app.db, request.params.id, viewer);
       if (room === null) throw new AppError("NOT_FOUND", ROOM_NOT_FOUND);
+      if (room.event !== null) {
+        // [SEC] Written before the history is returned; a failure fails the read (ADR 0001 §7).
+        await auditAdminEventView(app.db, {
+          viewer,
+          eventId: room.event.id,
+          surface: AdminViewSurface.Chat,
+          ip: request.ip,
+          now: app.clock.now()
+        });
+      }
       const page = await historyPage(app.db, room.id, request.query.before, request.query.limit);
       return {
         messages: await toChatMessages(app, page.records),
@@ -147,7 +168,7 @@ const chatRoutes: FastifyPluginAsyncZod<ChatRoutesOptions> = async (app, { hub }
     },
     async (request, reply) => {
       const user = authUser(request);
-      const room = await findVisibleRoom(app.db, request.params.id);
+      const room = await findVisibleRoom(app.db, request.params.id, viewerOf(user));
       if (room === null) throw new AppError("NOT_FOUND", ROOM_NOT_FOUND);
       const found = await markRead(app.db, {
         roomId: room.id,
@@ -184,7 +205,7 @@ const chatRoutes: FastifyPluginAsyncZod<ChatRoutesOptions> = async (app, { hub }
       if (
         message === null ||
         (!own && user.role !== "admin") ||
-        (await findVisibleRoom(app.db, message.roomId)) === null
+        (await findModerationRoom(app.db, message.roomId, viewerOf(user))) === null
       ) {
         throw new AppError("NOT_FOUND", MESSAGE_NOT_FOUND);
       }
@@ -215,7 +236,7 @@ const chatRoutes: FastifyPluginAsyncZod<ChatRoutesOptions> = async (app, { hub }
       });
       if (deleted !== null) {
         const { roomId } = deleted;
-        hub.fanOut(() => ({
+        await hub.fanOutRoom(roomId, () => ({
           type: "message_deleted",
           roomId,
           messageId: message.id
@@ -224,7 +245,7 @@ const chatRoutes: FastifyPluginAsyncZod<ChatRoutesOptions> = async (app, { hub }
           // Best effort after commit: the delete succeeded either way; clients refetch rooms on reconnect.
           try {
             const [previewAfter] = await lastMessagesFor(app.db, [roomId]);
-            hub.fanOut(() => ({
+            await hub.fanOutRoom(roomId, () => ({
               type: "room_preview",
               roomId,
               lastMessageAt: previewAfter?.createdAt.toISOString() ?? null,

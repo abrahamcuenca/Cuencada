@@ -18,7 +18,8 @@ import {
   apiErrorSchema,
   idParamSchema,
   type Page,
-  pageSchema
+  pageSchema,
+  type UserRole
 } from "@cuencada/types";
 import { eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyRequest } from "fastify";
@@ -40,6 +41,7 @@ import {
   sendInBackground
 } from "../auth/emailTokens.js";
 import { closeChatSockets as closeUserChatSockets } from "../auth/chatSockets.js";
+import { chatUserRoleChanged } from "../chat/index.js";
 import { revokeSessions } from "../auth/sessions.js";
 import { adminAlertMetadata, type AdminAlert, type AdminAlertPlan, planAdminAlert, queueAdminAlerts } from "./adminAlerts.js";
 import {
@@ -103,6 +105,8 @@ interface PendingAlert {
 /** Result of the PATCH transaction. */
 interface PatchOutcome {
   disabled: boolean;
+  /** The new role when it changed (event-room access in chat, WP-5.3). */
+  newRole: UserRole | null;
   alert: PendingAlert | null;
 }
 
@@ -218,7 +222,7 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
         if (roleChanged) fields.push("role");
         if (statusChanged) fields.push("status");
         if (mustChangeChanged) fields.push("mustChangePassword");
-        if (fields.length === 0) return { disabled: false, alert: null };
+        if (fields.length === 0) return { disabled: false, newRole: null, alert: null };
 
         await tx
           .update(users)
@@ -265,11 +269,12 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
           plan === null
             ? null
             : { plan, alert: { auditId, actorName: admin.displayName, targetName: target.displayName, changes, changedAt: now } };
-        return { disabled: disabling, alert };
+        return { disabled: disabling, newRole: roleChanged ? nextRole : null, alert };
       });
 
       if (outcome.alert !== null) queueAdminAlerts(app, outcome.alert.plan, outcome.alert.alert);
       if (outcome.disabled) closeChatSockets(app, targetId);
+      if (outcome.newRole !== null) chatUserRoleChanged(app, targetId, outcome.newRole);
       return getAdminUser(app.db, targetId, app.clock.now());
     }
   );

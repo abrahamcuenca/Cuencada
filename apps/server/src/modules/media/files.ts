@@ -64,15 +64,49 @@ export interface MediaKeys {
 }
 
 /**
- * Build the object keys for a media item.
+ * The key prefix of an edition's media (`cuencadas/{year}`): the legacy,
+ * year-derived prefix, also stored on new edition rows (WP-5.3).
  *
  * @param year - Cuencada year.
+ */
+export function editionStoragePrefix(year: number): string {
+  return `cuencadas/${year}`;
+}
+
+/**
+ * The key prefix of an event album's media (`events/{eventId}/{albumId}`).
+ * [SEC] Always built from the album **row** (Security requirement 7), never
+ * from request input.
+ */
+export function albumStoragePrefix(album: { id: string; eventId: string }): string {
+  return `events/${album.eventId}/${album.id}`;
+}
+
+/**
+ * The key prefix of a stored row: `storage_prefix`, else (legacy edition
+ * rows) `cuencadas/{year}`.
+ *
+ * @param item - The row's prefix.
+ * @param year - Its edition year (`null` for album media).
+ * @throws Error when neither is known (a row the scope CHECK forbids).
+ */
+export function storagePrefixOf(item: { storagePrefix: string | null }, year: number | null): string {
+  if (item.storagePrefix !== null) return item.storagePrefix;
+  if (year !== null) return editionStoragePrefix(year);
+  throw new Error("media row has neither a storage prefix nor an edition year");
+}
+
+/**
+ * Build the object keys for a media item.
+ *
+ * @param scope - The row's key prefix (`storagePrefixOf`), or an edition
+ *   year (legacy rows, prefix `cuencadas/{year}`).
  * @param mediaId - The item's uuid.
  * @param mimeType - Allowed MIME type (decides the extensions). Images get a
  *   WebP display copy; videos a metadata-scrubbed copy in their own container.
  */
-export function mediaKeys(year: number, mediaId: string, mimeType: MediaMimeType): MediaKeys {
-  const base = `cuencadas/${year}`;
+export function mediaKeys(scope: number | string, mediaId: string, mimeType: MediaMimeType): MediaKeys {
+  const base = typeof scope === "number" ? editionStoragePrefix(scope) : scope;
   const extension = extensionForMime(mimeType);
   const displayExtension = mimeType.startsWith("video/") ? extension : "webp";
   return {
