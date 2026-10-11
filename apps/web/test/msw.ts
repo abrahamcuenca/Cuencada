@@ -27,7 +27,8 @@ export const defaultHandlers: readonly HttpHandler[] = [
   // The "Chat" tab's unread badge (T7) loads the room list for signed-in members.
   http.get(apiUrl("/chat/rooms"), () => HttpResponse.json([])),
   // Home's "Próximos eventos" strip (WP-5.4) for signed-in members.
-  http.get(apiUrl("/events"), () => HttpResponse.json({ items: [], nextCursor: null }))
+  http.get(apiUrl("/events"), () => HttpResponse.json({ items: [], nextCursor: null })),
+  http.get(apiUrl("/events/notices"), () => HttpResponse.json({ items: [] }))
 ];
 
 /**

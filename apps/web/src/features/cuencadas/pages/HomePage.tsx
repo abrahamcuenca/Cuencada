@@ -57,8 +57,8 @@ function NoStrip(): ReactNode {
 // WP-5.4: members-only, in its own chunk (and its events API with it). A chunk that fails
 // to load renders nothing: Home must never break over an optional strip.
 const UpcomingEventsStrip = lazy(() =>
-  import("../../events/components/UpcomingEventsStrip").then(
-    (module) => ({ default: module.UpcomingEventsStrip }),
+  import("../../events/components/HomeEvents").then(
+    (module) => ({ default: module.HomeEvents }),
     (error: unknown) => {
       reportUnexpected(error);
       return { default: NoStrip };
@@ -66,7 +66,7 @@ const UpcomingEventsStrip = lazy(() =>
   )
 );
 
-/** "Próximos eventos" (max 3) for members; hidden when there is none. */
+/** "Te agregaron a…" notices and "Próximos eventos" (max 3) for members; hidden when there is none. */
 function EventsStrip(): ReactNode {
   const audience = useAppSelector(selectSessionAudience);
   if (audience !== "member" && audience !== "admin") return null;
