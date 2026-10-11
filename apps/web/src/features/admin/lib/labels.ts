@@ -102,7 +102,22 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   [AuditAction.EventCoverUpdated]: "Cambió la portada de un evento",
   [AuditAction.EventCoverRemoved]: "Quitó la portada de un evento",
   [AuditAction.EventCoverRejected]: "Portada de evento rechazada",
-  [AuditAction.EventAdminViewed]: "Revisó un evento privado"
+  [AuditAction.EventAdminViewed]: "Revisó un evento privado",
+  [AuditAction.MediaTagged]: "Etiquetó a alguien en una foto",
+  [AuditAction.MediaUntagged]: "Quitó una etiqueta de una foto",
+  [AuditAction.MediaCommentDeleted]: "Eliminó un comentario de una foto",
+  [AuditAction.MediaCommentReported]: "Reportó un comentario",
+  [AuditAction.MemoryAlbumCreated]: "Creó un baúl de recuerdos",
+  [AuditAction.MemoryAlbumUpdated]: "Editó un baúl de recuerdos",
+  [AuditAction.MemoryAlbumPublished]: "Publicó un baúl de recuerdos",
+  [AuditAction.MemoryAlbumHidden]: "Ocultó un baúl de recuerdos",
+  [AuditAction.MemoryAlbumDeleted]: "Eliminó un baúl de recuerdos",
+  [AuditAction.MemoryAlbumsReordered]: "Reordenó los baúles de recuerdos",
+  [AuditAction.TreeProposalCreated]: "Propuso una conexión en el árbol",
+  [AuditAction.TreeProposalApproved]: "Aprobó una propuesta del árbol",
+  [AuditAction.TreeProposalRejected]: "Rechazó una propuesta del árbol",
+  [AuditAction.TreeProposalWithdrawn]: "Retiró una propuesta del árbol",
+  [AuditAction.FamilySettingsUpdated]: "Cambió la raíz del árbol"
 };
 
 const ENTITY_LABELS: Record<AuditEntityType, string> = {
@@ -121,7 +136,11 @@ const ENTITY_LABELS: Record<AuditEntityType, string> = {
   [AuditEntityType.Person]: "Persona",
   [AuditEntityType.Relationship]: "Parentesco",
   [AuditEntityType.ChatMessage]: "Mensaje del chat",
-  [AuditEntityType.Event]: "Evento"
+  [AuditEntityType.Event]: "Evento",
+  [AuditEntityType.MediaComment]: "Comentario",
+  [AuditEntityType.MemoryAlbum]: "Baúl de recuerdos",
+  [AuditEntityType.TreeProposal]: "Propuesta del árbol",
+  [AuditEntityType.FamilySettings]: "Ajustes del árbol"
 };
 
 function hasKey<TKey extends string>(record: Record<TKey, string>, key: string): key is TKey {

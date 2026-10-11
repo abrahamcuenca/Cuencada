@@ -23,6 +23,12 @@ import {
   stripUnsafeChars
 } from "./common.js";
 import { type EventRef, eventRefSchema } from "./eventRefs.js";
+import { wsServerNotificationSchema } from "./notifications.js";
+
+// WP-6.0: the notification and photo-social contracts are re-exported here
+// because the barrel (`index.ts`) is frozen (the WP-4.0/5.2 precedent).
+export * from "./notifications.js";
+export * from "./social.js";
 
 /**
  * `event` (WP-5.2): one room per event, created with the event's first
@@ -326,7 +332,10 @@ export const wsServerPongSchema = z.object({
   ts: z.number().int().nullable()
 });
 
-/** Any frame the server may send. */
+/**
+ * Any frame the server may send. WP-6.0 adds `notification`
+ * (`wsServerNotificationSchema`, `notifications.ts`): per-user, never per-room.
+ */
 export const wsServerMessageSchema = z.discriminatedUnion("type", [
   wsServerMessageEventSchema,
   wsServerMessageDeletedSchema,
@@ -335,6 +344,7 @@ export const wsServerMessageSchema = z.discriminatedUnion("type", [
   wsServerTypingSchema,
   wsServerPresenceSchema,
   wsServerErrorSchema,
-  wsServerPongSchema
+  wsServerPongSchema,
+  wsServerNotificationSchema
 ]);
 export type WsServerMessage = z.infer<typeof wsServerMessageSchema>;

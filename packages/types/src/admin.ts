@@ -6,6 +6,11 @@ import { z } from "zod";
 import { cursorQuerySchema, dateTimeSchema, idSchema, queryBooleanSchema } from "./common.js";
 import { type UserRole, type UserStatus, userRoleSchema, userStatusSchema } from "./auth.js";
 
+// WP-6.0: tree-link proposals, family settings and the extended tree reads
+// live in their own file; re-exported here because the barrel is frozen and
+// `family.ts` cannot re-export a module that imports it.
+export * from "./treeLinks.js";
+
 /** Entity types that appear in the audit log. */
 export const AuditEntityType = {
   User: "user",
@@ -24,7 +29,15 @@ export const AuditEntityType = {
   Relationship: "relationship",
   ChatMessage: "chat_message",
   /** WP-5.2: events; participant, album and cover actions use it too (ids in `metadata`). */
-  Event: "event"
+  Event: "event",
+  /** WP-6.0: a photo comment (moderation and reports). Tags use `media` (`metadata.tagId`, `personId`). */
+  MediaComment: "media_comment",
+  /** WP-6.0: a Memory Box. */
+  MemoryAlbum: "memory_album",
+  /** WP-6.0: a tree-link proposal. */
+  TreeProposal: "tree_proposal",
+  /** WP-6.0: the family settings row (root ancestor). */
+  FamilySettings: "family_settings"
 } as const;
 export type AuditEntityType = (typeof AuditEntityType)[keyof typeof AuditEntityType];
 export const auditEntityTypeSchema = z.enum(AuditEntityType);
@@ -166,7 +179,39 @@ export const AuditAction = {
    * chat or media (`metadata.surface`: `detail` | `chat` | `media`, the first
    * one in the window). At most once per admin per event per hour (ADR 0001 §7).
    */
-  EventAdminViewed: "event.admin_viewed"
+  EventAdminViewed: "event.admin_viewed",
+  /*
+   * WP-6.0 (ADR 0001 §8). Metadata holds ids, enums, field names and counts
+   * only: never comment bodies, box titles, notes or names.
+   */
+  /** `entityType: media`; a person was tagged (metadata: `tagId`, `personId`, `placed`). */
+  MediaTagged: "media.tagged",
+  /** `entityType: media`; a tag was removed (metadata: `tagId`, `personId`, `by`: `tagger` | `uploader` | `self` | `admin`). */
+  MediaUntagged: "media.untagged",
+  /** `entityType: media_comment`; an admin deleted a comment (metadata: `mediaId`, `authorUserId`). */
+  MediaCommentDeleted: "media_comment.deleted",
+  /** `entityType: media_comment`; a member reported a comment (metadata: `mediaId`, `reason`). */
+  MediaCommentReported: "media_comment.reported",
+  MemoryAlbumCreated: "memory_album.created",
+  /** Metadata: changed field names. */
+  MemoryAlbumUpdated: "memory_album.updated",
+  /** Written (in addition to `updated`) when `status` becomes `published`. */
+  MemoryAlbumPublished: "memory_album.published",
+  /** Written (in addition to `updated`) when `status` becomes `hidden`. */
+  MemoryAlbumHidden: "memory_album.hidden",
+  /** Metadata: `mediaDeleted` (soft-deleted rows purged). */
+  MemoryAlbumDeleted: "memory_album.deleted",
+  /** Metadata: `count`. */
+  MemoryAlbumsReordered: "memory_album.reordered",
+  /** Metadata: `kind`, `relation`, `fromPersonId`, `toPersonId`. */
+  TreeProposalCreated: "tree_proposal.created",
+  /** Metadata: `kind`, the merge's `keepPersonId`/`duplicatePersonId` or the new `relationshipId`. */
+  TreeProposalApproved: "tree_proposal.approved",
+  TreeProposalRejected: "tree_proposal.rejected",
+  /** Metadata: `reason`: `proposer` | `person_deleted` | `person_merged`. */
+  TreeProposalWithdrawn: "tree_proposal.withdrawn",
+  /** Metadata: `rootPersonId` (or `null`). */
+  FamilySettingsUpdated: "family_settings.updated"
 } as const;
 export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
 

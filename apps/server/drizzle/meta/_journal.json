@@ -71,6 +71,13 @@
       "when": 1791755743039,
       "tag": "0009_event_notices_admin_views",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791761433705,
+      "tag": "0010_social_tree_memories",
+      "breakpoints": true
     }
   ]
 }

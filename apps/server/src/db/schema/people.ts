@@ -9,6 +9,9 @@ import {
   PersonRevisionAction,
   type PersonRevisionSnapshot,
   RelationshipKind,
+  TREE_LINK_NOTE_MAX_LENGTH,
+  TreeLinkProposalKind,
+  TreeLinkProposalStatus,
   avatarMimeTypeSchema
 } from "@cuencada/types";
 import { sql } from "drizzle-orm";
@@ -209,5 +212,87 @@ export const personRelationships = pgTable(
     index("person_relationships_created_by_user_id_idx").on(table.createdByUserId),
     checkIn("person_relationships_kind_check", "kind", RelationshipKind),
     check("person_relationships_no_self_check", sql`"from_person_id" <> "to_person_id"`)
+  ]
+);
+
+/**
+ * WP-6.0 (migration 0010): a member's proposal to connect two people
+ * ("Es la misma persona" / "Conectar con…"); admins approve (merge or edge)
+ * or reject. At most one **pending** proposal per unordered pair.
+ *
+ * The person FKs are ON DELETE **SET NULL**, not CASCADE: approving a
+ * `same_person` proposal merges (deletes) one of its own people, and the
+ * resolved proposal must survive to be shown and notified. A pending
+ * proposal must name two people (`tree_link_proposals_pending_people_check`),
+ * so person delete and merge must first withdraw or re-point the pending
+ * proposals that name the person (WP-6.4); otherwise the delete fails closed.
+ */
+export const treeLinkProposals = pgTable(
+  "tree_link_proposals",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    kind: text("kind").$type<TreeLinkProposalKind>().notNull(),
+    fromPersonId: uuid("from_person_id").references(() => people.id, { onDelete: "set null" }),
+    toPersonId: uuid("to_person_id").references(() => people.id, { onDelete: "set null" }),
+    /** `parent_of` (from is a parent of to) or `partner_of`; set iff `kind = 'relate'`. */
+    relation: text("relation").$type<RelationshipKind>(),
+    note: text("note"),
+    proposedByUserId: uuid("proposed_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    status: text("status").$type<TreeLinkProposalStatus>().notNull().default("pending"),
+    resolvedByUserId: uuid("resolved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    resolvedAt: timestamptz("resolved_at"),
+    resolutionNote: text("resolution_note"),
+    createdAt: createdAt()
+  },
+  (table) => [
+    uniqueIndex("tree_link_proposals_pending_pair_unique")
+      .on(sql`least(${table.fromPersonId}, ${table.toPersonId})`, sql`greatest(${table.fromPersonId}, ${table.toPersonId})`)
+      .where(sql`status = 'pending'`),
+    // Admin queue (pending first, oldest first) and the per-member daily count.
+    index("tree_link_proposals_status_created_idx").on(table.status, table.createdAt),
+    index("tree_link_proposals_proposed_by_idx").on(table.proposedByUserId, table.createdAt),
+    index("tree_link_proposals_from_person_id_idx").on(table.fromPersonId),
+    index("tree_link_proposals_to_person_id_idx").on(table.toPersonId),
+    index("tree_link_proposals_resolved_by_user_id_idx").on(table.resolvedByUserId),
+    checkIn("tree_link_proposals_kind_check", "kind", TreeLinkProposalKind),
+    checkIn("tree_link_proposals_status_check", "status", TreeLinkProposalStatus),
+    check(
+      "tree_link_proposals_relation_check",
+      sql`("kind" = 'relate') = ("relation" is not null) and ("relation" is null or ${inList("relation", Object.values(RelationshipKind))})`
+    ),
+    check("tree_link_proposals_distinct_check", sql`"from_person_id" <> "to_person_id"`),
+    check(
+      "tree_link_proposals_pending_people_check",
+      sql`"status" <> 'pending' or ("from_person_id" is not null and "to_person_id" is not null)`
+    ),
+    check("tree_link_proposals_resolved_check", sql`("status" = 'pending') = ("resolved_at" is null)`),
+    check(
+      "tree_link_proposals_note_length_check",
+      sql.raw(`"note" is null or char_length("note") <= ${TREE_LINK_NOTE_MAX_LENGTH}`)
+    ),
+    check(
+      "tree_link_proposals_resolution_note_length_check",
+      sql.raw(`"resolution_note" is null or char_length("resolution_note") <= ${TREE_LINK_NOTE_MAX_LENGTH}`)
+    )
+  ]
+);
+
+/**
+ * WP-6.0 (migration 0010): tree-wide settings, a single row (`id = true`,
+ * inserted by the migration). `root_person_id` is the root ancestor of
+ * "Árbol completo" and of the "Ramas sin conectar" report.
+ */
+export const familySettings = pgTable(
+  "family_settings",
+  {
+    id: boolean("id").primaryKey().default(true),
+    rootPersonId: uuid("root_person_id").references(() => people.id, { onDelete: "set null" }),
+    updatedByUserId: uuid("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    updatedAt: updatedAt()
+  },
+  (table) => [
+    index("family_settings_root_person_id_idx").on(table.rootPersonId),
+    index("family_settings_updated_by_user_id_idx").on(table.updatedByUserId),
+    check("family_settings_single_row_check", sql`"id"`)
   ]
 );

@@ -81,14 +81,18 @@ export function isAdmin(viewer: Viewer): boolean {
  * (unchanged member rule). Album media: the event is visible to the viewer
  * and the viewer is a participant or an admin (ADR 0001 §7, Security
  * requirement 1). Admins reach every scope.
+ *
+ * WP-6.0 (ADR 0001 §8): one explicit branch per known scope, and any other
+ * row (a Memory Box row, `memory_album_id`, until WP-6.3 adds its branch, or
+ * a future scope) is **denied** rather than let through.
  */
 export function mediaScopeSql(viewer: Viewer): SQL {
   if (isAdmin(viewer)) return sql`true`;
-  return sql`(${mediaItems.albumId} is null or exists (
+  return sql`((${mediaItems.cuencadaId} is not null) or (${mediaItems.albumId} is not null and exists (
     select 1 from ${eventAlbums} scope_album
     inner join ${events} scope_event on ${scopeEvent.id} = ${scopeAlbum.eventId}
     where ${scopeAlbum.id} = ${mediaItems.albumId} and ${eventMemberAccessSql(viewer, scopeEvent)}
-  ))`;
+  )))`;
 }
 
 /** SQL: rows a member may see within a scope they can reach (see module doc). */

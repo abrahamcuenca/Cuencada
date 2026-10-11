@@ -423,6 +423,24 @@ function nullableEventTextSchema(max: number, multiline: boolean) {
     );
 }
 
+/**
+ * Required one-line text (NFC, invisible marks stripped, trimmed, 1–`max`
+ * characters, no line breaks). The rule of event titles, shared with WP-6
+ * contracts (Memory Box titles).
+ */
+export function singleLineTextSchema(max: number): z.ZodType<string, string> {
+  return eventLineSchema(max);
+}
+
+/**
+ * Optional cleaned text stored as `null` when blank (`multiline` allows
+ * `\n`). The rule of event summaries and details, shared with WP-6 contracts
+ * (Memory Box descriptions, tree-link notes).
+ */
+export function cleanNullableTextSchema(max: number, multiline: boolean): z.ZodType<string | null, string | null> {
+  return nullableEventTextSchema(max, multiline);
+}
+
 /** Event title: one line, 1–120 characters. */
 export const eventTitleSchema = eventLineSchema(EVENT_TITLE_MAX_LENGTH);
 /** Album title: one line, 1–80 characters. */
