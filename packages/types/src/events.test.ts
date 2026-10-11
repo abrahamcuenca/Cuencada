@@ -27,6 +27,7 @@ import {
   foldAccents,
   isEventSlug,
   isPastEvent,
+  memberEventSlug,
   randomEventSlugSuffix,
   slugifyEventTitle,
   updateEventAlbumInputSchema,
@@ -116,6 +117,37 @@ describe("eventSlugWithSuffix", () => {
     for (const bad of ["2", "abc", "abcde", "ab-c", "AB23", "ab18"]) {
       expect(() => eventSlugWithSuffix("carne-asada", bad), bad).toThrow(RangeError);
     }
+  });
+});
+
+describe("memberEventSlug (Security M1)", () => {
+  const suffixed = /-[a-z2-7]{4}$/;
+
+  it("always ends in a random 4-char base32 suffix, with or without a colliding (invisible) event", () => {
+    // The helper takes no knowledge of existing slugs: the first event with a
+    // title and the one created after an invisible event took the bare slug
+    // get the same shape.
+    const first = memberEventSlug("Carne asada");
+    const afterInvisibleCollision = memberEventSlug("Carne asada");
+    for (const slug of [first, afterInvisibleCollision]) {
+      expect(slug).toMatch(/^carne-asada-[a-z2-7]{4}$/);
+      expect(isEventSlug(slug)).toBe(true);
+    }
+    // The retry after a unique violation is another suffixed slug, never the bare one.
+    const retry = memberEventSlug("Carne asada");
+    expect(retry).toMatch(suffixed);
+    expect(retry).not.toBe("carne-asada");
+  });
+
+  it("suffixes every kind of title within 60 characters", () => {
+    for (const title of ["Viaje a Ciudad de México 2026", "🎉", "Yo", `${"palabra ".repeat(12)}final`, "x".repeat(80)]) {
+      const slug = memberEventSlug(title);
+      expect(slug, title).toMatch(suffixed);
+      expect(slug.length).toBeLessThanOrEqual(EVENT_SLUG_MAX_LENGTH);
+      expect(isEventSlug(slug), slug).toBe(true);
+    }
+    expect(memberEventSlug("🎉", "q2z7")).toBe("evento-q2z7");
+    expect(memberEventSlug("Posada de la Rama Norte", "ab23")).toBe("posada-de-la-rama-norte-ab23");
   });
 });
 

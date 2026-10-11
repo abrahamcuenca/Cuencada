@@ -188,7 +188,7 @@ export const EVENT_SLUG_FALLBACK = "evento";
  * characters → one `-`, no leading/trailing `-`, at most
  * {@link EVENT_SLUG_MAX_LENGTH} characters (cut at a word boundary when
  * possible). Falls back to {@link EVENT_SLUG_FALLBACK} when shorter than 3.
- * The server adds a random suffix on collision with {@link eventSlugWithSuffix}.
+ * Member-created events never use it bare: see {@link memberEventSlug}.
  *
  * @param title - The event title.
  * @returns A slug matching {@link EVENT_SLUG_PATTERN}.
@@ -212,20 +212,21 @@ function fitSlug(slug: string, max: number): string {
   return out.length >= EVENT_SLUG_MIN_LENGTH ? out : EVENT_SLUG_FALLBACK;
 }
 
-/** Alphabet of the collision suffix (RFC 4648 base32, lowercase: every character fits the slug pattern). */
+/** Alphabet of the random slug suffix (RFC 4648 base32, lowercase: every character fits the slug pattern). */
 const SLUG_SUFFIX_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
-/** Length of the random collision suffix (32^4 ≈ 1M values). */
+/** Length of the random slug suffix (32^4 ≈ 1M values). */
 export const EVENT_SLUG_SUFFIX_LENGTH = 4;
 const slugSuffixRegex = new RegExp(`^[${SLUG_SUFFIX_ALPHABET}]{${EVENT_SLUG_SUFFIX_LENGTH}}$`);
 
 /**
- * A random collision suffix: {@link EVENT_SLUG_SUFFIX_LENGTH} base32 characters
+ * A random slug suffix: {@link EVENT_SLUG_SUFFIX_LENGTH} base32 characters
  * from `crypto.getRandomValues` (Node ≥ 19 and browsers).
  *
- * [SEC] Security M1 (PR #52, CWE-203): a **sequential** suffix (`-2`, `-3`) or
- * a 409 on a taken slug would tell a member that an event they cannot see
- * already uses that title in that year. A random suffix is the same whether
- * or not the colliding event is visible to the caller.
+ * [SEC] Security M1 (PR #52, CWE-203): a sequential suffix (`-2`), a 409 on a
+ * taken slug, or even a suffix that appears **only** on collision would tell
+ * a member that an event they cannot see already uses that title in that
+ * year. Member slugs therefore always carry a random suffix
+ * ({@link memberEventSlug}), collision or not.
  */
 export function randomEventSlugSuffix(): string {
   const bytes = new Uint8Array(EVENT_SLUG_SUFFIX_LENGTH);
@@ -237,10 +238,8 @@ export function randomEventSlugSuffix(): string {
 }
 
 /**
- * `base` with a random suffix, used on **every** `(year, slug)` collision of
- * a generated slug: `"carne-asada"` → `"carne-asada-k7q2"`, still at most 60
- * characters (the base is cut at a word boundary to make room). The server
- * retries with a fresh suffix on the rare second collision.
+ * `base` with a random suffix: `"carne-asada"` → `"carne-asada-k7q2"`, still
+ * at most 60 characters (the base is cut at a word boundary to make room).
  *
  * @param base - A valid slug.
  * @param suffix - The suffix; defaults to {@link randomEventSlugSuffix} (tests pass a fixed one).
@@ -251,6 +250,23 @@ export function eventSlugWithSuffix(base: string, suffix: string = randomEventSl
   if (!slugSuffixRegex.test(suffix)) throw new RangeError("eventSlugWithSuffix: invalid suffix");
   const head = fitSlug(base, EVENT_SLUG_MAX_LENGTH - suffix.length - 1);
   return `${head}-${suffix}`;
+}
+
+/**
+ * The slug of a **member-created** event: {@link slugifyEventTitle} plus a
+ * random suffix, **always** (`"Carne asada"` → `"carne-asada-k7q2"`), whether
+ * or not the title collides in that year, so the slug's shape says nothing
+ * about events the caller cannot see (Security M1). On the rare
+ * `(year, slug)` unique violation the server calls it again (fresh suffix)
+ * and retries the insert; it never falls back to the bare slug. Only an
+ * admin-typed slug (admin routes) may be bare.
+ *
+ * @param title - The event title.
+ * @param suffix - Defaults to {@link randomEventSlugSuffix} (tests pass a fixed one).
+ * @returns A slug matching {@link EVENT_SLUG_PATTERN} and ending in `-[a-z2-7]{4}`.
+ */
+export function memberEventSlug(title: string, suffix: string = randomEventSlugSuffix()): string {
+  return eventSlugWithSuffix(slugifyEventTitle(title), suffix);
 }
 
 /** True when `value` is a valid event slug (3–60 chars, {@link EVENT_SLUG_PATTERN}). */
@@ -475,10 +491,9 @@ const eventFields = {
  * Responds 201 with {@link EventDetail}.
  *
  * The slug is **not** accepted (strict schema, Security M1): the server
- * generates it with {@link slugifyEventTitle} and, on any `(year, slug)`
- * collision, {@link eventSlugWithSuffix} (random suffix), so the result never
- * depends on events the caller cannot see. Admins may choose a slug through
- * {@link adminCreateEventInputSchema}.
+ * always generates it with {@link memberEventSlug} (title + random suffix,
+ * collision or not), so it never depends on events the caller cannot see.
+ * Admins may choose a slug through {@link adminCreateEventInputSchema}.
  */
 export const createEventInputSchema = z
   .strictObject({
@@ -509,7 +524,7 @@ export type CreateEventRequest = z.input<typeof createEventInputSchema>;
  * `POST /api/admin/events` (admins): {@link createEventInputSchema} plus an
  * optional typed `slug`. A taken typed slug is 409 `CONFLICT` +
  * `EVENT_SLUG_TAKEN` (`path: "slug"`); admins can see every event, so this
- * reveals nothing. Omitted → generated as for members.
+ * reveals nothing. Omitted → {@link memberEventSlug}, as for members.
  */
 export const adminCreateEventInputSchema = createEventInputSchema.safeExtend({
   slug: eventSlugSchema.exactOptional()
