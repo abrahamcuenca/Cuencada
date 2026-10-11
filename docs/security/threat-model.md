@@ -1,6 +1,6 @@
 # Threat model
 
-WP-2.3 · Security Engineer · 2026-10-06 · baseline `main` @ `28c55aa`, updated after the PR #35 review (merged with `main` @ `e75e718`); updated by WP-2.4 (deploy prep, #36 invites); updated by WP-3.2 after the 2026-10-07 launch (accepted risks A10, A11)
+WP-2.3 · Security Engineer · 2026-10-06 · baseline `main` @ `28c55aa`, updated after the PR #35 review (merged with `main` @ `e75e718`); updated by WP-2.4 (deploy prep, #36 invites); updated by WP-3.2 after the 2026-10-07 launch (accepted risks A10, A11); updated by WP-5.2 (events: assets, §4.9, A14)
 
 Cuencada is a private family portal:
 
@@ -33,7 +33,9 @@ Related documents: [route inventory](routes.md), [CSP](csp.md),
 | Attendance and RSVPs: who attended or is coming, guests, hotel, dates, notes | `cuencada_rsvps`, `cuencada_attendance` | **Medium–High.** Physical-presence data: someone could learn when a home is empty. Notes are visible to admins only. |
 | Photos and videos (faces, places, children) | Bucket `cuencadas/<year>/…`, `media_items` | **High.** Members-only (PR #31 owner decision). Originals are stripped of GPS/EXIF and video location atoms (T4). |
 | Avatars | Bucket `avatars/<userId>/…` | Medium. |
-| Chat messages | `chat_messages` | Medium. Visible to members, including the sender's name and avatar. |
+| Chat messages | `chat_messages` | Medium. Visible to members, including the sender's name and avatar. Event-room messages (WP-5.2) only to that event's participants and admins. |
+| Event membership and plans (WP-5.2): who takes part in which event, where and when (`location_text`, dates), event details | `events`, `event_participants` | **Medium–High.** Physical-presence data like RSVPs (a trip reveals an empty home). `participants`-visibility events, and their existence, are hidden from non-participants (404); admins see them, audited. |
+| Event album photos and covers (WP-5.2) | Bucket `events/<eventId>/<albumId>/…` and `events/<eventId>/cover/…`, `media_items.album_id`, `event_cover_uploads` | **High.** Same as the gallery, but scoped to the event's participants (and to every member for a `members` event's cover only). Same EXIF/GPS strip and private cache. |
 | Credentials | `users.password_hash` (argon2id, m = 19 MiB, t = 2) | **Critical.** |
 | Session and refresh tokens | `sessions`, `refresh_tokens` (hashed); `__Secure-cuencada_rt` cookie | **Critical.** |
 | One-time tokens: invites, magic links, password reset, email verification, WS tickets | `invites.token_hash`, `magic_links.token_hash` (SHA-256), WS tickets in memory | **Critical.** Hashed at rest and delivered in URL fragments (`#t=`). |
@@ -168,6 +170,8 @@ Each row lists the main mitigation and where it's enforced or tested.
 
 ### 4.5 Chat (`modules/chat`)
 
+Event rooms (WP-5.2) add the threats in §4.9.
+
 | Threat | Mitigation | Evidence |
 |---|---|---|
 | **S**: cross-site WebSocket hijacking | 30 s single-use ticket from `POST /api/chat/ticket` (bearer-authenticated, verified members only), bound to the session. Exact `Origin` check. Failures close with 1008 and a generic reason. | matrix "chat WebSocket upgrade"; `socket.test.ts` |
@@ -205,6 +209,23 @@ Each row lists the main mitigation and where it's enforced or tested.
 | **D**: abuse of Resend quota | Recipient budget, global daily cap, admin alerts that bypass the cap. | `mailBudget.ts` |
 | **R**: send failures go unnoticed | Queue retries. `mail.cap_reached` and `mail.queue_full` are logged. Open: alert on them (backlog). | |
 
+### 4.9 Events (`modules/events`, WP-5.2 contracts; WP-5.3 implements)
+
+Rules: ADR 0001 §7. The evidence column names the tests WP-5.3 must add.
+
+| Threat | Mitigation | Evidence (WP-5.3) |
+|---|---|---|
+| **I**: a non-participant learns that a `participants` event exists, or reads its details, participants or cover | One visibility predicate (`eventVisibleSql(viewer)`) for lists and every by-id/by-slug route; invisible → **404** `EVENT_NOT_FOUND`, never 403; drafts only to organizers and admins, hidden only to admins. Cover URLs are presigned only inside visible responses. | matrix rows + IDOR probes (detail by slug and by id, list, cover, participants) |
+| **I/E**: a non-participant reads or posts in an event chat (REST history, WS `send`, fan-out) | `visibleRoomSql(userId)` gains the event rule and every `findVisibleRoom` call passes the user; the hub's fan-out uses a per-room recipient predicate (participant set cached per room, invalidated on participant/visibility/status changes). Losing access sends `room_removed`, drops typing state and stops delivery. | WS test: a non-participant receives **no** event frames; a removed participant stops receiving them after `room_removed`; history 404 |
+| **I/E**: album media reached by id outside its scope (`GET/PATCH/DELETE /api/media/:id`, confirm, report), or uploads into someone else's album | `mediaScopeSql(viewer)` on **every** by-id route (404 outside scope); upload intents only through `POST /api/events/:id/albums/:albumId/uploads` for participants and admins, the album checked to belong to the event; keys server-generated under `storage_prefix` (DB CHECK on its shape). | IDOR probes on each `/api/media/:id*` route with album media; upload as non-participant 403/404 |
+| **E**: a member manages someone else's event (edit, visibility, participants, albums, cover, delete) | Organizer-or-admin check after the visibility check (403 `EVENT_MANAGE_NOT_ALLOWED` when visible, 404 otherwise); `hidden` admin-only; organizer delete only for a media-free draft; strict input schemas (no `status`/`firstPublishedAt`/`createdByUserId` mass assignment on create). | matrix rule probes with before/after state |
+| **E**: self-join into a private event; adding strangers | Self-join only for published `members` events (403 `EVENT_JOIN_NOT_ALLOWED`); added users must be active, verified members; ≤ 50 per request, ≤ 500 per event. | join/add tests incl. disabled and unverified targets |
+| **T/D**: a slug or text that breaks URLs or spoofs titles; very long fields | Slug CHECK `^[a-z0-9]+(?:-[a-z0-9]+)*$`, 3–60, generated server-side by default; titles one line, bidi/invisible marks stripped, every text bounded in zod **and** DB CHECKs. | `events.test.ts` (contract), `migrations.test.ts` (CHECKs) |
+| **T**: cover key or storage prefix pointing at another event's objects | `events_cover_check` pins `cover_key` to `events/{id}/cover/{uuid}-1280.webp`; `media_items_storage_prefix_check` allows only `cuencadas/{yyyy}` or `events/{uuid}/{uuid}`; both are server-written. | `migrations.test.ts` |
+| **R**: admin browsing of private events goes unnoticed | `event.admin_viewed` audit (detail, chat, media) once per admin per event per hour; every event write is audited (`event.*`, ids and field names only). | audit tests incl. the rate limit |
+| **D**: event/album/upload spam | Per-user rate limits on create, join, participant changes and album writes; ≤ 20 albums per event; the gallery's pending-intent cap, daily byte budget and cleanup apply to album uploads; cover intents mirror person photos (10 MB). | rate-limit tests |
+| **I**: PII through participants | `EventParticipant` carries name and avatar only; `userId` only for self, managers and directory-listed active members; no contacts or emails. Audit metadata never holds titles or names. | PII scan additions (event detail, participants, admin list) |
+
 ## 5. Accepted risks (owner and orchestrator decisions)
 
 | # | Risk | Decision | Owner |
@@ -222,6 +243,7 @@ Each row lists the main mitigation and where it's enforced or tested.
 | A11 | **Runtime DB role may be the admin role:** if `DATABASE_URL` on `server_1` uses the DB admin role (the launch's migrator) instead of the DML-only `cuencada_app`, the API has DDL rights, and a compromised `server_1` holds the admin password. | Accepted on 2026-10-07 until `cuencada_app` is adopted. Follow-up: run `infra/db/roles.sql` with `-v owner_role=<that role>`, then switch the vault URL to `cuencada_app` and redeploy (runbook § 3; backlog "Post-launch"). | O (2026-10-07) |
 | A12 | **Relatives write PII about people without accounts** (WP-4): members can add dates, birthplace, bio and (close relatives) a photo for someone who never consented, including children. | Owner decision (2026-10-07): members edit their own family only (qualifying circle, no member edges between existing people: M1); every change is a revision admins see and can undo; living people's dates and birthplace are circle-only; photos are members-only. Removal on request goes through an admin, who deletes the person (and its photo objects) and can **purge its revision history** (`POST /api/admin/people/:id/revisions/purge`, L2). | Owner |
 | A13 | **`PersonDetails.canEdit`/`isLinked` hints** (WP-4.0): a 403 `PERSON_LINKED_TO_OTHER` or `canEdit: false` on an in-circle person can reveal that an **unlisted** account is linked there, which `userId: null` otherwise hides. | Accepted: only reachable inside the member's own circle (close family), and the server never returns the account id. `isLinked` itself follows the unlisted rule. | Architect (WP-4.0) |
+| A14 | **Admins can read private events** (WP-5.2): every admin can open any `participants` event's details, chat and albums for moderation, so "solo participantes" is not private from admins. | Owner decision (2026-10-11). Mitigated by the `event.admin_viewed` audit (once per admin per event per hour) and the small, trusted admin group; the event page should say that admins can moderate. | Owner |
 
 ## 6. Open items
 
