@@ -2,7 +2,15 @@ import type { ChatRoom } from "@cuencada/types";
 import { baseApi } from "../../shared/api/baseApi";
 import type { WithAuthState } from "../auth/authSlice";
 import { type ChatHubEvent, getViewingRoom, subscribeChatEventsOnceLoaded } from "./events";
-import { applyDeletedToRooms, applyMessageToRooms, applyRoomPreview, type ChatRoomView, mergeRoomLists, roomsFromResponse } from "./lib/rooms";
+import {
+  applyDeletedToRooms,
+  applyMessageToRooms,
+  applyRoomPreview,
+  applyRoomRemoved,
+  type ChatRoomView,
+  mergeRoomLists,
+  roomsFromResponse
+} from "./lib/rooms";
 
 function currentUserId(state: unknown): string | null {
   // RTK Query types lifecycle `getState()` as its own RootState; the store's state always has `auth` (store.ts).
@@ -21,7 +29,7 @@ function currentUserId(state: unknown): string | null {
  */
 export const chatApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
-    /** `GET /chat/rooms`, kept live by `message`/`message_deleted` frames. */
+    /** `GET /chat/rooms`, kept live by `message`/`message_deleted`/`room_preview`/`room_removed` frames. */
     getRooms: build.query<ChatRoomView[], void>({
       query: () => "/chat/rooms",
       transformResponse: (rooms: ChatRoom[]) => roomsFromResponse(rooms),
@@ -54,6 +62,9 @@ export const chatApi = baseApi.injectEndpoints({
           } else if (frame.type === "room_preview") {
             // The server's word on the room's new last live message (after a deletion).
             updateCachedData((rooms) => applyRoomPreview(rooms, frame.roomId, frame.lastMessageAt, frame.lastMessage));
+          } else if (frame.type === "room_removed") {
+            // WP-5.4: removed from an event (or it was hidden, deleted, made participants-only): the room goes away.
+            updateCachedData((rooms) => applyRoomRemoved(rooms, frame.roomId));
           }
         });
         if (unsubscribe === null) return;

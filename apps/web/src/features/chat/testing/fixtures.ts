@@ -27,7 +27,9 @@ export const PEOPLE = {
 export const ROOMS = {
   familia: chatId(1, 1),
   y2026: chatId(1, 2),
-  y2025: chatId(1, 3)
+  y2025: chatId(1, 3),
+  /** WP-5.4: an event room (not in {@link makeRooms}; add it with {@link makeEventRoom}). */
+  evento: chatId(1, 4)
 } as const;
 
 /** A valid single-use ticket shape (≥ 32 chars). */
@@ -104,6 +106,33 @@ export function makeRooms(overrides: Partial<Record<keyof typeof ROOMS, Partial<
       ...overrides.y2026
     }
   ];
+}
+
+/**
+ * WP-5.4: the room of a (fictional) event the member takes part in.
+ *
+ * @param overrides - Fields to change.
+ */
+export function makeEventRoom(overrides: Partial<ChatRoom> = {}): ChatRoom {
+  return {
+    id: ROOMS.evento,
+    kind: "event",
+    cuencadaId: null,
+    year: null,
+    title: "Paseo a la laguna",
+    unreadCount: 0,
+    lastMessageAt: "2026-09-14T16:00:00.000Z",
+    lastReadMessageId: null,
+    lastMessage: {
+      id: chatId(3, 950),
+      senderUserId: PEOPLE.tomas.userId,
+      senderDisplayName: PEOPLE.tomas.displayName,
+      preview: "¿Quién lleva la hielera?",
+      createdAt: "2026-09-14T16:00:00.000Z"
+    },
+    event: { id: chatId(5, 1), year: 2026, slug: "paseo-a-la-laguna-k7q2", title: "Paseo a la laguna" },
+    ...overrides
+  };
 }
 
 /** Mutable state behind the MSW handlers. */
@@ -195,5 +224,7 @@ export const frames = {
   message: (message: ChatMessage, clientMessageId: string | null = null): WsServerMessage => ({ type: "message", message, clientMessageId }),
   deleted: (roomId: string, messageId: string): WsServerMessage => ({ type: "message_deleted", roomId, messageId }),
   typing: (roomId: string, sender: ChatSender): WsServerMessage => ({ type: "typing", roomId, userId: sender.userId, displayName: sender.displayName }),
-  error: (clientMessageId: string | null): WsServerMessage => ({ type: "error", code: "RATE_LIMITED", message: "Más despacio.", clientMessageId })
+  error: (clientMessageId: string | null): WsServerMessage => ({ type: "error", code: "RATE_LIMITED", message: "Más despacio.", clientMessageId }),
+  /** WP-5.4: the member lost access to a room. */
+  roomRemoved: (roomId: string): WsServerMessage => ({ type: "room_removed", roomId })
 };

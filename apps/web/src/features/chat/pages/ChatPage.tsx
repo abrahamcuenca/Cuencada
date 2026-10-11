@@ -1,10 +1,11 @@
 import { idSchema } from "@cuencada/types";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import { useMatch } from "react-router-dom";
+import { useMatch, useNavigate } from "react-router-dom";
 import { useAppSelector } from "../../../app/hooks";
 import { Button } from "../../../shared/ui/Button";
 import { cx } from "../../../shared/ui/cx";
 import { EmptyState } from "../../../shared/ui/EmptyState";
+import { useToast } from "../../../shared/ui/Toast";
 import { selectCurrentUser } from "../../auth/authSlice";
 import { useGetRoomsQuery } from "../api";
 import styles from "../chat.module.css";
@@ -12,6 +13,8 @@ import { Conversation } from "../components/Conversation";
 import { RoomList } from "../components/RoomList";
 import { type ChatDenial, chatDenial } from "../lib/access";
 import { readerTimeZone } from "../lib/format";
+import { roomDisplayTitle } from "../lib/rooms";
+import { roomRemovedMessage, useRoomRemoved } from "../lib/useRoomRemoved";
 import { useChatViewport } from "../lib/useChatViewport";
 import { useChatConnection } from "../socket";
 
@@ -79,6 +82,19 @@ export function ChatPage(): ReactNode {
   const [timeZone] = useState(readerTimeZone);
   useChatViewport(layoutRef, markerRef);
   const onForbidden = useCallback((denial: ChatDenial) => setMessagesDenial(denial), []);
+  const navigate = useNavigate();
+  const toast = useToast();
+  // Titles of every room seen, so a `room_removed` toast can still name a room the cache already dropped.
+  const knownTitles = useRef(new Map<string, string>());
+  useEffect(() => {
+    for (const entry of rooms.data ?? []) knownTitles.current.set(entry.id, roomDisplayTitle(entry));
+  }, [rooms.data]);
+  // WP-5.4: lost access to a room (removed from an event, …): close it if it is open and say why.
+  useRoomRemoved((removedId) => {
+    if (removedId === roomId) navigate("/chat", { replace: true });
+    const title = knownTitles.current.get(removedId);
+    if (title !== undefined) toast.show({ message: roomRemovedMessage(title), tone: "info" });
+  });
 
   const denial = roomsDenial ?? messagesDenial ?? (connection === "unverified" || connection === "forbidden" ? connection : null);
   if (denial === "unverified") return <ChatForbidden />;

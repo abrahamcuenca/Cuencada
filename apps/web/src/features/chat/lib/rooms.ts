@@ -172,6 +172,27 @@ export function applyMessageToRooms(rooms: ChatRoomView[], message: ChatMessage,
 }
 
 /**
+ * Drops a room the caller lost access to (`room_removed`, WP-5.4).
+ *
+ * @param rooms - Cached rooms.
+ * @param roomId - The removed room.
+ * @returns The list without it (the same array when it was not there).
+ */
+export function applyRoomRemoved(rooms: ChatRoomView[], roomId: string): ChatRoomView[] {
+  return rooms.some((room) => room.id === roomId) ? rooms.filter((room) => room.id !== roomId) : rooms;
+}
+
+/**
+ * The name to show for a room: the event's title for an event room (WP-5.4),
+ * else the room's own title.
+ *
+ * @param room - A cached room.
+ */
+export function roomDisplayTitle(room: Pick<ChatRoomView, "title" | "event">): string {
+  return room.event?.title ?? room.title;
+}
+
+/**
  * Marks a room's preview as deleted when the deleted message is the one shown.
  *
  * @param rooms - Cached rooms.
