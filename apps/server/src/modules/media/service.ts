@@ -246,7 +246,8 @@ export async function countVisibleMediaByCuencada(db: DbOrTx, cuencadaIds: strin
     .from(mediaItems)
     .where(and(inArray(mediaItems.cuencadaId, cuencadaIds), publicVisibleSql()))
     .groupBy(mediaItems.cuencadaId);
-  return new Map(rows.map((row) => [row.cuencadaId, row.total]));
+  // `cuencada_id` is nullable since WP-5.2 (album media); the `inArray` filter already excludes nulls.
+  return new Map(rows.flatMap((row) => (row.cuencadaId === null ? [] : [[row.cuencadaId, row.total] as const])));
 }
 
 /** Reports on one item, newest first (bounded). */
@@ -304,7 +305,10 @@ export async function toMediaItem(storage: StorageService, record: MediaRecord, 
     canDelete: canManage,
     uploadStatus: item.uploadStatus,
     moderationStatus: item.moderationStatus,
-    createdAt: item.createdAt.toISOString()
+    createdAt: item.createdAt.toISOString(),
+    // WP-5.2: edition media only until WP-5.3 maps album scope.
+    album: null,
+    event: null
   };
 }
 

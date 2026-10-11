@@ -16,9 +16,10 @@ import { migrationsFolder } from "./migrate.js";
  * 0002: the same database is first taken 0000 → 0001, filled with rows in the
  * 0001 shape, then migrated to the latest version. Migration 0003: likewise
  * from 0002, migration 0004 from 0003, migration 0005 (data only) from
- * 0004, migration 0006 (wider revision action CHECK) from 0005, and migration
- * 0007 (historical editions) from 0006. The scratch database uses a
- * harness-style name so the global teardown also reclaims it.
+ * 0004, migration 0006 (wider revision action CHECK) from 0005, migration
+ * 0007 (historical editions) from 0006, and the events migration (WP-5.2,
+ * 0008) from the migration just before it (found by tag). The scratch
+ * database uses a harness-style name so the global teardown also reclaims it.
  */
 
 interface JournalEntry {
@@ -39,6 +40,8 @@ let upTo0003Folder: string;
 let upTo0004Folder: string;
 let upTo0005Folder: string;
 let upTo0006Folder: string;
+/** Every migration before the events one (WP-5.2). */
+let beforeEventsFolder: string;
 /** Number of migrations in the real journal (the "latest" version). */
 let latestCount: number;
 
@@ -88,6 +91,9 @@ beforeAll(async () => {
   upTo0006Folder = await migrationsUpTo(7);
   const journal = JSON.parse(await readFile(join(migrationsFolder, "meta", "_journal.json"), "utf8")) as Journal; // drizzle-kit's own file shape
   latestCount = journal.entries.length;
+  const eventsIndex = journal.entries.findIndex((entry) => entry.tag.endsWith("_events"));
+  if (eventsIndex < 1) throw new Error("events migration not found in the journal");
+  beforeEventsFolder = await migrationsUpTo(eventsIndex);
 });
 
 // Every test starts from a brand-new database migrated to 0000 only.
@@ -113,6 +119,7 @@ afterAll(async () => {
   if (upTo0004Folder) await rm(upTo0004Folder, { recursive: true, force: true });
   if (upTo0005Folder) await rm(upTo0005Folder, { recursive: true, force: true });
   if (upTo0006Folder) await rm(upTo0006Folder, { recursive: true, force: true });
+  if (beforeEventsFolder) await rm(beforeEventsFolder, { recursive: true, force: true });
   await dropScratch();
 });
 
@@ -887,5 +894,284 @@ describe("migration 0007 (historical editions, expand-only)", () => {
     `;
     expect(await sql`select is_historical from cuencadas where year = 2017`).toEqual([{ is_historical: true }]);
     expect(await sqlState(sql`update cuencadas set is_historical = null where year = 2017`)).toBe("23502");
+  });
+});
+
+describe("migration events (WP-5.2, expand-only)", () => {
+  const selectOldRooms = "select id, kind, cuencada_id, title, created_at from chat_rooms order by kind";
+  const selectOldMedia =
+    "select id, cuencada_id, uploaded_by_user_id, kind, object_key, bucket, thumb_key, display_key, file_name, mime_type, " +
+    "byte_size, upload_status, moderation_status, deleted_at, created_at, updated_at from media_items order by object_key";
+
+  /** A user, a published edition with its room, the global room, a message and two media rows (one soft-deleted). */
+  async function seedOldShape(): Promise<{ userId: string; cuencadaId: string; roomId: string }> {
+    const userId = await insertId(sql`insert into users (email, display_name) values ('ana@example.test', 'Ana') returning id`);
+    const cuencadaId = await insertId(sql`
+      insert into cuencadas (year, slug, title, description, is_published, first_published_at)
+      values (2026, '2026', 'Cuencada 2026', 'Reunión', true, now()) returning id
+    `);
+    await sql`insert into chat_rooms (kind, title) values ('global', 'Chat familiar')`;
+    const roomId = await insertId(sql`
+      insert into chat_rooms (kind, cuencada_id, title) values ('cuencada', ${cuencadaId}, 'Cuencada 2026') returning id
+    `);
+    await sql`insert into chat_messages (room_id, sender_user_id, body) values (${roomId}, ${userId}, 'Hola')`;
+    await sql`
+      insert into media_items (cuencada_id, uploaded_by_user_id, kind, object_key, bucket, file_name, mime_type, byte_size, upload_status)
+      values (${cuencadaId}, ${userId}, 'image', 'cuencadas/2026/originals/a.jpg', 'b', 'a.jpg', 'image/jpeg', 100, 'ready')
+    `;
+    await sql`
+      insert into media_items (cuencada_id, kind, object_key, bucket, file_name, mime_type, byte_size, deleted_at)
+      values (${cuencadaId}, 'video', 'cuencadas/2026/originals/b.mp4', 'b', 'b.mp4', 'video/mp4', 100, now())
+    `;
+    return { userId, cuencadaId, roomId };
+  }
+
+  /** A published participants-only event with an organizer, its album, chat room (one message) and a pending cover upload. */
+  async function seedEvent(userId: string): Promise<{ eventId: string; albumId: string; roomId: string }> {
+    const eventId = await insertId(sql`
+      insert into events (slug, year, title, starts_at, ends_at, visibility, status, first_published_at, created_by_user_id)
+      values ('viaje-cdmx', 2026, 'Viaje a Ciudad de México', '2026-11-20T10:00:00-06:00', '2026-11-22T18:00:00-06:00',
+              'participants', 'published', now(), ${userId})
+      returning id
+    `);
+    await sql`insert into event_participants (event_id, user_id, role, added_by_user_id) values (${eventId}, ${userId}, 'organizer', ${userId})`;
+    const albumId = await insertId(sql`
+      insert into event_albums (event_id, title, created_by_user_id) values (${eventId}, 'Fotos', ${userId}) returning id
+    `);
+    const roomId = await insertId(sql`insert into chat_rooms (kind, event_id) values ('event', ${eventId}) returning id`);
+    await sql`insert into chat_messages (room_id, sender_user_id, body) values (${roomId}, ${userId}, '¿Quién lleva el pastel?')`;
+    await sql`
+      insert into event_cover_uploads (event_id, uploaded_by_user_id, object_key, mime_type, byte_size, expires_at)
+      values (${eventId}, ${userId}, ${`events/${eventId}/cover/u1.jpg`}, 'image/jpeg', 1000, now() + interval '1 hour')
+    `;
+    return { eventId, albumId, roomId };
+  }
+
+  /** Inserts an album media row; `prefix` defaults to the event layout. */
+  function insertAlbumMedia(
+    eventId: string,
+    albumId: string,
+    key: string,
+    prefix: string | null = `events/${eventId}/${albumId}`
+  ): postgres.PendingQuery<postgres.Row[]> {
+    return sql`
+      insert into media_items (album_id, storage_prefix, kind, object_key, bucket, file_name, mime_type, byte_size)
+      values (${albumId}, ${prefix}, 'image', ${key}, 'b', 'x.jpg', 'image/jpeg', 100)
+    `;
+  }
+
+  it("upgrades a seeded database: chat rooms, messages and media unchanged, new columns null, old-shape inserts still work", async () => {
+    await migrate(drizzle(sql), { migrationsFolder: beforeEventsFolder });
+    const { userId, cuencadaId } = await seedOldShape();
+    const roomsBefore = await sql.unsafe(selectOldRooms);
+    const mediaBefore = await sql.unsafe(selectOldMedia);
+    const messagesBefore = await sql`select * from chat_messages`;
+
+    await migrate(drizzle(sql), { migrationsFolder });
+    expect(await sql`select count(*)::int as count from drizzle.__drizzle_migrations`).toEqual([{ count: latestCount }]);
+
+    expect(await sql.unsafe(selectOldRooms)).toEqual(roomsBefore);
+    expect(await sql`select * from chat_messages`).toEqual(messagesBefore);
+    expect(await sql.unsafe(selectOldMedia)).toEqual(mediaBefore);
+    expect(await sql`select distinct event_id from chat_rooms`).toEqual([{ event_id: null }]);
+    expect(await sql`select distinct album_id, storage_prefix from media_items`).toEqual([{ album_id: null, storage_prefix: null }]);
+
+    // Old code paths: a new edition room and an edition upload without the new columns.
+    const cuencada2027 = await insertId(sql`
+      insert into cuencadas (year, slug, title, description, is_published, first_published_at)
+      values (2027, '2027', 'Cuencada 2027', 'Reunión', true, now()) returning id
+    `);
+    expect(
+      await sqlState(sql`insert into chat_rooms (kind, cuencada_id, title) values ('cuencada', ${cuencada2027}, 'Cuencada 2027')`)
+    ).toBeUndefined();
+    expect(
+      await sqlState(sql`
+        insert into media_items (cuencada_id, uploaded_by_user_id, kind, object_key, bucket, file_name, mime_type, byte_size)
+        values (${cuencadaId}, ${userId}, 'image', 'cuencadas/2026/originals/c.jpg', 'b', 'c.jpg', 'image/jpeg', 100)
+      `)
+    ).toBeUndefined();
+
+    const constraints = await sql`
+      select conname, convalidated from pg_constraint
+      where conname in ('chat_rooms_kind_check', 'chat_rooms_kind_cuencada_check', 'chat_rooms_event_id_events_id_fk',
+                        'media_items_scope_check', 'media_items_storage_prefix_check', 'media_items_album_id_event_albums_id_fk')
+    `;
+    expect(constraints).toHaveLength(6);
+    for (const constraint of constraints) expect(constraint.convalidated, String(constraint.conname)).toBe(true);
+  });
+
+  it("enforces the events CHECKs: slug, lengths, enums, dates, year from the start date and (year, slug) uniqueness", async () => {
+    await migrate(drizzle(sql), { migrationsFolder });
+    const insert = (fields: Record<string, string | number | null>): Promise<string | undefined> => {
+      const row = { slug: "carne-asada", year: 2026, title: "Carne asada", ...fields };
+      return sqlState(sql`insert into events ${sql(row)}`);
+    };
+
+    expect(await insert({})).toBeUndefined();
+    expect(await insert({})).toBe("23505");
+    expect(await insert({ year: 2027 })).toBeUndefined();
+
+    for (const slug of ["ab", "-abc", "abc-", "a--b", "Carne", "méxico", "a b", "x".repeat(61)]) {
+      expect(await insert({ slug }), slug).toBe("23514");
+    }
+    expect(await insert({ slug: "x".repeat(60) })).toBeUndefined();
+
+    expect(await insert({ slug: "t-empty", title: "" })).toBe("23514");
+    expect(await insert({ slug: "t-121", title: "x".repeat(121) })).toBe("23514");
+    expect(await insert({ slug: "t-120", title: "x".repeat(120) })).toBeUndefined();
+    expect(await insert({ slug: "s-281", summary: "x".repeat(281) })).toBe("23514");
+    expect(await insert({ slug: "d-4001", details: "x".repeat(4001) })).toBe("23514");
+    expect(await insert({ slug: "d-4000", details: "x".repeat(4000) })).toBeUndefined();
+    expect(await insert({ slug: "l-161", location_text: "x".repeat(161) })).toBe("23514");
+    expect(await insert({ slug: "year-1899", year: 1899 })).toBe("23514");
+
+    expect(await insert({ slug: "vis-bad", visibility: "public" })).toBe("23514");
+    expect(await insert({ slug: "st-bad", status: "archived" })).toBe("23514");
+    // Published needs `first_published_at`; hidden does not (an admin may hide a draft).
+    expect(await insert({ slug: "pub-no-date", status: "published" })).toBe("23514");
+    expect(await insert({ slug: "hidden-draft", status: "hidden" })).toBeUndefined();
+    expect(await insert({ slug: "cover-half", cover_key: "u1" })).toBe("23514");
+    // The cover key must sit under this event's own prefix.
+    const [own, other] = await sql<{ id: string }[]>`select id from events order by slug limit 2`;
+    if (!own || !other) throw new Error("expected two events");
+    const upload = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+    const setCover = (key: string): Promise<string | undefined> =>
+      sqlState(sql`update events set cover_key = ${key}, cover_updated_at = now() where id = ${own.id}`);
+    expect(await setCover(`events/${own.id}/cover/${upload}-1280.webp`)).toBeUndefined();
+    expect(await setCover(`events/${other.id}/cover/${upload}-1280.webp`)).toBe("23514");
+    expect(await setCover(`events/${own.id}/cover/${upload}-640.webp`)).toBe("23514");
+    expect(await setCover(`events/${own.id}/cover/../x-1280.webp`)).toBe("23514");
+
+    // Dates: both or neither, end after start; year = the start's year in the event's timezone.
+    expect(await insert({ slug: "one-date", starts_at: "2026-11-20T10:00:00Z" })).toBe("23514");
+    expect(await insert({ slug: "backwards", starts_at: "2026-11-20T10:00:00Z", ends_at: "2026-11-20T09:00:00Z" })).toBe("23514");
+    expect(
+      await insert({ slug: "wrong-year", year: 2025, starts_at: "2026-11-20T10:00:00Z", ends_at: "2026-11-21T10:00:00Z" })
+    ).toBe("23514");
+    // 05:00 UTC on Jan 1 2027 is Dec 31 2026 in Mérida.
+    expect(
+      await insert({ slug: "nochevieja", year: 2026, starts_at: "2027-01-01T05:00:00Z", ends_at: "2027-01-01T08:00:00Z" })
+    ).toBeUndefined();
+    expect(
+      await insert({
+        slug: "nochevieja-utc",
+        year: 2026,
+        timezone: "UTC",
+        starts_at: "2027-01-01T05:00:00Z",
+        ends_at: "2027-01-01T08:00:00Z"
+      })
+    ).toBe("23514");
+  });
+
+  it("enforces participant roles, album titles, cover upload MIME/size and the chat room kind <-> column rule", async () => {
+    await migrate(drizzle(sql), { migrationsFolder });
+    const { userId, cuencadaId } = await seedOldShape();
+    const { eventId } = await seedEvent(userId);
+
+    const other = await insertId(sql`insert into users (email, display_name) values ('beto@example.test', 'Beto') returning id`);
+    expect(await sqlState(sql`insert into event_participants (event_id, user_id, role) values (${eventId}, ${other}, 'guest')`)).toBe(
+      "23514"
+    );
+    expect(await sqlState(sql`insert into event_participants (event_id, user_id) values (${eventId}, ${other})`)).toBeUndefined();
+    expect(await sqlState(sql`insert into event_participants (event_id, user_id) values (${eventId}, ${other})`)).toBe("23505");
+    expect(await sql`select role, joined_at is not null as joined from event_participants where user_id = ${other}`).toEqual([
+      { role: "participant", joined: true }
+    ]);
+
+    expect(await sqlState(sql`insert into event_albums (event_id, title) values (${eventId}, '')`)).toBe("23514");
+    expect(await sqlState(sql`insert into event_albums (event_id, title) values (${eventId}, ${"x".repeat(81)})`)).toBe("23514");
+    expect(await sqlState(sql`insert into event_albums (event_id, title, sort_order) values (${eventId}, 'Día 2', 1001)`)).toBe(
+      "23514"
+    );
+
+    const upload = (mime: string, size: number, key: string): Promise<string | undefined> =>
+      sqlState(sql`
+        insert into event_cover_uploads (event_id, object_key, mime_type, byte_size, expires_at)
+        values (${eventId}, ${key}, ${mime}, ${size}, now())
+      `);
+    expect(await upload("image/gif", 10, "k1")).toBe("23514");
+    expect(await upload("image/webp", 0, "k2")).toBe("23514");
+    expect(await upload("image/webp", 10 * 1024 * 1024 + 1, "k3")).toBe("23514");
+    expect(await upload("image/webp", 10 * 1024 * 1024, "k4")).toBeUndefined();
+    expect(await upload("image/webp", 10, "k4")).toBe("23505");
+
+    const room = (kind: string, cuencada: string | null, event: string | null): Promise<string | undefined> =>
+      sqlState(sql`insert into chat_rooms (kind, cuencada_id, event_id) values (${kind}, ${cuencada}, ${event})`);
+    expect(await room("event", null, null)).toBe("23514");
+    expect(await room("event", cuencadaId, eventId)).toBe("23514");
+    expect(await room("cuencada", cuencadaId, eventId)).toBe("23514");
+    expect(await room("global", null, eventId)).toBe("23514");
+    expect(await room("party", null, null)).toBe("23514");
+    // One room per event.
+    expect(await room("event", null, eventId)).toBe("23505");
+  });
+
+  it("enforces exactly one media scope and the storage prefix shape", async () => {
+    await migrate(drizzle(sql), { migrationsFolder });
+    const { userId, cuencadaId } = await seedOldShape();
+    const { eventId, albumId } = await seedEvent(userId);
+
+    expect(await sqlState(insertAlbumMedia(eventId, albumId, "k-ok"))).toBeUndefined();
+    // Album media needs a prefix, and only the two server layouts are accepted.
+    expect(await sqlState(insertAlbumMedia(eventId, albumId, "k-null", null))).toBe("23514");
+    expect(await sqlState(insertAlbumMedia(eventId, albumId, "k-dots", "events/../x"))).toBe("23514");
+    expect(await sqlState(insertAlbumMedia(eventId, albumId, "k-upper", `events/${eventId.toUpperCase()}/${albumId}`))).toBe("23514");
+    expect(await sqlState(insertAlbumMedia(eventId, albumId, "k-trailing", `events/${eventId}/${albumId}/`))).toBe("23514");
+
+    const scoped = (cuencada: string | null, album: string | null, prefix: string | null, key: string): Promise<string | undefined> =>
+      sqlState(sql`
+        insert into media_items (cuencada_id, album_id, storage_prefix, kind, object_key, bucket, file_name, mime_type, byte_size)
+        values (${cuencada}, ${album}, ${prefix}, 'image', ${key}, 'b', 'x.jpg', 'image/jpeg', 100)
+      `);
+    expect(await scoped(null, null, null, "k-none")).toBe("23514");
+    expect(await scoped(cuencadaId, albumId, `events/${eventId}/${albumId}`, "k-both")).toBe("23514");
+    expect(await scoped(cuencadaId, null, "cuencadas/2026", "k-edition-prefix")).toBeUndefined();
+    expect(await scoped(cuencadaId, null, "cuencadas/26", "k-edition-bad")).toBe("23514");
+
+    expect(
+      await sql`select indexdef like '%WHERE (album_id IS NOT NULL)%' as partial from pg_indexes where indexname = 'media_items_album_keyset_idx'`
+    ).toEqual([{ partial: true }]);
+  });
+
+  it("cascades an event delete to participants, albums, cover uploads and the chat room, but never past album media", async () => {
+    await migrate(drizzle(sql), { migrationsFolder });
+    const { userId, roomId: editionRoom } = await seedOldShape();
+    const { eventId, albumId, roomId } = await seedEvent(userId);
+    await insertAlbumMedia(eventId, albumId, "k-album");
+    await sql`update media_items set deleted_at = now() where album_id = ${albumId}`;
+
+    // RESTRICT: even a soft-deleted media row blocks the album and the event.
+    expect(await sqlState(sql`delete from event_albums where id = ${albumId}`)).toBe("23503");
+    expect(await sqlState(sql`delete from events where id = ${eventId}`)).toBe("23503");
+    expect(await sql`select count(*)::int as count from events`).toEqual([{ count: 1 }]);
+
+    await sql`delete from media_items where album_id = ${albumId}`;
+    await sql`delete from events where id = ${eventId}`;
+    for (const table of ["event_participants", "event_albums", "event_cover_uploads"]) {
+      expect(await sql.unsafe(`select count(*)::int as count from ${table}`), table).toEqual([{ count: 0 }]);
+    }
+    expect(await sql`select count(*)::int as count from chat_rooms where id = ${roomId}`).toEqual([{ count: 0 }]);
+    expect(await sql`select count(*)::int as count from chat_messages where room_id = ${roomId}`).toEqual([{ count: 0 }]);
+    // Edition data is untouched.
+    expect(await sql`select count(*)::int as count from chat_messages where room_id = ${editionRoom}`).toEqual([{ count: 1 }]);
+    expect(await sql`select count(*)::int as count from media_items where cuencada_id is not null`).toEqual([{ count: 2 }]);
+  });
+
+  it("removes a deleted user's participations and keeps their events and albums with the user FKs nulled", async () => {
+    await migrate(drizzle(sql), { migrationsFolder });
+    const owner = await insertId(sql`insert into users (email, display_name) values ('carla@example.test', 'Carla') returning id`);
+    const { eventId, albumId } = await seedEvent(owner);
+    const guest = await insertId(sql`insert into users (email, display_name) values ('dani@example.test', 'Dani') returning id`);
+    await sql`insert into event_participants (event_id, user_id, added_by_user_id) values (${eventId}, ${guest}, ${owner})`;
+
+    await sql`delete from users where id = ${owner}`;
+    expect(await sql`select user_id, added_by_user_id from event_participants where event_id = ${eventId}`).toEqual([
+      { user_id: guest, added_by_user_id: null }
+    ]);
+    expect(await sql`select created_by_user_id from events where id = ${eventId}`).toEqual([{ created_by_user_id: null }]);
+    expect(await sql`select created_by_user_id from event_albums where id = ${albumId}`).toEqual([{ created_by_user_id: null }]);
+    expect(await sql`select uploaded_by_user_id from event_cover_uploads where event_id = ${eventId}`).toEqual([
+      { uploaded_by_user_id: null }
+    ]);
   });
 });

@@ -22,10 +22,16 @@ import {
   opaqueTokenSchema,
   stripUnsafeChars
 } from "./common.js";
+import { type EventRef, eventRefSchema } from "./eventRefs.js";
 
+/**
+ * `event` (WP-5.2): one room per event, created with the event's first
+ * publish; readable only by its participants and admins (ADR 0001 §7).
+ */
 export const ChatRoomKind = {
   Global: "global",
-  Cuencada: "cuencada"
+  Cuencada: "cuencada",
+  Event: "event"
 } as const;
 export type ChatRoomKind = (typeof ChatRoomKind)[keyof typeof ChatRoomKind];
 export const chatRoomKindSchema = z.enum(ChatRoomKind);
@@ -81,8 +87,10 @@ export const chatRoomLastMessageSchema = z.object({
 }) satisfies z.ZodType<ChatRoomLastMessage>;
 
 /**
- * A room the caller can read (`GET /api/chat/rooms`): the global room plus the
- * rooms of published editions, most recent activity first.
+ * A room the caller can read (`GET /api/chat/rooms`): the global room, the
+ * rooms of published editions and (WP-5.2) the rooms of the events the caller
+ * takes part in (admins: every event room), most recent activity first.
+ * `cuencadaId`/`year` are `null` for the global and event rooms.
  */
 export interface ChatRoom {
   id: string;
@@ -96,6 +104,11 @@ export interface ChatRoom {
   lastMessageAt: string | null;
   lastReadMessageId: string | null;
   lastMessage: ChatRoomLastMessage | null;
+  /**
+   * WP-5.2: the event of an `event` room, `null` for other rooms. Optional on
+   * the wire so older servers and clients interoperate.
+   */
+  event?: EventRef | null;
 }
 
 /** Unread counts stop at this value (the UI shows "999+"). */
@@ -110,7 +123,8 @@ export const chatRoomSchema = z.object({
   unreadCount: z.number().int().min(0).max(CHAT_UNREAD_COUNT_MAX),
   lastMessageAt: dateTimeSchema.nullable(),
   lastReadMessageId: idSchema.nullable(),
-  lastMessage: chatRoomLastMessageSchema.nullable()
+  lastMessage: chatRoomLastMessageSchema.nullable(),
+  event: eventRefSchema.nullable().exactOptional()
 }) satisfies z.ZodType<ChatRoom>;
 
 export interface ChatSender {
@@ -281,6 +295,16 @@ export const wsServerRoomPreviewSchema = z.object({
   lastMessageAt: dateTimeSchema.nullable(),
   lastMessage: chatRoomLastMessageSchema.nullable()
 });
+/**
+ * WP-5.2: the caller lost access to a room (removed from the event, the
+ * event's visibility tightened, hidden or deleted). Drop the room and its
+ * typing state, leave it if it is open, and refetch the room list. Older
+ * clients drop the unknown frame (they validate with this union).
+ */
+export const wsServerRoomRemovedSchema = z.object({
+  type: z.literal("room_removed"),
+  roomId: idSchema
+});
 export const wsServerTypingSchema = z.object({
   type: z.literal("typing"),
   roomId: idSchema,
@@ -307,6 +331,7 @@ export const wsServerMessageSchema = z.discriminatedUnion("type", [
   wsServerMessageEventSchema,
   wsServerMessageDeletedSchema,
   wsServerRoomPreviewSchema,
+  wsServerRoomRemovedSchema,
   wsServerTypingSchema,
   wsServerPresenceSchema,
   wsServerErrorSchema,

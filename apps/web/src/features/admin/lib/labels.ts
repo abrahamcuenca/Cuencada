@@ -85,7 +85,24 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   [AuditAction.PersonMerged]: "Fusionó a dos personas",
   [AuditAction.RelationshipCreated]: "Agregó un parentesco",
   [AuditAction.RelationshipDeleted]: "Eliminó un parentesco",
-  [AuditAction.ChatMessageDeleted]: "Eliminó un mensaje del chat"
+  [AuditAction.ChatMessageDeleted]: "Eliminó un mensaje del chat",
+  [AuditAction.EventCreated]: "Creó un evento",
+  [AuditAction.EventUpdated]: "Editó un evento",
+  [AuditAction.EventPublished]: "Publicó un evento",
+  [AuditAction.EventHidden]: "Ocultó o mostró un evento",
+  [AuditAction.EventDeleted]: "Eliminó un evento",
+  [AuditAction.EventParticipantAdded]: "Agregó participantes a un evento",
+  [AuditAction.EventParticipantRemoved]: "Quitó a un participante de un evento",
+  [AuditAction.EventParticipantRoleChanged]: "Cambió el rol de un participante",
+  [AuditAction.EventJoined]: "Se apuntó a un evento",
+  [AuditAction.EventLeft]: "Salió de un evento",
+  [AuditAction.EventAlbumCreated]: "Creó un álbum de evento",
+  [AuditAction.EventAlbumUpdated]: "Editó un álbum de evento",
+  [AuditAction.EventAlbumDeleted]: "Eliminó un álbum de evento",
+  [AuditAction.EventCoverUpdated]: "Cambió la portada de un evento",
+  [AuditAction.EventCoverRemoved]: "Quitó la portada de un evento",
+  [AuditAction.EventCoverRejected]: "Portada de evento rechazada",
+  [AuditAction.EventAdminViewed]: "Revisó un evento privado"
 };
 
 const ENTITY_LABELS: Record<AuditEntityType, string> = {
@@ -103,7 +120,8 @@ const ENTITY_LABELS: Record<AuditEntityType, string> = {
   [AuditEntityType.Media]: "Foto o video",
   [AuditEntityType.Person]: "Persona",
   [AuditEntityType.Relationship]: "Parentesco",
-  [AuditEntityType.ChatMessage]: "Mensaje del chat"
+  [AuditEntityType.ChatMessage]: "Mensaje del chat",
+  [AuditEntityType.Event]: "Evento"
 };
 
 function hasKey<TKey extends string>(record: Record<TKey, string>, key: string): key is TKey {

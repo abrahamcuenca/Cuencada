@@ -15,6 +15,7 @@ import {
   nullableTextSchema,
   queryBooleanSchema
 } from "./common.js";
+import { type EventRef, type MediaAlbumRef, eventRefSchema, mediaAlbumRefSchema } from "./eventRefs.js";
 
 const MB = 1024 * 1024;
 
@@ -188,11 +189,15 @@ export type ConfirmUploadRequest = z.input<typeof confirmUploadInputSchema>;
 /* Items                                                                       */
 /* -------------------------------------------------------------------------- */
 
-/** A gallery item as members see it. */
+/**
+ * A gallery item as members see it. Exactly one scope (WP-5.2): an edition
+ * (`cuencadaId`/`year` set) or an event album (`album`/`event` set,
+ * `cuencadaId`/`year` `null`).
+ */
 export interface MediaItem {
   id: string;
-  cuencadaId: string;
-  year: number;
+  cuencadaId: string | null;
+  year: number | null;
   kind: MediaKind;
   mimeType: MediaMimeType;
   /** Presigned 400px WebP (1h). `null` until processed. */
@@ -213,12 +218,16 @@ export interface MediaItem {
   uploadStatus: MediaUploadStatus;
   moderationStatus: ModerationStatus;
   createdAt: string;
+  /** WP-5.2: the event album, `null` for edition media. Optional on the wire for older servers. */
+  album?: MediaAlbumRef | null;
+  /** WP-5.2: the album's event (for links), `null` for edition media. */
+  event?: EventRef | null;
 }
 
 export const mediaItemSchema = z.object({
   id: idSchema,
-  cuencadaId: idSchema,
-  year: z.number().int(),
+  cuencadaId: idSchema.nullable(),
+  year: z.number().int().nullable(),
   kind: mediaKindSchema,
   mimeType: mediaMimeTypeSchema,
   thumbUrl: z.string().max(4096).nullable(),
@@ -233,7 +242,9 @@ export const mediaItemSchema = z.object({
   canDelete: z.boolean(),
   uploadStatus: mediaUploadStatusSchema,
   moderationStatus: moderationStatusSchema,
-  createdAt: dateTimeSchema
+  createdAt: dateTimeSchema,
+  album: mediaAlbumRefSchema.nullable().exactOptional(),
+  event: eventRefSchema.nullable().exactOptional()
 }) satisfies z.ZodType<MediaItem>;
 
 /** `GET /api/cuencadas/:year/media` query. */
@@ -302,6 +313,8 @@ export const adminMediaQuerySchema = cursorQuerySchema.extend({
   moderationStatus: moderationStatusSchema.exactOptional(),
   uploadStatus: mediaUploadStatusSchema.exactOptional(),
   cuencadaId: idSchema.exactOptional(),
+  /** WP-5.2: only media of this event's albums (implemented by WP-5.3). */
+  eventId: idSchema.exactOptional(),
   /** `"true"` → only items with at least one report. */
   reported: queryBooleanSchema.exactOptional()
 });
