@@ -318,8 +318,16 @@ export function isPastEvent(event: { year: number; endsAt: string | null; timezo
 /* Text fields                                                                 */
 /* -------------------------------------------------------------------------- */
 
-const CONTROL_CHARS = /[\u0000-\u0008\u000B-\u001F\u007F]/;
 const LINE_BREAKS = /[\r\n\t]/;
+
+/** True when `value` has a C0 control character other than `\t`/`\n`, or DEL. */
+function hasControlChars(value: string): boolean {
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if ((code < 0x20 && code !== 0x09 && code !== 0x0a) || code === 0x7f) return true;
+  }
+  return false;
+}
 
 /** NFC, bidi/invisible marks stripped (ZWJ kept for emoji), CRLF → LF, trimmed. */
 function cleanText(value: string): string {
@@ -337,7 +345,7 @@ function eventLineSchema(max: number) {
         .string()
         .min(1, { error: "Este campo es obligatorio." })
         .max(max, { error: `Máximo ${max} caracteres.` })
-        .refine((value) => !LINE_BREAKS.test(value) && !CONTROL_CHARS.test(value), { error: "Usa una sola línea." })
+        .refine((value) => !LINE_BREAKS.test(value) && !hasControlChars(value), { error: "Usa una sola línea." })
         .refine(hasVisibleChars, { error: "Este campo es obligatorio." })
     );
 }
@@ -357,7 +365,7 @@ function nullableEventTextSchema(max: number, multiline: boolean) {
       z
         .string()
         .max(max, { error: `Máximo ${max} caracteres.` })
-        .refine((value) => !CONTROL_CHARS.test(value) && (multiline || !LINE_BREAKS.test(value)), {
+        .refine((value) => !hasControlChars(value) && (multiline || !LINE_BREAKS.test(value)), {
           error: multiline ? "Contiene caracteres no permitidos." : "Usa una sola línea."
         })
         .nullable()

@@ -73,7 +73,7 @@ describe("slugifyEventTitle", () => {
 
   it("always produces a slug the DB pattern accepts", () => {
     const pattern = new RegExp(EVENT_SLUG_PATTERN);
-    for (const title of ["--x--", "A  B  C", "x".repeat(59) + " y", "Ñandú — 2026/27", "🎉 fiesta 🎉", "123"]) {
+    for (const title of ["--x--", "A  B  C", `${"x".repeat(59)} y`, "Ñandú — 2026/27", "🎉 fiesta 🎉", "123"]) {
       const slug = slugifyEventTitle(title);
       expect(pattern.test(slug), `${title} → ${slug}`).toBe(true);
       expect(isEventSlug(slug), slug).toBe(true);
