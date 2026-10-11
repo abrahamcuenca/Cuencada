@@ -33,7 +33,9 @@ import {
   EVENT_ALBUM_TITLE_MAX_LENGTH,
   EVENT_SLUG_MAX_LENGTH,
   EVENT_SLUG_MIN_LENGTH,
-  EVENT_TITLE_MAX_LENGTH
+  EVENT_TITLE_MAX_LENGTH,
+  type EventRef,
+  eventRefSchema
 } from "./eventRefs.js";
 
 // The refs live in a leaf module (no cycle through profile → media); one import path for consumers.
@@ -885,3 +887,45 @@ export const adminEventSummarySchema = eventSummarySchema.extend({
 }) satisfies z.ZodType<AdminEventSummary>;
 
 export const adminEventPageSchema = pageSchema(adminEventSummarySchema);
+
+/* -------------------------------------------------------------------------- */
+/* Consent notices (WP-5.3, Security requirement 3)                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * "Te agregaron a un evento": someone else (an organizer or an admin) added
+ * the caller to an event. Derived from the caller's own
+ * `event_participants` row (`added_by_user_id` set to another user, notice
+ * not dismissed), and only for events the caller can see, so a notice never
+ * names an event the caller could not open. The one-tap "Salir" is
+ * `DELETE /api/events/:id/participants/me`; "Entendido" is
+ * `DELETE /api/events/:id/notice` (204, idempotent). Leaving removes the row
+ * and with it the notice.
+ */
+export interface EventNotice {
+  event: EventRef;
+  /** Who added the caller; `null` once that account was removed. */
+  addedByName: string | null;
+  /** The role the caller was given. */
+  role: EventRole;
+  addedAt: string;
+  /** False when the caller is the event's last organizer (they cannot leave). */
+  canLeave: boolean;
+}
+
+export const eventNoticeSchema = z.object({
+  event: eventRefSchema,
+  addedByName: z.string().max(80).nullable(),
+  role: eventRoleSchema,
+  addedAt: dateTimeSchema,
+  canLeave: z.boolean()
+}) satisfies z.ZodType<EventNotice>;
+
+/** Most notices returned by `GET /api/events/notices` (newest first). */
+export const EVENT_NOTICES_MAX = 20;
+
+/** `GET /api/events/notices` response. */
+export const eventNoticeListSchema = z.object({
+  items: z.array(eventNoticeSchema).max(EVENT_NOTICES_MAX)
+});
+export type EventNoticeList = z.infer<typeof eventNoticeListSchema>;
