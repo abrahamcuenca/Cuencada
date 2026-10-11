@@ -4,12 +4,13 @@
  *
  * Every write that can change who reads an event's room (participants,
  * roles, status, visibility, delete) takes a {@link RoomSnapshot} **before**
- * its transaction and calls {@link syncEventRoom} (or
+ * its transaction (after the visibility check) and calls {@link syncEventRoom} (or
  * {@link removeEventRoom}) **after** the commit and **before** answering,
  * so the hub's recipient set is current before any client hears about the
  * change, and users who lost access get `room_removed`.
  */
 import type { FastifyInstance } from "fastify";
+import type { DbOrTx } from "../../lib/audit.js";
 import { chatHubOf } from "../chat/index.js";
 import { loadRoomAudience } from "../chat/repository.js";
 import { findEventRoomId } from "./repository.js";
@@ -21,15 +22,17 @@ export interface RoomSnapshot {
 }
 
 /**
- * Who can read the event's room now (call before the write's transaction).
+ * Who can read the event's room now. Call inside the write's transaction,
+ * after the row lock and the visibility and permission checks passed (no
+ * work is done for an event the caller cannot see), before the change.
  *
- * @param app - The app (`db`).
+ * @param db - The write's transaction.
  * @param eventId - The event.
  */
-export async function snapshotEventRoom(app: FastifyInstance, eventId: string): Promise<RoomSnapshot> {
-  const roomId = await findEventRoomId(app.db, eventId);
+export async function snapshotEventRoom(db: DbOrTx, eventId: string): Promise<RoomSnapshot> {
+  const roomId = await findEventRoomId(db, eventId);
   if (roomId === null) return { roomId: null, readers: null };
-  const audience = await loadRoomAudience(app.db, roomId);
+  const audience = await loadRoomAudience(db, roomId);
   return { roomId, readers: audience.kind === "users" ? audience.userIds : null };
 }
 

@@ -49,7 +49,7 @@ import { allObjectKeys } from "../media/service.js";
 import { deleteObjectsQuietly } from "../profile/uploadPipeline.js";
 import { type EventViewer, isEventAdmin } from "./access.js";
 import { AdminViewSurface, auditAdminEventView } from "./adminView.js";
-import { removeEventRoom, snapshotEventRoom, syncEventRoom } from "./chatSync.js";
+import { removeEventRoom, type RoomSnapshot, snapshotEventRoom, syncEventRoom } from "./chatSync.js";
 import { EVENT_CREATE_DAILY_MAX, EVENT_CREATE_WINDOW_MS, EVENT_OPEN_DRAFTS_MAX } from "./constants.js";
 import { coverDerivativeKeys, coverKeys } from "./cover.js";
 import {
@@ -353,10 +353,11 @@ export async function updateEvent(
 ): Promise<void> {
   const viewer = eventViewerOf(user);
   const now = app.clock.now();
-  const before = await snapshotEventRoom(app, eventId);
-  await app.db.transaction(async (tx) => {
+  const before = await app.db.transaction(async (tx): Promise<RoomSnapshot> => {
     const event = await lockVisibleEvent(tx, viewer, eventId);
     requireManager(event, viewer);
+    // Only after visibility and permission passed (PR #54 L1).
+    const snapshot = await snapshotEventRoom(tx, eventId);
     const current = event.row;
     const nextStatus = patch.status ?? current.status;
     if ((nextStatus === EventStatus.Hidden || current.status === EventStatus.Hidden) && nextStatus !== current.status) {
@@ -396,6 +397,7 @@ export async function updateEvent(
     if (nextStatus !== current.status && (nextStatus === EventStatus.Hidden || current.status === EventStatus.Hidden)) {
       await audit(AuditAction.EventHidden, { hidden: nextStatus === EventStatus.Hidden });
     }
+    return snapshot;
   });
   await syncEventRoom(app, eventId, before);
 }
@@ -447,14 +449,15 @@ async function updateWithSlug(
  */
 export async function deleteEvent(app: FastifyInstance, user: AuthUser, eventId: string, ip: string): Promise<void> {
   const viewer = eventViewerOf(user);
-  const before = await snapshotEventRoom(app, eventId);
-  const objectKeys = await app.db.transaction(async (tx) => {
+  const { objectKeys, before } = await app.db.transaction(async (tx) => {
     const event = await lockVisibleEvent(tx, viewer, eventId);
     const admin = isEventAdmin(viewer);
     if (!admin) {
       if (event.viewerRole !== EventRole.Organizer) throw eventManageNotAllowed();
       if (event.row.status !== EventStatus.Draft || (await eventHasMedia(tx, eventId))) throw eventDeleteNotAllowed();
     }
+    // Only after visibility and permission passed (PR #54 L1).
+    const snapshot = await snapshotEventRoom(tx, eventId);
     const media = await tx
       .select({ item: mediaItems })
       .from(mediaItems)
@@ -481,7 +484,7 @@ export async function deleteEvent(app: FastifyInstance, user: AuthUser, eventId:
       metadata: { participantCount: event.participantCount, mediaDeleted: media.length, byAdmin: admin },
       ip
     });
-    return [
+    const objectKeys = [
       ...media.flatMap(({ item }) => allObjectKeys(item, null)),
       ...coverDerivativeKeys(event.row.coverKey),
       ...uploads.flatMap((upload) => {
@@ -489,6 +492,7 @@ export async function deleteEvent(app: FastifyInstance, user: AuthUser, eventId:
         return [upload.objectKey, keys.w1280, keys.w640];
       })
     ];
+    return { objectKeys, before: snapshot };
   });
   await removeEventRoom(app, before);
   await deleteObjectsQuietly(app, [...new Set(objectKeys)], "event");
@@ -515,14 +519,16 @@ function participantAudit(
  */
 export async function joinEvent(app: FastifyInstance, user: AuthUser, eventId: string, ip: string): Promise<void> {
   const viewer = eventViewerOf(user);
-  const before = await snapshotEventRoom(app, eventId);
-  await app.db.transaction(async (tx) => {
+  const before = await app.db.transaction(async (tx): Promise<RoomSnapshot> => {
     const event = await lockVisibleEvent(tx, viewer, eventId);
     if (event.row.status !== EventStatus.Published || event.row.visibility !== "members") throw eventJoinNotAllowed();
-    if (event.viewerRole !== null) return;
+    // Only after visibility and permission passed (PR #54 L1).
+    const snapshot = await snapshotEventRoom(tx, eventId);
+    if (event.viewerRole !== null) return snapshot;
     if (event.participantCount + 1 > EVENT_PARTICIPANTS_MAX) throw new AppError("CONFLICT", TOO_MANY_PARTICIPANTS);
     await tx.insert(eventParticipants).values({ eventId, userId: user.id, role: EventRole.Participant, addedByUserId: null });
     await participantAudit(tx, user, eventId, ip)(AuditAction.EventJoined, { userId: user.id });
+    return snapshot;
   });
   await syncEventRoom(app, eventId, before);
 }
@@ -534,15 +540,17 @@ export async function joinEvent(app: FastifyInstance, user: AuthUser, eventId: s
  */
 export async function leaveEvent(app: FastifyInstance, user: AuthUser, eventId: string, ip: string): Promise<void> {
   const viewer = eventViewerOf(user);
-  const before = await snapshotEventRoom(app, eventId);
-  await app.db.transaction(async (tx) => {
+  const before = await app.db.transaction(async (tx): Promise<RoomSnapshot> => {
     const event = await lockVisibleEvent(tx, viewer, eventId);
     if (event.viewerRole === null) throw eventNotParticipant();
     if (event.viewerRole === EventRole.Organizer && (await countOrganizers(tx, eventId)) <= 1) throw eventLastOrganizer();
+    // Only after visibility and permission passed (PR #54 L1).
+    const snapshot = await snapshotEventRoom(tx, eventId);
     await tx
       .delete(eventParticipants)
       .where(and(eq(eventParticipants.eventId, eventId), eq(eventParticipants.userId, user.id)));
     await participantAudit(tx, user, eventId, ip)(AuditAction.EventLeft, { userId: user.id, role: event.viewerRole });
+    return snapshot;
   });
   await syncEventRoom(app, eventId, before);
 }
@@ -561,17 +569,19 @@ export async function addParticipants(
   ip: string
 ): Promise<void> {
   const viewer = eventViewerOf(user);
-  const before = await snapshotEventRoom(app, eventId);
-  await app.db.transaction(async (tx) => {
+  const before = await app.db.transaction(async (tx): Promise<RoomSnapshot> => {
     const event = await lockVisibleEvent(tx, viewer, eventId);
     requireManager(event, viewer);
+    // Only after visibility and permission passed (PR #54 L1).
+    const snapshot = await snapshotEventRoom(tx, eventId);
     const added = await newEligibleParticipants(tx, eventId, input.userIds, viewer);
-    if (added.length === 0) return;
+    if (added.length === 0) return snapshot;
     if (event.participantCount + added.length > EVENT_PARTICIPANTS_MAX) throw new AppError("CONFLICT", TOO_MANY_PARTICIPANTS);
     await tx
       .insert(eventParticipants)
       .values(added.map((userId) => ({ eventId, userId, role: input.role, addedByUserId: user.id })));
     await participantAudit(tx, user, eventId, ip)(AuditAction.EventParticipantAdded, { userIds: added, role: input.role });
+    return snapshot;
   });
   await syncEventRoom(app, eventId, before);
 }
@@ -600,18 +610,20 @@ export async function changeParticipantRole(
   ip: string
 ): Promise<void> {
   const viewer = eventViewerOf(user);
-  const before = await snapshotEventRoom(app, eventId);
-  await app.db.transaction(async (tx) => {
+  const before = await app.db.transaction(async (tx): Promise<RoomSnapshot> => {
     const event = await lockVisibleEvent(tx, viewer, eventId);
     requireManager(event, viewer);
+    // Only after visibility and permission passed (PR #54 L1).
+    const snapshot = await snapshotEventRoom(tx, eventId);
     const current = await participantRole(tx, eventId, targetUserId);
-    if (current === role) return;
+    if (current === role) return snapshot;
     if (current === EventRole.Organizer && (await countOrganizers(tx, eventId)) <= 1) throw eventLastOrganizer();
     await tx
       .update(eventParticipants)
       .set({ role })
       .where(and(eq(eventParticipants.eventId, eventId), eq(eventParticipants.userId, targetUserId)));
     await participantAudit(tx, user, eventId, ip)(AuditAction.EventParticipantRoleChanged, { userId: targetUserId, role });
+    return snapshot;
   });
   await syncEventRoom(app, eventId, before);
 }
@@ -628,16 +640,18 @@ export async function removeParticipant(
   ip: string
 ): Promise<void> {
   const viewer = eventViewerOf(user);
-  const before = await snapshotEventRoom(app, eventId);
-  await app.db.transaction(async (tx) => {
+  const before = await app.db.transaction(async (tx): Promise<RoomSnapshot> => {
     const event = await lockVisibleEvent(tx, viewer, eventId);
     requireManager(event, viewer);
+    // Only after visibility and permission passed (PR #54 L1).
+    const snapshot = await snapshotEventRoom(tx, eventId);
     const current = await participantRole(tx, eventId, targetUserId);
     if (current === EventRole.Organizer && (await countOrganizers(tx, eventId)) <= 1) throw eventLastOrganizer();
     await tx
       .delete(eventParticipants)
       .where(and(eq(eventParticipants.eventId, eventId), eq(eventParticipants.userId, targetUserId)));
     await participantAudit(tx, user, eventId, ip)(AuditAction.EventParticipantRemoved, { userId: targetUserId, role: current });
+    return snapshot;
   });
   await syncEventRoom(app, eventId, before);
 }

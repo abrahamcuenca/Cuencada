@@ -42,6 +42,7 @@ import type { ChatHub } from "./hub.js";
 import { toChatMessages, toChatRooms, toLastMessage } from "./mappers.js";
 import {
   findMessage,
+  findModerationRoom,
   findVisibleRoom,
   historyPage,
   lastMessagesFor,
@@ -127,7 +128,8 @@ const chatRoutes: FastifyPluginAsyncZod<ChatRoutesOptions> = async (app, { hub }
     },
     async (request): Promise<ChatHistoryPage> => {
       const viewer = viewerOf(authUser(request));
-      const room = await findVisibleRoom(app.db, request.params.id, viewer);
+      // Read-only moderation path: admins may read any event room's history (audited below).
+      const room = await findModerationRoom(app.db, request.params.id, viewer);
       if (room === null) throw new AppError("NOT_FOUND", ROOM_NOT_FOUND);
       if (room.event !== null) {
         // [SEC] Written before the history is returned; a failure fails the read (ADR 0001 §7).
@@ -203,7 +205,7 @@ const chatRoutes: FastifyPluginAsyncZod<ChatRoutesOptions> = async (app, { hub }
       if (
         message === null ||
         (!own && user.role !== "admin") ||
-        (await findVisibleRoom(app.db, message.roomId, viewerOf(user))) === null
+        (await findModerationRoom(app.db, message.roomId, viewerOf(user))) === null
       ) {
         throw new AppError("NOT_FOUND", MESSAGE_NOT_FOUND);
       }

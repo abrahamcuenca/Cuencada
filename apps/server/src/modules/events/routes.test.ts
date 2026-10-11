@@ -318,6 +318,21 @@ describe("PATCH /api/events/:id", () => {
     expect(JSON.stringify(updated.map((row) => row.metadata))).not.toContain("Hola");
   });
 
+  it("never locks an event the caller cannot see (the lock carries the visibility predicate, PR #54 L1)", async () => {
+    const ana = await eventActor();
+    const outsider = await eventActor();
+    const { event } = await insertEvent({ organizerId: ana.user.id, visibility: "participants" });
+    // Another transaction holds the row lock; an invisible write must answer 404 without waiting for it.
+    await getTestDb().$client.begin(async (tx) => {
+      await tx`select 1 from events where id = ${event.id} for update`;
+      const started = Date.now();
+      const response = await callAs(app, outsider, "PATCH", `/api/events/${event.id}`, { summary: "x" });
+      expect(response.statusCode).toBe(404);
+      expect(errorOf(response.body).detailCode).toBe("EVENT_NOT_FOUND");
+      expect(Date.now() - started).toBeLessThan(2_000);
+    });
+  });
+
   it("refuses a member that can see but not manage with EVENT_MANAGE_NOT_ALLOWED", async () => {
     const ana = await eventActor();
     const bea = await eventActor();

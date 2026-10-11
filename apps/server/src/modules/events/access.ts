@@ -67,8 +67,20 @@ export function eventVisibleSql(viewer: EventViewer, table: EventsTable = events
 }
 
 /**
- * SQL: the viewer may use the event's chat and albums: the event is visible
- * and the viewer is a participant or an admin.
+ * SQL: the viewer takes part in the event's **chat** (room list, live
+ * frames, sending, read markers): the event is visible to them and they are
+ * a participant. Admins are no exception (PR #54 Security M1): a
+ * non-participant admin reads an event chat only through the audited,
+ * read-only history (`chatModerationRoomSql`), never passively.
+ */
+export function eventChatAccessSql(viewer: EventViewer, table: EventsTable = events): SQL {
+  return sql`(${eventVisibleSql(viewer, table)} and ${isParticipantSql(viewer, table)})`;
+}
+
+/**
+ * SQL: the viewer may use the event's albums (and read its chat history as a
+ * moderator): the event is visible and the viewer is a participant or an
+ * admin.
  */
 export function eventMemberAccessSql(viewer: EventViewer, table: EventsTable = events): SQL {
   if (isEventAdmin(viewer)) return sql`true`;

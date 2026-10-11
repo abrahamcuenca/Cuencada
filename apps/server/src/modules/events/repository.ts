@@ -36,26 +36,35 @@ const participantCountSql = sql<number>`(select count(*)::int from ${eventPartic
  * One statement decides existence and visibility together.
  *
  * @param where - Identifies the event (`id`, or `year` + `slug`).
+ * @param lock - Take the row lock (`FOR UPDATE OF events`) in the same statement.
  */
-export async function loadVisibleEvent(db: DbOrTx, viewer: EventViewer, where: SQL | undefined): Promise<VisibleEvent> {
-  const [found] = await db
+export async function loadVisibleEvent(
+  db: DbOrTx,
+  viewer: EventViewer,
+  where: SQL | undefined,
+  lock = false
+): Promise<VisibleEvent> {
+  const query = db
     .select({ row: events, viewerRole: viewerRoleSql(viewer), participantCount: participantCountSql })
     .from(events)
     .where(and(where, eventVisibleSql(viewer)))
     .limit(1);
+  const [found] = lock ? await query.for("update", { of: events }) : await query;
   if (found === undefined) throw eventNotFound();
   return found;
 }
 
 /**
- * Lock the event row (`FOR UPDATE`) for a write, then load it if visible.
- * Both statements always run, so an unknown and an invisible id take the
- * same path. Serializes participant, album, cover and status changes of one
- * event (the last-organizer guard and the participant cap rely on it).
+ * Lock the event row for a write **through the visibility predicate**, in a
+ * single statement (PR #54 L1): an event the caller cannot see is never
+ * locked, and an unknown and an invisible id take the same path (404).
+ * Postgres re-evaluates the predicate on the locked row version, so a
+ * concurrent hide or removal is seen. Serializes participant, album, cover
+ * and status changes of one event (the last-organizer guard and the
+ * participant cap rely on it).
  */
 export async function lockVisibleEvent(tx: Transaction, viewer: EventViewer, eventId: string): Promise<VisibleEvent> {
-  await tx.execute(sql`select 1 from ${events} where ${events.id} = ${eventId}::uuid for update`);
-  return loadVisibleEvent(tx, viewer, eq(events.id, eventId));
+  return loadVisibleEvent(tx, viewer, eq(events.id, eventId), true);
 }
 
 /** A participant row with what the event page may show. */

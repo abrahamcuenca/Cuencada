@@ -99,6 +99,29 @@ describe("album uploads", () => {
     void event;
   });
 
+  it("re-derives the prefix from the album row at confirm: a stored prefix pointing elsewhere is refused (PR #54 L3)", async () => {
+    const ana = await eventActor();
+    const { album } = await insertEvent({ organizerId: ana.user.id });
+    const other = await insertEvent({ organizerId: ana.user.id });
+    const foreignPrefix = `events/${other.event.id}/${other.album.id}`;
+    const id = "00000000-0000-4000-8000-0000000000a1";
+    // Keys consistent with the stored prefix, but the prefix is not this album's.
+    const row = await insertAlbumMedia(album, {
+      id,
+      uploadedByUserId: ana.user.id,
+      uploadStatus: "pending_upload",
+      storagePrefix: foreignPrefix,
+      objectKey: `${foreignPrefix}/originals/${id}.jpg`,
+      thumbKey: null,
+      displayKey: null
+    });
+    await storage.simulateUpload(row.objectKey, await makeJpegWithGps(), "image/jpeg");
+    const response = await callAs(app, ana, "POST", `/api/media/${row.id}/confirm`, {});
+    expect(response.statusCode).toBe(400);
+    const [after] = await getTestDb().select().from(mediaItems).where(eq(mediaItems.id, row.id));
+    expect(after?.processingError).toBe("prefix_mismatch");
+  });
+
   it("re-checks participation at confirm: a removed uploader gets 404", async () => {
     const ana = await eventActor();
     const bea = await eventActor();

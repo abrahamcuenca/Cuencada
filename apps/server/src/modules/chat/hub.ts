@@ -13,8 +13,8 @@
  * reaches sockets. Each room has an audience ({@link RoomAudience}): global
  * and edition rooms reach every connected member (membership is uniform and
  * each inbound frame re-checks visibility); event rooms reach only the
- * users in a cached participant set (participants with access plus active
- * admins). The event service calls {@link ChatHub.refreshRoomAudience}
+ * users in a cached participant set (participants with access; admins only
+ * when they take part, PR #54 M1). The event service calls {@link ChatHub.refreshRoomAudience}
  * after every participant, status or visibility change and **before** it
  * answers, so the set is current before any client learns of the change;
  * users who lost access get `room_removed` and then nothing for that room.
@@ -127,6 +127,11 @@ export interface ChatHubHooks {
    * the post-registration DB re-check (e.g. to revoke the session there).
    */
   afterRegister?: (connection: ChatConnection) => Promise<void>;
+  /**
+   * Awaited in `fanOutRoom` after the room's audience resolved and before the
+   * generation re-check and the sends (e.g. to land a refresh there).
+   */
+  afterAudience?: (roomId: string) => Promise<void>;
 }
 
 function addTo(map: Map<string, Set<ChatConnection>>, key: string, connection: ChatConnection): Set<ChatConnection> {
@@ -216,7 +221,18 @@ export class ChatHub {
    * @param frameFor - Return the frame for a connection, or `null` to skip it.
    */
   async fanOutRoom(roomId: string, frameFor: (connection: ChatConnection) => WsServerMessage | null): Promise<void> {
-    const audience = await this.audienceFor(roomId);
+    let audience: RoomAudience | undefined;
+    // [SEC] PR #54 L2: a refresh may land between the audience await and the
+    // sends; re-check the room's generation right before sending and reload
+    // when it moved.
+    for (let attempt = 0; attempt < 5 && audience === undefined; attempt += 1) {
+      const generation = this.generationOf(roomId);
+      const loaded = await this.audienceFor(roomId);
+      if (this.hooks.afterAudience !== undefined) await this.hooks.afterAudience(roomId);
+      if (this.generationOf(roomId) === generation) audience = loaded;
+    }
+    // Still moving after five tries: the cache holds the latest refresh's set (fall back to nobody).
+    audience ??= this.audiences.get(roomId)?.audience ?? NO_AUDIENCE;
     for (const connection of this.connections()) {
       if (!audienceAllows(audience, connection.principal.userId)) continue;
       const frame = frameFor(connection);

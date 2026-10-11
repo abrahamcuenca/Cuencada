@@ -37,7 +37,7 @@ import { AppError } from "../../lib/errors.js";
 import { authUser } from "../../plugins/auth.js";
 import { AdminViewSurface, auditAdminEventView } from "../events/adminView.js";
 import { CONFIRM_RATE_LIMIT, REPORT_RATE_LIMIT, SNIFF_BYTES, UPLOAD_INTENT_RATE_LIMIT } from "./constants.js";
-import { editionStoragePrefix, mediaKeys, normalizeContentType, signatureMatches, storagePrefixOf } from "./files.js";
+import { albumStoragePrefix, editionStoragePrefix, mediaKeys, normalizeContentType, signatureMatches } from "./files.js";
 import { enqueueMediaProcessing } from "./jobs/mediaProcess.js";
 import {
   allObjectKeys,
@@ -88,14 +88,25 @@ function isOwner(record: MediaRecord, viewer: Viewer): boolean {
 }
 
 /**
- * [SEC] Security requirement 7: the original key must be the one derived
- * from the row's own prefix and id. A row whose keys sit elsewhere is never
- * confirmed (and so never processed or served).
+ * [SEC] Security requirement 7 (and PR #54 L3): the prefix is re-derived
+ * from the scope row itself, the album (`events/{album.eventId}/{album.id}`)
+ * or the edition (`cuencadas/{year}`), never taken from the stored
+ * `storage_prefix`; the stored prefix (when set) and the original key must
+ * both match it. A row whose keys sit elsewhere is never confirmed (and so
+ * never processed or served).
  */
 function keysMatchPrefix(record: MediaRecord): boolean {
   const { item } = record;
-  const expected = mediaKeys(storagePrefixOf(item, record.year), item.id, item.mimeType);
-  return item.objectKey === expected.original;
+  let expectedPrefix: string;
+  if (item.albumId !== null) {
+    if (record.album === null || record.album.id !== item.albumId) return false;
+    expectedPrefix = albumStoragePrefix(record.album);
+  } else {
+    if (record.year === null) return false;
+    expectedPrefix = editionStoragePrefix(record.year);
+  }
+  if (item.storagePrefix !== null && item.storagePrefix !== expectedPrefix) return false;
+  return item.objectKey === mediaKeys(expectedPrefix, item.id, item.mimeType).original;
 }
 
 /** Member media routes. */

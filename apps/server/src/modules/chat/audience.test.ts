@@ -84,6 +84,27 @@ describe("ChatHub room audiences", () => {
     expect(bea.frames.filter((f) => f.type !== "presence").map((f) => f.type)).toEqual(["room_removed"]);
   });
 
+  it("re-checks the generation after the audience await: a refresh landing before the sends reloads the set (PR #54 L2)", async () => {
+    let current = users("ana", "bea");
+    const hub = hubWith(async () => current);
+    const ana = connect(hub, "ana");
+    const bea = connect(hub, "bea");
+    await hub.fanOutRoom(ROOM, message); // warm cache: { ana, bea }
+    let landed = false;
+    hub.hooks.afterAudience = async () => {
+      if (landed) return;
+      landed = true;
+      // Bea is removed while this fan-out holds the old set.
+      current = users("ana");
+      await hub.refreshRoomAudience(ROOM);
+    };
+    await hub.fanOutRoom(ROOM, message);
+    const types = (frames: WsServerMessage[]): string[] => frames.filter((f) => f.type !== "presence").map((f) => f.type);
+    expect(landed).toBe(true);
+    expect(types(bea.frames)).toEqual(["typing", "room_removed"]);
+    expect(types(ana.frames)).toEqual(["typing", "typing"]);
+  });
+
   it("removeRoom tells every previous reader and forgets the room", async () => {
     const hub = hubWith(async () => users("ana"));
     const ana = connect(hub, "ana");
