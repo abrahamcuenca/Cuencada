@@ -6,6 +6,7 @@ import { TextInput } from "../../../shared/ui/TextInput";
 import { cx } from "../../../shared/ui/cx";
 import styles from "../gallery.module.css";
 import { env } from "../../../shared/lib/env";
+import type { MediaScope } from "../lib/mediaScope";
 import { UPLOAD_ORIGIN_DEV_HINT, UPLOADS_UNAVAILABLE_MESSAGE, uploadsConfigured } from "../lib/uploadOrigin";
 import { type FileCheck, formatBytes, UPLOAD_ACCEPT, validateUploadFile } from "../lib/validateFile";
 import { useUploadManager } from "../upload/useUploadManager";
@@ -45,13 +46,15 @@ export interface UploaderHandle {
   openPicker: () => void;
 }
 
-/** Props for {@link Uploader}. */
-export interface UploaderProps {
-  year: number;
+/** Props shared by both {@link Uploader} targets. */
+interface UploaderBaseProps {
   /** Render the big trigger button (off when another control opens the picker). */
   showButton?: boolean;
   ref?: Ref<UploaderHandle>;
 }
+
+/** Props for {@link Uploader}: an edition `year`, or (WP-5.4) an event album `scope`. */
+export type UploaderProps = UploaderBaseProps & ({ year: number; scope?: undefined } | { scope: MediaScope; year?: undefined });
 
 const CAPTION_MAX = 500;
 
@@ -60,7 +63,7 @@ const CAPTION_MAX = 500;
  * sheet to review the files, see per-file errors and add optional captions
  * before they are queued.
  */
-export function Uploader({ year, showButton = true, ref }: UploaderProps): React.ReactNode {
+export function Uploader({ year, scope, showButton = true, ref }: UploaderProps): React.ReactNode {
   const input = useRef<HTMLInputElement>(null);
   const { manager } = useUploadManager();
   const [checks, setChecks] = useState<FileCheck[]>([]);
@@ -91,7 +94,7 @@ export function Uploader({ year, showButton = true, ref }: UploaderProps): React
   const rejectedCount = checks.length - accepted.length;
 
   const start = (): void => {
-    manager.enqueue(year, accepted);
+    manager.enqueue(scope ?? year, accepted);
     close();
   };
 

@@ -7,7 +7,7 @@ import { Field } from "../../../shared/ui/Field";
 import { Select, type SelectOption } from "../../../shared/ui/Select";
 import { TextArea } from "../../../shared/ui/TextArea";
 import { useToast } from "../../../shared/ui/Toast";
-import { useDeleteMediaMutation, useReportMediaMutation, useUpdateMediaCaptionMutation } from "../api";
+import { albumOf, useDeleteMediaMutation, useReportMediaMutation, useUpdateMediaCaptionMutation } from "../api";
 
 const CAPTION_MAX = 500;
 
@@ -51,7 +51,8 @@ export function EditCaptionDialog({ item, open, onClose }: ItemDialogProps): Rea
       return;
     }
     try {
-      await update({ id: item.id, year: item.year, caption: trimmed === "" ? null : trimmed }).unwrap();
+      const album = albumOf(item);
+      await update({ id: item.id, year: item.year, ...(album === undefined ? {} : { album }), caption: trimmed === "" ? null : trimmed }).unwrap();
       toast.show({ message: "Descripción guardada.", tone: "success" });
       onClose();
     } catch (failure) {
@@ -81,7 +82,8 @@ export function DeleteMediaDialog({ item, open, onClose, onDeleted }: ItemDialog
 
   const confirm = async (): Promise<void> => {
     try {
-      await remove({ id: item.id, year: item.year }).unwrap();
+      const album = albumOf(item);
+      await remove({ id: item.id, year: item.year, ...(album === undefined ? {} : { album }) }).unwrap();
       toast.show({ message: item.kind === "video" ? "Video eliminado." : "Foto eliminada.", tone: "success" });
       onDeleted();
     } catch (failure) {

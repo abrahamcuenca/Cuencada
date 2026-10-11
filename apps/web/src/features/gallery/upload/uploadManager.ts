@@ -3,6 +3,7 @@ import type { AppStore } from "../../../app/store";
 import { getApiErrorMessage } from "../../../shared/api/errors";
 import { selectCurrentUser, selectSessionEpoch } from "../../auth/authSlice";
 import { galleryApi, MEDIA_PAGE_SIZE } from "../api";
+import { type MediaScope, mediaScopeKey, mediaScopeLabel, yearScope } from "../lib/mediaScope";
 import { putToPresignedUrl, UploadTransferError } from "../lib/putToPresignedUrl";
 import { GALLERY_RESIZE, ImageDecodeError, shrinkImageIfNeeded } from "../lib/resizeImage";
 import { UploadsUnavailableError, uploadsConfigured } from "../lib/uploadOrigin";
@@ -10,7 +11,7 @@ import type { AcceptedFile } from "../lib/validateFile";
 
 /** Uploads running at once (intent → PUT → confirm). Keeps phones on 4G responsive. */
 export const MAX_CONCURRENT_UPLOADS = 2;
-/** While anything is processing, the first page of its year is polled this often. */
+/** While anything is processing, the first page of its year (or album) is polled this often. */
 export const PROCESSING_POLL_MS = 5000;
 /** An intent closer than this to `expiresAt` is replaced instead of reused on retry. */
 const INTENT_MARGIN_MS = 60_000;
@@ -30,7 +31,14 @@ export type UploadPhase =
 /** One row of the upload list (immutable snapshot, safe to render). */
 export interface UploadEntry {
   id: string;
-  year: number;
+  /** Where the file goes: an edition's year or an event album (WP-5.4). */
+  scope: MediaScope;
+  /** {@link mediaScopeKey} of `scope`. */
+  scopeKey: string;
+  /** {@link mediaScopeLabel} of `scope` (the year, or the album's label). */
+  scopeLabel: string;
+  /** The edition year, `null` for album uploads. */
+  year: number | null;
   fileName: string;
   byteSize: number;
   kind: MediaKind;
@@ -127,18 +135,23 @@ export class UploadManager {
   getSnapshot = (): readonly UploadEntry[] => this.snapshot;
 
   /**
-   * Queues files for a year and starts up to {@link MAX_CONCURRENT_UPLOADS}.
+   * Queues files for a year (or an event album) and starts up to
+   * {@link MAX_CONCURRENT_UPLOADS}.
    *
-   * @param year - Edition the files belong to.
+   * @param target - Edition year, or a {@link MediaScope}.
    * @param requests - Validated files with optional captions.
    */
-  enqueue(year: number, requests: readonly UploadRequest[]): void {
+  enqueue(target: number | MediaScope, requests: readonly UploadRequest[]): void {
+    const scope = typeof target === "number" ? yearScope(target) : target;
     for (const { file, caption } of requests) {
       this.sequence += 1;
       this.jobs.push({
         entry: {
           id: `upload-${this.sequence}`,
-          year,
+          scope,
+          scopeKey: mediaScopeKey(scope),
+          scopeLabel: mediaScopeLabel(scope),
+          year: scope.kind === "year" ? scope.year : null,
           fileName: file.fileName,
           byteSize: file.file.size,
           kind: file.kind,
@@ -201,16 +214,17 @@ export class UploadManager {
   }
 
   /**
-   * Moves confirmed uploads forward from a fresh first page of their year.
+   * Moves confirmed uploads forward from a fresh first page of their year (or album).
    *
-   * @param year - Year of the page.
+   * @param target - Year (or scope) of the page.
    * @param items - The page's items (newest first, own non-ready items included).
    * @param requestedAt - When that request started (ms); older responses are ignored.
    */
-  syncFromList(year: number, items: readonly MediaItem[], requestedAt: number): void {
+  syncFromList(target: number | MediaScope, items: readonly MediaItem[], requestedAt: number): void {
+    const key = mediaScopeKey(typeof target === "number" ? yearScope(target) : target);
     const byId = new Map(items.map((item) => [item.id, item]));
     for (const job of this.jobs) {
-      if (job.entry.year !== year || job.entry.phase !== "processing" || job.entry.mediaId === null) continue;
+      if (job.entry.scopeKey !== key || job.entry.phase !== "processing" || job.entry.mediaId === null) continue;
       if (job.confirmedAt === null || requestedAt < job.confirmedAt) continue;
       const item = byId.get(job.entry.mediaId);
       if (!item) {
@@ -346,12 +360,12 @@ export class UploadManager {
     // [SEC/ops] Without a bucket origin every intent would be refused after the server already
     // created its row: don't ask for one at all.
     if (!uploadsConfigured()) throw new UploadsUnavailableError();
-    const request = this.store.dispatch(
-      galleryApi.endpoints.createUpload.initiate({
-        year: job.entry.year,
-        body: { fileName: job.file.name, mimeType: job.mimeType, byteSize: job.file.size, caption: job.entry.caption }
-      })
-    );
+    const body = { fileName: job.file.name, mimeType: job.mimeType, byteSize: job.file.size, caption: job.entry.caption };
+    const { scope } = job.entry;
+    const request =
+      scope.kind === "year"
+        ? this.store.dispatch(galleryApi.endpoints.createUpload.initiate({ year: scope.year, body }))
+        : this.store.dispatch(galleryApi.endpoints.createAlbumUpload.initiate({ eventId: scope.eventId, albumId: scope.albumId, body }));
     job.inFlight = request;
     try {
       const created = await request.unwrap();
@@ -397,7 +411,7 @@ export class UploadManager {
     if (mediaId === undefined) throw new Error("Falta el identificador de la subida.");
     this.throwIfCanceled(job);
     this.update(job, { phase: "confirming", progress: 1 });
-    const request = this.store.dispatch(galleryApi.endpoints.confirmUpload.initiate({ mediaId, year: job.entry.year }));
+    const request = this.store.dispatch(galleryApi.endpoints.confirmUpload.initiate({ mediaId, scope: job.entry.scope }));
     job.inFlight = request;
     try {
       const item = await request.unwrap();
@@ -420,7 +434,12 @@ export class UploadManager {
     const mediaId = job.intent?.mediaId;
     job.intent = null;
     if (!job.deleteOnCancel || mediaId === undefined) return;
-    const request = this.store.dispatch(galleryApi.endpoints.deleteMedia.initiate({ id: mediaId, year: job.entry.year }));
+    const { scope } = job.entry;
+    const request = this.store.dispatch(
+      galleryApi.endpoints.deleteMedia.initiate(
+        scope.kind === "year" ? { id: mediaId, year: scope.year } : { id: mediaId, year: null, album: { eventId: scope.eventId, albumId: scope.albumId } }
+      )
+    );
     request
       .unwrap()
       .catch(() => {
@@ -429,7 +448,7 @@ export class UploadManager {
       .finally(() => request.reset());
   }
 
-  /** Polls the first page of every year with processing uploads, so rows resolve even after navigating away. */
+  /** Polls the first page of every year (or album) with processing uploads, so rows resolve even after navigating away. */
   private schedulePoll(): void {
     if (this.pollTimer !== null || !this.jobs.some((job) => job.entry.phase === "processing")) return;
     this.pollTimer = setTimeout(() => {
@@ -440,14 +459,19 @@ export class UploadManager {
 
   private async pollProcessing(): Promise<void> {
     const generation = this.generation;
-    const years = new Set(this.jobs.filter((job) => job.entry.phase === "processing").map((job) => job.entry.year));
-    for (const year of years) {
+    const scopes = new Map<string, MediaScope>();
+    for (const job of this.jobs) if (job.entry.phase === "processing") scopes.set(job.entry.scopeKey, job.entry.scope);
+    for (const scope of scopes.values()) {
       const requestedAt = Date.now();
-      const request = this.store.dispatch(galleryApi.endpoints.mediaHead.initiate({ year, limit: MEDIA_PAGE_SIZE }, { subscribe: false, forceRefetch: true }));
+      const options = { subscribe: false, forceRefetch: true } as const;
+      const request =
+        scope.kind === "year"
+          ? this.store.dispatch(galleryApi.endpoints.mediaHead.initiate({ year: scope.year, limit: MEDIA_PAGE_SIZE }, options))
+          : this.store.dispatch(galleryApi.endpoints.albumMediaHead.initiate({ eventId: scope.eventId, albumId: scope.albumId, limit: MEDIA_PAGE_SIZE }, options));
       try {
         const page = await request.unwrap();
         if (generation !== this.generation) return;
-        this.syncFromList(year, page.items, requestedAt);
+        this.syncFromList(scope, page.items, requestedAt);
       } catch {
         // A failed poll is retried on the next tick; rows stay "Procesando…".
       }

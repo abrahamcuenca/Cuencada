@@ -16,6 +16,7 @@ import { isViewable, MediaGrid, MediaGridSkeleton } from "../components/MediaGri
 import { UploadPanel } from "../components/UploadPanel";
 import { Uploader, type UploaderHandle } from "../components/Uploader";
 import styles from "../gallery.module.css";
+import { mediaScopeKey, yearScope } from "../lib/mediaScope";
 import { parseYearParam } from "../lib/mediaText";
 import { LARGE_PHOTO_NOTE } from "../lib/resizeImage";
 import { uploadsConfigured } from "../lib/uploadOrigin";
@@ -130,7 +131,7 @@ function GalleryYear({ year }: { year: number }): React.ReactNode {
 
   // The upload manager polls for its own uploads; the page polls only for processing items it
   // doesn't track (e.g. from an earlier visit). Only the first page is fetched and patched in.
-  const managerPolls = uploads.some((upload) => upload.year === year && upload.phase === "processing");
+  const managerPolls = uploads.some((upload) => upload.scopeKey === mediaScopeKey(yearScope(year)) && upload.phase === "processing");
   const processing = !managerPolls && items.some((item) => item.uploadStatus === "processing");
   useMediaHeadQuery(
     { year, limit: MEDIA_PAGE_SIZE },
