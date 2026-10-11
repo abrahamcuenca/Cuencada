@@ -11,7 +11,7 @@ same guard config. `401`/`403` cells are guard denials (`UNAUTHENTICATED`,
 `PASSWORD_CHANGE_REQUIRED`, `FORBIDDEN`, `EMAIL_UNVERIFIED`); other non-2xx
 cells are handler answers for that principal's own data.
 
-Total: 115 routes (14 public, 45 user, 54 admin, 2 cookie).
+Total: 138 routes (14 public, 65 user, 57 admin, 2 cookie).
 
 | Method | Path | auth | Verified email | Pending pw allowed | Anon | Member | Unverified | Pending pw | Disabled | Revoked | Admin | Other member (IDOR) | Scope / notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -39,6 +39,9 @@ Total: 115 routes (14 public, 45 user, 54 admin, 2 cookie).
 | PUT | `/api/admin/cuencadas/:id/locations/order` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | GET | `/api/admin/cuencadas/:id/rsvps` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | GET | `/api/admin/cuencadas/:id/rsvps.csv` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
+| GET | `/api/admin/events` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | every event, hidden and drafts included |
+| POST | `/api/admin/events` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | optional typed slug (409 EVENT_SLUG_TAKEN) |
+| PATCH | `/api/admin/events/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | every field, hidden and the slug |
 | GET | `/api/admin/family/activity` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | PII snapshots |
 | GET | `/api/admin/family/duplicates` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | PII pairs (no account ids) |
 | GET | `/api/admin/invites` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
@@ -103,6 +106,26 @@ Total: 115 routes (14 public, 45 user, 54 admin, 2 cookie).
 | GET | `/api/cuencadas/home` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
 | GET | `/api/directory` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | GET | `/api/directory/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | listed members only (404 for unlisted) |
+| GET | `/api/events` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | only events the caller may see (ADR 0001 §7); hidden never |
+| POST | `/api/events` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | the caller becomes organizer; 10/day and 20 open drafts per member; mass assignment: a member-typed slug (Security M1) → 400 |
+| DELETE | `/api/events/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | admins; organizers only for a draft without media; probe: a joined members event the caller does not organize → 403; probe: an organizer deleting a published event → 403; probe: an organizer deleting a draft with (soft-deleted) media → 403 |
+| PATCH | `/api/events/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | organizers and admins; hidden admin-only; probe: a joined members event the caller does not organize → 403; probe: an organizer hiding their own event → 403; mass assignment: a member-typed slug (Security M1) → 400 |
+| POST | `/api/events/:id/albums` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | organizers and admins (≤ 20 albums); probe: a joined members event the caller does not organize → 403 |
+| DELETE | `/api/events/:id/albums/:albumId` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | organizers and admins; 409 while live media remain; probe: a joined members event the caller does not organize → 403; probe: an album with live media → 409 |
+| PATCH | `/api/events/:id/albums/:albumId` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | organizers and admins; the album must belong to the event; probe: a joined members event the caller does not organize → 403 |
+| GET | `/api/events/:id/albums/:albumId/media` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | participants and admins (admins on participants events audited); probe: a members event the caller has not joined → 403 |
+| POST | `/api/events/:id/albums/:albumId/uploads` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | participants and admins; shared daily upload budget; probe: a members event the caller has not joined (no media row created) → 403 |
+| DELETE | `/api/events/:id/cover` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | organizers and admins; probe: a joined members event the caller does not organize → 403 |
+| POST | `/api/events/:id/cover/uploads` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | organizers and admins; probe: a joined members event the caller does not organize → 403 |
+| POST | `/api/events/:id/cover/uploads/:uploadId/confirm` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | the uploader, still an organizer or admin (404 for another user's upload); probe: an own intent after being demoted to participant → 403 |
+| POST | `/api/events/:id/join` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | published members events only (403 otherwise, admins included); probe: joining a participants-only event the caller already sees → 403 |
+| DELETE | `/api/events/:id/notice` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | the caller's own notice only |
+| POST | `/api/events/:id/participants` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | organizers (listed, active, verified members) and admins; probe: a joined members event the caller does not organize → 403; probe: an organizer adding a member hidden from the directory → 400; probe: an organizer adding a disabled member → 400 |
+| DELETE | `/api/events/:id/participants/:userId` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | organizers and admins; never removes the last organizer; probe: a joined members event the caller does not organize → 403; probe: removing the last organizer → 409 |
+| PATCH | `/api/events/:id/participants/:userId` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | organizers and admins; never demotes the last organizer; probe: a joined members event the caller does not organize → 403; probe: demoting the last organizer → 409 |
+| DELETE | `/api/events/:id/participants/me` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | the caller's own participation (not the last organizer); probe: a members event the caller has not joined → 403; probe: the last organizer leaving → 409 |
+| GET | `/api/events/:year/:slug` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | per visibility (404 when the caller cannot see it) |
+| GET | `/api/events/notices` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | the caller's own participations only, in events they can see |
 | PATCH | `/api/family/me` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | self-scoped (the caller's linked person); mass assignment: extra keys (userId/deceased/deathYear/deathDate/id) → 2xx |
 | GET | `/api/family/people` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | POST | `/api/family/people` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | qualifying own-family circle (relateTo must be in it; ADR 0001 §6); probe: circle widened through a member edge whose creator made no endpoint (planted) → 403; mass assignment: userId / createdByUserId keys → 400; probe: existing-to-existing edge → 400 |
