@@ -95,7 +95,7 @@ const eventSlugRegex = new RegExp(EVENT_SLUG_PATTERN);
 /** Most users in one "add participants" request. */
 export const EVENT_PARTICIPANTS_ADD_MAX = 50;
 /** Most participants per event (service cap; `EventDetail.participants` is never longer). */
-export const EVENT_PARTICIPANTS_MAX = 500;
+export const EVENT_PARTICIPANTS_MAX = 200;
 /** Most albums per event (service cap). */
 export const EVENT_ALBUMS_MAX = 20;
 /** Highest album `sortOrder`. DB CHECK `event_albums_sort_order_check`. */
@@ -128,7 +128,7 @@ export type EventCoverWidth = (typeof EVENT_COVER_WIDTHS)[number];
  * | `EVENT_NOT_FOUND` | `NOT_FOUND` | 404: missing **or not visible** (never 403, no existence leak) |
  * | `EVENT_NOT_PARTICIPANT` | `FORBIDDEN` | 403: visible event, but chat/albums/uploads need a participant |
  * | `EVENT_JOIN_NOT_ALLOWED` | `FORBIDDEN` | 403: self-join only for published `members` events |
- * | `EVENT_SLUG_TAKEN` | `CONFLICT` | 409: `(year, slug)` already used (`path: "slug"`) |
+ * | `EVENT_SLUG_TAKEN` | `CONFLICT` | 409: an **admin's** typed slug is taken in that year (`path: "slug"`); members never get it (Security M1) |
  * | `EVENT_ALBUM_NOT_EMPTY` | `CONFLICT` | 409: delete the album's media first |
  * | `EVENT_DELETE_NOT_ALLOWED` | `FORBIDDEN` | 403: organizers delete only drafts without media |
  * | `EVENT_LAST_ORGANIZER` | `CONFLICT` | 409: the last organizer cannot leave or be demoted/removed |
@@ -188,7 +188,7 @@ export const EVENT_SLUG_FALLBACK = "evento";
  * characters → one `-`, no leading/trailing `-`, at most
  * {@link EVENT_SLUG_MAX_LENGTH} characters (cut at a word boundary when
  * possible). Falls back to {@link EVENT_SLUG_FALLBACK} when shorter than 3.
- * The server adds a suffix on collision with {@link eventSlugWithSuffix}.
+ * The server adds a random suffix on collision with {@link eventSlugWithSuffix}.
  *
  * @param title - The event title.
  * @returns A slug matching {@link EVENT_SLUG_PATTERN}.
@@ -212,19 +212,45 @@ function fitSlug(slug: string, max: number): string {
   return out.length >= EVENT_SLUG_MIN_LENGTH ? out : EVENT_SLUG_FALLBACK;
 }
 
+/** Alphabet of the collision suffix (RFC 4648 base32, lowercase: every character fits the slug pattern). */
+const SLUG_SUFFIX_ALPHABET = "abcdefghijklmnopqrstuvwxyz234567";
+/** Length of the random collision suffix (32^4 ≈ 1M values). */
+export const EVENT_SLUG_SUFFIX_LENGTH = 4;
+const slugSuffixRegex = new RegExp(`^[${SLUG_SUFFIX_ALPHABET}]{${EVENT_SLUG_SUFFIX_LENGTH}}$`);
+
 /**
- * `base` with a numeric suffix for the `n`-th collision (`n` ≥ 2):
- * `"carne-asada"`, 2 → `"carne-asada-2"`, still at most 60 characters.
+ * A random collision suffix: {@link EVENT_SLUG_SUFFIX_LENGTH} base32 characters
+ * from `crypto.getRandomValues` (Node ≥ 19 and browsers).
+ *
+ * [SEC] Security M1 (PR #52, CWE-203): a **sequential** suffix (`-2`, `-3`) or
+ * a 409 on a taken slug would tell a member that an event they cannot see
+ * already uses that title in that year. A random suffix is the same whether
+ * or not the colliding event is visible to the caller.
+ */
+export function randomEventSlugSuffix(): string {
+  const bytes = new Uint8Array(EVENT_SLUG_SUFFIX_LENGTH);
+  globalThis.crypto.getRandomValues(bytes);
+  let out = "";
+  // 256 is a multiple of 32, so `byte % 32` is unbiased.
+  for (const byte of bytes) out += SLUG_SUFFIX_ALPHABET[byte % SLUG_SUFFIX_ALPHABET.length];
+  return out;
+}
+
+/**
+ * `base` with a random suffix, used on **every** `(year, slug)` collision of
+ * a generated slug: `"carne-asada"` → `"carne-asada-k7q2"`, still at most 60
+ * characters (the base is cut at a word boundary to make room). The server
+ * retries with a fresh suffix on the rare second collision.
  *
  * @param base - A valid slug.
- * @param n - Attempt number; values below 2 return `base` unchanged.
+ * @param suffix - The suffix; defaults to {@link randomEventSlugSuffix} (tests pass a fixed one).
  * @returns A slug matching {@link EVENT_SLUG_PATTERN}.
+ * @throws RangeError when `suffix` is not {@link EVENT_SLUG_SUFFIX_LENGTH} base32 characters.
  */
-export function eventSlugWithSuffix(base: string, n: number): string {
-  if (!Number.isInteger(n) || n < 2) return base;
-  const suffix = `-${n}`;
-  const head = fitSlug(base, EVENT_SLUG_MAX_LENGTH - suffix.length);
-  return `${head}${suffix}`;
+export function eventSlugWithSuffix(base: string, suffix: string = randomEventSlugSuffix()): string {
+  if (!slugSuffixRegex.test(suffix)) throw new RangeError("eventSlugWithSuffix: invalid suffix");
+  const head = fitSlug(base, EVENT_SLUG_MAX_LENGTH - suffix.length - 1);
+  return `${head}-${suffix}`;
 }
 
 /** True when `value` is a valid event slug (3–60 chars, {@link EVENT_SLUG_PATTERN}). */
@@ -421,11 +447,14 @@ const datesTogetherIssue = { error: EVENT_DATES_TOGETHER_MESSAGE, path: ["endsAt
 const endsAfterStartIssue = { error: EVENT_ENDS_AFTER_START_MESSAGE, path: ["endsAt"] };
 const yearMismatchIssue = { error: EVENT_YEAR_MISMATCH_MESSAGE, path: ["year"] };
 
-/** Fields shared by create and update, without defaults (a PATCH never resets omitted fields). */
+/**
+ * Fields shared by create and update, without defaults (a PATCH never resets
+ * omitted fields). No `slug`: for members it is always generated from the
+ * title at create time and never changes; only the admin schemas accept one
+ * (Security M1).
+ */
 const eventFields = {
   title: eventTitleSchema,
-  /** Omit to derive it from the title ({@link slugifyEventTitle}); the server suffixes it on collision. */
-  slug: eventSlugSchema,
   /** Required when undated; when dated it may be omitted (derived from `startsAt`) and must match. */
   year: yearSchema,
   summary: eventSummaryTextSchema,
@@ -441,14 +470,19 @@ const eventFields = {
  * `POST /api/events` (any verified member; the caller becomes its organizer).
  * Creates the event, its default "Fotos" album and, when published, its chat
  * room. `publish: true` publishes right away (else `draft`).
- * `participantUserIds` adds verified, active members as participants (the
- * caller is added as organizer regardless and may be listed or not).
+ * `participantUserIds` adds listed, active, verified members as participants
+ * (the caller is added as organizer regardless and may be listed or not).
  * Responds 201 with {@link EventDetail}.
+ *
+ * The slug is **not** accepted (strict schema, Security M1): the server
+ * generates it with {@link slugifyEventTitle} and, on any `(year, slug)`
+ * collision, {@link eventSlugWithSuffix} (random suffix), so the result never
+ * depends on events the caller cannot see. Admins may choose a slug through
+ * {@link adminCreateEventInputSchema}.
  */
 export const createEventInputSchema = z
   .strictObject({
     ...eventFields,
-    slug: eventSlugSchema.exactOptional(),
     year: yearSchema.exactOptional(),
     summary: eventSummaryTextSchema.default(null),
     details: eventDetailsSchema.default(null),
@@ -472,11 +506,25 @@ export type CreateEventInput = z.infer<typeof createEventInputSchema>;
 export type CreateEventRequest = z.input<typeof createEventInputSchema>;
 
 /**
+ * `POST /api/admin/events` (admins): {@link createEventInputSchema} plus an
+ * optional typed `slug`. A taken typed slug is 409 `CONFLICT` +
+ * `EVENT_SLUG_TAKEN` (`path: "slug"`); admins can see every event, so this
+ * reveals nothing. Omitted → generated as for members.
+ */
+export const adminCreateEventInputSchema = createEventInputSchema.safeExtend({
+  slug: eventSlugSchema.exactOptional()
+});
+export type AdminCreateEventInput = z.infer<typeof adminCreateEventInputSchema>;
+export type AdminCreateEventRequest = z.input<typeof adminCreateEventInputSchema>;
+
+/**
  * `PATCH /api/events/:id` (organizers and admins). `status`: organizers may
  * move `draft` ↔ `published`; `hidden` (to or from) is admin-only (403
  * `FORBIDDEN`). Changing `startsAt` re-derives `year` (the URL may change);
  * the server runs {@link eventDatesIssue} on the merged row. Tightening
  * `visibility` to `participants` revokes non-participants' access live.
+ * No `slug` (strict; Security M1): a title change keeps the URL. Admins
+ * change slugs with {@link adminUpdateEventInputSchema}.
  */
 export const updateEventInputSchema = z
   .strictObject({ ...eventFields, status: eventStatusSchema })
@@ -487,6 +535,20 @@ export const updateEventInputSchema = z
   .refine((value) => Object.keys(value).length > 0, { error: "No hay cambios que guardar." });
 export type UpdateEventInput = z.infer<typeof updateEventInputSchema>;
 export type UpdateEventRequest = z.input<typeof updateEventInputSchema>;
+
+/**
+ * `PATCH /api/admin/events/:id` (admins): {@link updateEventInputSchema} plus
+ * `slug` (409 `EVENT_SLUG_TAKEN` when taken in the event's year).
+ */
+export const adminUpdateEventInputSchema = z
+  .strictObject({ ...eventFields, status: eventStatusSchema, slug: eventSlugSchema })
+  .partial()
+  .refine(datesTogether, datesTogetherIssue)
+  .refine(endsAfterStart, endsAfterStartIssue)
+  .refine(yearMatchesStart, yearMismatchIssue)
+  .refine((value) => Object.keys(value).length > 0, { error: "No hay cambios que guardar." });
+export type AdminUpdateEventInput = z.infer<typeof adminUpdateEventInputSchema>;
+export type AdminUpdateEventRequest = z.input<typeof adminUpdateEventInputSchema>;
 
 /* -------------------------------------------------------------------------- */
 /* Participants                                                                */

@@ -32,7 +32,7 @@ Based on `origin/main` @ 8147363 (WP-4.7). Plan: WP-5 "Past Cuencadas + Eventos"
 1. **`storage_prefix` is stored, not derived** (nullable for legacy rows, which keep `cuencadas/{year}`). Today's keys are derived from the edition **year**, and an admin can change an edition's year (`updateCuencadaInputSchema.year`), which would orphan derivative keys; album media have no year at all. A stored, server-generated prefix (`events/{eventId}/{albumId}`, CHECKed) makes key derivation scope-independent: `mediaKeys(prefix, id, mime)`. WP-5.3 may also start writing `cuencadas/{year}` on new edition rows; readers use `storage_prefix ?? \`cuencadas/${year}\``.
 2. **`album_id` is ON DELETE RESTRICT**, so a cascade can never silently drop media rows whose objects would then leak in the bucket. Deleting an album or an event therefore needs its media rows removed first (soft-deleted ones included): the service collects the object keys, hard-deletes the rows in the same transaction, and deletes the objects after the commit (best effort; the leftover sweep retries). Album delete with **live** media answers 409 `EVENT_ALBUM_NOT_EMPTY`; with only soft-deleted rows it purges them.
 3. **`year` follows `starts_at` in the event's timezone** (DB CHECK and `eventDatesIssue`), so "Año Nuevo" starting 23:00 on Dec 31 in Mérida is a 2026 event. Changing `startsAt` across a year boundary changes the URL; the web navigates to the returned `year/slug`.
-4. **Slug** generated server-side from the title with `slugifyEventTitle` (exported for the web preview) and suffixed `-2…` on collision with `eventSlugWithSuffix`; an organizer may type one (409 `EVENT_SLUG_TAKEN`). Folding: NFD minus marks plus `ß→ss`, `æ→ae`, `œ→oe`, `ø→o`, `ł→l`, `đ→d`; fallback `evento` when < 3 chars.
+4. **Slug** (revised for Security M1, PR #52, CWE-203): generated server-side from the title with `slugifyEventTitle` (exported for the web preview); on **any** `(year, slug)` collision a random 4-character base32 suffix is appended (`eventSlugWithSuffix`, `randomEventSlugSuffix`; retry on the rare second collision). A sequential `-2` or a 409 would reveal that an invisible event uses that title in that year. Members never send a slug (`createEventInputSchema`/`updateEventInputSchema` are strict without it) and it does not follow later title edits; admins may type one through `adminCreateEventInputSchema`/`adminUpdateEventInputSchema` (409 `EVENT_SLUG_TAKEN`). Folding: NFD minus marks plus `ß→ss`, `æ→ae`, `œ→oe`, `ø→o`, `ł→l`, `đ→d`; fallback `evento` when < 3 chars.
 5. **Cover** uses the avatar upload intent (JPEG/PNG/WebP ≤ 10 MB) and the WP-4.0 crop rect with `size` = crop **width** (height = `round(size / (16/9))`), clamped by the new `clampAspectCropRect` (same "shift, don't shrink" rule as `clampCropRect`). Derivatives 1280 and 640 px WebP. `cover_key` stores the 1280 key; the 640 key swaps the suffix (the WP-4.3 `photo_key` pattern).
 6. **`hidden` is a status**, admin-only both ways; `hidden` without a prior publish is allowed (an admin can hide a draft). `published` requires `first_published_at`.
 7. **Organizers survive account deletion only as `null`**: participant rows cascade with the user; an event may be left with no organizer, which admins fix. The "last organizer cannot leave" rule is a service rule (`EVENT_LAST_ORGANIZER`), not a DB constraint (a trigger would hide logic, and user deletes must not fail).
@@ -47,9 +47,11 @@ All routes: `auth: "member"`, `config.requireVerifiedEmail: true`, response sche
 | Method + path | Who | Params / query / body | Response |
 |---|---|---|---|
 | `GET /api/events` | member | `eventListQuerySchema` (`when` upcoming\|past, `year?`, `mine?`, `cursor?`, `limit`) | `Page<EventSummary>` (`eventPageSchema`), cover 640 |
-| `POST /api/events` | member (becomes organizer) | `createEventInputSchema` | 201 `EventDetail`; creates the "Fotos" album, and the chat room when `publish` |
+| `POST /api/events` | member (becomes organizer) | `createEventInputSchema` (no slug) | 201 `EventDetail`; creates the "Fotos" album, and the chat room when `publish` |
+| `POST /api/admin/events` | admin (becomes organizer) | `adminCreateEventInputSchema` (optional typed slug) | 201 `EventDetail`; 409 `EVENT_SLUG_TAKEN` |
 | `GET /api/events/:year/:slug` | per visibility | `eventPathParamsSchema` | `EventDetail` (cover 1280); audits `event.admin_viewed` (`detail`) |
-| `PATCH /api/events/:id` | organizer, admin (`hidden` admin-only) | `updateEventInputSchema` | `EventDetail`; first publish creates the room; tightening visibility/hiding sends `room_removed` |
+| `PATCH /api/admin/events/:id` | admin | `adminUpdateEventInputSchema` (adds `slug`) | `EventDetail`; 409 `EVENT_SLUG_TAKEN` |
+| `PATCH /api/events/:id` | organizer, admin (`hidden` admin-only) | `updateEventInputSchema` (no slug) | `EventDetail`; first publish creates the room; tightening visibility/hiding sends `room_removed` |
 | `DELETE /api/events/:id` | admin; organizer for a media-free draft | `emptyEventBodySchema` | 204 |
 | `POST /api/events/:id/join` | member, published `members` event | `emptyEventBodySchema` | `EventDetail` (idempotent) |
 | `DELETE /api/events/:id/participants/me` | participant (not the last organizer) | — | 204 |
@@ -74,9 +76,33 @@ All routes: `auth: "member"`, `config.requireVerifiedEmail: true`, response sche
 
 **WebSocket:** new server frame `room_removed { roomId }` (`wsServerRoomRemovedSchema`). Event rooms reuse every other frame; delivery is filtered per room.
 
-**Helpers exported from `@cuencada/types`:** `foldAccents`, `slugifyEventTitle`, `eventSlugWithSuffix`, `isEventSlug`, `eventYearOf`, `eventDatesIssue` (merged-row check, returns an `ApiErrorDetail`), `isPastEvent` (upcoming/past rule, same as WP-5.1's), `clampAspectCropRect`, constants (`EVENT_*`, `DEFAULT_EVENT_ALBUM_TITLE`, `EVENT_COVER_ASPECT`, `EVENT_COVER_WIDTHS`).
+**Helpers exported from `@cuencada/types`:** `foldAccents`, `slugifyEventTitle`, `eventSlugWithSuffix`, `randomEventSlugSuffix`, `isEventSlug`, `eventYearOf`, `eventDatesIssue` (merged-row check, returns an `ApiErrorDetail`), `isPastEvent` (upcoming/past rule, same as WP-5.1's), `clampAspectCropRect`, constants (`EVENT_*`, `DEFAULT_EVENT_ALBUM_TITLE`, `EVENT_COVER_ASPECT`, `EVENT_COVER_WIDTHS`).
 
 **Rollout order:** the migration ships first and is inert. 5.3 must make the media by-id routes scope-aware **before** any album row can exist (the album upload route lands in the same change), and must switch the media jobs and cleanup from inner to left joins on `cuencadas` with `storage_prefix`.
+
+## Security requirements for 5.3/5.4
+From the Security review of PR #52; also in ADR 0001 §7 (binding).
+
+**WP-5.3:**
+1. **Visibility first, everywhere.** One SQL predicate (`eventVisibleSql(viewer)`) used by every list, by-slug and by-id route; an invisible event answers 404 `EVENT_NOT_FOUND` **before** any other check or code path runs (no 403, no validation detail, no timing branch on the event's state). The media by-id routes (`GET|PATCH|DELETE /api/media/:id`, `confirm`, `report`) apply the same rule through `mediaScopeSql(viewer)`.
+2. **Who can be added, and how much.** Server-side: a non-admin organizer may add only **listed, active, verified** members (the same set the directory shows); admins any active member. Participant cap `EVENT_PARTICIPANTS_MAX` = 200. Rate limits: participant writes ~100/h per user, event creation ~10/day per user plus a cap on open drafts per user. Every participant change is audited with ids only.
+3. **Consent.** Being added to a `participants` event creates an in-app notice (who added you, which event) with a one-tap "Salir". Later (backlog): a profile setting "only admins may add me to events".
+4. **Participant PII.** `EventParticipant.avatarUrl` follows the unlisted/disabled avatar rules (as chat senders and `resolvePersonPhoto`); `userId` per §7 above; never emails or contacts.
+5. **Admin-read audit.** `event.admin_viewed` is written **before** the data is returned, and the read fails (500) if the write fails. The once-per-admin-per-event-per-hour dedupe is race-free: an upsert/insert-on-conflict on a dedupe key (e.g. a small table or unique index on `(admin, event, hour bucket)`), not a read-then-write.
+6. **Chat.** The per-room recipient check is the **only** fan-out path (no broadcast bypass for any frame type). The participant set is refreshed on every participant, status or visibility change **before** clients are told about the change. A user who loses access gets `room_removed` and then no further frames for that room, `room_preview` and `typing` included. Every inbound frame and every history read re-checks access.
+7. **Media.** `storage_prefix` is always derived server-side from the album row (`events/{album.eventId}/{album.id}`), never from input; `confirm` rejects an item whose keys do not sit under its row's prefix; upload intents and confirms re-check participation (and visibility) at that moment.
+8. **Cover.** The full avatar pipeline (MIME allowlist, magic bytes, size, pixel cap, EXIF/GPS strip, WebP re-encode, crop clamp). Organizers and admins only, re-checked at confirm. Replaced and removed covers' objects are deleted. A cover URL is never presigned for a caller who cannot see the event.
+9. **PII scan additions:** an unlisted participant's id and avatar must not appear in event responses to other members; a `participants` event's title must never reach a non-participant (lists, chat room list, media `event` refs, admin-only fields).
+
+**WP-5.4:**
+- An invisible event and a missing one look identical: "No encontramos ese evento" (no hint that it exists).
+- The participant picker shows listed members only (the directory), with consent copy ("Le avisaremos y podrá salir cuando quiera").
+- Handle `room_removed`: drop the room from the list, close the open conversation if it is that room, and clear its cached history.
+- Reuse the gallery uploader and grid and the WP-4.3 `ImageCropper` (16:9 via the new `aspect` option); no new upload path.
+- Slugs are never typed by members; the form shows the URL preview from `slugifyEventTitle` and notes that a short code may be added if the name is taken. Admin screens may edit the slug.
+
+## Review log
+- PR #52 round 1: Security M1 (CWE-203, slug collisions revealed invisible events and their titles) → random collision suffix, no member-typed slugs, admin-only slug routes; requirements above recorded.
 
 ## Open questions (→ orchestrator)
 - Migration number: renumber to 0008 after WP-5.1 (see Scope).
@@ -85,4 +111,4 @@ All routes: `auth: "member"`, `config.requireVerifiedEmail: true`, response sche
 ## Verification
 - `drizzle-kit generate`: "No schema changes, nothing to migrate".
 - Migration test "migration events (WP-5.2, expand-only)" (6 cases) from the migration before it: chat rooms, messages and media (incl. a soft-deleted video) unchanged, new columns null, old-shape room and media inserts still work, the six new/replaced constraints validated; events CHECKs (slug corpus, lengths, enums, published ⇒ date, year in the timezone across New Year, cover key pinned to the event, unique `(year, slug)`); participant role/PK, album title/sort, cover MIME/size/unique; chat kind ↔ column rule and one room per event; media scope and prefix CHECKs and the partial album index; event delete blocked by album media (even soft-deleted), then cascading to participants, albums, cover uploads, room and messages with edition data untouched; user delete removes participations and nulls the user FKs.
-- Contract tests `packages/types/src/events.test.ts` (45): accent folding, slug generation/suffix/validation, timezone year, create/update strictness and defaults, text cleaning, merged-row check, past/upcoming rule, participant/album inputs, list query, cover crop clamp, read models (unknown keys stripped, `userId` absent vs. null), old/new `ChatRoom` and `MediaItem` shapes, `room_removed`, audit actions and detail codes, barrel exports.
+- Contract tests `packages/types/src/events.test.ts` (48): accent folding, slug generation, random collision suffix (Security M1) and validation, member schemas reject a slug while the admin ones accept it, timezone year, create/update strictness and defaults, text cleaning, merged-row check, past/upcoming rule, participant/album inputs, list query, cover crop clamp, read models (unknown keys stripped, `userId` absent vs. null), old/new `ChatRoom` and `MediaItem` shapes, `room_removed`, audit actions and detail codes, barrel exports.

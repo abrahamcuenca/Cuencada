@@ -6,8 +6,11 @@ import {
   EVENT_SLUG_FALLBACK,
   EVENT_SLUG_MAX_LENGTH,
   EVENT_SLUG_PATTERN,
+  EVENT_SLUG_SUFFIX_LENGTH,
   EventIssueCode,
   addEventParticipantsInputSchema,
+  adminCreateEventInputSchema,
+  adminUpdateEventInputSchema,
   clampAspectCropRect,
   createEventAlbumInputSchema,
   createEventInputSchema,
@@ -24,6 +27,7 @@ import {
   foldAccents,
   isEventSlug,
   isPastEvent,
+  randomEventSlugSuffix,
   slugifyEventTitle,
   updateEventAlbumInputSchema,
   updateEventInputSchema
@@ -82,18 +86,36 @@ describe("slugifyEventTitle", () => {
 });
 
 describe("eventSlugWithSuffix", () => {
-  it("adds the attempt number and stays within 60 characters", () => {
-    expect(eventSlugWithSuffix("carne-asada", 2)).toBe("carne-asada-2");
+  it("appends the given suffix and stays within 60 characters", () => {
+    expect(eventSlugWithSuffix("carne-asada", "k7q2")).toBe("carne-asada-k7q2");
     const long = slugifyEventTitle("x".repeat(60));
-    const suffixed = eventSlugWithSuffix(long, 12);
+    const suffixed = eventSlugWithSuffix(long, "ab23");
     expect(suffixed.length).toBeLessThanOrEqual(EVENT_SLUG_MAX_LENGTH);
-    expect(suffixed.endsWith("-12")).toBe(true);
+    expect(suffixed.endsWith("-ab23")).toBe(true);
     expect(isEventSlug(suffixed)).toBe(true);
+    const words = eventSlugWithSuffix(slugifyEventTitle(`${"palabra ".repeat(7)}final`), "zz77");
+    expect(words.length).toBeLessThanOrEqual(EVENT_SLUG_MAX_LENGTH);
+    expect(words).toMatch(/palabra-zz77$/);
   });
 
-  it("returns the base for attempts below 2", () => {
-    expect(eventSlugWithSuffix("carne-asada", 1)).toBe("carne-asada");
-    expect(eventSlugWithSuffix("carne-asada", 2.5)).toBe("carne-asada");
+  it("uses a random base32 suffix by default, not a sequence (Security M1)", () => {
+    const seen = new Set<string>();
+    for (let index = 0; index < 50; index += 1) {
+      const slug = eventSlugWithSuffix("carne-asada");
+      expect(slug).toMatch(/^carne-asada-[a-z2-7]{4}$/);
+      expect(isEventSlug(slug)).toBe(true);
+      seen.add(slug);
+    }
+    // 50 draws from 32^4 values: a repeat is possible but many repeats mean no randomness.
+    expect(seen.size).toBeGreaterThan(45);
+    const suffix = randomEventSlugSuffix();
+    expect(suffix).toHaveLength(EVENT_SLUG_SUFFIX_LENGTH);
+  });
+
+  it("rejects a suffix that is not 4 base32 characters", () => {
+    for (const bad of ["2", "abc", "abcde", "ab-c", "AB23", "ab18"]) {
+      expect(() => eventSlugWithSuffix("carne-asada", bad), bad).toThrow(RangeError);
+    }
   });
 });
 
@@ -185,6 +207,15 @@ describe("createEventInputSchema", () => {
     expect(createEventInputSchema.safeParse({ ...dated, summary: "Uno\nDos" }).success).toBe(false);
   });
 
+  it("never accepts a slug from members; admins may type one (Security M1)", () => {
+    expect(createEventInputSchema.safeParse({ ...dated, slug: "viaje-cdmx" }).success).toBe(false);
+    expect(adminCreateEventInputSchema.parse({ ...dated, slug: " Viaje-CDMX " }).slug).toBe("viaje-cdmx");
+    expect(adminCreateEventInputSchema.parse(dated)).not.toHaveProperty("slug");
+    expect(adminCreateEventInputSchema.safeParse({ ...dated, slug: "a" }).success).toBe(false);
+    // The admin schema keeps the member refines.
+    expect(adminCreateEventInputSchema.safeParse({ title: "Posada" }).success).toBe(false);
+  });
+
   it("dedupes nothing silently: repeated participants are rejected", () => {
     expect(createEventInputSchema.safeParse({ ...dated, participantUserIds: [userId, userId] }).success).toBe(false);
     expect(createEventInputSchema.parse({ ...dated, participantUserIds: [userId, otherUserId] }).participantUserIds).toHaveLength(2);
@@ -213,6 +244,13 @@ describe("updateEventInputSchema", () => {
 
   it("is strict", () => {
     expect(updateEventInputSchema.safeParse({ firstPublishedAt: "2026-01-01T00:00:00Z" }).success).toBe(false);
+  });
+
+  it("accepts a slug only in the admin schema (Security M1)", () => {
+    expect(updateEventInputSchema.safeParse({ slug: "otro-slug" }).success).toBe(false);
+    expect(adminUpdateEventInputSchema.parse({ slug: "Otro-Slug" })).toEqual({ slug: "otro-slug" });
+    expect(adminUpdateEventInputSchema.safeParse({}).success).toBe(false);
+    expect(adminUpdateEventInputSchema.safeParse({ startsAt: null }).success).toBe(false);
   });
 });
 
