@@ -5,7 +5,17 @@
 import { randomUUID } from "node:crypto";
 import { type EventRole, type EventStatus, type EventVisibility, memberEventSlug } from "@cuencada/types";
 import { chatRooms, eventAlbums, eventParticipants, events, mediaItems } from "../../src/db/schema/index.js";
+import type { LightMyRequestResponse } from "fastify";
+import type { App } from "../../src/app.js";
 import { getTestDb } from "./db.js";
+import {
+  type AuthInjectOptions,
+  bearerFor,
+  createSession,
+  createUser,
+  type CreateUserOptions,
+  type TestUser
+} from "./factories.js";
 
 type EventRow = typeof events.$inferSelect;
 type AlbumRow = typeof eventAlbums.$inferSelect;
@@ -113,4 +123,38 @@ export async function insertAlbumMedia(album: Pick<AlbumRow, "id" | "eventId">, 
     .returning();
   if (row === undefined) throw new Error("insertAlbumMedia: no row");
   return row;
+}
+
+/** A verified member (or admin) with a live session. */
+export interface EventActor {
+  user: TestUser;
+  auth: AuthInjectOptions;
+}
+
+/** Create a verified actor (options as `createUser`). */
+export async function eventActor(options: CreateUserOptions = {}): Promise<EventActor> {
+  const user = await createUser({ emailVerified: true, ...options });
+  return { user, auth: await bearerFor(user, await createSession(user.id)) };
+}
+
+/** One `inject()` call as `actor`. */
+export function callAs(
+  app: App,
+  actor: EventActor,
+  method: "GET" | "POST" | "PATCH" | "DELETE",
+  url: string,
+  payload?: unknown
+): Promise<LightMyRequestResponse> {
+  return app.inject({
+    method,
+    url,
+    ...actor.auth,
+    ...(payload === undefined ? {} : { payload: payload as Record<string, unknown> }) // JSON fixture body
+  });
+}
+
+/** `{ code, detailCode }` of an error body. */
+export function errorOf(body: string): { code: string; detailCode: string | undefined } {
+  const parsed = JSON.parse(body) as { error?: { code?: string; details?: Array<{ code?: string }> } }; // test-only shape probe
+  return { code: parsed.error?.code ?? "", detailCode: parsed.error?.details?.[0]?.code };
 }
