@@ -55,6 +55,8 @@ const MEMBER_ROUTES: RouteCheck[] = [
   { name: "perfil", open: "/perfil" },
   { name: "sesiones", open: "/perfil/sesiones" },
   { name: "mas", open: "/mas" },
+  // WP-5.4: the events list (renders its heading even before WP-5.3's API is there).
+  { name: "eventos", open: "/eventos", ready: "Eventos" },
   // WP-4.7: the profile's Contacto section from a link, and the open account menu.
   { name: "perfil-contacto", open: "/perfil#contacto", ready: "Contacto" },
   {
@@ -80,6 +82,8 @@ const ADMIN_ROUTES: RouteCheck[] = [
   // WP-4.5: the "Posibles duplicados" tab.
   { name: "admin-duplicados", open: "/admin/familia/actividad?vista=duplicados", ready: "Actividad del árbol" },
   { name: "admin-cuencadas", open: "/admin/cuencadas" },
+  // WP-5.4.
+  { name: "admin-eventos", open: "/admin/eventos", ready: "Eventos" },
   // WP-5.1: the open "Agregar Cuencada anterior" form.
   {
     name: "admin-cuencada-anterior",
@@ -263,6 +267,36 @@ test.describe("mobile quality gates", () => {
       }
     ]);
     await expect(page.getByRole("dialog", { name: "Ajustar foto" })).toBeVisible();
+    assertGates(results);
+  });
+
+  test("the event pages (WP-5.4): create sheet, event page and its tabs", async ({ page }, testInfo) => {
+    // Needs the events API (WP-5.3) to create an event; drop the fixme once it is merged.
+    test.fixme(true, "WP-5.3 (events server) is not merged yet");
+    test.setTimeout(180_000);
+    await recordTransientOverflow(page.context());
+    await login(page, castMember(ProjectKey.Iphone, CastRole.Fede));
+    await page.goto("/eventos");
+    await page.getByRole("button", { name: /Crear evento/ }).first().click();
+    const sheet = page.getByRole("dialog", { name: "Crear evento" });
+    await sheet.getByRole("textbox", { name: /Título/ }).fill("Comida de prueba de calidad con un título largo para medir");
+    await sheet.getByRole("button", { name: "Crear evento" }).click();
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    const path = new URL(page.url()).pathname;
+    const results = await checkRoutes(page, testInfo, [
+      { name: "evento-detalle", open: path },
+      { name: "evento-chat", open: `${path}?vista=chat` },
+      { name: "evento-fotos", open: `${path}?vista=fotos` },
+      {
+        name: "evento-crear",
+        open: async (target) => {
+          await target.goto("/eventos");
+          await target.getByRole("button", { name: /Crear evento/ }).first().click();
+          await expect(target.getByRole("dialog", { name: "Crear evento" })).toBeVisible();
+        }
+      },
+      { name: "evento-no-encontrado", open: "/eventos/2026/no-existe-zz99", ready: "No encontramos ese evento" }
+    ]);
     assertGates(results);
   });
 
