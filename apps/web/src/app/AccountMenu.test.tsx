@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { apiUrl, authenticatedState, makeUser } from "../../test/auth";
 import { createTestServer } from "../../test/msw";
 import { renderApp } from "../../test/renderApp";
@@ -22,6 +22,7 @@ afterEach(() => {
   server.resetHandlers();
   cancelOnlineLogoutRetry();
   logoutCalls = 0;
+  vi.restoreAllMocks();
 });
 
 const banner = (): ReturnType<typeof within> => within(screen.getByRole("banner"));
@@ -50,7 +51,10 @@ describe("AccountMenu", () => {
 
     await userEvent.click(button);
     expect(button).toHaveAttribute("aria-expanded", "true");
-    expect(entryNames()).toEqual(["Mi perfil", "Contacto", "Sesiones y seguridad", "Cerrar sesión"]);
+    expect(entryNames()).toEqual(["Mi perfil", "Contacto", "Sesiones y seguridad", "Eventos", "Cerrar sesión"]);
+    const menu = document.getElementById(button.getAttribute("aria-controls") ?? "");
+    if (menu === null) throw new Error("account menu list not found");
+    expect(within(menu).getByRole("link", { name: /Eventos/ })).toHaveAttribute("href", "/eventos");
     expect(banner().getByRole("link", { name: /Mi perfil/ })).toHaveAttribute("href", "/perfil");
     expect(banner().getByRole("link", { name: /Contacto/ })).toHaveAttribute("href", "/perfil#contacto");
     expect(banner().getByRole("link", { name: /Sesiones y seguridad/ })).toHaveAttribute("href", "/perfil/sesiones");
@@ -127,11 +131,32 @@ describe("AccountMenu", () => {
     expect(button).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("drops Eventos from 1000px, where the TopNav shows it (WP-5.4)", async () => {
+    vi.spyOn(window, "matchMedia").mockImplementation(
+      (query: string): MediaQueryList =>
+        ({
+          matches: query.includes("min-width: 1000px"),
+          media: query,
+          onchange: null,
+          addEventListener: () => undefined,
+          removeEventListener: () => undefined,
+          addListener: () => undefined,
+          removeListener: () => undefined,
+          dispatchEvent: () => false
+        }) satisfies MediaQueryList
+    );
+    renderApp("/", authenticatedState());
+    await userEvent.click(await accountButton());
+    expect(entryNames()).toEqual(["Mi perfil", "Contacto", "Sesiones y seguridad", "Cerrar sesión"]);
+    // The TopNav link is there (shown by CSS from 1000px).
+    expect(within(screen.getByRole("navigation", { name: "Navegación principal" })).getByRole("link", { name: "Eventos" })).toHaveAttribute("href", "/eventos");
+  });
+
   it("adds Panel for an admin, once", async () => {
     renderApp("/", authenticatedState(makeUser({ role: "admin" })));
     await userEvent.click(await accountButton());
 
-    expect(entryNames()).toEqual(["Mi perfil", "Contacto", "Sesiones y seguridad", "Panel", "Cerrar sesión"]);
+    expect(entryNames()).toEqual(["Mi perfil", "Contacto", "Sesiones y seguridad", "Eventos", "Panel", "Cerrar sesión"]);
     expect(screen.getAllByRole("link", { name: /Panel/ })).toHaveLength(1);
     expect(banner().getByRole("link", { name: /Panel/ })).toHaveAttribute("href", "/admin");
   });
