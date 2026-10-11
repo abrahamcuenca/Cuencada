@@ -208,7 +208,7 @@ describe("handshake race", () => {
     const closes: number[] = [];
     const connection = (sessionId: string): ChatConnection => ({
       id: hub.allocateId(),
-      principal: { userId: "u", sessionId, displayName: "Ana", listedInDirectory: true },
+      principal: { userId: "u", sessionId, displayName: "Ana", role: "member", listedInDirectory: true },
       alive: true,
       send: () => undefined,
       close: (code) => {

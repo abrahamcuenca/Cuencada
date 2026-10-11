@@ -8,10 +8,19 @@
  * `LISTEN/NOTIFY` on a `chat` channel carrying message ids, each process then
  * loading and fanning out locally) plus shared tickets, limits and caps.
  *
- * Every connected member is implicitly subscribed to every visible room:
- * membership is uniform (any verified member may read the global room and
- * every published edition room), so "sockets subscribed to room R" is every
- * live socket, and each `send` re-checks that R is still visible.
+ * **Per-room fan-out [SEC] (WP-5.3).** {@link ChatHub.fanOutRoom} is the only
+ * way a room frame (`message`, `message_deleted`, `room_preview`, `typing`)
+ * reaches sockets. Each room has an audience ({@link RoomAudience}): global
+ * and edition rooms reach every connected member (membership is uniform and
+ * each inbound frame re-checks visibility); event rooms reach only the
+ * users in a cached participant set (participants with access plus active
+ * admins). The event service calls {@link ChatHub.refreshRoomAudience}
+ * after every participant, status or visibility change and **before** it
+ * answers, so the set is current before any client learns of the change;
+ * users who lost access get `room_removed` and then nothing for that room.
+ * A generation counter per room makes a fan-out that loaded an audience
+ * concurrently with a refresh reload it instead of using the stale set.
+ * Presence is the only global frame (user ids only).
  *
  * **Caps [SEC]:** at most {@link MAX_SOCKETS_PER_SESSION} sockets per session
  * and {@link MAX_SOCKETS_PER_USER} per user (a new socket closes the oldest
@@ -26,7 +35,7 @@ import type { FastifyBaseLogger } from "fastify";
 import type { Database } from "../../db/client.js";
 import type { Clock } from "../../lib/clock.js";
 import { FRAME_RATE_LIMIT, SEND_RATE_LIMIT, SlidingWindowLimiter, Throttle, TYPING_THROTTLE_MS } from "./limits.js";
-import { type ChatPrincipal, usableSessions } from "./repository.js";
+import { type ChatPrincipal, loadRoomAudience, NO_AUDIENCE, type RoomAudience, usableSessions } from "./repository.js";
 import { TicketStore } from "./tickets.js";
 
 /** How often connected sessions are re-validated against the database. */
@@ -47,6 +56,11 @@ export const WS_TRY_AGAIN_LATER = 1013;
  * level changes are covered by the post-registration DB re-check in `socket.ts`.)
  */
 export const REVOKED_MEMORY_MS = 60_000;
+/**
+ * How long an event room's cached audience is trusted without an explicit
+ * refresh (catches changes no event route made, e.g. an admin promoted).
+ */
+export const ROOM_AUDIENCE_TTL_MS = 60_000;
 /** Close code for a socket evicted by a newer one (normal closure: do not reconnect). */
 export const WS_NORMAL_CLOSURE = 1000;
 
@@ -88,6 +102,19 @@ export interface ChatHubDeps {
   db: Database;
   clock: Clock;
   log: FastifyBaseLogger;
+  /** Audience loader; defaults to `loadRoomAudience` (tests may wrap it). */
+  loadAudience?: (roomId: string) => Promise<RoomAudience>;
+}
+
+/** True when `audience` lets `userId` receive the room's frames. */
+export function audienceAllows(audience: RoomAudience, userId: string): boolean {
+  return audience.kind === "everyone" || audience.userIds.has(userId);
+}
+
+interface CachedAudience {
+  audience: RoomAudience;
+  /** Epoch ms after which it is reloaded (`Infinity` for "everyone": a room's kind never changes). */
+  expiresAt: number;
 }
 
 /**
@@ -137,8 +164,136 @@ export class ChatHub {
   private readonly revokedSessions = new Map<string, number>();
   /** Test seams ({@link ChatHubHooks}); empty in production. */
   readonly hooks: ChatHubHooks = {};
+  /** Room id → cached audience. */
+  private readonly audiences = new Map<string, CachedAudience>();
+  /** Room id → generation, bumped by every refresh (see {@link fanOutRoom}). */
+  private readonly audienceGenerations = new Map<string, number>();
+  /** Room id → the refresh in progress (refreshes of one room run one at a time). */
+  private readonly refreshes = new Map<string, Promise<void>>();
 
   constructor(private readonly deps: ChatHubDeps) {}
+
+  private loadAudience(roomId: string): Promise<RoomAudience> {
+    return this.deps.loadAudience === undefined ? loadRoomAudience(this.deps.db, roomId) : this.deps.loadAudience(roomId);
+  }
+
+  private generationOf(roomId: string): number {
+    return this.audienceGenerations.get(roomId) ?? 0;
+  }
+
+  private store(roomId: string, audience: RoomAudience): void {
+    const expiresAt = audience.kind === "everyone" ? Number.POSITIVE_INFINITY : this.deps.clock.now().getTime() + ROOM_AUDIENCE_TTL_MS;
+    this.audiences.set(roomId, { audience, expiresAt });
+  }
+
+  /**
+   * The room's audience: the cache, else a load. A load that raced a refresh
+   * (the generation moved while it ran) is discarded and redone, so the
+   * result is never older than the latest completed refresh.
+   */
+  private async audienceFor(roomId: string): Promise<RoomAudience> {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const cached = this.audiences.get(roomId);
+      if (cached !== undefined && cached.expiresAt > this.deps.clock.now().getTime()) return cached.audience;
+      const generation = this.generationOf(roomId);
+      const loaded = await this.loadAudience(roomId);
+      if (this.generationOf(roomId) === generation) {
+        this.store(roomId, loaded);
+        return loaded;
+      }
+    }
+    // Refreshes kept landing: this load ran after the latest commit we know of, so it is current.
+    return this.loadAudience(roomId);
+  }
+
+  /**
+   * Send a room frame to the room's audience only [SEC]: the only fan-out
+   * path for `message`, `message_deleted`, `room_preview` and `typing`.
+   * The audience is resolved first; the sends then run synchronously, so
+   * they cannot interleave with a refresh's `room_removed`.
+   *
+   * @param roomId - The room the frame belongs to.
+   * @param frameFor - Return the frame for a connection, or `null` to skip it.
+   */
+  async fanOutRoom(roomId: string, frameFor: (connection: ChatConnection) => WsServerMessage | null): Promise<void> {
+    const audience = await this.audienceFor(roomId);
+    for (const connection of this.connections()) {
+      if (!audienceAllows(audience, connection.principal.userId)) continue;
+      const frame = frameFor(connection);
+      if (frame !== null) connection.send(frame);
+    }
+  }
+
+  /**
+   * Reload a room's audience after a participant, status or visibility
+   * change has **committed**, then tell every connected user who lost access
+   * (`room_removed`) and drop their typing state. Await it before answering
+   * the request that made the change.
+   *
+   * @param roomId - The event's room.
+   * @param before - Users who could read the room before the change
+   *   (loaded by the caller before its transaction); merged with the cache.
+   */
+  refreshRoomAudience(roomId: string, before: ReadonlySet<string> | null = null): Promise<void> {
+    return this.serializeRefresh(roomId, async () => {
+      const fresh = await this.loadAudience(roomId);
+      this.applyAudience(roomId, fresh, before);
+    });
+  }
+
+  /**
+   * The room is gone (its event was deleted): everyone who could read it
+   * gets `room_removed`, and the room is forgotten.
+   */
+  removeRoom(roomId: string, before: ReadonlySet<string> | null = null): Promise<void> {
+    return this.serializeRefresh(roomId, async () => {
+      this.applyAudience(roomId, NO_AUDIENCE, before);
+    });
+  }
+
+  /**
+   * A user's database role changed (admin promotion or demotion): update
+   * their live sockets' principal (event-room access on inbound frames) and
+   * drop every cached event-room audience (admins are part of each), so the
+   * next fan-out reloads it.
+   */
+  setUserRole(userId: string, role: ChatPrincipal["role"]): void {
+    for (const connection of this.byUser.get(userId) ?? []) connection.principal.role = role;
+    this.invalidateEventAudiences();
+  }
+
+  /** Drop every cached event-room audience (e.g. after an admin role change). */
+  invalidateEventAudiences(): void {
+    for (const [roomId, cached] of this.audiences) {
+      if (cached.audience.kind === "users") {
+        this.audienceGenerations.set(roomId, this.generationOf(roomId) + 1);
+        this.audiences.delete(roomId);
+      }
+    }
+  }
+
+  private serializeRefresh(roomId: string, task: () => Promise<void>): Promise<void> {
+    const previous = this.refreshes.get(roomId) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(task);
+    const tracked = next.finally(() => {
+      if (this.refreshes.get(roomId) === tracked) this.refreshes.delete(roomId);
+    });
+    this.refreshes.set(roomId, tracked);
+    return next;
+  }
+
+  private applyAudience(roomId: string, fresh: RoomAudience, before: ReadonlySet<string> | null): void {
+    const old = this.audiences.get(roomId)?.audience;
+    this.audienceGenerations.set(roomId, this.generationOf(roomId) + 1);
+    this.store(roomId, fresh);
+    for (const connection of this.connections()) {
+      const { userId } = connection.principal;
+      const had = (before?.has(userId) ?? false) || (old !== undefined && audienceAllows(old, userId));
+      if (!had || audienceAllows(fresh, userId)) continue;
+      connection.send({ type: "room_removed", roomId });
+      this.typingThrottle.forget(`${userId}:${roomId}`);
+    }
+  }
 
   /** A fresh connection id (increasing). */
   allocateId(): number {
@@ -197,11 +352,12 @@ export class ChatHub {
   }
 
   /**
-   * Send a frame to every live connection, optionally filtered.
+   * Send a non-room frame (presence) to every live connection. Room frames
+   * must use {@link fanOutRoom}.
    *
    * @param frameFor - Return the frame for a connection, or `null` to skip it.
    */
-  fanOut(frameFor: (connection: ChatConnection) => WsServerMessage | null): void {
+  private broadcast(frameFor: (connection: ChatConnection) => WsServerMessage | null): void {
     for (const connection of this.connections()) {
       const frame = frameFor(connection);
       if (frame !== null) connection.send(frame);
@@ -322,6 +478,7 @@ export class ChatHub {
     this.frameLimiter.sweep(now.getTime());
     this.typingThrottle.sweep(now.getTime());
     for (const [id, until] of this.revokedSessions) if (until <= now.getTime()) this.revokedSessions.delete(id);
+    for (const [roomId, cached] of this.audiences) if (cached.expiresAt <= now.getTime()) this.audiences.delete(roomId);
   }
 
   /** Resolve once any in-flight session re-check has finished (shutdown). */
@@ -381,7 +538,7 @@ export class ChatHub {
   private broadcastPresence(): void {
     const listed = [...this.listedOnline()].slice(0, 4999);
     const shared: WsServerMessage = { type: "presence", onlineUserIds: listed };
-    this.fanOut((connection) =>
+    this.broadcast((connection) =>
       connection.principal.listedInDirectory
         ? shared
         : { type: "presence", onlineUserIds: [...listed, connection.principal.userId] }

@@ -13,7 +13,9 @@ import { type AvatarDeps, avatarUrlsFor } from "./avatars.js";
 import type { LastMessageRecord, MessageRecord, RoomListRecord, RoomRecord } from "./repository.js";
 
 /** Title shown when a room row has none. */
-export function roomTitle(room: Pick<RoomRecord, "kind" | "year" | "title">): string {
+export function roomTitle(room: Pick<RoomRecord, "kind" | "year" | "title" | "event">): string {
+  // WP-5.3: an event room is titled after its event (kept current when the event is renamed).
+  if (room.event !== null) return room.event.title;
   if (room.title !== null && room.title.trim() !== "") return room.title;
   return room.kind === ChatRoomKind.Global || room.year === null ? "Chat familiar" : `Cuencada ${room.year}`;
 }
@@ -91,8 +93,8 @@ export function toChatRooms(rooms: readonly RoomListRecord[], lastMessages: read
       lastMessageAt: last?.createdAt.toISOString() ?? null,
       lastReadMessageId: room.lastReadMessageId,
       lastMessage: last === undefined ? null : toLastMessage(last),
-      // WP-5.2: event rooms are not listed until WP-5.3 extends the visibility rule.
-      event: null
+      // Only rooms the caller may see reach this mapper, so the event ref is theirs to see.
+      event: room.event
     };
   });
   return mapped.sort(compareRooms);
@@ -104,6 +106,14 @@ function compareRooms(a: ChatRoom, b: ChatRoom): number {
     if (b.lastMessageAt === null) return -1;
     return a.lastMessageAt < b.lastMessageAt ? 1 : -1;
   }
-  if (a.kind !== b.kind) return a.kind === ChatRoomKind.Global ? -1 : 1;
-  return (b.year ?? 0) - (a.year ?? 0);
+  if (a.kind !== b.kind) return KIND_ORDER[a.kind] - KIND_ORDER[b.kind];
+  const year = (b.year ?? b.event?.year ?? 0) - (a.year ?? a.event?.year ?? 0);
+  return year !== 0 ? year : a.id.localeCompare(b.id);
 }
+
+/** Rooms without messages: global first, then editions, then events. */
+const KIND_ORDER: Record<ChatRoomKind, number> = {
+  [ChatRoomKind.Global]: 0,
+  [ChatRoomKind.Cuencada]: 1,
+  [ChatRoomKind.Event]: 2
+};

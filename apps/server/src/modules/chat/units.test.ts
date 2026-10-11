@@ -116,8 +116,13 @@ describe("previewOf", () => {
 
 describe("roomTitle", () => {
   it("falls back to a default title", () => {
-    expect(roomTitle({ kind: "global", year: null, title: null })).toBe("Chat familiar");
-    expect(roomTitle({ kind: "cuencada", year: 2026, title: " " })).toBe("Cuencada 2026");
-    expect(roomTitle({ kind: "cuencada", year: 2026, title: "Mérida" })).toBe("Mérida");
+    expect(roomTitle({ kind: "global", year: null, title: null, event: null })).toBe("Chat familiar");
+    expect(roomTitle({ kind: "cuencada", year: 2026, title: " ", event: null })).toBe("Cuencada 2026");
+    expect(roomTitle({ kind: "cuencada", year: 2026, title: "Mérida", event: null })).toBe("Mérida");
+  });
+
+  it("titles an event room after its event (WP-5.3)", () => {
+    const event = { id: "00000000-0000-4000-8000-000000000001", year: 2026, slug: "viaje-cdmx-k7q2", title: "Viaje a CDMX" };
+    expect(roomTitle({ kind: "event", year: null, title: null, event })).toBe("Viaje a CDMX");
   });
 });

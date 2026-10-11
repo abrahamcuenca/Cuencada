@@ -28,6 +28,7 @@ import authModule from "./modules/auth/index.js";
 import chatModule from "./modules/chat/index.js";
 import cuencadasModule from "./modules/cuencadas/index.js";
 import directoryModule from "./modules/directory/index.js";
+import eventsModule from "./modules/events/index.js";
 import familyModule from "./modules/family/index.js";
 import invitesModule from "./modules/invites/index.js";
 import mediaModule from "./modules/media/index.js";
@@ -241,6 +242,7 @@ async function configureApp(app: App, config: AppConfig, deps: AppDeps, owned: O
     mediaModule,
     familyModule,
     chatModule,
+    eventsModule,
     announcementsModule,
     adminModule
   ];

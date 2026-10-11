@@ -59,7 +59,11 @@ export interface AdminMediaRecord extends MediaRecord {
 }
 
 const moderator = alias(users, "moderator");
-/** Aliases for the scope subquery (the outer query may join the real tables). */
+/**
+ * Aliases for the scope subquery (the outer query may join the real tables).
+ * A drizzle alias renders as its name only, so the subquery spells
+ * `from <table> <alias>` itself.
+ */
 const scopeAlbum = alias(eventAlbums, "scope_album");
 const scopeEvent = alias(events, "scope_event");
 
@@ -81,8 +85,8 @@ export function isAdmin(viewer: Viewer): boolean {
 export function mediaScopeSql(viewer: Viewer): SQL {
   if (isAdmin(viewer)) return sql`true`;
   return sql`(${mediaItems.albumId} is null or exists (
-    select 1 from ${scopeAlbum}
-    inner join ${scopeEvent} on ${scopeEvent.id} = ${scopeAlbum.eventId}
+    select 1 from ${eventAlbums} scope_album
+    inner join ${events} scope_event on ${scopeEvent.id} = ${scopeAlbum.eventId}
     where ${scopeAlbum.id} = ${mediaItems.albumId} and ${eventMemberAccessSql(viewer, scopeEvent)}
   ))`;
 }

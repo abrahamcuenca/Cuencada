@@ -1,7 +1,8 @@
 /**
- * Avatar and tree-photo upload cleanup, run on an interval by the profile
- * module. The same two passes run over `avatar_uploads` and (WP-4.3)
- * `person_photo_uploads`; the counts in the result cover both tables.
+ * Avatar, tree-photo and event-cover upload cleanup, run on an interval by
+ * the profile module. The same two passes run over `avatar_uploads`,
+ * (WP-4.3) `person_photo_uploads` and (WP-5.3) `event_cover_uploads`; the
+ * counts in the result cover every table.
  *
  * 1. **Abandoned** uploads (never confirmed, `expires_at` older than the
  *    grace): the row is claimed (deleted with the condition re-checked)
@@ -16,7 +17,7 @@
 import { and, inArray, isNotNull, isNull, lt } from "drizzle-orm";
 import type { FastifyBaseLogger } from "fastify";
 import type { Database } from "../../db/client.js";
-import { avatarUploads, personPhotoUploads } from "../../db/schema/index.js";
+import { avatarUploads, eventCoverUploads, personPhotoUploads } from "../../db/schema/index.js";
 import type { Clock } from "../../lib/clock.js";
 import type { StorageService } from "../../lib/storage/types.js";
 import {
@@ -55,13 +56,14 @@ export async function cleanupAvatarUploads(deps: AvatarCleanupDeps): Promise<Ava
   };
   await cleanupTable(deps, avatarUploads, "avatar", result);
   await cleanupTable(deps, personPhotoUploads, "person photo", result);
+  await cleanupTable(deps, eventCoverUploads, "event cover", result);
   if (result.abandonedDeleted > 0 || result.confirmedPurged > 0)
     deps.log.info({ ...result }, "avatar uploads cleaned up");
   return result;
 }
 
-/** Both upload tables share these columns. */
-type UploadTable = typeof avatarUploads | typeof personPhotoUploads;
+/** The upload tables share these columns. */
+type UploadTable = typeof avatarUploads | typeof personPhotoUploads | typeof eventCoverUploads;
 
 /** One table's two passes, added to `result`. */
 async function cleanupTable(
