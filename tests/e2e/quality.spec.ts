@@ -79,7 +79,16 @@ const ADMIN_ROUTES: RouteCheck[] = [
   { name: "admin-actividad", open: "/admin/familia/actividad", ready: "Actividad del árbol" },
   // WP-4.5: the "Posibles duplicados" tab.
   { name: "admin-duplicados", open: "/admin/familia/actividad?vista=duplicados", ready: "Actividad del árbol" },
-  { name: "admin-cuencadas", open: "/admin/cuencadas" }
+  { name: "admin-cuencadas", open: "/admin/cuencadas" },
+  // WP-5.1: the open "Agregar Cuencada anterior" form.
+  {
+    name: "admin-cuencada-anterior",
+    open: async (page) => {
+      await page.goto("/admin/cuencadas");
+      await page.getByRole("button", { name: "Agregar Cuencada anterior" }).click();
+      await expect(page.getByRole("form", { name: "Cuencada anterior" })).toBeVisible();
+    }
+  }
 ];
 
 /** Per-route results, attached to the report. */

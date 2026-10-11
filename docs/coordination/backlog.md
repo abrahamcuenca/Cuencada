@@ -214,3 +214,5 @@ WP-2.4 prepared every item below; **the owner applies them** following
 - [x] **Pre-launch:** stricter open invites (#36).
 - [ ] Minimum client version mechanism, then "bump min client version" in the release checklist for security fixes (runbook § 11).
 - [ ] Git history still contains the pre-sweep real/real-looking family names and the legacy links; owner decided "sweep forward, no history rewrite". Revisit only if the owner asks.
+- [ ] WP-5.1: an "Cuencada anterior" (historical) switch on the admin edit page; today the flag is set by "Agregar Cuencada anterior" and changed only through `PATCH /api/admin/cuencadas/:id`.
+- [ ] WP-5.1: cover image upload for past Cuencadas (the form takes a URL for now); comes with WP-5.4's cover pipeline.
