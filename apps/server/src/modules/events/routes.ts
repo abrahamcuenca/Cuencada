@@ -52,6 +52,7 @@ import { EVENT_PARTICIPANT_WRITE_LIMIT, EVENT_UPLOAD_INTENT_LIMIT, EVENT_WRITE_L
 import { decodeEventCursor, encodeEventCursor } from "./cursor.js";
 import { albumNotFound } from "./errors.js";
 import { toEventAlbum, toEventSummary } from "./mappers.js";
+import { dismissNotice, listNotices } from "./notices.js";
 import { findAlbum, listEventSummaries, loadVisibleEvent } from "./repository.js";
 import {
   addParticipants,
@@ -61,12 +62,10 @@ import {
   createEvent,
   deleteAlbum,
   deleteEvent,
-  dismissNotice,
   eventDetailById,
   eventViewerOf,
   joinEvent,
   leaveEvent,
-  listNotices,
   recheckAlbumUpload,
   removeParticipant,
   requireEventAccess,

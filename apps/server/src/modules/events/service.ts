@@ -20,11 +20,9 @@ import {
   DEFAULT_EVENT_ALBUM_TITLE,
   EVENT_ALBUM_SORT_ORDER_MAX,
   EVENT_ALBUMS_MAX,
-  EVENT_NOTICES_MAX,
   EVENT_PARTICIPANTS_MAX,
   EVENT_SLUG_MAX_ATTEMPTS,
   type EventDetail,
-  type EventNotice,
   EventRole,
   EventStatus,
   type UpdateEventAlbumInput,
@@ -33,8 +31,7 @@ import {
   memberEventSlug,
   randomEventSlugSuffix
 } from "@cuencada/types";
-import { and, count, desc, eq, gt, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
-import { alias } from "drizzle-orm/pg-core";
+import { and, count, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import {
   chatRooms,
@@ -42,8 +39,7 @@ import {
   eventCoverUploads,
   eventParticipants,
   events,
-  mediaItems,
-  users
+  mediaItems
 } from "../../db/schema/index.js";
 import { recordAudit, type Transaction } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
@@ -51,7 +47,7 @@ import type { AuthUser } from "../../plugins/auth.js";
 import { PgErrorCode, pgErrorInfo } from "../family/db-errors.js";
 import { allObjectKeys } from "../media/service.js";
 import { deleteObjectsQuietly } from "../profile/uploadPipeline.js";
-import { type EventViewer, eventVisibleSql, isEventAdmin } from "./access.js";
+import { type EventViewer, isEventAdmin } from "./access.js";
 import { AdminViewSurface, auditAdminEventView } from "./adminView.js";
 import { removeEventRoom, snapshotEventRoom, syncEventRoom } from "./chatSync.js";
 import { EVENT_CREATE_DAILY_MAX, EVENT_CREATE_WINDOW_MS, EVENT_OPEN_DRAFTS_MAX } from "./constants.js";
@@ -744,69 +740,6 @@ export async function recheckAlbumUpload(tx: Transaction, viewer: EventViewer, e
   const event = await loadVisibleEvent(tx, viewer, eq(events.id, eventId));
   requireEventAccess(event, viewer);
   await requireAlbum(tx, eventId, albumId);
-}
-
-/* -------------------------------------------------------------------------- */
-/* Consent notices                                                             */
-/* -------------------------------------------------------------------------- */
-
-const adder = alias(users, "adder");
-
-/**
- * The caller's undismissed "you were added" notices (Security requirement
- * 3): their participations added by **someone else**, in events they can
- * see, newest first.
- */
-export async function listNotices(app: FastifyInstance, viewer: EventViewer): Promise<EventNotice[]> {
-  const organizerCount = sql<number>`(select count(*)::int from ${eventParticipants} o
-    where o.event_id = ${events.id} and o.role = 'organizer')`.mapWith(Number);
-  const rows = await app.db
-    .select({
-      id: events.id,
-      year: events.year,
-      slug: events.slug,
-      title: events.title,
-      role: eventParticipants.role,
-      addedAt: eventParticipants.joinedAt,
-      addedByName: adder.displayName,
-      organizerCount
-    })
-    .from(eventParticipants)
-    .innerJoin(events, eq(events.id, eventParticipants.eventId))
-    .leftJoin(adder, eq(adder.id, eventParticipants.addedByUserId))
-    .where(
-      and(
-        eq(eventParticipants.userId, viewer.id),
-        isNotNull(eventParticipants.addedByUserId),
-        ne(eventParticipants.addedByUserId, viewer.id),
-        isNull(eventParticipants.noticeSeenAt),
-        eventVisibleSql(viewer)
-      )
-    )
-    .orderBy(desc(eventParticipants.joinedAt), desc(events.id))
-    .limit(EVENT_NOTICES_MAX);
-  return rows.map((row) => ({
-    event: { id: row.id, year: row.year, slug: row.slug, title: row.title },
-    addedByName: row.addedByName,
-    role: row.role,
-    addedAt: row.addedAt.toISOString(),
-    canLeave: !(row.role === EventRole.Organizer && row.organizerCount <= 1)
-  }));
-}
-
-/** `DELETE /api/events/:id/notice`: dismiss the caller's notice (idempotent; 404 when invisible). */
-export async function dismissNotice(app: FastifyInstance, viewer: EventViewer, eventId: string): Promise<void> {
-  await loadVisibleEvent(app.db, viewer, eq(events.id, eventId));
-  await app.db
-    .update(eventParticipants)
-    .set({ noticeSeenAt: app.clock.now() })
-    .where(
-      and(
-        eq(eventParticipants.eventId, eventId),
-        eq(eventParticipants.userId, viewer.id),
-        isNull(eventParticipants.noticeSeenAt)
-      )
-    );
 }
 
 /** Pending cover intents of a user that may still be confirmed (cap). */
