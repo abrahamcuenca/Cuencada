@@ -26,7 +26,7 @@ import styles from "./layout.module.css";
 
 /** "Programa" before the home query answers (or when there is no edition yet). */
 export const PROGRAMA_FALLBACK_PATH = "/";
-/** Mobile "Más" menu (Directorio, Árbol, Perfil, Sesiones, Panel, Cerrar sesión). */
+/** Mobile "Más" menu (Eventos, Directorio, Árbol, Perfil, Sesiones, Panel, Cerrar sesión). */
 export const MORE_PATH = "/mas";
 /** Login page, the anonymous "Entrar" tab and button. */
 export const LOGIN_NAV_PATH = "/entrar";
@@ -98,7 +98,8 @@ export function bottomNavItems(audience: SessionAudience, programaPath: string, 
  * TopNav (≥900px) destinations for who is looking. The brand links home for
  * members; anonymous visitors also get an explicit "Inicio" next to "Programa".
  * Admins get the same links: "Panel" lives in the account menu (WP-4.7), so
- * the bar keeps room for the avatar and name at 900px.
+ * the bar keeps room for the avatar and name at 900px. "Eventos" (WP-5.4)
+ * shows only from 1000px (`wideOnly`); below that it is in the account menu.
  *
  * @param audience - From `selectSessionAudience`.
  * @param programaPath - `/cuencada/{year}` of the current or latest edition.
@@ -117,6 +118,8 @@ export function topNavItems(audience: SessionAudience, programaPath: string, cha
       return [
         programa,
         { key: "galeria", label: "Galería", href: "/galeria" },
+        // WP-5.4: from 1000px only; at 900–999px it is in the account menu (the bar has no room).
+        { key: "eventos", label: "Eventos", href: "/eventos", wideOnly: true },
         { key: "directorio", label: "Directorio", href: "/directorio" },
         { key: "arbol", label: "Árbol", href: "/arbol" },
         { key: "chat", label: "Chat", href: "/chat", ...chatBadgeProps(chatBadge) }

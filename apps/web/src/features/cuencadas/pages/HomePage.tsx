@@ -6,9 +6,10 @@ import {
   hasDates,
   type PublicCuencada,
 } from "@cuencada/types";
-import type { ReactNode } from "react";
+import { lazy, type ReactNode, Suspense } from "react";
 import { Link } from "react-router-dom";
 import { useAppSelector } from "../../../app/hooks";
+import { reportUnexpected } from "../../../shared/lib/reportUnexpected";
 import { Button } from "../../../shared/ui/Button";
 import { Card } from "../../../shared/ui/Card";
 import { Countdown } from "../../../shared/ui/Countdown";
@@ -48,6 +49,33 @@ import { programaYear } from "../lib/programa";
 import styles from "./home.module.css";
 
 const TAGLINE = "Una familia. Una historia. Una celebración.";
+
+function NoStrip(): ReactNode {
+  return null;
+}
+
+// WP-5.4: members-only, in its own chunk (and its events API with it). A chunk that fails
+// to load renders nothing: Home must never break over an optional strip.
+const UpcomingEventsStrip = lazy(() =>
+  import("../../events/components/UpcomingEventsStrip").then(
+    (module) => ({ default: module.UpcomingEventsStrip }),
+    (error: unknown) => {
+      reportUnexpected(error);
+      return { default: NoStrip };
+    }
+  )
+);
+
+/** "Próximos eventos" (max 3) for members; hidden when there is none. */
+function EventsStrip(): ReactNode {
+  const audience = useAppSelector(selectSessionAudience);
+  if (audience !== "member" && audience !== "admin") return null;
+  return (
+    <Suspense fallback={null}>
+      <UpcomingEventsStrip />
+    </Suspense>
+  );
+}
 /** Timezone for portal-wide content that belongs to no edition (the family's home base). */
 const PORTAL_TIMEZONE = "America/Merida";
 
@@ -108,6 +136,7 @@ export function HomePage(): ReactNode {
         />
       ) : null}
       <HomeAnnouncements home={home.data} />
+      <EventsStrip />
       {featured === null ? <Memories latestPast={latestPast} /> : null}
       {featured !== null && !hasDates(featured) && latestPast ? (
         <MemoriesPhotosSection latestPast={latestPast} />
