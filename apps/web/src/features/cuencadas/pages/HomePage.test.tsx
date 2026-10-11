@@ -192,3 +192,23 @@ describe("HomePage", () => {
     expect(screen.getByRole("button", { name: "Reintentar" })).toBeInTheDocument();
   });
 });
+
+describe("HomePage past editions (WP-5.1)", () => {
+  it("lists an undated historical edition under Cuencadas anteriores and keeps announced ones out", async () => {
+    server.use(
+      http.get(apiUrl("/cuencadas"), () =>
+        HttpResponse.json([
+          makeSummary({ id: fixtureId(2027), year: 2027, status: "announced", startsAt: null, endsAt: null, city: null, state: null }),
+          makeSummary(),
+          makeSummary({ id: fixtureId(2019), year: 2019, title: "Cuencada 2019", status: "past", startsAt: null, endsAt: null, city: null, state: null, isHistorical: true })
+        ])
+      )
+    );
+    renderApp("/", statusState("anonymous"));
+
+    const past = await screen.findByRole("region", { name: /Cuencadas anteriores/ });
+    const links = within(past).getAllByRole("link");
+    expect(links.map((link) => link.getAttribute("href"))).toEqual(["/cuencada/2026", "/cuencada/2019"]);
+    expect(within(past).getByRole("link", { name: "2019" })).toBeInTheDocument();
+  });
+});

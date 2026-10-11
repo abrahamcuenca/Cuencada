@@ -40,7 +40,11 @@ export type AdminMediaFilter = Omit<AdminMediaQueryRequest, "cursor" | "limit">;
 
 /** Result of {@link galleryApi} `galleryYears`. */
 export interface GalleryYears {
-  /** Published editions, newest first. */
+  /**
+   * Every published edition, newest first, whether or not it has media yet
+   * (WP-5.1: an admin can open an empty past year, e.g. a "Cuencada
+   * anterior", and upload to it).
+   */
   years: number[];
   /** Newest edition that has visible media, else the newest past/current edition, else `null`. */
   defaultYear: number | null;
@@ -63,8 +67,9 @@ export function galleryYearsFrom(editions: readonly CuencadaSummary[], now: numb
   const newestFirst = [...editions].sort((a, b) => b.year - a.year);
   const years = [...new Set(newestFirst.map((e) => e.year))];
   const withMedia = newestFirst.find((e) => e.hasMedia);
-  // An announced edition (no dates yet) has not started, so it is never the default.
-  const started = newestFirst.find((e) => e.startsAt !== null && Date.parse(e.startsAt) <= now);
+  // An announced edition (no dates yet) has not started, so it is never the default; a past
+  // edition has, even without dates (WP-5.1: undated earlier years and historical editions).
+  const started = newestFirst.find((e) => e.status === "past" || (e.startsAt !== null && Date.parse(e.startsAt) <= now));
   return { years, defaultYear: withMedia?.year ?? started?.year ?? years[0] ?? null };
 }
 

@@ -82,6 +82,21 @@ export function formatKicker(place: EditionPlaceAndDates): string {
 }
 
 /**
+ * Kicker of a past edition without dates (WP-5.1): the place when known,
+ * then the year, e.g. `"Valladolid · Yucatán · 2019"` or just `"2019"`. Never
+ * "por anunciar": nothing is pending for an edition that already happened.
+ *
+ * @param edition - City, state and year.
+ * @returns The kicker text.
+ */
+export function formatPastKicker(edition: Pick<EditionPlaceAndDates, "city" | "state"> & { year: number }): string {
+  return [edition.city, edition.state, String(edition.year)].filter((part) => part !== null && part !== "").join(" · ");
+}
+
+/** Note shown on the page of an edition that happened before the portal (WP-5.1). */
+export const BEFORE_PORTAL_NOTE = "Esta Cuencada ocurrió antes del portal";
+
+/**
  * Today's calendar date (`YYYY-MM-DD`) in the Cuencada's timezone.
  *
  * @param now - The current instant.

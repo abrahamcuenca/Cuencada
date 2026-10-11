@@ -66,6 +66,16 @@
 }
 
 /* Announced edition (no dates yet): "Fechas / Lugar: Por anunciar" in place of the countdown. */
+/* A past edition without a countdown: one short line on the hero (WP-5.1). */
+.pastNote {
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  background: rgb(255 255 255 / 0.12);
+  border: 1px solid rgb(255 255 255 / 0.28);
+  font-weight: var(--weight-semibold);
+}
+
 .pendingFacts {
   display: grid;
   gap: var(--space-2);

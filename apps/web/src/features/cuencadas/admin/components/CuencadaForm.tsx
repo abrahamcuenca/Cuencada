@@ -166,8 +166,12 @@ function buildDraft(values: CuencadaValues): Draft {
   return { body, errors };
 }
 
-/** A validated Cuencada body, without `isPublished` (publishing has its own switch). */
-export type CuencadaFormBody = Omit<CreateCuencadaInput, "isPublished">;
+/**
+ * A validated Cuencada body, without `isPublished` (publishing has its own
+ * switch) and `isHistorical` (set only by "Agregar Cuencada anterior"; an edit
+ * must never reset it).
+ */
+export type CuencadaFormBody = Omit<CreateCuencadaInput, "isPublished" | "isHistorical">;
 
 /** Result of {@link validateCuencadaForm}. */
 export type CuencadaFormResult = { ok: true; body: CuencadaFormBody } | { ok: false; errors: FieldErrors };
@@ -186,7 +190,7 @@ export function validateCuencadaForm(values: CuencadaValues): CuencadaFormResult
   if (!parsed.success || Object.keys(draft.errors).length > 0) {
     return { ok: false, errors: { ...(parsed.success ? {} : issuesToFieldErrors(parsed.error.issues)), ...draft.errors } };
   }
-  const { isPublished: _isPublished, ...body } = parsed.data;
+  const { isPublished: _isPublished, isHistorical: _isHistorical, ...body } = parsed.data;
   return { ok: true, body };
 }
 

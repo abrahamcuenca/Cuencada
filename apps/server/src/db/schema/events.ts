@@ -1,5 +1,5 @@
 /**
- * Eventos (WP-5.2, migration 0007/0008 `events`): family events with
+ * Eventos (WP-5.2, migration 0008 `events`): family events with
  * participants, albums and a 16:9 cover. The event chat room lives in
  * `chat_rooms` (`kind = 'event'`, `event_id`), album media in `media_items`
  * (`album_id`). Authorization: ADR 0001 §7.

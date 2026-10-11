@@ -26,6 +26,13 @@
   gap: var(--space-3);
 }
 
+/* Header actions ("Nueva", "Agregar Cuencada anterior"); they wrap on a phone. */
+.headerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .pageTitle {
   margin: 0; /* overrides the legacy global h1 margin in styles.css */
   letter-spacing: -0.02em;

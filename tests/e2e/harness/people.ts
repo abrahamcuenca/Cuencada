@@ -178,3 +178,17 @@ export const FUTURE_YEAR = 2027;
 export const SEEDED_YEAR = 2026;
 /** A fictional announced edition (WP-3.1a): published, no dates and no place yet. */
 export const ANNOUNCED_YEAR = 2028;
+
+/**
+ * The "Cuencada anterior" (WP-5.1) each project's admin adds, undated: one
+ * year per project so parallel projects never collide on the unique year.
+ * The desktop project adds 2019.
+ */
+export function pastYear(project: ProjectKey): number {
+  const years: Record<ProjectKey, number> = {
+    [ProjectKey.Desktop]: 2019,
+    [ProjectKey.Iphone]: 2018,
+    [ProjectKey.Pixel]: 2017
+  };
+  return years[project];
+}

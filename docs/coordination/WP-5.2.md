@@ -1,10 +1,10 @@
 # WP-5.2 Events: contracts + migration [SEC]
 Owner: Software Architect · Reviewers: TL, Security · Branch: wp/5.2-events-contracts · PR: (not opened)
 
-Based on `origin/main` @ 8147363 (WP-4.7). Plan: WP-5 "Past Cuencadas + Eventos". This WP is the schema owner for the events migration and adds **no routes or UI**; WP-5.3 (server) and WP-5.4 (web) build on it in parallel from the interfaces below. Authorization rules: **ADR 0001 §7** (binding).
+Based on `origin/main` @ 8147363 (WP-4.7), merged with 05aa42f (WP-5.1, PR #53). Plan: WP-5 "Past Cuencadas + Eventos". This WP is the schema owner for the events migration and adds **no routes or UI**; WP-5.3 (server) and WP-5.4 (web) build on it in parallel from the interfaces below. Authorization rules: **ADR 0001 §7** (binding).
 
 ## Scope
-- **Migration `0007_events` → to be renumbered `0008_events`** (expand-only; `drizzle/0007_events.sql`, `meta/0007_snapshot.json`, journal). WP-5.1's `0007_historical_cuencadas` had not merged when this branch was cut. **Whichever lands second renumbers:** if 5.1 merges first, move this file to `0008_events.sql`, change the journal tag/idx to 8th place, and regenerate the snapshot on top of 5.1's (`drizzle-kit generate` must then report "No schema changes"). The SQL touches only the objects listed below, so nothing in it changes. The migration test finds the events migration by tag (`*_events`) and needs no edit.
+- **Migration `0008_events`** (expand-only; `drizzle/0008_events.sql`, `meta/0008_snapshot.json`, journal), on top of WP-5.1's `0007_historical_editions` (PR #53). Generated first as 0007 on a base without 5.1, then renumbered after the merge of `origin/main` @ 05aa42f: file and journal tag moved to 0008, the snapshot regenerated on top of #53's `0007_snapshot.json`; the SQL statements are byte-identical to the reviewed 0007 version (header comment only). The migration test finds it by tag (`*_events`) and starts from 0007.
   - New tables `events`, `event_participants`, `event_albums`, `event_cover_uploads` (`db/schema/events.ts`).
   - `chat_rooms.event_id` + `event` kind; `media_items.cuencada_id` nullable, `album_id`, `storage_prefix`.
 - **Contracts** (`packages/types`): new `src/events.ts` and the leaf `src/eventRefs.ts` (re-exported from `cuencadas.ts`, because the barrel is frozen: the WP-4.0 `contacts.ts` precedent). Additive edits to `chat.ts`, `media.ts`, `admin.ts`.
@@ -24,7 +24,7 @@ Based on `origin/main` @ 8147363 (WP-4.7). Plan: WP-5 "Past Cuencadas + Eventos"
 
 ### Why it is expand-only
 - New tables only receive rows from new code.
-- `chat_rooms`: both CHECKs are strictly wider for what old code writes (`global`/`cuencada` rooms, `event_id` absent ⇒ null). Old reads use `kind = 'global' or exists(published cuencada)`, so event rooms (none exist before WP-5.3) never reach 0007-era code.
+- `chat_rooms`: both CHECKs are strictly wider for what old code writes (`global`/`cuencada` rooms, `event_id` absent ⇒ null). Old reads use `kind = 'global' or exists(published cuencada)`, so event rooms (none exist before WP-5.3) never reach 0007-era (WP-5.1) code.
 - `media_items`: dropping NOT NULL on `cuencada_id` is a widening; old inserts always set it and never `album_id`, so they satisfy the scope and prefix CHECKs. Old reads inner-join `cuencadas`, so album rows never reach them.
 - Dropped and re-added CHECKs run in the migration transaction (no window without a CHECK). No data step.
 
@@ -42,7 +42,7 @@ Based on `origin/main` @ 8147363 (WP-4.7). Plan: WP-5 "Past Cuencadas + Eventos"
 11. **Error codes** use the open detail-code channel (ADR 0001 §4); `ErrorCode` stays closed. Two codes beyond the brief: `EVENT_LAST_ORGANIZER`, `EVENT_MANAGE_NOT_ALLOWED`.
 
 ## Interfaces for 5.3/5.4
-All routes: `auth: "member"`, `config.requireVerifiedEmail: true`, response schemas from `events.ts` (the PII guard). `:id` = event id (uuid). Invisible event → 404 `NOT_FOUND` + `EVENT_NOT_FOUND`.
+All routes: `auth: "user"`, `config.requireVerifiedEmail: true` (admin routes `auth: "admin"`), response schemas from `events.ts` (the PII guard). `:id` = event id (uuid). Invisible event → 404 `NOT_FOUND` + `EVENT_NOT_FOUND`.
 
 | Method + path | Who | Params / query / body | Response |
 |---|---|---|---|
@@ -78,7 +78,7 @@ All routes: `auth: "member"`, `config.requireVerifiedEmail: true`, response sche
 
 **Helpers exported from `@cuencada/types`:** `foldAccents`, `slugifyEventTitle`, `memberEventSlug`, `eventSlugWithSuffix`, `randomEventSlugSuffix`, `isEventSlug`, `eventYearOf`, `eventDatesIssue` (merged-row check, returns an `ApiErrorDetail`), `isPastEvent` (upcoming/past rule, same as WP-5.1's), `clampAspectCropRect`, constants (`EVENT_*`, `DEFAULT_EVENT_ALBUM_TITLE`, `EVENT_COVER_ASPECT`, `EVENT_COVER_WIDTHS`).
 
-**Rollout order:** the migration ships first and is inert. 5.3 must make the media by-id routes scope-aware **before** any album row can exist (the album upload route lands in the same change), and must switch the media jobs and cleanup from inner to left joins on `cuencadas` with `storage_prefix`.
+**Rollout order:** the migration ships first and is inert. 5.3 must make the media by-id routes scope-aware **before** any album row can exist (the album upload route lands in the same change), and must switch the media jobs, cleanup **and the admin media list** from inner to left joins on `cuencadas` with `storage_prefix` (requirement 10).
 
 ## Security requirements for 5.3/5.4
 From the Security review of PR #52; also in ADR 0001 §7 (binding).
@@ -93,6 +93,9 @@ From the Security review of PR #52; also in ADR 0001 §7 (binding).
 7. **Media.** `storage_prefix` is always derived server-side from the album row (`events/{album.eventId}/{album.id}`), never from input; `confirm` rejects an item whose keys do not sit under its row's prefix; upload intents and confirms re-check participation (and visibility) at that moment.
 8. **Cover.** The full avatar pipeline (MIME allowlist, magic bytes, size, pixel cap, EXIF/GPS strip, WebP re-encode, crop clamp). Organizers and admins only, re-checked at confirm. Replaced and removed covers' objects are deleted. A cover URL is never presigned for a caller who cannot see the event.
 9. **PII scan additions:** an unlisted participant's id and avatar must not appear in event responses to other members; a `participants` event's title must never reach a non-participant (lists, chat room list, media `event` refs, admin-only fields).
+10. **Admin media list.** `GET /api/admin/media` (and its `?eventId=` filter) also inner-joins `cuencadas` today: switch it to the same left-join + `mediaScopeSql` treatment as the member routes, or album media never reach the moderation queue.
+11. **Slug retry cap.** `memberEventSlug` retries on a `(year, slug)` unique violation at most **5** attempts (`EVENT_SLUG_MAX_ATTEMPTS`), then a generic 500 `INTERNAL` (no detail that mentions the slug or a collision).
+12. **Upload budget.** The album upload intent goes through the existing **locked daily-budget step** of the gallery upload (one shared per-user budget for edition and album media; no separate counter).
 
 **WP-5.4:**
 - An invisible event and a missing one look identical: "No encontramos ese evento" (no hint that it exists).
@@ -103,10 +106,10 @@ From the Security review of PR #52; also in ADR 0001 §7 (binding).
 
 ## Review log
 - PR #52 round 1: Security M1 (CWE-203, slug collisions revealed invisible events and their titles) → random collision suffix, no member-typed slugs, admin-only slug routes; requirements above recorded.
+- PR #52 approved (TL, Security). TL corrections folded in: `auth: "user"` + `requireVerifiedEmail`, requirements 10–12 (admin media list join, slug retry cap 5 then 500, shared locked upload budget). Renumbered to 0008 after merging WP-5.1.
 - PR #52 round 2: residual M1 (whether a suffix appears still revealed a collision) → every member slug always carries the random suffix (`memberEventSlug`); WP-5.4 copy note added.
 
 ## Open questions (→ orchestrator)
-- Migration number: renumber to 0008 after WP-5.1 (see Scope).
 - Should event uploads count against the same per-user daily byte budget as the gallery? Proposed: yes, one budget.
 
 ## Verification

@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { computeCuencadaStatus, localDateInZone, localYearInZone, selectHome, type StatusInput } from "./status.js";
+import {
+  comparePastNewestFirst,
+  computeCuencadaStatus,
+  localDateInZone,
+  localYearInZone,
+  selectHome,
+  type StatusInput
+} from "./status.js";
 
 const edition: StatusInput = {
   isPublished: true,
+  isHistorical: false,
+  year: 2026,
   // Mérida is UTC-6 all year (no DST since 2015).
   startsAt: new Date("2026-09-13T19:30:00-06:00"),
   endsAt: new Date("2026-09-18T12:00:00-06:00"),
@@ -59,6 +68,8 @@ describe("computeCuencadaStatus", () => {
   it("treats a one-day edition as active only on that local day", () => {
     const oneDay: StatusInput = {
       isPublished: true,
+      isHistorical: false,
+      year: 2026,
       startsAt: new Date("2026-05-10T10:00:00+09:00"),
       endsAt: new Date("2026-05-10T18:00:00+09:00"),
       timezone: "Asia/Tokyo"
@@ -71,19 +82,73 @@ describe("computeCuencadaStatus", () => {
 });
 
 describe("computeCuencadaStatus without dates", () => {
-  const undated: StatusInput = { isPublished: true, startsAt: null, endsAt: null, timezone: "America/Merida" };
+  const undated: StatusInput = {
+    isPublished: true,
+    isHistorical: false,
+    year: 2026,
+    startsAt: null,
+    endsAt: null,
+    timezone: "America/Merida"
+  };
 
-  it("returns announced for a published edition without dates, at any instant", () => {
+  it("returns announced for a published edition without dates during its year and before it", () => {
+    expect(computeCuencadaStatus(undated, at("2025-01-01T00:00:00Z"))).toBe("announced");
     expect(computeCuencadaStatus(undated, at("2026-10-07T12:00:00Z"))).toBe("announced");
-    expect(computeCuencadaStatus(undated, at("2030-01-01T00:00:00Z"))).toBe("announced");
+    expect(computeCuencadaStatus({ ...undated, year: 2030 }, at("2026-10-07T12:00:00Z"))).toBe("announced");
+  });
+
+  it("returns past for an undated edition whose year is before the current year (WP-5.1)", () => {
+    expect(computeCuencadaStatus({ ...undated, year: 2019 }, at("2026-10-07T12:00:00Z"))).toBe("past");
+    expect(computeCuencadaStatus(undated, at("2030-01-01T00:00:00Z"))).toBe("past");
+  });
+
+  it("rolls an undated edition over to past at local midnight on 1 January, in its own timezone", () => {
+    // 2027-01-01T05:59:59Z is still 31 Dec 2026 in Mérida (UTC-6).
+    expect(computeCuencadaStatus(undated, at("2027-01-01T05:59:59Z"))).toBe("announced");
+    expect(computeCuencadaStatus(undated, at("2027-01-01T06:00:00Z"))).toBe("past");
+    // Tokyo is already in 2027 at 2026-12-31T15:00Z.
+    expect(computeCuencadaStatus({ ...undated, timezone: "Asia/Tokyo" }, at("2026-12-31T15:00:00Z"))).toBe("past");
   });
 
   it("returns draft for an unpublished edition without dates", () => {
     expect(computeCuencadaStatus({ ...undated, isPublished: false }, at("2026-10-07T12:00:00Z"))).toBe("draft");
   });
 
-  it("treats a single missing date as announced instead of throwing (the DB forbids it)", () => {
+  it("treats a single missing date as undated instead of throwing (the DB forbids it)", () => {
     expect(computeCuencadaStatus({ ...edition, endsAt: null }, at("2026-10-07T12:00:00Z"))).toBe("announced");
+    expect(computeCuencadaStatus({ ...edition, endsAt: null, year: 2020 }, at("2026-10-07T12:00:00Z"))).toBe("past");
+  });
+});
+
+describe("computeCuencadaStatus for historical editions (WP-5.1)", () => {
+  const historical: StatusInput = {
+    isPublished: true,
+    isHistorical: true,
+    year: 2019,
+    startsAt: null,
+    endsAt: null,
+    timezone: "America/Merida"
+  };
+  const now = at("2026-10-07T12:00:00Z");
+
+  it("returns past when published, with or without dates", () => {
+    expect(computeCuencadaStatus(historical, now)).toBe("past");
+    expect(
+      computeCuencadaStatus(
+        { ...historical, startsAt: new Date("2019-09-10T00:00:00Z"), endsAt: new Date("2019-09-15T00:00:00Z") },
+        now
+      )
+    ).toBe("past");
+  });
+
+  it("returns past even when its dates would make it upcoming or active (never RSVP, never the hero)", () => {
+    expect(computeCuencadaStatus({ ...edition, isHistorical: true }, at("2026-09-01T00:00:00Z"))).toBe("past");
+    expect(computeCuencadaStatus({ ...edition, isHistorical: true }, at("2026-09-15T12:00:00Z"))).toBe("past");
+    expect(computeCuencadaStatus({ ...historical, year: 2030 }, now)).toBe("past");
+  });
+
+  it("returns draft while unpublished", () => {
+    expect(computeCuencadaStatus({ ...historical, isPublished: false }, now)).toBe("draft");
   });
 });
 
@@ -184,9 +249,56 @@ describe("selectHome", () => {
     expect(result).toEqual({ mode: "memories", featured: null, latestPast: past2025 });
   });
 
+  it("includes undated past editions in latestPast, sorting by endsAt and falling back to the year", () => {
+    const undatedPast = (year: number): Candidate => ({
+      name: `${year} sin fechas`,
+      status: "past",
+      year,
+      timezone: "America/Merida",
+      startsAt: null,
+      endsAt: null
+    });
+    // Only undated past editions: the newest year wins.
+    expect(selectHome([undatedPast(2018), undatedPast(2019)], now)).toEqual({
+      mode: "memories",
+      featured: null,
+      latestPast: undatedPast(2019)
+    });
+    // A dated 2025 edition beats an undated 2019 one, and an undated 2025 one beats a dated 2024 one.
+    expect(selectHome([undatedPast(2019), past2025], now).latestPast).toBe(past2025);
+    const undated2025 = undatedPast(2025);
+    expect(selectHome([past2024, undated2025], now).latestPast).toBe(undated2025);
+    // With an upcoming hero, the undated past edition is still the memories link.
+    expect(selectHome([upcoming2027, undatedPast(2019)], now)).toEqual({
+      mode: "upcoming",
+      featured: upcoming2027,
+      latestPast: undatedPast(2019)
+    });
+  });
+
   it("ignores drafts and handles an empty list", () => {
     const draft = edition("2028", "draft", "2028-09-13T00:00:00Z", "2028-09-18T00:00:00Z");
     expect(selectHome([draft], now)).toEqual({ mode: "memories", featured: null, latestPast: null });
     expect(selectHome([], now)).toEqual({ mode: "memories", featured: null, latestPast: null });
+  });
+});
+
+describe("comparePastNewestFirst", () => {
+  it("orders by endsAt, an undated edition by the end of its year, then by year", () => {
+    const list = [
+      { year: 2018, endsAt: null },
+      { year: 2024, endsAt: new Date("2024-09-15T00:00:00Z") },
+      { year: 2019, endsAt: null },
+      // A 2023 edition that ended in January 2024 sorts before the undated 2023 one... and after 2024's.
+      { year: 2023, endsAt: new Date("2024-01-05T00:00:00Z") }
+    ];
+    expect([...list].sort(comparePastNewestFirst).map((e) => e.year)).toEqual([2024, 2023, 2019, 2018]);
+  });
+
+  it("breaks an exact tie by the newer year", () => {
+    const endsAt = new Date("2020-01-01T00:00:00Z");
+    expect([{ year: 2019, endsAt }, { year: 2020, endsAt }].sort(comparePastNewestFirst).map((e) => e.year)).toEqual([
+      2020, 2019
+    ]);
   });
 });

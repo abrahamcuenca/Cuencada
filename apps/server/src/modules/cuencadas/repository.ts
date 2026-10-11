@@ -175,13 +175,20 @@ export async function findDailyMessage(db: DbOrTx, cuencadaId: string, date: str
 
 /**
  * Create the edition's chat room if it does not exist yet (idempotent via the
- * partial unique index `chat_rooms_cuencada_unique`).
+ * partial unique index `chat_rooms_cuencada_unique`). A historical edition
+ * (WP-5.1) gets no room: it happened before the portal. A room it already
+ * has (flag set after a publish) is kept but hidden by the chat module's
+ * `visibleRoomSql`.
  *
  * @param db - The publishing transaction.
- * @param cuencada - Edition id and year (for the room title).
- * @returns `true` when a room was created now.
+ * @param cuencada - Edition id, year (for the room title) and historical flag.
+ * @returns `true` when a room was created now; always `false` for a historical edition.
  */
-export async function ensureCuencadaChatRoom(db: DbOrTx, cuencada: Pick<CuencadaRow, "id" | "year">): Promise<boolean> {
+export async function ensureCuencadaChatRoom(
+  db: DbOrTx,
+  cuencada: Pick<CuencadaRow, "id" | "year" | "isHistorical">
+): Promise<boolean> {
+  if (cuencada.isHistorical) return false;
   const created = await db
     .insert(chatRooms)
     .values({ kind: "cuencada", cuencadaId: cuencada.id, title: `Cuencada ${cuencada.year}` })

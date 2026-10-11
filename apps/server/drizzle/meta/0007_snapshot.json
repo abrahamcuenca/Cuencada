@@ -1,5 +1,5 @@
 {
-  "id": "5b08e623-c442-4e6a-a631-4af2c4667c72",
+  "id": "0e9c0b8d-6d60-4837-b951-f7c2fe6b599a",
   "prevId": "b05c3270-ae73-48ca-9309-009b7a4951e0",
   "version": "7",
   "dialect": "postgresql",
@@ -1272,12 +1272,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "event_id": {
-          "name": "event_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "title": {
           "name": "title",
           "type": "text",
@@ -1324,22 +1318,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "chat_rooms_event_unique": {
-          "name": "chat_rooms_event_unique",
-          "columns": [
-            {
-              "expression": "event_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "kind = 'event'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -1355,19 +1333,6 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
-        },
-        "chat_rooms_event_id_events_id_fk": {
-          "name": "chat_rooms_event_id_events_id_fk",
-          "tableFrom": "chat_rooms",
-          "tableTo": "events",
-          "columnsFrom": [
-            "event_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1376,11 +1341,11 @@
       "checkConstraints": {
         "chat_rooms_kind_check": {
           "name": "chat_rooms_kind_check",
-          "value": "\"kind\" in ('global', 'cuencada', 'event')"
+          "value": "\"kind\" in ('global', 'cuencada')"
         },
         "chat_rooms_kind_cuencada_check": {
           "name": "chat_rooms_kind_cuencada_check",
-          "value": "(\"kind\" = 'global' and \"cuencada_id\" is null and \"event_id\" is null) or (\"kind\" = 'cuencada' and \"cuencada_id\" is not null and \"event_id\" is null) or (\"kind\" = 'event' and \"event_id\" is not null and \"cuencada_id\" is null)"
+          "value": "(\"kind\" = 'global' and \"cuencada_id\" is null) or (\"kind\" = 'cuencada' and \"cuencada_id\" is not null)"
         }
       },
       "isRLSEnabled": false
@@ -2049,6 +2014,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "is_historical": {
+          "name": "is_historical",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -2215,672 +2187,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.event_albums": {
-      "name": "event_albums",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "event_id": {
-          "name": "event_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sort_order": {
-          "name": "sort_order",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "created_by_user_id": {
-          "name": "created_by_user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "event_albums_event_id_idx": {
-          "name": "event_albums_event_id_idx",
-          "columns": [
-            {
-              "expression": "event_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "sort_order",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "event_albums_created_by_user_id_idx": {
-          "name": "event_albums_created_by_user_id_idx",
-          "columns": [
-            {
-              "expression": "created_by_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "event_albums_event_id_events_id_fk": {
-          "name": "event_albums_event_id_events_id_fk",
-          "tableFrom": "event_albums",
-          "tableTo": "events",
-          "columnsFrom": [
-            "event_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "event_albums_created_by_user_id_users_id_fk": {
-          "name": "event_albums_created_by_user_id_users_id_fk",
-          "tableFrom": "event_albums",
-          "tableTo": "users",
-          "columnsFrom": [
-            "created_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "event_albums_title_length_check": {
-          "name": "event_albums_title_length_check",
-          "value": "char_length(\"title\") between 1 and 80"
-        },
-        "event_albums_sort_order_check": {
-          "name": "event_albums_sort_order_check",
-          "value": "\"sort_order\" between 0 and 1000"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.event_cover_uploads": {
-      "name": "event_cover_uploads",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "event_id": {
-          "name": "event_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "uploaded_by_user_id": {
-          "name": "uploaded_by_user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "object_key": {
-          "name": "object_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "mime_type": {
-          "name": "mime_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "byte_size": {
-          "name": "byte_size",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "confirmed_at": {
-          "name": "confirmed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "event_cover_uploads_object_key_unique": {
-          "name": "event_cover_uploads_object_key_unique",
-          "columns": [
-            {
-              "expression": "object_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "event_cover_uploads_event_id_idx": {
-          "name": "event_cover_uploads_event_id_idx",
-          "columns": [
-            {
-              "expression": "event_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "event_cover_uploads_uploaded_by_user_id_idx": {
-          "name": "event_cover_uploads_uploaded_by_user_id_idx",
-          "columns": [
-            {
-              "expression": "uploaded_by_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "event_cover_uploads_event_id_events_id_fk": {
-          "name": "event_cover_uploads_event_id_events_id_fk",
-          "tableFrom": "event_cover_uploads",
-          "tableTo": "events",
-          "columnsFrom": [
-            "event_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "event_cover_uploads_uploaded_by_user_id_users_id_fk": {
-          "name": "event_cover_uploads_uploaded_by_user_id_users_id_fk",
-          "tableFrom": "event_cover_uploads",
-          "tableTo": "users",
-          "columnsFrom": [
-            "uploaded_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "event_cover_uploads_mime_type_check": {
-          "name": "event_cover_uploads_mime_type_check",
-          "value": "\"mime_type\" in ('image/jpeg', 'image/png', 'image/webp')"
-        },
-        "event_cover_uploads_byte_size_check": {
-          "name": "event_cover_uploads_byte_size_check",
-          "value": "\"byte_size\" > 0 and \"byte_size\" <= 10485760"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.event_participants": {
-      "name": "event_participants",
-      "schema": "",
-      "columns": {
-        "event_id": {
-          "name": "event_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "user_id": {
-          "name": "user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "role": {
-          "name": "role",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'participant'"
-        },
-        "added_by_user_id": {
-          "name": "added_by_user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "joined_at": {
-          "name": "joined_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "event_participants_user_id_idx": {
-          "name": "event_participants_user_id_idx",
-          "columns": [
-            {
-              "expression": "user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "event_participants_added_by_user_id_idx": {
-          "name": "event_participants_added_by_user_id_idx",
-          "columns": [
-            {
-              "expression": "added_by_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "event_participants_event_id_events_id_fk": {
-          "name": "event_participants_event_id_events_id_fk",
-          "tableFrom": "event_participants",
-          "tableTo": "events",
-          "columnsFrom": [
-            "event_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "event_participants_user_id_users_id_fk": {
-          "name": "event_participants_user_id_users_id_fk",
-          "tableFrom": "event_participants",
-          "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "event_participants_added_by_user_id_users_id_fk": {
-          "name": "event_participants_added_by_user_id_users_id_fk",
-          "tableFrom": "event_participants",
-          "tableTo": "users",
-          "columnsFrom": [
-            "added_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "event_participants_pkey": {
-          "name": "event_participants_pkey",
-          "columns": [
-            "event_id",
-            "user_id"
-          ]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "event_participants_role_check": {
-          "name": "event_participants_role_check",
-          "value": "\"role\" in ('organizer', 'participant')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.events": {
-      "name": "events",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "slug": {
-          "name": "slug",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "year": {
-          "name": "year",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "summary": {
-          "name": "summary",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "details": {
-          "name": "details",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "starts_at": {
-          "name": "starts_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "ends_at": {
-          "name": "ends_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "timezone": {
-          "name": "timezone",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'America/Merida'"
-        },
-        "location_text": {
-          "name": "location_text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cover_key": {
-          "name": "cover_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cover_updated_at": {
-          "name": "cover_updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "visibility": {
-          "name": "visibility",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'members'"
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'draft'"
-        },
-        "first_published_at": {
-          "name": "first_published_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by_user_id": {
-          "name": "created_by_user_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "events_year_slug_unique": {
-          "name": "events_year_slug_unique",
-          "columns": [
-            {
-              "expression": "year",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "slug",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "events_year_starts_at_idx": {
-          "name": "events_year_starts_at_idx",
-          "columns": [
-            {
-              "expression": "year",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "starts_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "events_created_by_user_id_idx": {
-          "name": "events_created_by_user_id_idx",
-          "columns": [
-            {
-              "expression": "created_by_user_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "events_created_by_user_id_users_id_fk": {
-          "name": "events_created_by_user_id_users_id_fk",
-          "tableFrom": "events",
-          "tableTo": "users",
-          "columnsFrom": [
-            "created_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "events_slug_check": {
-          "name": "events_slug_check",
-          "value": "char_length(\"slug\") between 3 and 60 and \"slug\" ~ '^[a-z0-9]+(?:-[a-z0-9]+)*$'"
-        },
-        "events_year_range_check": {
-          "name": "events_year_range_check",
-          "value": "\"year\" between 1900 and 2200"
-        },
-        "events_dates_check": {
-          "name": "events_dates_check",
-          "value": "(\"starts_at\" is null and \"ends_at\" is null) or (\"starts_at\" is not null and \"ends_at\" is not null and \"ends_at\" > \"starts_at\")"
-        },
-        "events_year_check": {
-          "name": "events_year_check",
-          "value": "\"starts_at\" is null or \"year\" = extract(year from (\"starts_at\" at time zone \"timezone\"))::integer"
-        },
-        "events_title_length_check": {
-          "name": "events_title_length_check",
-          "value": "char_length(\"title\") between 1 and 120"
-        },
-        "events_summary_length_check": {
-          "name": "events_summary_length_check",
-          "value": "\"summary\" is null or char_length(\"summary\") <= 280"
-        },
-        "events_details_length_check": {
-          "name": "events_details_length_check",
-          "value": "\"details\" is null or char_length(\"details\") <= 4000"
-        },
-        "events_location_text_length_check": {
-          "name": "events_location_text_length_check",
-          "value": "\"location_text\" is null or char_length(\"location_text\") <= 160"
-        },
-        "events_cover_check": {
-          "name": "events_cover_check",
-          "value": "(\"cover_key\" is null) = (\"cover_updated_at\" is null) and (\"cover_key\" is null or \"cover_key\" ~ ('^events/' || \"id\"::text || '/cover/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-1280[.]webp$'))"
-        },
-        "events_visibility_check": {
-          "name": "events_visibility_check",
-          "value": "\"visibility\" in ('members', 'participants')"
-        },
-        "events_status_check": {
-          "name": "events_status_check",
-          "value": "\"status\" in ('draft', 'published', 'hidden')"
-        },
-        "events_published_check": {
-          "name": "events_published_check",
-          "value": "\"status\" <> 'published' or \"first_published_at\" is not null"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.media_items": {
       "name": "media_items",
       "schema": "",
@@ -2896,19 +2202,7 @@
           "name": "cuencada_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": false
-        },
-        "album_id": {
-          "name": "album_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "storage_prefix": {
-          "name": "storage_prefix",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "uploaded_by_user_id": {
           "name": "uploaded_by_user_id",
@@ -3115,34 +2409,6 @@
           "method": "btree",
           "with": {}
         },
-        "media_items_album_keyset_idx": {
-          "name": "media_items_album_keyset_idx",
-          "columns": [
-            {
-              "expression": "album_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "album_id is not null",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "media_items_uploaded_by_user_id_idx": {
           "name": "media_items_uploaded_by_user_id_idx",
           "columns": [
@@ -3230,19 +2496,6 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "media_items_album_id_event_albums_id_fk": {
-          "name": "media_items_album_id_event_albums_id_fk",
-          "tableFrom": "media_items",
-          "tableTo": "event_albums",
-          "columnsFrom": [
-            "album_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "restrict",
-          "onUpdate": "no action"
-        },
         "media_items_uploaded_by_user_id_users_id_fk": {
           "name": "media_items_uploaded_by_user_id_users_id_fk",
           "tableFrom": "media_items",
@@ -3314,14 +2567,6 @@
         "media_items_kind_mime_check": {
           "name": "media_items_kind_mime_check",
           "value": "(\"kind\" = 'video') = (\"mime_type\" like 'video/%')"
-        },
-        "media_items_scope_check": {
-          "name": "media_items_scope_check",
-          "value": "num_nonnulls(\"cuencada_id\", \"album_id\") = 1"
-        },
-        "media_items_storage_prefix_check": {
-          "name": "media_items_storage_prefix_check",
-          "value": "(\"album_id\" is null or \"storage_prefix\" is not null) and (\"storage_prefix\" is null or \"storage_prefix\" ~ '^(cuencadas/[0-9]{4}|events/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$')"
         }
       },
       "isRLSEnabled": false

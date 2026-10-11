@@ -1,10 +1,5 @@
--- Migration events (WP-5.2): Eventos. EXPAND-ONLY, so the code already
--- deployed keeps working on this database during the rollout.
---
--- NUMBERING: planned as 0008. Generated as 0007 on a base without WP-5.1; once
--- WP-5.1's `0007_historical_cuencadas` lands this becomes `0008_events` (rename
--- the file and the journal tag, regenerate the snapshot on top of 5.1's).
--- Every statement touches only the objects named here, so it is mechanical.
+-- Migration 0008 (WP-5.2): Eventos. EXPAND-ONLY, so the code already
+-- deployed (0007, WP-5.1) keeps working on this database during the rollout.
 --
 -- 1. New tables `events`, `event_participants`, `event_albums`,
 --    `event_cover_uploads`.

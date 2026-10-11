@@ -36,6 +36,9 @@ export * from "./events.js";
  * the Cuencada's timezone: unpublished → `draft`; published without dates →
  * `announced` (WP-3.1a: "Fecha y lugar por anunciar", no countdown, no RSVP);
  * before start → `upcoming`; between start and end → `active`; after end → `past`.
+ * WP-5.1: a published edition without dates whose `year` is before the current
+ * year (in its timezone) is `past`, and a historical edition
+ * (`isHistorical`, before the portal existed) is always `past` once published.
  */
 export const CuencadaStatus = {
   Draft: "draft",
@@ -261,6 +264,11 @@ export interface CuencadaSummary {
    * request. Contract amendment (T2-BE, for T4-FE).
    */
   hasMedia: boolean;
+  /**
+   * The edition happened before the portal existed (WP-5.1): always `past`,
+   * no RSVP, no chat. Optional so older servers/clients keep parsing.
+   */
+  isHistorical?: boolean;
 }
 
 export const cuencadaSummarySchema = z.object({
@@ -276,7 +284,8 @@ export const cuencadaSummarySchema = z.object({
   state: z.string().max(120).nullable(),
   heroImageUrl: z.string().max(2048).nullable(),
   themeColor: z.string().max(7),
-  hasMedia: z.boolean()
+  hasMedia: z.boolean(),
+  isHistorical: z.boolean().exactOptional()
 }) satisfies z.ZodType<CuencadaSummary>;
 
 /** Everything an anonymous visitor may see (`GET /api/cuencadas/:year`). */
@@ -301,6 +310,8 @@ export interface PublicCuencada {
   songUrl: string | null;
   weatherWidgetUrl: string | null;
   rsvpDeadline: string | null;
+  /** See {@link CuencadaSummary.isHistorical} (WP-5.1). */
+  isHistorical?: boolean;
   publicItinerary: ItineraryItem[];
   publicLocations: LocationItem[];
   publicAnnouncements: Announcement[];
@@ -326,6 +337,7 @@ export const publicCuencadaSchema = z.object({
   songUrl: z.string().max(2048).nullable(),
   weatherWidgetUrl: z.string().max(2048).nullable(),
   rsvpDeadline: dateTimeSchema.nullable(),
+  isHistorical: z.boolean().exactOptional(),
   publicItinerary: z.array(itineraryItemSchema),
   publicLocations: z.array(locationItemSchema),
   publicAnnouncements: z.array(announcementSchema),
@@ -483,7 +495,13 @@ const cuencadaFields = {
   weatherWidgetUrl: optionalHttpsUrl,
   externalAlbumUrl: optionalHttpsUrl,
   rsvpDeadline: dateTimeSchema.nullable(),
-  isPublished: z.boolean()
+  isPublished: z.boolean(),
+  /**
+   * A Cuencada from before the portal (WP-5.1). The server requires `year`
+   * before the current year (in the edition's timezone) whenever the merged
+   * row is historical; see {@link CUENCADA_HISTORICAL_YEAR_MESSAGE}.
+   */
+  isHistorical: z.boolean()
 };
 
 type DateInput = { startsAt?: string | null | undefined; endsAt?: string | null | undefined };
@@ -506,6 +524,9 @@ function datesTogether(value: DateInput): boolean {
   if (hasEnd) return value.endsAt !== null;
   return true;
 }
+
+/** Spanish 400 message when a historical edition's year is not in the past (WP-5.1). */
+export const CUENCADA_HISTORICAL_YEAR_MESSAGE = "Una Cuencada anterior debe ser de un año pasado.";
 
 /** Spanish message for one date without the other (contract refine and the server's merged-row check). */
 export const CUENCADA_DATES_TOGETHER_MESSAGE = "Escribe las dos fechas (inicio y fin) o deja ambas vacías.";
@@ -533,7 +554,8 @@ export const createCuencadaInputSchema = z
     weatherWidgetUrl: optionalHttpsUrl.default(null),
     externalAlbumUrl: optionalHttpsUrl.default(null),
     rsvpDeadline: dateTimeSchema.nullable().default(null),
-    isPublished: z.boolean().default(false)
+    isPublished: z.boolean().default(false),
+    isHistorical: z.boolean().default(false)
   })
   .refine(datesTogether, datesTogetherIssue)
   .refine(endsAfterStart, endsAfterStartIssue);

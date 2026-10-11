@@ -269,6 +269,13 @@ export function memberEventSlug(title: string, suffix: string = randomEventSlugS
   return eventSlugWithSuffix(slugifyEventTitle(title), suffix);
 }
 
+/**
+ * Most insert attempts with a fresh {@link memberEventSlug} on `(year, slug)`
+ * unique violations; after that the server answers a generic 500 `INTERNAL`
+ * (no slug or collision detail).
+ */
+export const EVENT_SLUG_MAX_ATTEMPTS = 5;
+
 /** True when `value` is a valid event slug (3–60 chars, {@link EVENT_SLUG_PATTERN}). */
 export function isEventSlug(value: string): boolean {
   return value.length >= EVENT_SLUG_MIN_LENGTH && value.length <= EVENT_SLUG_MAX_LENGTH && eventSlugRegex.test(value);

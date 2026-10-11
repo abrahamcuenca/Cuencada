@@ -26,11 +26,14 @@ const cursorMicrosSql = sql<string>`(extract(epoch from ${chatMessages.createdAt
 
 /**
  * SQL: rooms members may see, i.e. the global room and rooms whose edition is
- * published. An unpublished edition's room keeps its history but is hidden.
+ * published and not historical. An unpublished edition's room keeps its
+ * history but is hidden; so is the room of an edition later marked historical
+ * (WP-5.1: kept, never deleted, hidden from the list, by id and on the socket).
  */
 export function visibleRoomSql(): SQL {
   return sql`(${chatRooms.kind} = 'global' or exists (
-    select 1 from ${cuencadas} where ${cuencadas.id} = ${chatRooms.cuencadaId} and ${cuencadas.isPublished}
+    select 1 from ${cuencadas}
+    where ${cuencadas.id} = ${chatRooms.cuencadaId} and ${cuencadas.isPublished} and not ${cuencadas.isHistorical}
   ))`;
 }
 
