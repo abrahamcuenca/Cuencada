@@ -216,3 +216,7 @@ WP-2.4 prepared every item below; **the owner applies them** following
 - [ ] Git history still contains the pre-sweep real/real-looking family names and the legacy links; owner decided "sweep forward, no history rewrite". Revisit only if the owner asks.
 - [ ] WP-5.1: a "Cuencada anterior" (historical) switch on the admin edit page; today the flag is set by "Agregar Cuencada anterior" and changed only through `PATCH /api/admin/cuencadas/:id`.
 - [ ] WP-5.1: cover image upload for past Cuencadas (the form takes a URL for now); comes with WP-5.4's cover pipeline.
+- [ ] WP-5.3: move the event consent notice (`modules/events/notices.ts`, `event_participants.notice_seen_at`, `GET /api/events/notices`, `DELETE /api/events/:id/notice`) onto WP-6's general `notifications` table, then drop the column (contract migration).
+- [ ] WP-5.3: profile setting "only admins may add me to events" (Security requirement 3, later).
+- [ ] WP-5.3: the in-memory participant-write limiter (100/h) and the chat hub's event-room audiences are single-process, like the rest of the hub; a second API process needs a shared bus (see `chat/hub.ts`).
+- [ ] WP-5.3: removing yourself as organizer from a draft (or from a `participants` event) through `PATCH|DELETE /api/events/:id/participants/:userId` succeeds but the follow-up detail answers 404 (you no longer see it); the web should treat that as "left".
