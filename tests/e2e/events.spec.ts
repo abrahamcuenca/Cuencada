@@ -10,7 +10,7 @@
  * the WP-5.2 contracts and the WP-5.3 notice contract. Fictional data only.
  */
 import type { Page } from "@playwright/test";
-import { CastRole, docShot, expect, login, test } from "./support/fixtures.js";
+import { CastRole, docShot, expect, login, setControl, test } from "./support/fixtures.js";
 import { generateJpeg } from "./support/images.js";
 
 /** Flip to `false` once WP-5.3 is merged (the events routes exist in the harness API). */
@@ -23,7 +23,7 @@ async function createEvent(page: Page, title: string, visibility: "Todos los mie
   await sheet.getByRole("textbox", { name: /Título/ }).fill(title);
   await expect(sheet.getByTestId("slug-preview")).toContainText("la dirección lleva un código corto");
   await sheet.getByRole("textbox", { name: /Resumen/ }).fill("Salimos temprano; cada familia lleva algo.");
-  await sheet.getByRole("radio", { name: visibility }).check();
+  await setControl(sheet.getByRole("radio", { name: visibility }), true);
   await sheet.getByRole("button", { name: "Crear evento" }).click();
   await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
   // Member slugs always carry the random code (Security M1).
@@ -54,7 +54,7 @@ test.describe("eventos", () => {
     await expect(sheet.getByText("Les avisaremos y podrán salir cuando quieran.")).toBeVisible();
     for (const member of [beto, elena]) {
       await sheet.getByRole("searchbox", { name: /Buscar en el directorio/ }).fill(member.firstName);
-      await sheet.getByRole("checkbox", { name: new RegExp(member.firstName) }).check();
+      await setControl(sheet.getByRole("checkbox", { name: new RegExp(member.firstName) }), true);
     }
     await sheet.getByRole("button", { name: "Agregar (2)" }).click();
     await expect(page.getByText("Agregaste a 2 personas.")).toBeVisible();

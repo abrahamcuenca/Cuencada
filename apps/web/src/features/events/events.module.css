@@ -253,13 +253,25 @@
 }
 
 @media (min-width: 900px) {
+  /* Cover on the left; title, dates and the join/leave actions stacked on the right. */
   .hero {
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-rows: auto 1fr;
     align-items: start;
+  }
+
+  .hero > :first-child {
+    grid-row: 1 / span 2;
+  }
+
+  .heroText {
+    grid-column: 2;
+    grid-row: 1;
   }
 
   .heroActions {
     grid-column: 2;
+    grid-row: 2;
   }
 }
 
