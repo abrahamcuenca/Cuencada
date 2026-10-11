@@ -34,11 +34,12 @@ test.describe("eventos", () => {
     project,
     newPhone
   }, testInfo) => {
-    const ana = cast(CastRole.Ana);
+    // Carla organizes: Ana's account is already near the per-account login limit across the journeys.
+    const carla = cast(CastRole.Carla);
     const beto = cast(CastRole.Beto);
     const elena = cast(CastRole.Elena);
     const title = `Viaje a Ciudad de México (${project})`;
-    await login(page, ana);
+    await login(page, carla);
     const path = await createEvent(page, title, "Solo participantes");
     await docShot(page, testInfo, "eventos", "evento-creado", page.getByRole("heading", { level: 1 }));
 
@@ -48,7 +49,11 @@ test.describe("eventos", () => {
     await expect(sheet.getByText("Les avisaremos y podrán salir cuando quieran.")).toBeVisible();
     for (const member of [beto, elena]) {
       await sheet.getByRole("searchbox", { name: /Buscar en el directorio/ }).fill(member.firstName);
-      await setControl(sheet.getByRole("checkbox", { name: new RegExp(member.firstName) }), true);
+      // Several fictional people share a first name: pick the exact one. Tap its label (the full-row
+      // target), which also works inside the scrolling sheet on short phones.
+      const picker = sheet.getByRole("list", { name: "Personas del directorio" });
+      await picker.getByText(member.displayName, { exact: true }).click();
+      await expect(picker.getByRole("checkbox", { name: member.displayName, exact: true })).toBeChecked();
     }
     await sheet.getByRole("button", { name: "Agregar (2)" }).click();
     await expect(page.getByText("Agregaste a 2 personas.")).toBeVisible();
@@ -66,7 +71,7 @@ test.describe("eventos", () => {
     await page.goto(`${path}?vista=chat`);
     await expect(page.getByRole("log").getByText(hello)).toBeVisible();
 
-    // Ana uploads a photo to the default album.
+    // Carla uploads a photo to the default album.
     await page.goto(`${path}?vista=fotos`);
     const jpeg = await generateJpeg(page, "evento");
     await page.getByTestId("gallery-file-input").setInputFiles({ name: "evento.jpg", mimeType: "image/jpeg", buffer: jpeg });
@@ -94,7 +99,7 @@ test.describe("eventos", () => {
 
   test("5.4 · an all-members event: Me apunto opens its chat @desktop", async ({ page, cast, project, newPhone }) => {
     const title = `Carne asada (${project})`;
-    await login(page, cast(CastRole.Ana));
+    await login(page, cast(CastRole.Carla));
     const path = await createEvent(page, title, "Todos los miembros");
 
     const betoPhone = await newPhone();

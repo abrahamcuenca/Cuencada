@@ -283,7 +283,9 @@ test.describe("mobile quality gates", () => {
     const sheet = page.getByRole("dialog", { name: "Crear evento" });
     await sheet.getByRole("textbox", { name: /Título/ }).fill("Comida de prueba de calidad con un título largo para medir");
     await sheet.getByRole("button", { name: "Crear evento" }).click();
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    // Wait for the new event's own page (the list's "Eventos" heading would satisfy a bare h1 check).
+    await expect(page).toHaveURL(/\/eventos\/\d{4}\/[a-z0-9-]+$/);
+    await expect(page.getByRole("heading", { level: 1, name: /Comida de prueba/ })).toBeVisible();
     const path = new URL(page.url()).pathname;
     const results = await checkRoutes(page, testInfo, [
       { name: "evento-detalle", open: path },
