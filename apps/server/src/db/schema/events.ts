@@ -116,7 +116,13 @@ export const eventParticipants = pgTable(
     role: text("role").$type<EventRole>().notNull().default("participant"),
     /** Who added them; `null` for a self-join or once that account is removed. */
     addedByUserId: uuid("added_by_user_id").references(() => users.id, { onDelete: "set null" }),
-    joinedAt: timestamptz("joined_at").notNull().defaultNow()
+    joinedAt: timestamptz("joined_at").notNull().defaultNow(),
+    /**
+     * WP-5.3 (migration 0009): when the member dismissed the "you were added"
+     * notice (Security requirement 3). `null` = not dismissed; the notice only
+     * exists when `added_by_user_id` is another user.
+     */
+    noticeSeenAt: timestamptz("notice_seen_at")
   },
   (table) => [
     primaryKey({ name: "event_participants_pkey", columns: [table.eventId, table.userId] }),
@@ -175,5 +181,30 @@ export const eventCoverUploads = pgTable(
     index("event_cover_uploads_uploaded_by_user_id_idx").on(table.uploadedByUserId),
     check("event_cover_uploads_mime_type_check", inList("mime_type", avatarMimeTypeSchema.options)),
     check("event_cover_uploads_byte_size_check", sql.raw(`"byte_size" > 0 and "byte_size" <= ${AVATAR_MAX_BYTES}`))
+  ]
+);
+
+/**
+ * WP-5.3 (migration 0009): dedupe key for the `event.admin_viewed` audit
+ * (ADR 0001 §7, Security requirement 5). One row per admin, event and hour
+ * bucket; the audit row is written only when the insert-on-conflict inserted,
+ * in the same transaction, so concurrent views record exactly one row. Rows
+ * older than the current window are pruned on the next insert by that admin.
+ */
+export const eventAdminViews = pgTable(
+  "event_admin_views",
+  {
+    adminUserId: uuid("admin_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    eventId: uuid("event_id")
+      .notNull()
+      .references(() => events.id, { onDelete: "cascade" }),
+    /** `date_trunc('hour', viewed_at)`. */
+    hourBucket: timestamptz("hour_bucket").notNull()
+  },
+  (table) => [
+    primaryKey({ name: "event_admin_views_pkey", columns: [table.adminUserId, table.eventId, table.hourBucket] }),
+    index("event_admin_views_event_id_idx").on(table.eventId)
   ]
 );

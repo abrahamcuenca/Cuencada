@@ -3,11 +3,17 @@
  * caption edit, delete and report. Mounted under `/api`.
  *
  * IDOR rule: an item the caller may not see — or may not act on, for
- * owner-only actions — answers 404, never 403, so ids reveal nothing. *
+ * owner-only actions — answers 404, never 403, so ids reveal nothing.
  * Every route requires a verified email (ADR 0001, WP-2.3 L2 owner decision):
  * photos and uploader names reveal who belongs to the family, like attendees.
+ *
+ * WP-5.3 [SEC]: every by-id route (`GET|PATCH|DELETE /media/:id`, `confirm`,
+ * `report`) applies `mediaScopeSql` first, so event-album media answer 404 to
+ * anyone outside the event (non-participants, and participants of an event
+ * that is no longer visible to them). Album uploads start at
+ * `POST /api/events/:id/albums/:albumId/uploads` (events module) and are
+ * confirmed here.
  */
-import { randomUUID } from "node:crypto";
 import {
   AuditAction,
   confirmUploadInputSchema,
@@ -16,35 +22,27 @@ import {
   idParamSchema,
   type MediaItem,
   mediaItemSchema,
-  mediaKindOfMime,
   mediaListQuerySchema,
   pageSchema,
   reportMediaInputSchema,
   updateMediaInputSchema,
   yearParamSchema
 } from "@cuencada/types";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { cuencadas, mediaItems, mediaReports } from "../../db/schema/index.js";
 import { recordAudit } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
 import { authUser } from "../../plugins/auth.js";
-import {
-  CONFIRM_RATE_LIMIT,
-  DAILY_UPLOAD_BYTES,
-  DAILY_UPLOAD_WINDOW_MS,
-  MAX_PENDING_UPLOADS_PER_USER,
-  REPORT_RATE_LIMIT,
-  SNIFF_BYTES,
-  UPLOAD_INTENT_RATE_LIMIT,
-  UPLOAD_URL_SECONDS
-} from "./constants.js";
-import { mediaKeys, normalizeContentType, sanitizeFileName, signatureMatches } from "./files.js";
+import { AdminViewSurface, auditAdminEventView } from "../events/adminView.js";
+import { CONFIRM_RATE_LIMIT, REPORT_RATE_LIMIT, SNIFF_BYTES, UPLOAD_INTENT_RATE_LIMIT } from "./constants.js";
+import { albumStoragePrefix, editionStoragePrefix, mediaKeys, normalizeContentType, signatureMatches } from "./files.js";
 import { enqueueMediaProcessing } from "./jobs/mediaProcess.js";
 import {
   allObjectKeys,
   findLiveRecord,
+  findScopedRecord,
   findViewableRecord,
   isAdmin,
   listGallery,
@@ -53,6 +51,7 @@ import {
   type Viewer
 } from "./service.js";
 import { deleteObjectsQuietly, jobDeps, mediaErrorResponses, noContentSchema, rateLimitByUser, viewerOf } from "./shared.js";
+import { createPendingUpload } from "./uploadIntent.js";
 
 const NOT_FOUND_MESSAGE = "No encontramos esa foto o video.";
 const NO_CUENCADA_MESSAGE = "No encontramos esa Cuencada.";
@@ -74,15 +73,6 @@ function uploadInvalid(reason: UploadInvalidReason, message: string): AppError {
   return new AppError("UPLOAD_INVALID", message, { details: [{ path: "upload", message: reason }] });
 }
 
-/** Headers a browser may set itself; the signature also covers Content-Length, which the browser derives from the File. */
-function browserUploadHeaders(required: Record<string, string>, mimeType: string): Record<string, string> {
-  const headers: Record<string, string> = { "Content-Type": mimeType };
-  for (const [name, value] of Object.entries(required)) {
-    if (name.toLowerCase().startsWith("x-amz-")) headers[name] = value;
-  }
-  return headers;
-}
-
 async function findPublishedCuencada(app: FastifyInstance, year: number): Promise<{ id: string; year: number }> {
   const [row] = await app.db
     .select({ id: cuencadas.id, year: cuencadas.year })
@@ -95,6 +85,28 @@ async function findPublishedCuencada(app: FastifyInstance, year: number): Promis
 
 function isOwner(record: MediaRecord, viewer: Viewer): boolean {
   return record.item.uploadedByUserId === viewer.id;
+}
+
+/**
+ * [SEC] Security requirement 7 (and PR #54 L3): the prefix is re-derived
+ * from the scope row itself, the album (`events/{album.eventId}/{album.id}`)
+ * or the edition (`cuencadas/{year}`), never taken from the stored
+ * `storage_prefix`; the stored prefix (when set) and the original key must
+ * both match it. A row whose keys sit elsewhere is never confirmed (and so
+ * never processed or served).
+ */
+function keysMatchPrefix(record: MediaRecord): boolean {
+  const { item } = record;
+  let expectedPrefix: string;
+  if (item.albumId !== null) {
+    if (record.album === null || record.album.id !== item.albumId) return false;
+    expectedPrefix = albumStoragePrefix(record.album);
+  } else {
+    if (record.year === null) return false;
+    expectedPrefix = editionStoragePrefix(record.year);
+  }
+  if (item.storagePrefix !== null && item.storagePrefix !== expectedPrefix) return false;
+  return item.objectKey === mediaKeys(expectedPrefix, item.id, item.mimeType).original;
 }
 
 /** Member media routes. */
@@ -127,7 +139,8 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
 
   /**
    * POST /api/cuencadas/:year/media/uploads — create a pending item and a
-   * presigned PUT bound to the declared type and size (5 min).
+   * presigned PUT bound to the declared type and size (5 min). The locked
+   * budget step is shared with event-album uploads (`createPendingUpload`).
    */
   app.post(
     "/cuencadas/:year/media/uploads",
@@ -141,70 +154,22 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request, reply) => {
       const user = authUser(request);
-      const body = request.body;
       const cuencada = await findPublishedCuencada(app, request.params.year);
-
-      const mediaId = randomUUID();
-      const keys = mediaKeys(cuencada.year, mediaId, body.mimeType);
-      const now = app.clock.now();
-      const needsReview = app.config.MEDIA_REQUIRE_APPROVAL && user.role !== "admin";
-
-      const presigned = await app.db.transaction(async (tx) => {
-        // Serialize this user's intents so the caps below are exact under concurrency.
-        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`media-intent:${user.id}`}))`);
-        const since = new Date(now.getTime() - DAILY_UPLOAD_WINDOW_MS).toISOString();
-        const [usage] = await tx
-          .select({
-            open: sql<number>`(count(*) filter (where ${mediaItems.uploadStatus} = 'pending_upload' and ${mediaItems.deletedAt} is null))::int`,
-            recentBytes: sql<string>`coalesce(sum(${mediaItems.byteSize}) filter (where ${mediaItems.uploadStatus} <> 'failed' and ${mediaItems.createdAt} > ${since}::timestamptz), 0)::text`
-          })
-          .from(mediaItems)
-          .where(eq(mediaItems.uploadedByUserId, user.id));
-        if ((usage?.open ?? 0) >= MAX_PENDING_UPLOADS_PER_USER) {
-          throw new AppError("RATE_LIMITED", "Tienes demasiadas subidas pendientes. Espera a que terminen.");
-        }
-        // Admins are exempt (they load historical albums); members get the rolling budget.
-        if (user.role !== "admin" && Number(usage?.recentBytes ?? "0") + body.byteSize > DAILY_UPLOAD_BYTES) {
-          throw new AppError("RATE_LIMITED", "Llegaste al límite de subidas de hoy. Intenta de nuevo mañana.");
-        }
-
-        await tx.insert(mediaItems).values({
-          id: mediaId,
-          cuencadaId: cuencada.id,
-          uploadedByUserId: user.id,
-          kind: mediaKindOfMime(body.mimeType),
-          objectKey: keys.original,
-          bucket: app.config.S3_BUCKET,
-          fileName: sanitizeFileName(body.fileName),
-          mimeType: body.mimeType,
-          byteSize: body.byteSize,
-          caption: body.caption,
-          uploadStatus: "pending_upload",
-          uploadExpiresAt: new Date(now.getTime() + UPLOAD_URL_SECONDS * 1000),
-          moderationStatus: needsReview ? "pending_review" : "approved"
-        });
-        // Presign inside the transaction: if storage is unavailable, no orphan row is left.
-        return app.storage.presignPut({
-          key: keys.original,
-          contentType: body.mimeType,
-          contentLength: body.byteSize,
-          expiresInSeconds: UPLOAD_URL_SECONDS
-        });
-      });
-
-      return reply.code(201).send({
-        mediaId,
-        uploadUrl: presigned.url,
-        headers: browserUploadHeaders(presigned.requiredHeaders, body.mimeType),
-        expiresAt: presigned.expiresAt.toISOString()
-      });
+      const response = await createPendingUpload(
+        app,
+        user,
+        { cuencadaId: cuencada.id, storagePrefix: editionStoragePrefix(cuencada.year) },
+        request.body
+      );
+      return reply.code(201).send(response);
     }
   );
 
   /**
-   * POST /api/media/:id/confirm — uploader only. HEAD (size + type) and a
-   * magic-byte check, then `processing` + the sharp job. Idempotent once
-   * accepted.
+   * POST /api/media/:id/confirm — uploader only, within the caller's scope
+   * (an album upload is re-checked against the event's participants at this
+   * moment). HEAD (size + type) and a magic-byte check, then `processing` +
+   * the sharp job. Idempotent once accepted.
    */
   app.post(
     "/media/:id/confirm",
@@ -219,7 +184,7 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request): Promise<MediaItem> => {
       const user = authUser(request);
       const viewer = viewerOf(user);
-      const record = await findLiveRecord(app.db, request.params.id);
+      const record = await findLiveRecord(app.db, request.params.id, viewer);
       if (record === null || !isOwner(record, viewer)) throw new AppError("NOT_FOUND", NOT_FOUND_MESSAGE);
       const { item } = record;
 
@@ -227,6 +192,7 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
         return toMediaItem(app.storage, record, viewer);
       }
       if (item.uploadStatus === "failed") throw uploadInvalid(UploadInvalidReason.Rejected, UPLOAD_MISMATCH_MESSAGE);
+      if (!keysMatchPrefix(record)) return rejectUpload(record, user.id, request.ip, "prefix_mismatch");
 
       const head = await app.storage.head(item.objectKey);
       if (head === null) {
@@ -255,7 +221,7 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
           action: AuditAction.MediaUploaded,
           entityType: "media",
           entityId: row.id,
-          metadata: { kind: row.kind, mimeType: row.mimeType, byteSize: row.byteSize },
+          metadata: { kind: row.kind, mimeType: row.mimeType, byteSize: row.byteSize, ...(row.albumId === null ? {} : { albumId: row.albumId }) },
           ip: request.ip
         });
         return row;
@@ -263,7 +229,7 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
 
       if (confirmed === null) {
         // A concurrent confirm won (or the item was deleted/cleaned up meanwhile).
-        const current = await findLiveRecord(app.db, item.id);
+        const current = await findLiveRecord(app.db, item.id, viewer);
         if (current === null || !isOwner(current, viewer) || current.item.uploadStatus === "pending_upload") {
           throw new AppError("NOT_FOUND", NOT_FOUND_MESSAGE);
         }
@@ -304,7 +270,11 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
     }
   );
 
-  /** GET /api/media/:id — one item the caller may see. */
+  /**
+   * GET /api/media/:id — one item the caller may see (scope first). An
+   * admin outside a `participants` event opening its album media is audited
+   * (`event.admin_viewed`, surface `media`) before the item is returned.
+   */
   app.get(
     "/media/:id",
     {
@@ -315,11 +285,20 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
       const viewer = viewerOf(authUser(request));
       const record = await findViewableRecord(app.db, request.params.id, viewer);
       if (record === null) throw new AppError("NOT_FOUND", NOT_FOUND_MESSAGE);
+      if (record.album !== null && isAdmin(viewer)) {
+        await auditAdminEventView(app.db, {
+          viewer,
+          eventId: record.album.eventId,
+          surface: AdminViewSurface.Media,
+          ip: request.ip,
+          now: app.clock.now()
+        });
+      }
       return toMediaItem(app.storage, record, viewer);
     }
   );
 
-  /** PATCH /api/media/:id — edit the caption (uploader or admin). */
+  /** PATCH /api/media/:id — edit the caption (uploader or admin, within scope). */
   app.patch(
     "/media/:id",
     {
@@ -360,8 +339,9 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
 
   /**
    * DELETE /api/media/:id — uploader (any status, including a cancelled
-   * `pending_upload`) or admin. Soft-deletes the row and removes the objects.
-   * Repeating it answers 204 again and retries the object deletes.
+   * `pending_upload`) or admin, within scope. Soft-deletes the row and
+   * removes the objects. Repeating it answers 204 again and retries the
+   * object deletes.
    */
   app.delete(
     "/media/:id",
@@ -372,13 +352,8 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       const user = authUser(request);
       const viewer = viewerOf(user);
-      const [found] = await app.db
-        .select({ item: mediaItems, year: cuencadas.year })
-        .from(mediaItems)
-        .innerJoin(cuencadas, eq(cuencadas.id, mediaItems.cuencadaId))
-        .where(eq(mediaItems.id, request.params.id))
-        .limit(1);
-      if (found === undefined) throw new AppError("NOT_FOUND", NOT_FOUND_MESSAGE);
+      const found = await findScopedRecord(app.db, request.params.id, viewer);
+      if (found === null) throw new AppError("NOT_FOUND", NOT_FOUND_MESSAGE);
       const own = found.item.uploadedByUserId === user.id;
       if (!own && !isAdmin(viewer)) throw new AppError("NOT_FOUND", NOT_FOUND_MESSAGE);
       // Members cannot see a hidden item of someone else, but they may delete their own.
@@ -406,7 +381,7 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
     }
   );
 
-  /** POST /api/media/:id/report — any member, once per item (409 on repeat). Reasons/details are never logged. */
+  /** POST /api/media/:id/report — any member within scope, once per item (409 on repeat). Reasons/details are never logged. */
   app.post(
     "/media/:id/report",
     {

@@ -3,10 +3,12 @@
  * keyset history, idempotent inserts, monotonic read state, soft delete and
  * the session checks the WebSocket uses.
  *
- * Every member can read every visible room (the global room and the rooms of
- * published editions), so there are no membership rows (WP-0.3).
+ * Every member can read every visible global or edition room, so those have
+ * no membership rows (WP-0.3). Event rooms (WP-5.3) are limited to the
+ * event's participants through `event_participants` (admins read them only
+ * through the audited, read-only history: `moderationRoomSql`).
  */
-import { CHAT_UNREAD_COUNT_MAX, type ChatRoomKind } from "@cuencada/types";
+import { CHAT_UNREAD_COUNT_MAX, type ChatRoomKind, type EventRef, type UserRole } from "@cuencada/types";
 import { and, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import {
@@ -14,57 +16,182 @@ import {
   chatReadStates,
   chatRooms,
   cuencadas,
+  eventParticipants,
+  events,
   profiles,
   sessions,
   users
 } from "../../db/schema/index.js";
 import type { DbOrTx } from "../../lib/audit.js";
+import { type EventViewer, eventChatAccessSql, eventMemberAccessSql } from "../events/access.js";
 import { type ChatCursor, decodeChatCursor } from "./cursor.js";
 
 /** `created_at` as epoch microseconds (keyset cursor). */
 const cursorMicrosSql = sql<string>`(extract(epoch from ${chatMessages.createdAt}) * 1000000)::bigint::text`;
 
-/**
- * SQL: rooms members may see, i.e. the global room and rooms whose edition is
- * published and not historical. An unpublished edition's room keeps its
- * history but is hidden; so is the room of an edition later marked historical
- * (WP-5.1: kept, never deleted, hidden from the list, by id and on the socket).
- */
-export function visibleRoomSql(): SQL {
+/** Alias of `events` for the visibility subquery (the outer query joins the real table). */
+const roomEvent = alias(events, "room_event");
+
+/** SQL: the global room, or an edition room whose edition is published and not historical. */
+function memberRoomSql(): SQL {
   return sql`(${chatRooms.kind} = 'global' or exists (
     select 1 from ${cuencadas}
     where ${cuencadas.id} = ${chatRooms.cuencadaId} and ${cuencadas.isPublished} and not ${cuencadas.isHistorical}
   ))`;
 }
 
-/** A room as stored, plus its edition year. */
+/**
+ * SQL [SEC]: rooms the viewer takes part in: the room list, every inbound
+ * socket frame (`send`, `typing`, `read`) and the REST read marker.
+ * - The global room and rooms whose edition is published and not historical.
+ *   An unpublished edition's room keeps its history but is hidden; so is the
+ *   room of an edition later marked historical (WP-5.1: kept, never deleted,
+ *   hidden from the list, by id and on the socket).
+ * - WP-5.3: an event's room only for its **participants** while the event is
+ *   visible to them (`eventChatAccessSql`). Admins are no exception (PR #54
+ *   Security M1): a non-participant admin never lists, receives or writes an
+ *   event chat; they moderate through {@link moderationRoomSql}.
+ *
+ * @param viewer - The caller (id + database role).
+ */
+export function visibleRoomSql(viewer: EventViewer): SQL {
+  return sql`(${memberRoomSql()} or (${chatRooms.kind} = 'event' and exists (
+    select 1 from ${events} room_event
+    where ${roomEvent.id} = ${chatRooms.eventId} and ${eventChatAccessSql(viewer, roomEvent)}
+  )))`;
+}
+
+/**
+ * SQL [SEC]: rooms the viewer may **read as a moderator**: everything
+ * {@link visibleRoomSql} allows plus, for admins, every event room. Used only
+ * by the read-only history (audited `event.admin_viewed` for non-participant
+ * admins on `participants` events) and the message delete (audited when an
+ * admin deletes someone else's message).
+ */
+export function moderationRoomSql(viewer: EventViewer): SQL {
+  return sql`(${memberRoomSql()} or (${chatRooms.kind} = 'event' and exists (
+    select 1 from ${events} room_event
+    where ${roomEvent.id} = ${chatRooms.eventId} and ${eventMemberAccessSql(viewer, roomEvent)}
+  )))`;
+}
+
+/** A room as stored, plus its edition year or its event. */
 export interface RoomRecord {
   id: string;
   kind: ChatRoomKind;
   cuencadaId: string | null;
   year: number | null;
   title: string | null;
+  /** WP-5.3: the event of an `event` room (only loaded for viewers who may see it). */
+  event: EventRef | null;
+}
+
+const roomColumns = {
+  id: chatRooms.id,
+  kind: chatRooms.kind,
+  cuencadaId: chatRooms.cuencadaId,
+  year: cuencadas.year,
+  title: chatRooms.title,
+  eventId: events.id,
+  eventYear: events.year,
+  eventSlug: events.slug,
+  eventTitle: events.title
+};
+
+type RoomRow = Omit<RoomRecord, "event"> & {
+  eventId: string | null;
+  eventYear: number | null;
+  eventSlug: string | null;
+  eventTitle: string | null;
+};
+
+function toRoomRecord<TRow extends RoomRow>(row: TRow): Omit<TRow, "eventId" | "eventYear" | "eventSlug" | "eventTitle"> & { event: EventRef | null } {
+  const { eventId, eventYear, eventSlug, eventTitle, ...rest } = row;
+  const event =
+    eventId !== null && eventYear !== null && eventSlug !== null && eventTitle !== null
+      ? { id: eventId, year: eventYear, slug: eventSlug, title: eventTitle }
+      : null;
+  return { ...rest, event };
 }
 
 /**
- * Load a room if members may see it.
+ * Load a room if the viewer may see it. Every REST read and every inbound
+ * socket frame calls this, so access is re-checked each time.
  *
  * @returns The room, or `null` for unknown and hidden rooms (callers answer 404).
  */
-export async function findVisibleRoom(db: DbOrTx, roomId: string): Promise<RoomRecord | null> {
+export async function findVisibleRoom(db: DbOrTx, roomId: string, viewer: EventViewer): Promise<RoomRecord | null> {
+  return findRoomWhere(db, roomId, visibleRoomSql(viewer));
+}
+
+/**
+ * Load a room the viewer may read as a moderator ({@link moderationRoomSql}):
+ * REST history and message delete only.
+ *
+ * @returns The room, or `null` (callers answer 404).
+ */
+export async function findModerationRoom(db: DbOrTx, roomId: string, viewer: EventViewer): Promise<RoomRecord | null> {
+  return findRoomWhere(db, roomId, moderationRoomSql(viewer));
+}
+
+async function findRoomWhere(db: DbOrTx, roomId: string, rule: SQL): Promise<RoomRecord | null> {
   const [row] = await db
-    .select({
-      id: chatRooms.id,
-      kind: chatRooms.kind,
-      cuencadaId: chatRooms.cuencadaId,
-      year: cuencadas.year,
-      title: chatRooms.title
-    })
+    .select(roomColumns)
     .from(chatRooms)
     .leftJoin(cuencadas, eq(cuencadas.id, chatRooms.cuencadaId))
-    .where(and(eq(chatRooms.id, roomId), visibleRoomSql()))
+    .leftJoin(events, eq(events.id, chatRooms.eventId))
+    .where(and(eq(chatRooms.id, roomId), rule))
     .limit(1);
-  return row ?? null;
+  return row === undefined ? null : toRoomRecord(row);
+}
+
+/** Who may receive a room's frames (see `ChatHub.fanOutRoom`). */
+export type RoomAudience =
+  /** Global and edition rooms: every connected member (their visibility is checked on each inbound frame). */
+  | { kind: "everyone" }
+  /** Event rooms: these users only (participants with chat access; no non-participant admins). */
+  | { kind: "users"; userIds: ReadonlySet<string> };
+
+/** The empty audience (a deleted or unknown room). */
+export const NO_AUDIENCE: RoomAudience = { kind: "users", userIds: new Set() };
+
+/**
+ * Load a room's audience from the database [SEC]. Event rooms: the
+ * participants who may currently use the chat, i.e. `eventChatAccessSql`
+ * evaluated for all users at once: published → every participant; draft →
+ * organizers; hidden → nobody, except participants who are active admins
+ * (they see every event). Non-participant admins are never in it (PR #54 M1).
+ *
+ * @returns The audience; an unknown room has {@link NO_AUDIENCE}.
+ */
+export async function loadRoomAudience(db: DbOrTx, roomId: string): Promise<RoomAudience> {
+  const [room] = await db
+    .select({ kind: chatRooms.kind, eventId: chatRooms.eventId })
+    .from(chatRooms)
+    .where(eq(chatRooms.id, roomId))
+    .limit(1);
+  if (room === undefined) return NO_AUDIENCE;
+  if (room.kind !== "event" || room.eventId === null) return { kind: "everyone" };
+  const rows = await db.execute<{ user_id: string }>(sql`
+    select ep.user_id::text as user_id
+    from ${eventParticipants} ep
+    inner join ${events} e on e.id = ep.event_id
+    where ep.event_id = ${room.eventId}::uuid
+      and (e.status = 'published'
+        or (e.status = 'draft' and ep.role = 'organizer')
+        or exists (select 1 from ${users} u where u.id = ep.user_id and u.role = 'admin' and u.status = 'active'))
+  `);
+  return { kind: "users", userIds: new Set(rows.map((row) => row.user_id)) };
+}
+
+/** The id of an event's chat room, if it has one. */
+export async function eventRoomId(db: DbOrTx, eventId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ id: chatRooms.id })
+    .from(chatRooms)
+    .where(and(eq(chatRooms.kind, "event"), eq(chatRooms.eventId, eventId)))
+    .limit(1);
+  return row?.id ?? null;
 }
 
 /** One row of the room list before mapping. */
@@ -79,17 +206,14 @@ export interface RoomListRecord extends RoomRecord {
  * from other members after the last-read message, capped at
  * {@link CHAT_UNREAD_COUNT_MAX} so a never-read busy room stays cheap.
  *
- * @param userId - The caller.
+ * @param viewer - The caller (event rooms follow ADR 0001 §7).
  */
-export async function listVisibleRooms(db: DbOrTx, userId: string): Promise<RoomListRecord[]> {
+export async function listVisibleRooms(db: DbOrTx, viewer: EventViewer): Promise<RoomListRecord[]> {
+  const userId = viewer.id;
   const lastRead = alias(chatMessages, "last_read");
-  return db
+  const rows = await db
     .select({
-      id: chatRooms.id,
-      kind: chatRooms.kind,
-      cuencadaId: chatRooms.cuencadaId,
-      year: cuencadas.year,
-      title: chatRooms.title,
+      ...roomColumns,
       createdAt: chatRooms.createdAt,
       lastReadMessageId: chatReadStates.lastReadMessageId,
       unreadCount: sql<number>`(select count(*)::int from (
@@ -103,9 +227,11 @@ export async function listVisibleRooms(db: DbOrTx, userId: string): Promise<Room
     })
     .from(chatRooms)
     .leftJoin(cuencadas, eq(cuencadas.id, chatRooms.cuencadaId))
+    .leftJoin(events, eq(events.id, chatRooms.eventId))
     .leftJoin(chatReadStates, and(eq(chatReadStates.roomId, chatRooms.id), eq(chatReadStates.userId, userId)))
     .leftJoin(lastRead, eq(lastRead.id, chatReadStates.lastReadMessageId))
-    .where(visibleRoomSql());
+    .where(visibleRoomSql(viewer));
+  return rows.map(toRoomRecord);
 }
 
 /** The newest live message of a room. */
@@ -323,6 +449,12 @@ export interface ChatPrincipal {
   sessionId: string;
   displayName: string;
   /**
+   * Database role at connect time. Event-room access (`findVisibleRoom`) reads
+   * it; a role change closes the user's sockets (admin user routes), so a
+   * demoted admin reconnects with the new role.
+   */
+  role: UserRole;
+  /**
    * `profiles.listed_in_directory` ("Aparecer en el directorio"). Unlisted
    * members are left out of presence; refreshed by the periodic re-check.
    */
@@ -355,7 +487,7 @@ export async function loadPrincipal(
   input: { sessionId: string; userId: string; now: Date }
 ): Promise<ChatPrincipal | null> {
   const [row] = await db
-    .select({ userId: sessions.userId, displayName: users.displayName, listedInDirectory: listedSql })
+    .select({ userId: sessions.userId, displayName: users.displayName, role: users.role, listedInDirectory: listedSql })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
     .leftJoin(profiles, eq(profiles.userId, sessions.userId))
@@ -366,6 +498,7 @@ export async function loadPrincipal(
     userId: row.userId,
     sessionId: input.sessionId,
     displayName: row.displayName,
+    role: row.role,
     listedInDirectory: row.listedInDirectory
   };
 }

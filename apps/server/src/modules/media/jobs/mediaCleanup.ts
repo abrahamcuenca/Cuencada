@@ -13,7 +13,9 @@
  *    and failed rows, and the original of ready rows (only sanitized copies
  *    are served). This retries transient storage failures and removes bytes a
  *    client re-PUT with a still-valid URL after rejection/processing. No
- *    schema change is needed: the time window is the tracking.
+ *    schema change is needed: the time window is the tracking. Since WP-5.3
+ *    it covers both scopes (left join on `cuencadas`; keys from
+ *    `storage_prefix`, so event-album objects under `events/` are swept too).
  * 3. **Purge:** abandoned/cancelled `pending_upload` rows soft-deleted before
  *    the sweep window are hard-deleted (their objects were swept already).
  */
@@ -78,7 +80,7 @@ async function sweepLeftoverObjects(deps: CleanupDeps, now: Date, result: Cleanu
   const gone = await deps.db
     .select({ item: mediaItems, year: cuencadas.year })
     .from(mediaItems)
-    .innerJoin(cuencadas, eq(cuencadas.id, mediaItems.cuencadaId))
+    .leftJoin(cuencadas, eq(cuencadas.id, mediaItems.cuencadaId))
     .where(
       or(
         between(mediaItems.deletedAt, from, to),

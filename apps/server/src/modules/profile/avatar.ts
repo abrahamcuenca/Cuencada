@@ -7,7 +7,7 @@
  * `avatarUrlFor` is the public export other tracks (T3 RSVP, T6 family,
  * T7 chat) use to turn `profiles.avatar_key` into a URL.
  */
-import { clampCropRect, type ImageCropRect } from "@cuencada/types";
+import { clampAspectCropRect, clampCropRect, type ImageCropRect } from "@cuencada/types";
 import type { AvatarMimeType } from "../../db/schema/index.js";
 import sharp from "sharp";
 import type { FastifyBaseLogger } from "fastify";
@@ -235,6 +235,82 @@ async function processSquareImageNow(
       ...rest.map((side) =>
         fromSquare()
           .resize(side, side, { fit: "cover", position: "centre" })
+          .webp({ quality: AVATAR_WEBP_QUALITY })
+          .toBuffer()
+      )
+    ]);
+    return { ok: true, images };
+  } catch (error) {
+    return {
+      ok: false,
+      failure: isPixelLimitError(error)
+        ? AvatarProcessingFailure.PixelLimitExceeded
+        : AvatarProcessingFailure.DecodeFailed
+    };
+  }
+}
+
+/** What {@link processImage} renders: a fixed-aspect (e.g. 16:9) image at several widths. */
+export interface WideImageOptions {
+  /** Widths to encode (px), **largest first**: decoded once at `widths[0]`, the rest from that raw image. */
+  widths: readonly [number, ...number[]];
+  /** Width / height, finite and > 0 (the event cover uses `EVENT_COVER_ASPECT`, 16/9). */
+  aspect: number;
+  /**
+   * Optional crop in oriented source pixels, `size` = crop **width**. It is
+   * clamped with `clampAspectCropRect` before `extract()`; without it the
+   * image is centre-cropped to the aspect.
+   */
+  crop?: ImageCropRect;
+}
+
+/**
+ * The wide sibling of {@link processSquareImage} (WP-5.3 event covers): the
+ * same checks and order (format and 24 MP cap from the header, `.rotate()`
+ * then the clamped crop, resize, WebP without any metadata, so EXIF/GPS are
+ * dropped) under the same decode semaphore, at a fixed aspect ratio.
+ *
+ * @param input - The whole uploaded file (already size- and magic-byte-checked).
+ * @param declared - The type the magic bytes matched.
+ * @param options - Widths, aspect and optional crop.
+ * @returns One WebP per width, in order.
+ */
+export async function processImage(
+  input: Uint8Array,
+  declared: AvatarMimeType,
+  options: WideImageOptions
+): Promise<SquareImageResult> {
+  return avatarProcessingSlots.run(() => processImageNow(input, declared, options));
+}
+
+async function processImageNow(input: Uint8Array, declared: AvatarMimeType, options: WideImageOptions): Promise<SquareImageResult> {
+  const [primary, ...rest] = options.widths;
+  const heightOf = (width: number): number => Math.max(1, Math.round(width / options.aspect));
+  try {
+    const metadata = await sharpInput(input).metadata();
+    if (metadata.format !== SHARP_FORMAT_BY_MIME[declared]) {
+      return { ok: false, failure: AvatarProcessingFailure.FormatMismatch };
+    }
+    const size = orientedSize(metadata);
+    if (size === null) return { ok: false, failure: AvatarProcessingFailure.DecodeFailed };
+    if (size.width * size.height > AVATAR_MAX_INPUT_PIXELS) {
+      return { ok: false, failure: AvatarProcessingFailure.PixelLimitExceeded };
+    }
+    let pipeline = sharpInput(input).rotate();
+    if (options.crop !== undefined) {
+      pipeline = pipeline.extract(clampAspectCropRect(options.crop, size.width, size.height, options.aspect));
+    }
+    const base = await pipeline
+      .resize(primary, heightOf(primary), { fit: "cover", position: "centre" })
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+    const fromBase = (): ReturnType<typeof sharp> =>
+      sharp(base.data, { raw: { width: base.info.width, height: base.info.height, channels: base.info.channels } });
+    const images = await Promise.all([
+      fromBase().webp({ quality: AVATAR_WEBP_QUALITY }).toBuffer(),
+      ...rest.map((width) =>
+        fromBase()
+          .resize(width, heightOf(width), { fit: "cover", position: "centre" })
           .webp({ quality: AVATAR_WEBP_QUALITY })
           .toBuffer()
       )
