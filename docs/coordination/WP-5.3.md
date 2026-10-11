@@ -41,5 +41,7 @@ Migration 0009 is expand-only (a nullable column and a new table; 0008-era code 
 - Removing or demoting yourself so that you lose access answers 404 on the follow-up detail (backlog note); treat as "left".
 
 ## Verification
-- `pnpm lint`, `pnpm turbo run typecheck --force`, `pnpm test`, `pnpm build`: see the final report of the branch.
+- `pnpm lint` clean; `pnpm turbo run typecheck --force` 6/6; `pnpm test` 199 files / 2638 tests passed; `pnpm build` ok. `drizzle-kit generate`: no schema changes after 0009. No web code changed (none needed to typecheck).
+- e2e on isolated ports and DB (`E2E_API_PORT=3953`, `E2E_STORAGE_PORT=3954`, `E2E_WEB_PORT=4953`, `cuencada_w53_e2e`): `chat.spec.ts` and `gallery.spec.ts` on iphone-13, pixel-7 and desktop-1280, 6/6 passed (no regression in the chat fan-out or the gallery upload path).
+- Merged `origin/main` (already up to date at 484405d).
 - New tests: `events/routes.test.ts` (21), `events/adminView.test.ts` (4), `events/socket.test.ts` (4), `events/media.test.ts` (7), `events/cover.test.ts` (4), `chat/audience.test.ts` (3), matrix rows for 23 routes with 50+ probes (`__tests__/security/eventRouteMatrix.ts`), `pii-leak.test.ts` events case, `migrations.test.ts` 0009, `packages/types/src/eventNotices.test.ts`; `docs/security/routes.md` regenerated; threat model §4.9 evidence filled in.
