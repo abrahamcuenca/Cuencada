@@ -220,6 +220,36 @@ export function makeAnnouncedCuencada(overrides: Partial<PublicCuencada> = {}): 
   });
 }
 
+export const CUENCADA_2019_ID = fixtureId(2019);
+
+/**
+ * 2019 as a "Cuencada anterior" (WP-5.1): historical, published, past, no
+ * dates and no place recorded, no programa or places. Fictional data.
+ */
+export function makeHistoricalCuencada(overrides: Partial<PublicCuencada> = {}): PublicCuencada {
+  return makePublicCuencada({
+    id: CUENCADA_2019_ID,
+    year: 2019,
+    slug: "2019",
+    title: "Cuencada 2019",
+    status: "past",
+    isHistorical: true,
+    startsAt: null,
+    endsAt: null,
+    city: null,
+    state: null,
+    description: "Nos reunimos en la casa de la abuela.",
+    songUrl: null,
+    weatherWidgetUrl: null,
+    rsvpDeadline: null,
+    publicItinerary: [],
+    publicLocations: [],
+    publicAnnouncements: [],
+    todayMessage: null,
+    ...overrides
+  });
+}
+
 /** `GET /cuencadas/home` in announced mode: 2027 featured without dates, 2026 as the latest past edition. */
 export function makeAnnouncedHome(overrides: Partial<CuencadaHome> = {}): CuencadaHome {
   return makeMemoriesHome({ mode: "announced", featured: makeAnnouncedCuencada(), ...overrides });

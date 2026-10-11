@@ -61,7 +61,8 @@ export function makeEdition(year: number, startsAt = `${year}-09-13T12:00:00.000
     year,
     slug: String(year),
     title: `Cuencada ${year}`,
-    status: "past",
+    // Consistent with the dates, like the server: the gallery's default year trusts `past`.
+    status: Date.parse(startsAt) > Date.now() ? "upcoming" : "past",
     startsAt,
     endsAt: startsAt,
     timezone: "America/Merida",
