@@ -3,6 +3,8 @@ import { addDays, rsvpDateProblems, rsvpDateWindow, rsvpEditability } from "./ru
 
 const edition = {
   isPublished: true,
+  isHistorical: false,
+  year: 2026,
   startsAt: new Date("2026-09-13T00:00:00-06:00"),
   endsAt: new Date("2026-09-18T23:59:59-06:00"),
   timezone: "America/Merida",
@@ -43,6 +45,20 @@ describe("rsvpEditability", () => {
     expect(rsvpEditability({ ...announced, rsvpDeadline: null }, now)).toEqual({ editable: false, reason: "dates_pending" });
     // Unpublished stays draft, whatever the dates.
     expect(rsvpEditability({ ...announced, isPublished: false }, now)).toEqual({ editable: false, reason: "draft" });
+  });
+
+  it("refuses changes for a historical edition (WP-5.1), whatever its dates or deadline", () => {
+    const historical = { ...edition, isHistorical: true, rsvpDeadline: null };
+    // The dates would make it upcoming or active; historical editions are always past.
+    expect(rsvpEditability(historical, new Date("2026-09-01T12:00:00Z"))).toEqual({ editable: false, reason: "past" });
+    expect(rsvpEditability(historical, new Date("2026-09-15T12:00:00Z"))).toEqual({ editable: false, reason: "past" });
+    const undated = { ...historical, year: 2019, startsAt: null, endsAt: null };
+    expect(rsvpEditability(undated, new Date("2026-09-01T12:00:00Z"))).toEqual({ editable: false, reason: "past" });
+  });
+
+  it("refuses changes for an undated edition of an earlier year as past, not dates pending (WP-5.1)", () => {
+    const undated = { ...edition, year: 2019, startsAt: null, endsAt: null };
+    expect(rsvpEditability(undated, new Date("2026-09-01T12:00:00Z"))).toEqual({ editable: false, reason: "past" });
   });
 
   it("allows changes while the edition is active when there is no deadline", () => {

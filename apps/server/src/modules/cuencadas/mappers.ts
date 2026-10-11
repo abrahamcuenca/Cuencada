@@ -90,7 +90,8 @@ export function toCuencadaSummary(row: CuencadaRow, hasMedia: boolean, now: Date
     state: row.state,
     heroImageUrl: row.heroImageUrl,
     themeColor: row.themeColor,
-    hasMedia
+    hasMedia,
+    isHistorical: row.isHistorical
   };
 }
 
@@ -113,7 +114,8 @@ function publicScalars(row: CuencadaRow, now: Date): Omit<AdminCuencada, "isPubl
     themeColor: row.themeColor,
     songUrl: row.songUrl,
     weatherWidgetUrl: row.weatherWidgetUrl,
-    rsvpDeadline: isoOrNull(row.rsvpDeadline)
+    rsvpDeadline: isoOrNull(row.rsvpDeadline),
+    isHistorical: row.isHistorical
   };
 }
 

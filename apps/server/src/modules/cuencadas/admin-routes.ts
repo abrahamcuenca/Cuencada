@@ -4,6 +4,9 @@
  * - Publishing is `PATCH { isPublished: true }`; it audits
  *   `cuencada.published` and creates the edition's chat room if missing.
  * - Only drafts that were never published and have no media can be deleted.
+ * - A historical edition (WP-5.1, "Cuencada anterior") must be of a year
+ *   before the current one in its timezone, on create and on every PATCH of
+ *   the merged row, and gets no chat room when published.
  * - Audit metadata lists changed field *names* only: some values (WhatsApp,
  *   album links) are credential-like and must not be copied into the log.
  */
@@ -16,6 +19,7 @@ import {
   adminCuencadaSchema,
   apiErrorSchema,
   CUENCADA_DATES_TOGETHER_MESSAGE,
+  CUENCADA_HISTORICAL_YEAR_MESSAGE,
   createCuencadaInputSchema,
   idParamSchema,
   type UpdateCuencadaInput,
@@ -38,6 +42,7 @@ import {
   getCuencadaById,
   loadEditionContent
 } from "./repository.js";
+import { localYearInZone } from "./status.js";
 
 const DUPLICATE_YEAR = "Ya existe una Cuencada para ese año.";
 const PUBLISHED_YEAR_LOCKED = "No se puede cambiar el año de una Cuencada publicada. Despublícala primero.";
@@ -62,6 +67,22 @@ function mergedDatesProblem(startsAt: Date | null, endsAt: Date | null): string 
   if (startsAt === null && endsAt === null) return null;
   if (startsAt === null || endsAt === null) return CUENCADA_DATES_TOGETHER_MESSAGE;
   return endsAt.getTime() > startsAt.getTime() ? null : "La fecha de fin debe ser posterior al inicio.";
+}
+
+/**
+ * Refuse a historical edition whose year is not before the current year in
+ * its timezone (400 on `year`). The schema cannot check this: it depends on now.
+ *
+ * @param edition - The merged flag, year and timezone.
+ * @param now - Current instant (`app.clock.now()`).
+ * @throws AppError `VALIDATION`.
+ */
+function assertHistoricalYear(edition: { isHistorical: boolean; year: number; timezone: string }, now: Date): void {
+  if (edition.isHistorical && edition.year >= localYearInZone(now, edition.timezone)) {
+    throw new AppError("VALIDATION", CUENCADA_HISTORICAL_YEAR_MESSAGE, {
+      details: [{ path: "year", message: CUENCADA_HISTORICAL_YEAR_MESSAGE }]
+    });
+  }
 }
 
 /** DB `set` object for a PATCH: only the keys that were sent. */
@@ -107,6 +128,7 @@ const cuencadaAdminRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       const admin = authUser(request);
       const input = request.body;
+      assertHistoricalYear(input, app.clock.now());
       const row = await app.db
         .transaction(async (tx) => {
           const [created] = await tx
@@ -201,6 +223,15 @@ const cuencadaAdminRoutes: FastifyPluginAsyncZod = async (app) => {
             });
           }
 
+          assertHistoricalYear(
+            {
+              isHistorical: input.isHistorical ?? current.isHistorical,
+              year: input.year ?? current.year,
+              timezone: input.timezone ?? current.timezone
+            },
+            app.clock.now()
+          );
+
           const startsAt = input.startsAt === undefined ? current.startsAt : toDateOrNull(input.startsAt);
           const endsAt = input.endsAt === undefined ? current.endsAt : toDateOrNull(input.endsAt);
           const datesProblem = mergedDatesProblem(startsAt, endsAt);
@@ -243,6 +274,9 @@ const cuencadaAdminRoutes: FastifyPluginAsyncZod = async (app) => {
               metadata: { year: updated.year, chatRoomCreated },
               ip: request.ip
             });
+          } else if (updated.isPublished && current.isHistorical && !updated.isHistorical) {
+            // No longer historical while published: it gets the room its publish skipped (idempotent).
+            await ensureCuencadaChatRoom(tx, updated);
           } else if (current.isPublished && !updated.isPublished) {
             await recordAudit(tx, {
               actorUserId: admin.id,

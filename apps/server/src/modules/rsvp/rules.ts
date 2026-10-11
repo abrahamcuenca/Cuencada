@@ -6,14 +6,14 @@
  * "upcoming/active/past" means exactly what the edition pages show.
  */
 import { type ApiErrorDetail, CuencadaStatus, RSVP_DATE_WINDOW_DAYS, RSVP_DATES_PENDING_MESSAGE } from "@cuencada/types";
-import { computeCuencadaStatus, localDateInZone } from "../cuencadas/status.js";
+import { computeCuencadaStatus, localDateInZone, type StatusInput } from "../cuencadas/status.js";
 
-/** Edition fields the RSVP rules depend on. Dates are both set or both `null` (announced). */
-export interface RsvpEditionInput {
-  isPublished: boolean;
-  startsAt: Date | null;
-  endsAt: Date | null;
-  timezone: string;
+/**
+ * Edition fields the RSVP rules depend on. Dates are both set or both `null`.
+ * `isHistorical`/`year` feed the status (WP-5.1): a historical edition, or an
+ * undated one from an earlier year, is `past` and refuses RSVPs.
+ */
+export interface RsvpEditionInput extends StatusInput {
   rsvpDeadline: Date | null;
 }
 
@@ -40,8 +40,9 @@ export type RsvpEditability = { editable: true } | { editable: false; reason: Rs
 
 /**
  * Whether members may create or change their RSVP at `now`: the edition must
- * be published, have dates (not `announced`: there is no stay window yet,
- * whatever the deadline says) and be `upcoming` or `active` (calendar days in its timezone),
+ * be published, not historical (WP-5.1: always `past`), have dates (not
+ * `announced`: there is no stay window yet, whatever the deadline says) and be
+ * `upcoming` or `active` (calendar days in its timezone),
  * and, when a deadline is set, today (in the edition's timezone) must be on
  * or before the deadline's calendar day. The deadline therefore lasts until
  * local midnight at the end of that day, whatever hour was stored.

@@ -1,7 +1,7 @@
 /**
  * Cuencada editions and their content: locations, itinerary, daily messages
  * and announcements. Edition status (`draft`/`upcoming`/`active`/`past`) is
- * computed from `is_published` and the dates, never stored.
+ * computed from `is_published`, `is_historical`, the year and the dates, never stored.
  */
 import { DAILY_MESSAGE_MAX_LENGTH, ITINERARY_TAGS_MAX, LocationKind, Visibility } from "@cuencada/types";
 import { sql } from "drizzle-orm";
@@ -58,6 +58,12 @@ export const cuencadas = pgTable(
      * 0002 were backfilled with `created_at`. Null means "never published".
      */
     firstPublishedAt: timestamptz("first_published_at"),
+    /**
+     * A Cuencada that happened before the portal existed (0007, WP-5.1). Always
+     * `past` once published: no chat room, no RSVP, never the Home hero. The
+     * API requires `year` before the current year; no DB CHECK (it depends on now).
+     */
+    isHistorical: boolean("is_historical").notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt()
   },
