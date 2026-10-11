@@ -2,7 +2,7 @@
  * Decode → downscale → re-encode, shared by the resize worker and the
  * main-thread fallback (see `resizeImage.ts`). No React, no store.
  */
-import { drawSquareCrop, type SquareCropSpec } from "./cropCore";
+import { type CropOutputSize, drawCrop, type SquareCropSpec } from "./cropCore";
 import type { ImageSize } from "./imageSize";
 
 /** When and how much to shrink. */
@@ -122,7 +122,7 @@ export const CROP_DECODE_MAX_EDGE = 4096;
  *
  * @param blob - The picked image.
  * @param spec - Rotation and crop, in fractions of the rotated image.
- * @param output - Output side (px).
+ * @param output - Output side (px) of a square crop, or the output size of a fixed-aspect one (WP-5.4 covers).
  * @param encode - Output format.
  * @param stored - Size read from the header, when known.
  * @throws {ImageDecodeError} When the image can't be decoded; other errors for canvas or encode failures.
@@ -130,7 +130,7 @@ export const CROP_DECODE_MAX_EDGE = 4096;
 export async function decodeAndCrop(
   blob: Blob,
   spec: SquareCropSpec,
-  output: number,
+  output: number | CropOutputSize,
   encode: EncodeOptions,
   stored: ImageSize | null = null
 ): Promise<Blob> {
@@ -142,9 +142,10 @@ export async function decodeAndCrop(
     throw new ImageDecodeError();
   }
   try {
-    const canvas = makeCanvas({ width: output, height: output });
+    const size: CropOutputSize = typeof output === "number" ? { width: output, height: output } : output;
+    const canvas = makeCanvas(size);
     try {
-      drawSquareCrop(canvas.context, bitmap, { width: bitmap.width, height: bitmap.height }, spec, output);
+      drawCrop(canvas.context, bitmap, { width: bitmap.width, height: bitmap.height }, spec, size);
       return await canvas.encode(encode);
     } finally {
       canvas.free();

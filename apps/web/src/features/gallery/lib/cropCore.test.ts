@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { applyAffine, type CropContext, cropPixels, drawSquareCrop, rotatedSize, rotationMatrix } from "./cropCore";
+import { applyAffine, type CropContext, cropPixels, drawCrop, drawSquareCrop, rotatedSize, rotationMatrix } from "./cropCore";
 
 describe("rotationMatrix", () => {
   const width = 400;
@@ -61,5 +61,27 @@ describe("drawSquareCrop", () => {
     expect(context.translate).toHaveBeenCalledWith(-0, -100);
     expect(context.transform).toHaveBeenCalledWith(0, 1, -1, 0, 200, 0);
     expect(context.drawImage).toHaveBeenCalledWith(source, 0, 0, 400, 200);
+  });
+});
+
+describe("drawCrop (WP-5.4, fixed aspect)", () => {
+  it("scales a 16:9 crop into a 1920 × 1080 canvas", () => {
+    const context = {
+      fillStyle: "",
+      imageSmoothingEnabled: false,
+      imageSmoothingQuality: "low",
+      setTransform: vi.fn(),
+      fillRect: vi.fn(),
+      scale: vi.fn(),
+      translate: vi.fn(),
+      transform: vi.fn(),
+      drawImage: vi.fn()
+    };
+    const source = {} as CanvasImageSource; // Safe: the mocked drawImage never reads it.
+    // A 4000 × 3000 photo, full width, 2250 px tall band starting at 375 px.
+    drawCrop(context as unknown as CropContext, source, { width: 4000, height: 3000 }, { rotation: 0, x: 0, y: 0.125, width: 1, height: 0.75 }, { width: 1920, height: 1080 });
+    expect(context.fillRect).toHaveBeenCalledWith(0, 0, 1920, 1080);
+    expect(context.scale).toHaveBeenCalledWith(1920 / 4000, 1080 / 2250);
+    expect(context.translate).toHaveBeenCalledWith(-0, -375);
   });
 });

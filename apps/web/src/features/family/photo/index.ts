@@ -8,5 +8,5 @@
  * `./ImageCropper`) so it stays out of the initial bundle.
  */
 export { PERSON_PHOTO_REMOVED, PersonPhotoEditor, type PersonPhotoEditorProps } from "./PersonPhotoEditor";
-export { type CropStep, useCropStep } from "./useCropStep";
+export { type CropStep, type CropStepOptions, useCropStep } from "./useCropStep";
 export { usePersonPhotoUpload } from "./usePersonPhotoUpload";
