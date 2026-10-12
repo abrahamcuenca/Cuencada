@@ -1,6 +1,6 @@
-import type { TreeLinkProposal } from "@cuencada/types";
-import { type ReactNode, useState } from "react";
-import { Link } from "react-router-dom";
+import { idSchema, type TreeLinkProposal } from "@cuencada/types";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { getApiErrorMessage, isAbortError } from "../../../shared/api/errors";
 import { formatDate } from "../../../shared/lib/dates";
 import { Badge } from "../../../shared/ui/Badge";
@@ -22,26 +22,46 @@ const PAGE_SIZE = 20;
  * `/arbol/propuestas` ("Mis propuestas", WP-6.4): the caller's own
  * tree-link proposals, newest first, with their status, the admin's note
  * (only the proposer sees it) and "Retirar" while pending.
+ * `?propuesta={id}` (the WP-6.1 notification link, via `/arbol?propuesta=`)
+ * highlights and focuses that proposal when it is on a loaded page.
  */
 export function MyProposalsPage(): ReactNode {
   const [cursors, setCursors] = useState<Array<string | null>>([null]);
+  const [params] = useSearchParams();
+  const requested = idSchema.safeParse(params.get("propuesta"));
+  const focusId = requested.success ? requested.data.toLowerCase() : null;
   return (
     <div className={cx("cu-container", styles.page)}>
-      <Link to="/arbol">‹ Árbol familiar</Link>
+      <Link to="/arbol" className={styles.back}>
+        ‹ Árbol familiar
+      </Link>
       <h1 className={styles.pageTitle}>Mis propuestas</h1>
       <p className={styles.muted}>
         Lo que propusiste para unir el árbol («Es la misma persona», «Conectar con…»). Un administrador revisa cada propuesta antes de cambiar algo.
       </p>
       <ul className={styles.list}>
         {cursors.map((cursor, index) => (
-          <ProposalsPage key={cursor ?? "first"} cursor={cursor} isLast={index === cursors.length - 1} onMore={(next) => setCursors([...cursors, next])} />
+          <ProposalsPage
+            key={cursor ?? "first"}
+            cursor={cursor}
+            focusId={focusId}
+            isLast={index === cursors.length - 1}
+            onMore={(next) => setCursors([...cursors, next])}
+          />
         ))}
       </ul>
     </div>
   );
 }
 
-function ProposalsPage({ cursor, isLast, onMore }: { cursor: string | null; isLast: boolean; onMore: (cursor: string) => void }): ReactNode {
+interface ProposalsPageProps {
+  cursor: string | null;
+  focusId: string | null;
+  isLast: boolean;
+  onMore: (cursor: string) => void;
+}
+
+function ProposalsPage({ cursor, focusId, isLast, onMore }: ProposalsPageProps): ReactNode {
   const page = useGetMyProposalsQuery({ limit: PAGE_SIZE, ...(cursor === null ? {} : { cursor }) });
   const denial = useAccessDenial(page.error);
   if (page.currentData === undefined) {
@@ -82,7 +102,7 @@ function ProposalsPage({ cursor, isLast, onMore }: { cursor: string | null; isLa
     <>
       {items.map((proposal) => (
         <li key={proposal.id}>
-          <ProposalItem proposal={proposal} />
+          <ProposalItem proposal={proposal} focused={proposal.id === focusId} />
         </li>
       ))}
       {isLast && nextCursor !== null ? (
@@ -96,9 +116,16 @@ function ProposalsPage({ cursor, isLast, onMore }: { cursor: string | null; isLa
   );
 }
 
-function ProposalItem({ proposal }: { proposal: TreeLinkProposal }): ReactNode {
+function ProposalItem({ proposal, focused }: { proposal: TreeLinkProposal; focused: boolean }): ReactNode {
   const [withdraw, state] = useWithdrawProposalMutation();
   const toast = useToast();
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!focused) return;
+    ref.current?.focus({ preventScroll: true });
+    // Optional call: jsdom and very old WebViews lack scrollIntoView options.
+    ref.current?.scrollIntoView?.({ block: "center" });
+  }, [focused]);
   const doWithdraw = async (): Promise<void> => {
     try {
       await withdraw(proposal.id).unwrap();
@@ -108,7 +135,13 @@ function ProposalItem({ proposal }: { proposal: TreeLinkProposal }): ReactNode {
     }
   };
   return (
-    <article className={styles.item} aria-label={describeProposal(proposal)}>
+    <article
+      ref={ref}
+      tabIndex={focused ? -1 : undefined}
+      aria-current={focused ? "true" : undefined}
+      className={cx(styles.item, focused && styles.focused)}
+      aria-label={describeProposal(proposal)}
+    >
       <div className={styles.itemHeader}>
         <h2 className={styles.itemTitle}>{describeProposal(proposal)}</h2>
         <Badge tone={PROPOSAL_STATUS_TONES[proposal.status]}>{PROPOSAL_STATUS_LABELS[proposal.status]}</Badge>

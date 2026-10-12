@@ -173,7 +173,9 @@ export function FullTreePage(): ReactNode {
 
   return (
     <div className={cx("cu-container", styles.page)}>
-      <Link to="/arbol">‹ Árbol familiar</Link>
+      <Link to="/arbol" className={styles.back}>
+        ‹ Árbol familiar
+      </Link>
       <h1 className={styles.pageTitle}>Árbol completo</h1>
       <p className={styles.muted}>Todos los descendientes de la raíz del árbol. Toca ▸ para ver la siguiente generación.</p>
       {me?.personId ? <ConnectCta onPropose={() => setProposing(true)} /> : null}

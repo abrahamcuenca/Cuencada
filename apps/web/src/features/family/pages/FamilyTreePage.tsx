@@ -1,6 +1,6 @@
 import { type FamilyTreeView, idSchema } from "@cuencada/types";
 import { type ReactNode, Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useAppSelector } from "../../../app/hooks";
 import { getApiErrorCode, getApiErrorMessage, isAbortError } from "../../../shared/api/errors";
 import { Button } from "../../../shared/ui/Button";
@@ -59,10 +59,13 @@ export function FamilyTreePage(): ReactNode {
   const trail = useMemo(() => resolveTrail(trailIds, names), [trailIds, names]);
   const [expanded, setExpanded] = useState(false);
   const validId = personId === undefined || idSchema.safeParse(personId).success;
+  // WP-6.4: `/arbol?propuesta={id}` (the WP-6.1 "tree_proposal_resolved" link) opens "Mis propuestas" on it.
+  const [search] = useSearchParams();
+  const proposalId = search.get("propuesta");
 
   const depth = expanded ? EXPANDED_DEPTH : 1;
   const tree = useGetFamilyTreeQuery(personId === undefined ? { depth } : { personId, depth }, {
-    skip: !validId
+    skip: !validId || proposalId !== null
   });
 
   const open: OpenPerson = (person) => {
@@ -74,6 +77,11 @@ export function FamilyTreePage(): ReactNode {
     };
     navigate(`/arbol/${encodeURIComponent(person.id)}`, { state });
   };
+
+  if (proposalId !== null) {
+    const parsed = idSchema.safeParse(proposalId);
+    return <Navigate to={parsed.success ? `/arbol/propuestas?propuesta=${encodeURIComponent(parsed.data)}` : "/arbol/propuestas"} replace />;
+  }
 
   return (
     <div className={cx("cu-container", styles.page)}>

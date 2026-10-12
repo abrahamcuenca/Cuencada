@@ -7,7 +7,10 @@
  * Fictional people only.
  *
  * The root ancestor is a single global setting, so this journey runs in one
- * project only (the iPhone one); it also takes the 1280 px doc shots there.
+ * project only: the desktop one, whose admin has the fewest logins (the
+ * per-email login limiter is 10 per 15 minutes, and the phone projects'
+ * admins already log in about that often). It takes the 375 and 1280 px doc
+ * shots itself.
  */
 import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -21,7 +24,7 @@ type SharpFactory = (input: Buffer) => { resize(width: number): { webp(options: 
 
 /** `docs/ux/screenshots/wp64/<name>-<width>.webp` at 375 and 1280 px, only with `E2E_UPDATE_DOCS=1`. */
 async function shots(page: Page, testInfo: TestInfo, name: string, focus?: Locator): Promise<void> {
-  if (process.env.E2E_UPDATE_DOCS !== "1" || testInfo.project.name !== ProjectKey.Iphone) return;
+  if (process.env.E2E_UPDATE_DOCS !== "1" || testInfo.project.name !== ProjectKey.Desktop) return;
   const previous = page.viewportSize();
   const out = join(REPO_ROOT, "docs/ux/screenshots/wp64");
   mkdirSync(out, { recursive: true });
@@ -38,12 +41,12 @@ async function shots(page: Page, testInfo: TestInfo, name: string, focus?: Locat
 }
 
 test.describe("one family tree", () => {
-  test("18 · a cousin's duplicate grandmother: he proposes «Es la misma persona», the admin approves, one connected tree", async ({
+  test("18 · a cousin's duplicate grandmother: he proposes «Es la misma persona», the admin approves, one connected tree @desktop", async ({
     page,
     project,
     newPhone
   }, testInfo) => {
-    test.skip(project !== ProjectKey.Iphone, "the root ancestor is global: one project runs this journey");
+    test.skip(project !== ProjectKey.Desktop, "the root ancestor is global: one project runs this journey");
     test.setTimeout(240_000);
     const family = familyNames(project);
     const branch = cousinBranchNames(project);
@@ -115,7 +118,8 @@ test.describe("one family tree", () => {
     await phone.goto("/arbol");
     await expect(phone.getByRole("article", { name: branch.cousin })).toBeVisible();
     const primos = phone.locator("details").filter({ has: phone.getByText(/^Primos \(\d+\)$/) });
-    await primos.locator("summary").click();
+    // Collapsed on phones, open from 700 px.
+    if ((await primos.getAttribute("open")) === null) await primos.locator("summary").click();
     await expect(primos.getByRole("button", { name: `Ver a ${ana.displayName}` })).toBeVisible();
     await expect(primos.getByRole("button", { name: `Ver a ${beto.displayName}` })).toBeVisible();
     await expect(phone.getByRole("complementary", { name: "¿No ves a tu familia? Propón una conexión" })).toHaveCount(0);

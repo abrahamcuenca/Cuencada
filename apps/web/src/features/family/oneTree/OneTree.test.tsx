@@ -156,6 +156,20 @@ describe("Mis propuestas", { timeout: 15_000 }, () => {
     expect(await within(pending).findByText("Retirada")).toBeInTheDocument();
   });
 
+  it("opens a proposal from the notification link /arbol?propuesta= (WP-6.1), focused", async () => {
+    const raul = db.people.get(IDS.raul);
+    const diego = db.people.get(IDS.diego);
+    if (raul === undefined || diego === undefined) throw new Error("fixture");
+    const target = makeProposal(db, { kind: "same_person", from: toSummary(raul), to: toSummary(diego), status: "approved", resolutionNote: "Listo." });
+    db.proposals = [makeProposal(db, { kind: "relate", relation: "partner_of", from: toSummary(diego), to: toSummary(raul) }), target];
+    renderApp(`/arbol?propuesta=${target.id}`, authenticatedState(me));
+    const article = await screen.findByRole("article", { name: "Raúl Herrera Morales es la misma persona que Diego Herrera Morales" });
+    await waitFor(() => expect(article).toHaveFocus());
+    expect(article).toHaveAttribute("aria-current", "true");
+    expect(within(article).getByText(/Listo\./)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Mis propuestas" })).toBeInTheDocument();
+  });
+
   it("shows an empty state", async () => {
     renderApp("/arbol/propuestas", authenticatedState(me));
     expect(await screen.findByText("Aún no has propuesto nada")).toBeInTheDocument();

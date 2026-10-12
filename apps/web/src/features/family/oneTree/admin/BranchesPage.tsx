@@ -184,14 +184,11 @@ function BranchCard({ branch, onReview }: { branch: DisconnectedBranch; onReview
           {branch.size === 1 ? "1 persona" : `${branch.size} personas`} · {branch.linkedAccounts === 1 ? "1 con cuenta" : `${branch.linkedAccounts} con cuenta`}
         </span>
       </div>
-      <p className={styles.muted}>
-        {branch.people.map((person, index) => (
-          <span key={person.id}>
-            {index > 0 ? ", " : ""}
-            {personLink(person)}
-          </span>
+      <ul className={styles.people} aria-label="Personas de la rama">
+        {branch.people.map((person) => (
+          <li key={person.id}>{personLink(person)}</li>
         ))}
-      </p>
+      </ul>
       {branch.suggestedMatches.length === 0 ? (
         <p className={styles.muted}>Sin coincidencias claras: abre a una persona de la rama y conéctala con sus parientes.</p>
       ) : (
