@@ -615,6 +615,8 @@ describe("member-facing reads never leak PII", () => {
       }
     }
     expect(problems).toEqual([]);
+  });
+
   it("notifications (WP-6.1): an actor who became unlisted carries no id or avatar; an invisible event's title never reaches the feed or a push", async () => {
     const editionId = (await getTestDb().select({ id: cuencadas.id }).from(cuencadas).where(eq(cuencadas.year, YEAR)))[0]?.id;
     if (editionId === undefined) throw new Error("no edition");
