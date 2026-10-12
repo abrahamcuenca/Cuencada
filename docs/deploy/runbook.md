@@ -543,9 +543,18 @@ If the verification email (or any other) doesn't arrive:
 
 ```sh
 printf 'admin password: '; read -rs SMOKE_PASSWORD; echo; export SMOKE_PASSWORD
+# WP-7: admins have two-step verification. Type the current code from the app right before running.
+printf 'código 2FA: '; read -rs SMOKE_TOTP_CODE; echo; export SMOKE_TOTP_CODE
 SMOKE_BASE_URL=https://cuencada.com SMOKE_EMAIL=admin@cuencada.com node scripts/deploy-smoke.mjs
-unset SMOKE_PASSWORD
+unset SMOKE_PASSWORD SMOKE_TOTP_CODE
 ```
+
+- The code is valid for about a minute and only once: if the login step
+  reports `TWO_FACTOR_INVALID`, wait for the next code and rerun.
+- An admin who has not enrolled yet makes the smoke test stop with "the admin
+  must enable two-step verification first…": enroll in the browser
+  (`/entrar` → "Activa la verificación en dos pasos"), then rerun.
+- The script never prints the code, the challenge token or any other secret.
 
 The smoke test checks:
 
@@ -554,7 +563,8 @@ The smoke test checks:
 - `no-cache` and `immutable` caching;
 - the SPA fallback, and a 404 for a missing asset;
 - the legacy redirect;
-- login, `/api/me` (`no-store`) and `/api/cuencadas/2026`;
+- login (with the two-step code when the account has it), `/api/me`
+  (`no-store`) and `/api/cuencadas/2026`;
 - a chat ticket plus a **WebSocket through nginx**.
 
 It prints no secret. Then, by hand:
@@ -711,8 +721,16 @@ Clear these items once the release that carries them is live.
   so admins land on "Activa la verificación en dos pasos" (members are
   unaffected; it is opt-in for them). Tell the admins before the release,
   and make sure at least two admins exist so one can reset the other.
-  Smoke test: log in as an admin → enrollment → `/admin` opens; log out and
-  in again → the code step appears.
+  **At the first WP-7 deploy, enroll the admin in the browser first** (log
+  in at `/entrar`; the admin is sent to "Activa la verificación en dos pasos";
+  save the recovery codes), **then** run the § 7 smoke test with a fresh code
+  (`SMOKE_TOTP_CODE`): before enrollment the smoke login stops with
+  `TWO_FACTOR_SETUP_REQUIRED`. Check by hand: log out and in again → the code
+  step appears. **Tell the family:** "Si al entrar ves un error genérico,
+  toca «Actualizar» (o recarga la página) para usar la versión nueva";
+  admins must update the app before logging in, because an older cached app
+  does not know the code step or the enrollment page (there is no minimum
+  client version yet, backlog).
 
 - **0010 `social_tree_memories`** (WP-6.0): expand-only (new tables, a
   nullable `media_items.memory_album_id`, wider scope/prefix CHECKs validated

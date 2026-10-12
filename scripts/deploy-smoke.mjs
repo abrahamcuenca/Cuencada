@@ -12,12 +12,24 @@
  *   SMOKE_BASE_URL       required. Origin of the site (nginx in front of the API).
  *   SMOKE_EMAIL / SMOKE_PASSWORD   account to log in with. Unset = public checks only.
  *   SMOKE_NEW_PASSWORD   if the account must change its password, change it to this.
+ *   SMOKE_TOTP_CODE      WP-7: the current 6-digit code of the account's authenticator app,
+ *                        for accounts with two-step verification (every admin). Read it with
+ *                        `read -rs` (runbook § 7); it is never printed. Admins must have
+ *                        enrolled in the browser first (the API answers 403
+ *                        TWO_FACTOR_SETUP_REQUIRED until they do).
  *   SMOKE_ORIGIN         Origin header for the API's CSRF/WS checks (default: SMOKE_BASE_URL's origin).
  *   SMOKE_STATIC=0       skip the SPA header checks (when hitting the API directly).
  *   SMOKE_HEALTH_PATH    default /healthz (nginx); /health when hitting the API directly.
  *   SMOKE_INSECURE_TLS=1 accept a self-signed certificate (local nginx test only).
  *
- * Never prints tokens, tickets, passwords or cookies. Exit code 1 on any failure.
+ * Never prints tokens, tickets, passwords, 2FA codes, challenge tokens or
+ * cookies. Exit code 1 on any failure.
+ *
+ * Dry check without a deploy (WP-7): run it against the e2e harness API
+ * (`SMOKE_STATIC=0 SMOKE_HEALTH_PATH=/health`, the harness's web origin as
+ * SMOKE_ORIGIN) with the seeded, pre-enrolled admin and a code from the
+ * test-only secret; and with the first-login admin to see the
+ * "enroll the admin in the browser first" failure.
  */
 
 const env = process.env;
@@ -145,11 +157,51 @@ async function chatSocket(token) {
   report(outcome.ok, "chat WebSocket through the proxy", outcome.detail);
 }
 
+/** Shown whenever the API answers 403 TWO_FACTOR_SETUP_REQUIRED (an admin who has not enrolled). */
+const ENROLL_FIRST =
+  "the admin must enable two-step verification first: log in at /entrar in the browser, enroll (QR + code, save the recovery codes), then rerun with SMOKE_TOTP_CODE";
+
+/** The API error code of a non-2xx response (never the body itself). */
+async function errorCode(response) {
+  return (await response.clone().json().catch(() => null))?.error?.code ?? "";
+}
+
+/**
+ * Finish a login that answered a two-step challenge (WP-7) with SMOKE_TOTP_CODE.
+ * Neither the code nor the challenge token is ever printed.
+ *
+ * @returns The issued session body, or null after reporting the failure.
+ */
+async function answerTwoFactor(challenge) {
+  const code = (env.SMOKE_TOTP_CODE ?? "").replace(/\s+/g, "");
+  if (!/^\d{6}$/.test(code)) {
+    report(false, "two-step verification required", "set SMOKE_TOTP_CODE to the current 6-digit code (read -rs, runbook § 7)");
+    return null;
+  }
+  const verified = await api("POST", "/api/auth/2fa/verify", { body: { challengeToken: challenge.challengeToken, code } });
+  const failure = verified.status === 200 ? "" : ` ${await errorCode(verified)}`;
+  const hint = failure.includes("TWO_FACTOR_INVALID") ? ", the code was wrong or already used: wait for the next one" : "";
+  report(verified.status === 200, "POST /api/auth/2fa/verify", `${verified.status}${failure}${hint}`);
+  return verified.status === 200 ? verified.json() : null;
+}
+
+/** Fail clearly when an admin has not enrolled two-step verification yet. */
+function needsEnrollment(user) {
+  if (user.twoFactorSetupRequired !== true) return false;
+  report(false, "admin two-step verification", ENROLL_FIRST);
+  return true;
+}
+
 async function memberChecks() {
   const login = await api("POST", "/api/auth/login", { body: { email: env.SMOKE_EMAIL, password: env.SMOKE_PASSWORD } });
   report(login.status === 200, "POST /api/auth/login", String(login.status));
   if (login.status !== 200) return;
-  let { accessToken, user } = await login.json();
+  let session = await login.json();
+  if (session.twoFactorRequired === true) {
+    session = await answerTwoFactor(session);
+    if (session === null) return;
+  }
+  let { accessToken, user } = session;
 
   if (user.mustChangePassword) {
     if (!env.SMOKE_NEW_PASSWORD) {
@@ -164,6 +216,7 @@ async function memberChecks() {
     if (changed.status !== 200) return;
     ({ accessToken, user } = await changed.json());
   }
+  if (needsEnrollment(user)) return;
 
   const me = await api("GET", "/api/me", { token: accessToken });
   report(me.status === 200, "GET /api/me", String(me.status));
@@ -171,7 +224,12 @@ async function memberChecks() {
   report(noStore.includes("no-store"), "API responses are no-store", noStore);
 
   const edition = await api("GET", "/api/cuencadas/2026", { token: accessToken });
-  report(edition.status === 200, "GET /api/cuencadas/2026", String(edition.status));
+  const editionCode = edition.status === 200 ? "" : await errorCode(edition);
+  if (editionCode === "TWO_FACTOR_SETUP_REQUIRED") {
+    report(false, "GET /api/cuencadas/2026", `403 ${editionCode}: ${ENROLL_FIRST}`);
+    return;
+  }
+  report(edition.status === 200, "GET /api/cuencadas/2026", `${edition.status} ${editionCode}`.trim());
 
   await chatSocket(accessToken);
 }

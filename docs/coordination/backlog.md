@@ -195,7 +195,7 @@ the runbook). Owner = **O**, agent = **A**.
 - [ ] **A:** retire the legacy root site: `git rm` `index.html`, `cuencada2026.html`, `images/fotos`, and `mensajes.txt` once the seed no longer needs it. `SEED_DAILY_MESSAGES_FILE` defaults to the root `mensajes.txt` (`DEFAULT_DAILY_MESSAGES_FILE` in `apps/server/src/seed.ts`), so move the file under `apps/server/` or change the default first. Update the Biome ignore list and AGENTS.md.
 - [ ] **O:** wait about a day after the deploy before publishing the first undated edition.
 - [ ] **A:** bump the dev/test Postgres from 16 to 18 to match production (`postgres:16-alpine` in `scripts/test-db.sh`, `scripts/dev-db.sh`, `.github/workflows/ci.yml` and `e2e.yml`).
-- [ ] **A:** minimum client version mechanism (force-update stale PWAs), then "bump min client version" in the release checklist (runbook § 9, § 11).
+- [ ] **A — next WP (promoted after WP-7):** minimum client version mechanism (force-update stale PWAs), then "bump min client version" in the release checklist (runbook § 9, § 11). WP-7 is the first change where it would have helped: an older cached app shows a generic error on the two-step code step and cannot open the admin enrollment page, so members must tap "Actualizar" by hand.
 
 ## Cutover checklist (WP-2.4–2.5)
 
