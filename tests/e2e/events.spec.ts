@@ -9,7 +9,8 @@
  * Runs against the WP-5.3 server (merged with #54). Fictional data only.
  */
 import type { Page } from "@playwright/test";
-import { CastRole, docShot, expect, login, setControl, test } from "./support/fixtures.js";
+import { ProjectKey } from "./harness/people.js";
+import { CastRole, docShot, expect, login, test } from "./support/fixtures.js";
 import { generateJpeg } from "./support/images.js";
 
 async function createEvent(page: Page, title: string, visibility: "Todos los miembros" | "Solo participantes"): Promise<string> {
@@ -19,7 +20,10 @@ async function createEvent(page: Page, title: string, visibility: "Todos los mie
   await sheet.getByRole("textbox", { name: /Título/ }).fill(title);
   await expect(sheet.getByTestId("slug-preview")).toContainText("la dirección lleva un código corto");
   await sheet.getByRole("textbox", { name: /Resumen/ }).fill("Salimos temprano; cada familia lleva algo.");
-  await setControl(sheet.getByRole("radio", { name: visibility }), true);
+  // Tap the label (no `force`): Playwright scrolls the sheet and waits until nothing (the sticky
+  // footer) covers it, which a forced tap on the small native radio did not on short phones.
+  await sheet.locator("label", { hasText: visibility }).click();
+  await expect(sheet.getByRole("radio", { name: visibility })).toBeChecked();
   await sheet.getByRole("button", { name: "Crear evento" }).click();
   await expect(page.getByRole("heading", { level: 1, name: title })).toBeVisible();
   // Member slugs always carry the random code (Security M1).
@@ -88,7 +92,9 @@ test.describe("eventos", () => {
     await darioPhone.goto(path.replace(/-[a-z2-7]{4}$/, "-zzzz"));
     await expect(darioPhone.getByRole("heading", { level: 1, name: "No encontramos ese evento" })).toBeVisible();
 
-    // An admin opens it (audited server-side).
+    // An admin opens it (audited server-side). Desktop only: the iPhone cast's admin also serves the
+    // 320/375 gates, and one more login there trips the per-account login limit (10 per 15 min).
+    if (project !== ProjectKey.Desktop) return;
     const adminPhone = await newPhone();
     await login(adminPhone, cast(CastRole.Admin));
     await adminPhone.goto(path);
