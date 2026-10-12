@@ -18,6 +18,7 @@
  * deterministically and paged by offset. No account ids leave the server.
  */
 import {
+  BranchMatchReason,
   type DuplicateCandidate,
   DuplicateReason,
   type PossibleDuplicate
@@ -191,4 +192,98 @@ export async function findPossibleDuplicates(db: DbOrTx): Promise<PossibleDuplic
       reason,
       mergeable: !(keep.linked && duplicate.linked)
     }));
+}
+
+/* -------------------------------------------------------------------------- */
+/* WP-6.4: richer matching for "Ramas sin conectar"                            */
+/* -------------------------------------------------------------------------- */
+
+/** A person as the branch matcher compares it: normalized name, nickname, years and relatives' names. */
+export interface MatchProfile {
+  id: string;
+  tokens: readonly string[];
+  /** Normalized nickname (tokens joined by one space), or `null`. */
+  nickname: string | null;
+  birthYear: number | null;
+  deathYear: number | null;
+  /** Normalized full names of the person's partners. */
+  partnerNames: readonly string[];
+  /** Normalized full names of the person's children. */
+  childNames: readonly string[];
+}
+
+/** Points per signal (summed, capped at 100). */
+const MATCH_POINTS: Record<BranchMatchReason, number> = {
+  [BranchMatchReason.SameName]: 60,
+  [BranchMatchReason.SimilarName]: 45,
+  [BranchMatchReason.Nickname]: 25,
+  [BranchMatchReason.SamePartner]: 30,
+  [BranchMatchReason.SharedChildren]: 25
+};
+/** Extra points when two or more children's names overlap. */
+const SHARED_CHILDREN_BONUS = 10;
+/** Weakest suggestion worth showing (a nickname alone is not enough). */
+export const BRANCH_MATCH_MIN_SCORE = 40;
+
+/** A normalized full name or nickname (tokens joined by one space), or `null` when empty. */
+export function normalizedName(name: string | null): string | null {
+  if (name === null) return null;
+  const joined = nameTokens(name).join(" ");
+  return joined === "" ? null : joined;
+}
+
+/** True when one nickname equals the other person's first name or nickname. */
+function nicknameMatch(a: MatchProfile, b: MatchProfile): boolean {
+  const matches = (nickname: string | null, other: MatchProfile): boolean =>
+    nickname !== null && (nickname === other.tokens[0] || nickname === other.nickname);
+  return matches(a.nickname, b) || matches(b.nickname, a);
+}
+
+/** How many of `a`'s names match one of `b`'s (equal, or one extra trailing word). */
+function namesOverlap(a: readonly string[], b: readonly string[]): number {
+  let shared = 0;
+  for (const name of a) {
+    const tokens = name.split(" ");
+    if (b.some((other) => nameMatch(tokens, other.split(" ")) !== null)) shared += 1;
+  }
+  return shared;
+}
+
+/**
+ * How likely `a` and `b` are the same human: name, nickname and structural
+ * signals (the same partner, overlapping children). Years must be
+ * compatible (±1 when both are known), and there must be some name evidence
+ * (a matching name or nickname: two strangers can share a partner's name);
+ * otherwise, or below {@link BRANCH_MATCH_MIN_SCORE}, `null`.
+ *
+ * @param a - One person.
+ * @param b - The other.
+ */
+export function scoreMatch(a: MatchProfile, b: MatchProfile): { reasons: BranchMatchReason[]; score: number } | null {
+  if (a.id === b.id || !compatibleYears(a, b)) return null;
+  const reasons: BranchMatchReason[] = [];
+  let score = 0;
+  const name = nameMatch(a.tokens, b.tokens);
+  if (name !== null) {
+    const reason = name === DuplicateReason.SameName ? BranchMatchReason.SameName : BranchMatchReason.SimilarName;
+    reasons.push(reason);
+    score += MATCH_POINTS[reason];
+  }
+  const nickname = nicknameMatch(a, b);
+  if (nickname) {
+    reasons.push(BranchMatchReason.Nickname);
+    score += MATCH_POINTS[BranchMatchReason.Nickname];
+  }
+  if (name === null && !nickname) return null;
+  if (namesOverlap(a.partnerNames, b.partnerNames) > 0) {
+    reasons.push(BranchMatchReason.SamePartner);
+    score += MATCH_POINTS[BranchMatchReason.SamePartner];
+  }
+  const sharedChildren = namesOverlap(a.childNames, b.childNames);
+  if (sharedChildren > 0) {
+    reasons.push(BranchMatchReason.SharedChildren);
+    score += MATCH_POINTS[BranchMatchReason.SharedChildren] + (sharedChildren >= 2 ? SHARED_CHILDREN_BONUS : 0);
+  }
+  const capped = Math.min(score, 100);
+  return capped >= BRANCH_MATCH_MIN_SCORE ? { reasons, score: capped } : null;
 }

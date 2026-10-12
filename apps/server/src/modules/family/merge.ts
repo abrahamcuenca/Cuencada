@@ -26,6 +26,12 @@
  *   edition). `person_revisions` rows keep pointing at the duplicate's id
  *   through their snapshots (the FK nulls `person_id`); a merge undo re-points
  *   them.
+ * - **WP-6.4:** before the delete, the duplicate's pending tree-link
+ *   proposals are re-pointed to keep (or withdrawn when they collapse or
+ *   collide, `proposalCleanup.ts`), its photo tags move to keep (WP-6.2's
+ *   `moveMediaTagsTx`) and a root ancestor setting naming it moves to keep.
+ *   A merge undo restores none of these (WP-6.0 decision 16): they stay on
+ *   keep, the same human.
  * - **Delete** the duplicate with `deletePersonTx` (no per-edge revisions:
  *   the merge revision records everything).
  * - **History:** one `person.merge` revision (`before` = both snapshots and
@@ -60,6 +66,10 @@ import { recordAudit, type Transaction } from "../../lib/audit.js";
 import { AppError, isAppError } from "../../lib/errors.js";
 import { invitePendingSql } from "../invites/service.js";
 import { losingPhotoKeys } from "./mergePhoto.js";
+// TODO(WP-6.2): point this at WP-6.2's `moveMediaTagsTx` in `modules/social/` and delete the placeholder.
+import { moveMediaTagsTx } from "../social/moveMediaTagsPlaceholder.js";
+import { repointPendingProposalsTx } from "./proposalCleanup.js";
+import { moveRootTx } from "./settings.js";
 import { MAX_PARENTS, insertRelationship, isAncestorOrSelf, lockFamilyTree } from "./relationships.js";
 import { type PersonRow, personColumns } from "./repository.js";
 import { insertRevision, personSnapshot, revisionsAboutPerson } from "./revisions.js";
@@ -455,6 +465,11 @@ async function applyMerge(
     await tx.update(cuencadaAttendance).set({ personId: keep.id }).where(inArray(cuencadaAttendance.id, plan.attendance.move));
   }
 
+  // WP-6.4 (ADR 0001 §8): proposals, photo tags and the root follow the duplicate to keep before the delete.
+  const proposals = await repointPendingProposalsTx(tx, duplicate.id, keep.id, actor);
+  const tags = await moveMediaTagsTx(tx, duplicate.id, keep.id);
+  const rootMoved = await moveRootTx(tx, duplicate.id, keep.id);
+
   // 4.1's delete: no edges or pending invites are left; no per-edge revisions (the merge records them).
   await deletePersonTx(tx, { ...duplicate, userId: null }, actor, { recordRevisions: false });
 
@@ -495,7 +510,12 @@ async function applyMerge(
       invitesMoved: plan.invites.move.length,
       invitesRevoked: plan.invites.revoke.length,
       attendanceMoved: plan.attendance.move.length,
-      attendanceDropped: plan.attendance.droppedCuencadaIds.length
+      attendanceDropped: plan.attendance.droppedCuencadaIds.length,
+      proposalsRepointed: proposals.repointed,
+      proposalsWithdrawn: proposals.withdrawn,
+      tagsMoved: tags.moved,
+      tagsDropped: tags.dropped,
+      rootMoved
     },
     ip: actor.ip
   });
