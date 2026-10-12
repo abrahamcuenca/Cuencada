@@ -70,7 +70,8 @@ function ProposeBody({ focus, mode, onClose }: ProposeDialogProps & { mode: Prop
     const trimmed = note.trim();
     const body =
       mode === "same_person"
-        ? { kind: "same_person" as const, fromPersonId: other.id, toPersonId: focus.id }
+        ? // The picked person is the "real" copy: `to` is who an approval keeps by default.
+          { kind: "same_person" as const, fromPersonId: focus.id, toPersonId: other.id }
         : { kind: "relate" as const, ...connectProposal(focus.id, other.id, role) };
     try {
       await create({ ...body, note: trimmed === "" ? null : trimmed }).unwrap();

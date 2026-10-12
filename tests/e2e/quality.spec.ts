@@ -45,6 +45,9 @@ const MEMBER_ROUTES: RouteCheck[] = [
   { name: "galeria", open: `/galeria/${FUTURE_YEAR}`, ready: `Álbum vivo ${FUTURE_YEAR}` },
   { name: "directorio", open: "/directorio", ready: "Directorio familiar" },
   { name: "arbol", open: "/arbol", ready: "Árbol familiar" },
+  // WP-6.4: "Árbol completo" and "Mis propuestas".
+  { name: "arbol-completo", open: "/arbol/completo", ready: "Árbol completo" },
+  { name: "arbol-propuestas", open: "/arbol/propuestas", ready: "Mis propuestas" },
   { name: "chat", open: "/chat" },
   {
     name: "chat-sala",
@@ -84,6 +87,9 @@ const ADMIN_ROUTES: RouteCheck[] = [
   // WP-4.5: the "Posibles duplicados" tab.
   { name: "admin-duplicados", open: "/admin/familia/actividad?vista=duplicados", ready: "Actividad del árbol" },
   { name: "admin-cuencadas", open: "/admin/cuencadas" },
+  // WP-6.4.
+  { name: "admin-propuestas", open: "/admin/familia/propuestas", ready: "Propuestas del árbol" },
+  { name: "admin-ramas", open: "/admin/familia/ramas", ready: "Ramas sin conectar" },
   // WP-5.4.
   { name: "admin-eventos", open: "/admin/eventos", ready: "Eventos", readyExact: true },
   // WP-5.1: the open "Agregar Cuencada anterior" form.

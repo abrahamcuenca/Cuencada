@@ -67,7 +67,7 @@ describe("proposals from the person page", { timeout: 15_000 }, () => {
 
     expect(await screen.findByText(/Enviamos tu propuesta/)).toBeInTheDocument();
     expect(posts("/family/proposals")).toEqual([
-      { kind: "same_person", fromPersonId: fixtureId(41), toPersonId: IDS.raul, note: "Es mi hijo, lo agregó mi prima." }
+      { kind: "same_person", fromPersonId: IDS.raul, toPersonId: fixtureId(41), note: "Es mi hijo, lo agregó mi prima." }
     ]);
   });
 
