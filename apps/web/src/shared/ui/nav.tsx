@@ -17,7 +17,16 @@ export interface NavItem {
   badgeLabel?: string;
   /** Match only the exact path (use for "/" so it is not active everywhere). */
   end?: boolean;
+  /**
+   * TopNav only: show the link from {@link TOP_NAV_WIDE_MIN_PX} up, not at
+   * 900–999px where the bar has no room (the destination must be reachable
+   * another way there, e.g. the account menu). WP-5.4 "Eventos".
+   */
+  wideOnly?: boolean;
 }
+
+/** Width from which {@link NavItem.wideOnly} TopNav links show (matches `TopNav.module.css`). */
+export const TOP_NAV_WIDE_MIN_PX = 1000;
 
 /** Props passed to a custom link renderer so navs stay router-agnostic. */
 export interface NavLinkRenderProps {

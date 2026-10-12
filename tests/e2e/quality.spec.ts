@@ -26,6 +26,8 @@ interface RouteCheck {
   open: string | ((page: Page) => Promise<void>);
   /** Heading that proves the page rendered its content (not an error state) before measuring. */
   ready?: string;
+  /** Match `ready` exactly (WP-5.4: "Eventos" must not match "No pudimos cargar los eventos"). */
+  readyExact?: true;
 }
 
 const PUBLIC_ROUTES: RouteCheck[] = [
@@ -55,6 +57,8 @@ const MEMBER_ROUTES: RouteCheck[] = [
   { name: "perfil", open: "/perfil" },
   { name: "sesiones", open: "/perfil/sesiones" },
   { name: "mas", open: "/mas" },
+  // WP-5.4: the events list.
+  { name: "eventos", open: "/eventos", ready: "Eventos", readyExact: true },
   // WP-4.7: the profile's Contacto section from a link, and the open account menu.
   { name: "perfil-contacto", open: "/perfil#contacto", ready: "Contacto" },
   {
@@ -80,6 +84,8 @@ const ADMIN_ROUTES: RouteCheck[] = [
   // WP-4.5: the "Posibles duplicados" tab.
   { name: "admin-duplicados", open: "/admin/familia/actividad?vista=duplicados", ready: "Actividad del árbol" },
   { name: "admin-cuencadas", open: "/admin/cuencadas" },
+  // WP-5.4.
+  { name: "admin-eventos", open: "/admin/eventos", ready: "Eventos", readyExact: true },
   // WP-5.1: the open "Agregar Cuencada anterior" form.
   {
     name: "admin-cuencada-anterior",
@@ -107,7 +113,9 @@ async function open(page: Page, route: RouteCheck): Promise<void> {
   await page.waitForLoadState("networkidle");
   // Let lazy routes, skeletons and fonts settle.
   await expect(page.locator("main")).toBeVisible();
-  if (route.ready !== undefined) await expect(page.getByRole("heading", { name: route.ready })).toBeVisible();
+  if (route.ready !== undefined) {
+    await expect(page.getByRole("heading", { name: route.ready, exact: route.readyExact === true })).toBeVisible();
+  }
   await page.waitForTimeout(400);
 }
 
@@ -263,6 +271,36 @@ test.describe("mobile quality gates", () => {
       }
     ]);
     await expect(page.getByRole("dialog", { name: "Ajustar foto" })).toBeVisible();
+    assertGates(results);
+  });
+
+  test("the event pages (WP-5.4): create sheet, event page and its tabs", async ({ page }, testInfo) => {
+    test.setTimeout(180_000);
+    await recordTransientOverflow(page.context());
+    await login(page, castMember(ProjectKey.Iphone, CastRole.Fede));
+    await page.goto("/eventos");
+    await page.getByRole("button", { name: /Crear evento/ }).first().click();
+    const sheet = page.getByRole("dialog", { name: "Crear evento" });
+    await sheet.getByRole("textbox", { name: /Título/ }).fill("Comida de prueba de calidad con un título largo para medir");
+    await sheet.getByRole("button", { name: "Crear evento" }).click();
+    // Wait for the new event's own page (the list's "Eventos" heading would satisfy a bare h1 check).
+    await expect(page).toHaveURL(/\/eventos\/\d{4}\/[a-z0-9-]+$/);
+    await expect(page.getByRole("heading", { level: 1, name: /Comida de prueba/ })).toBeVisible();
+    const path = new URL(page.url()).pathname;
+    const results = await checkRoutes(page, testInfo, [
+      { name: "evento-detalle", open: path },
+      { name: "evento-chat", open: `${path}?vista=chat` },
+      { name: "evento-fotos", open: `${path}?vista=fotos` },
+      {
+        name: "evento-crear",
+        open: async (target) => {
+          await target.goto("/eventos");
+          await target.getByRole("button", { name: /Crear evento/ }).first().click();
+          await expect(target.getByRole("dialog", { name: "Crear evento" })).toBeVisible();
+        }
+      },
+      { name: "evento-no-encontrado", open: "/eventos/2026/no-existe-zz99", ready: "No encontramos ese evento" }
+    ]);
     assertGates(results);
   });
 

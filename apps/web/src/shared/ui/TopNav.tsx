@@ -67,7 +67,7 @@ export function TopNav({
               const isActive = isPathActive(currentPath, item.href, item.end);
               const showBadge = item.badge === true || (typeof item.badge === "number" && item.badge > 0);
               return (
-                <li key={item.key}>
+                <li key={item.key} className={item.wideOnly === true ? styles.wideOnly : undefined}>
                   {renderLink({
                     item,
                     href: item.href,

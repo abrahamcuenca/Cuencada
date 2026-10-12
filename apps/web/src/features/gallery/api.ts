@@ -13,6 +13,7 @@ import {
 } from "@cuencada/types";
 import { baseApi } from "../../shared/api/baseApi";
 import { env } from "../../shared/lib/env";
+import type { MediaScope } from "./lib/mediaScope";
 import { isAllowedUploadUrl } from "./lib/uploadOrigin";
 
 /**
@@ -56,6 +57,21 @@ export interface MediaHeadArgs {
   limit: number;
 }
 
+/** An event album (WP-5.4): `/events/:eventId/albums/:albumId/media`. */
+export interface AlbumArgs {
+  eventId: string;
+  albumId: string;
+}
+
+/** Args of `albumMediaHead`: the first page of an album. */
+export interface AlbumHeadArgs extends AlbumArgs {
+  limit: number;
+}
+
+function albumPath({ eventId, albumId }: AlbumArgs): string {
+  return `/events/${encodeURIComponent(eventId)}/albums/${encodeURIComponent(albumId)}`;
+}
+
 /**
  * Year switcher + default year from the editions list (pure, for tests).
  *
@@ -81,6 +97,11 @@ export function mediaListTag(year: number): { type: "Media"; id: string } {
 /** Tag of the first-page queries (preview, processing poll) for one year. */
 export function mediaHeadTag(year: number): { type: "Media"; id: string } {
   return { type: "Media", id: `HEAD-${year}` };
+}
+
+/** Tag of an event album's media (the infinite list and its first-page queries, WP-5.4). */
+export function albumMediaTag(albumId: string): { type: "Media"; id: string } {
+  return { type: "Media", id: `ALBUM-${albumId}` };
 }
 
 const ADMIN_LIST_TAG = { type: "Media", id: "ADMIN-LIST" } as const;
@@ -115,38 +136,90 @@ const galleryListApi = baseApi.injectEndpoints({
       }),
       // No per-item tags: an item change must not reload every scrolled page.
       providesTags: (_result, _error, year) => [mediaListTag(year)]
+    }),
+
+    /** An event album's media, newest first, by cursor (WP-5.4; participants and admins). */
+    listAlbumMedia: build.infiniteQuery<Page<MediaItem>, AlbumArgs, string | null>({
+      infiniteQueryOptions: {
+        initialPageParam: null,
+        getNextPageParam: (lastPage) => lastPage.nextCursor
+      },
+      query: ({ queryArg, pageParam }) => ({
+        url: `${albumPath(queryArg)}/media`,
+        params: pageParam === null ? { limit: MEDIA_PAGE_SIZE } : { limit: MEDIA_PAGE_SIZE, cursor: pageParam }
+      }),
+      providesTags: (_result, _error, { albumId }) => [albumMediaTag(albumId)]
     })
   })
 });
+
+/** The loaded pages of an infinite list, as an immer draft. */
+type PagesDraft = { pages: Page<MediaItem>[] };
+
+function upsertPages(draft: PagesDraft, fresh: readonly MediaItem[]): void {
+  const byId = new Map(fresh.map((item) => [item.id, item]));
+  const seen = new Set<string>();
+  for (const page of draft.pages) {
+    page.items = page.items.map((item) => {
+      seen.add(item.id);
+      return byId.get(item.id) ?? item;
+    });
+  }
+  const added = fresh.filter((item) => !seen.has(item.id));
+  const first = draft.pages[0];
+  if (first && added.length > 0) first.items.unshift(...added);
+}
+
+function patchPages(draft: PagesDraft, id: string, change: (item: MediaItem) => void): void {
+  for (const page of draft.pages) {
+    const item = page.items.find((candidate) => candidate.id === id);
+    if (item) change(item);
+  }
+}
 
 /**
  * Replaces loaded items with fresh copies (new URLs, statuses, captions) and
  * puts items the list doesn't have yet at the top of the first page.
  */
 function upsertIntoList(year: number, fresh: readonly MediaItem[]): ReturnType<typeof galleryListApi.util.updateQueryData> {
-  return galleryListApi.util.updateQueryData("listMedia", year, (draft) => {
-    const byId = new Map(fresh.map((item) => [item.id, item]));
-    const seen = new Set<string>();
-    for (const page of draft.pages) {
-      page.items = page.items.map((item) => {
-        seen.add(item.id);
-        return byId.get(item.id) ?? item;
-      });
-    }
-    const added = fresh.filter((item) => !seen.has(item.id));
-    const first = draft.pages[0];
-    if (first && added.length > 0) first.items.unshift(...added);
-  });
+  return galleryListApi.util.updateQueryData("listMedia", year, (draft) => upsertPages(draft, fresh));
+}
+
+/** {@link upsertIntoList} for an event album (WP-5.4). */
+function upsertIntoAlbum(album: AlbumArgs, fresh: readonly MediaItem[]): ReturnType<typeof galleryListApi.util.updateQueryData> {
+  return galleryListApi.util.updateQueryData("listAlbumMedia", { eventId: album.eventId, albumId: album.albumId }, (draft) => upsertPages(draft, fresh));
+}
+
+/** Upserts into the list of `scope`. */
+function upsertIntoScope(scope: MediaScope, fresh: readonly MediaItem[]): ReturnType<typeof galleryListApi.util.updateQueryData> {
+  return scope.kind === "year" ? upsertIntoList(scope.year, fresh) : upsertIntoAlbum(scope, fresh);
 }
 
 /** Applies `change` to the loaded copy of one item. */
 function patchListItem(year: number, id: string, change: (item: MediaItem) => void): ReturnType<typeof galleryListApi.util.updateQueryData> {
-  return galleryListApi.util.updateQueryData("listMedia", year, (draft) => {
-    for (const page of draft.pages) {
-      const item = page.items.find((candidate) => candidate.id === id);
-      if (item) change(item);
-    }
-  });
+  return galleryListApi.util.updateQueryData("listMedia", year, (draft) => patchPages(draft, id, change));
+}
+
+/** The album list that holds an item, when it is album media. */
+export interface ItemAlbum {
+  /** `MediaItem.event.id` (or `album.eventId`). */
+  eventId: string;
+  albumId: string;
+}
+
+/** Where an item's loaded copy lives: its year list, or its album list (`albumOf`). */
+function patchItem(year: number | null, album: ItemAlbum | undefined, id: string, change: (item: MediaItem) => void): ReturnType<typeof galleryListApi.util.updateQueryData> | null {
+  if (album !== undefined) return galleryListApi.util.updateQueryData("listAlbumMedia", album, (draft) => patchPages(draft, id, change));
+  return year === null ? null : patchListItem(year, id, change);
+}
+
+/**
+ * @param item - A media item.
+ * @returns Its album list key, or `undefined` for edition media.
+ */
+export function albumOf(item: Pick<MediaItem, "album">): ItemAlbum | undefined {
+  const album = item.album ?? null;
+  return album === null ? undefined : { eventId: album.eventId, albumId: album.id };
 }
 
 export const galleryApi = galleryListApi.injectEndpoints({
@@ -182,68 +255,101 @@ export const galleryApi = galleryListApi.injectEndpoints({
       providesTags: [{ type: "Cuencada", id: "LIST" }, YEARS_TAG]
     }),
 
+    /**
+     * First page of an event album (WP-5.4): the processing poll. Fresh items
+     * are patched into the album's infinite list.
+     */
+    albumMediaHead: build.query<Page<MediaItem>, AlbumHeadArgs>({
+      query: ({ eventId, albumId, limit }) => ({ url: `${albumPath({ eventId, albumId })}/media`, params: { limit } }),
+      providesTags: (_result, _error, { albumId }) => [albumMediaTag(albumId)],
+      async onQueryStarted({ eventId, albumId }, { dispatch, queryFulfilled }) {
+        try {
+          const { data } = await queryFulfilled;
+          dispatch(upsertIntoAlbum({ eventId, albumId }, data.items));
+        } catch {
+          // The query's own error state reports the failure.
+        }
+      }
+    }),
+
     /** Step 1 of an upload: the server returns a presigned PUT bound to type and length. */
     createUpload: build.mutation<CreateUploadResponse, { year: number; body: CreateUploadRequest }>({
       query: ({ year, body }) => ({ url: `/cuencadas/${year}/media/uploads`, method: "POST", body }),
       transformResponse: (raw: unknown) => parseUploadIntent(raw)
     }),
 
+    /**
+     * Step 1 for an event album (WP-5.4): same intent, same validation of the
+     * presigned URL's origin [SEC]; the server derives the storage prefix.
+     */
+    createAlbumUpload: build.mutation<CreateUploadResponse, AlbumArgs & { body: CreateUploadRequest }>({
+      query: ({ eventId, albumId, body }) => ({ url: `${albumPath({ eventId, albumId })}/uploads`, method: "POST", body }),
+      transformResponse: (raw: unknown) => parseUploadIntent(raw)
+    }),
+
     /** Step 3: the server HEADs the object, checks magic bytes and starts processing. The item goes to the top of the list. */
-    confirmUpload: build.mutation<MediaItem, { mediaId: string; year: number }>({
+    confirmUpload: build.mutation<MediaItem, { mediaId: string; scope: MediaScope }>({
       query: ({ mediaId }) => ({ url: `/media/${mediaId}/confirm`, method: "POST", body: {} }),
-      async onQueryStarted({ year }, { dispatch, queryFulfilled }) {
+      async onQueryStarted({ scope }, { dispatch, queryFulfilled }) {
         try {
           const { data } = await queryFulfilled;
-          dispatch(upsertIntoList(year, [data]));
+          dispatch(upsertIntoScope(scope, [data]));
         } catch {
           // The upload manager reports the failure on the row.
         }
       },
-      invalidatesTags: (_result, error, { year }) => (error ? [] : [mediaHeadTag(year), YEARS_TAG, ADMIN_LIST_TAG])
+      invalidatesTags: (_result, error, { scope }) => {
+        if (error) return [];
+        // An album's media count and cover thumbnail live on the event (WP-5.4).
+        if (scope.kind === "album") return [albumMediaTag(scope.albumId), ADMIN_LIST_TAG, { type: "Event", id: scope.eventId }];
+        return [mediaHeadTag(scope.year), YEARS_TAG, ADMIN_LIST_TAG];
+      }
     }),
 
     /** Uploader or admin edits the caption (optimistic; rolled back on failure). */
-    updateMediaCaption: build.mutation<MediaItem, { id: string; year: number | null; caption: string | null }>({
+    updateMediaCaption: build.mutation<MediaItem, { id: string; year: number | null; album?: ItemAlbum; caption: string | null }>({
       query: ({ id, caption }) => ({ url: `/media/${id}`, method: "PATCH", body: { caption } }),
-      async onQueryStarted({ id, year, caption }, { dispatch, queryFulfilled }) {
-        // `year` is null for event-album media (WP-5.2): no year list to patch.
-        const patch =
-          year === null
-            ? null
-            : dispatch(
-                patchListItem(year, id, (item) => {
-                  item.caption = caption;
-                })
-              );
+      async onQueryStarted({ id, year, album, caption }, { dispatch, queryFulfilled }) {
+        // `year` is null for event-album media (WP-5.2): their copy lives in the album list (WP-5.4).
+        const change = patchItem(year, album, id, (item) => {
+          item.caption = caption;
+        });
+        const patch = change === null ? null : dispatch(change);
         try {
           const { data } = await queryFulfilled;
-          if (year !== null) dispatch(upsertIntoList(year, [data]));
+          if (album !== undefined) dispatch(upsertIntoAlbum(album, [data]));
+          else if (year !== null) dispatch(upsertIntoList(year, [data]));
         } catch {
           patch?.undo();
         }
       },
-      invalidatesTags: (_result, error, { year }) => (error ? [] : year === null ? [ADMIN_LIST_TAG] : [mediaHeadTag(year), ADMIN_LIST_TAG])
+      invalidatesTags: (_result, error, { year, album }) => {
+        if (error) return [];
+        if (album !== undefined) return [albumMediaTag(album.albumId), ADMIN_LIST_TAG];
+        return year === null ? [ADMIN_LIST_TAG] : [mediaHeadTag(year), ADMIN_LIST_TAG];
+      }
     }),
 
     /** Uploader or admin soft-deletes an item; it is removed from the loaded list. */
-    deleteMedia: build.mutation<void, { id: string; year: number | null }>({
+    deleteMedia: build.mutation<void, { id: string; year: number | null; album?: ItemAlbum }>({
       query: ({ id }) => ({ url: `/media/${id}`, method: "DELETE" }),
-      async onQueryStarted({ id, year }, { dispatch, queryFulfilled }) {
+      async onQueryStarted({ id, year, album }, { dispatch, queryFulfilled }) {
         try {
           await queryFulfilled;
-          // `year` is null for event-album media (WP-5.2): no year list to patch.
-          if (year === null) return;
-          dispatch(
-            galleryListApi.util.updateQueryData("listMedia", year, (draft) => {
-              for (const page of draft.pages) page.items = page.items.filter((item) => item.id !== id);
-            })
-          );
+          const drop = (draft: PagesDraft): void => {
+            for (const page of draft.pages) page.items = page.items.filter((item) => item.id !== id);
+          };
+          if (album !== undefined) dispatch(galleryListApi.util.updateQueryData("listAlbumMedia", album, drop));
+          else if (year !== null) dispatch(galleryListApi.util.updateQueryData("listMedia", year, drop));
         } catch {
           // The caller shows the error.
         }
       },
-      invalidatesTags: (_result, error, { year }) =>
-        error ? [] : year === null ? [ADMIN_LIST_TAG] : [mediaHeadTag(year), YEARS_TAG, ADMIN_LIST_TAG]
+      invalidatesTags: (_result, error, { year, album }) => {
+        if (error) return [];
+        if (album !== undefined) return [albumMediaTag(album.albumId), ADMIN_LIST_TAG, { type: "Event", id: album.eventId }];
+        return year === null ? [ADMIN_LIST_TAG] : [mediaHeadTag(year), YEARS_TAG, ADMIN_LIST_TAG];
+      }
     }),
 
     /** Any member reports an item (once per item). */
@@ -281,6 +387,8 @@ export const galleryApi = galleryListApi.injectEndpoints({
 
 export const {
   useListMediaInfiniteQuery,
+  useListAlbumMediaInfiniteQuery,
+  useAlbumMediaHeadQuery,
   useMediaHeadQuery,
   useGalleryYearsQuery,
   useUpdateMediaCaptionMutation,

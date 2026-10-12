@@ -6,7 +6,7 @@ import { EmptyState } from "../../../shared/ui/EmptyState";
 import { Skeleton } from "../../../shared/ui/Skeleton";
 import styles from "../chat.module.css";
 import { roomTimeLabel } from "../lib/format";
-import type { ChatRoomView, RoomPreview } from "../lib/rooms";
+import { type ChatRoomView, type RoomPreview, roomDisplayTitle } from "../lib/rooms";
 import { UNREAD_COUNT_MAX } from "../lib/limits";
 import { unreadLabel } from "../unread";
 
@@ -22,9 +22,10 @@ export interface RoomListProps {
   timeZone: string;
 }
 
-/** Decorative icon of a room. */
+/** Decorative icon of a room: the family, an edition, or (WP-5.4) an event. */
 export function roomIcon(room: Pick<ChatRoomView, "kind">): string {
-  return room.kind === "global" ? "👨‍👩‍👧‍👦" : "🌴";
+  if (room.kind === "global") return "👨‍👩‍👧‍👦";
+  return room.kind === "event" ? "🎉" : "🌴";
 }
 
 function previewText(preview: RoomPreview | null, meId: string | null): string {
@@ -37,8 +38,9 @@ function previewText(preview: RoomPreview | null, meId: string | null): string {
 
 /**
  * The room list (wireframes §8.1): the global "Familia" room first, then one
- * room per edition, each with the last message (when known), its time and an
- * unread badge.
+ * room per edition and (WP-5.4) per event the member takes part in, each with
+ * the last message (when known), its time and an unread badge. Event rooms
+ * show 🎉 and the event's title; their conversation links to the event.
  */
 export function RoomList({ rooms, loading, error, onRetry, activeRoomId, meId, now, timeZone }: RoomListProps): ReactNode {
   return (
@@ -75,7 +77,8 @@ export function RoomList({ rooms, loading, error, onRetry, activeRoomId, meId, n
                     {roomIcon(room)}
                   </span>
                   <span className={styles.roomText}>
-                    <span className={styles.roomTitle}>{room.title}</span>
+                    <span className={styles.roomTitle}>{roomDisplayTitle(room)}</span>
+                    {room.kind === "event" ? <span className="visually-hidden"> (evento)</span> : null}
                     {preview === "" ? null : <span className={styles.roomPreview}>{preview}</span>}
                   </span>
                   <span className={styles.roomMeta}>

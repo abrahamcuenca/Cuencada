@@ -5,6 +5,7 @@ import { cx } from "../../../shared/ui/cx";
 import styles from "../gallery.module.css";
 import { CANCELABLE_PHASES, type UploadEntry, type UploadPhase } from "../upload/uploadManager";
 import { useUploadManager } from "../upload/useUploadManager";
+import { type MediaScope, mediaScopeKey, yearScope } from "../lib/mediaScope";
 
 const DONE: ReadonlySet<UploadPhase> = new Set(["ready", "review"]);
 const FINISHED: ReadonlySet<UploadPhase> = new Set(["ready", "review", "processing_failed"]);
@@ -34,8 +35,8 @@ function statusText(entry: UploadEntry): string {
 
 /** Props for {@link UploadPanel}. */
 export interface UploadPanelProps {
-  /** The year being viewed; uploads for other years are labelled. */
-  year: number;
+  /** The year (or, WP-5.4, the event album scope) being viewed; uploads for other years and albums are labelled. */
+  year: number | MediaScope;
 }
 
 /**
@@ -44,6 +45,7 @@ export interface UploadPanelProps {
  */
 export function UploadPanel({ year }: UploadPanelProps): React.ReactNode {
   const { manager, uploads } = useUploadManager();
+  const viewing = mediaScopeKey(typeof year === "number" ? yearScope(year) : year);
   const titleId = useId();
   if (uploads.length === 0) return null;
 
@@ -83,7 +85,7 @@ export function UploadPanel({ year }: UploadPanelProps): React.ReactNode {
                 <p className={styles.uploadName} title={entry.fileName}>
                   {entry.kind === "video" ? "🎬 " : "📷 "}
                   {entry.fileName}
-                  {entry.year !== year ? ` (${entry.year})` : ""}
+                  {entry.scopeKey !== viewing ? ` (${entry.scopeLabel})` : ""}
                 </p>
                 {isTransferring ? (
                   <progress

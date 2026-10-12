@@ -19,11 +19,20 @@ export interface CropStep {
   cropper: ReactNode;
 }
 
+/** Options of {@link useCropStep} beyond the title (WP-5.4). */
+export interface CropStepOptions {
+  /** Frame width / height: 1 (default, circle) or e.g. 16/9 for event covers. */
+  aspect?: number;
+  /** Hint under the cropper title. */
+  description?: string;
+}
+
 /**
- * @param onCropped - Receives the 1024×1024 JPEG (e.g. `upload.start`).
+ * @param onCropped - Receives the cropped JPEG (1024×1024 for a square; e.g. `upload.start`).
  * @param title - Cropper title (default "Ajustar foto").
+ * @param options - Aspect ratio and hint of the cropper.
  */
-export function useCropStep(onCropped: (file: File) => void, title?: string): CropStep {
+export function useCropStep(onCropped: (file: File) => void, title?: string, options: CropStepOptions = {}): CropStep {
   const [file, setFile] = useState<File | null>(null);
   const [pickError, setPickError] = useState<string | null>(null);
 
@@ -48,6 +57,8 @@ export function useCropStep(onCropped: (file: File) => void, title?: string): Cr
         <ImageCropper
           file={file}
           {...(title === undefined ? {} : { title })}
+          {...(options.aspect === undefined ? {} : { aspect: options.aspect })}
+          {...(options.description === undefined ? {} : { description: options.description })}
           onCancel={() => setFile(null)}
           onCropped={(cropped) => {
             setFile(null);

@@ -12,6 +12,9 @@ import {
   threadFromPage
 } from "./lib/thread";
 
+/** What a room's cache holds after `room_removed`: nothing. */
+const EMPTY_THREAD: ChatThread = { messages: [], nextBefore: null };
+
 /** Messages per history page (the contract's maximum). */
 export const CHAT_PAGE_SIZE = CHAT_HISTORY_LIMIT_MAX;
 
@@ -93,6 +96,9 @@ export const conversationApi = chatApi.injectEndpoints({
           } else if (frame.type === "error" && frame.clientMessageId !== null) {
             const failedId = frame.clientMessageId;
             updateCachedData((thread) => setLocalStatus(thread, failedId, "failed"));
+          } else if (frame.type === "room_removed" && frame.roomId === roomId) {
+            // WP-5.4 [SEC]: no access any more; forget the history we hold (pending messages included).
+            updateCachedData(() => EMPTY_THREAD);
           }
         });
         if (unsubscribe === null) return;

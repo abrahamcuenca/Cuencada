@@ -49,7 +49,7 @@ describe("AppLayout", () => {
 
     const top = await screen.findByRole("navigation", { name: "Navegación principal" });
     const bottom = screen.getByRole("navigation", { name: "Navegación inferior" });
-    expect(linkNames(top)).toEqual(["Programa", "Galería", "Directorio", "Árbol", "Chat"]);
+    expect(linkNames(top)).toEqual(["Programa", "Galería", "Eventos", "Directorio", "Árbol", "Chat"]);
     expect(linkNames(bottom)).toEqual(["Inicio", "Programa", "Fotos", "Chat", "Más"]);
     expect(within(bottom).getByRole("link", { name: /Más/ })).toHaveAttribute("href", "/mas");
     expect(within(top).queryByRole("link", { name: "Panel" })).not.toBeInTheDocument();
@@ -61,7 +61,7 @@ describe("AppLayout", () => {
     renderApp("/", authenticatedState(makeUser({ role: "admin" })));
 
     const top = await screen.findByRole("navigation", { name: "Navegación principal" });
-    expect(linkNames(top)).toEqual(["Programa", "Galería", "Directorio", "Árbol", "Chat"]);
+    expect(linkNames(top)).toEqual(["Programa", "Galería", "Eventos", "Directorio", "Árbol", "Chat"]);
     expect(linkNames(screen.getByRole("navigation", { name: "Navegación inferior" }))).toEqual(["Inicio", "Programa", "Fotos", "Chat", "Más"]);
     await userEvent.click(screen.getByRole("button", ACCOUNT_BUTTON));
     expect(screen.getAllByRole("link", { name: /Panel/ })).toHaveLength(1);
