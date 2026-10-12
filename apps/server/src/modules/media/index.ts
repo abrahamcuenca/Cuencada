@@ -17,6 +17,7 @@ import { runMediaCleanup } from "./jobs/mediaCleanup.js";
 import { recoverProcessingOnStart } from "./jobs/mediaProcess.js";
 import mediaRoutes from "./routes.js";
 import { jobDeps } from "./shared.js";
+import socialModule from "../social/index.js";
 
 export { countVisibleMediaByCuencada } from "./service.js";
 
@@ -24,6 +25,8 @@ export { countVisibleMediaByCuencada } from "./service.js";
 const mediaModule: FastifyPluginAsyncZod = async (app) => {
   await app.register(mediaRoutes);
   await app.register(adminMediaRoutes);
+  // WP-6.2: tags, hearts and comments hang off media rows and share their scope rule.
+  await app.register(socialModule);
 
   const deps = jobDeps(app);
   // Items confirmed before this instant belong to a previous process (see recoverProcessingOnStart).

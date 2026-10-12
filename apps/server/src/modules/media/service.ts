@@ -28,6 +28,7 @@ import { eventMemberAccessSql } from "../events/access.js";
 import { VIEW_URL_SECONDS } from "./constants.js";
 import { decodeCursor, encodeCursor } from "./cursor.js";
 import { mediaKeys, storagePrefixOf } from "./files.js";
+import { socialCountColumns } from "./socialSql.js";
 
 /** A `media_items` row. */
 export type MediaRow = typeof mediaItems.$inferSelect;
@@ -50,6 +51,19 @@ export interface MediaRecord {
   album: MediaAlbumRef | null;
   /** The album's event (album media only). */
   event: EventRef | null;
+  /**
+   * WP-6.2: hearts, comments and tags for the viewer the record was read for
+   * (`null` when the read did not compute them, e.g. a confirm or an edit).
+   */
+  social: MediaSocialCounts | null;
+}
+
+/** The social counts of one item, as computed for one viewer (`socialCountColumns`). */
+export interface MediaSocialCounts {
+  likeCount: number;
+  likedByMe: boolean;
+  commentCount: number;
+  tagCount: number;
 }
 
 /** {@link MediaRecord} plus the admin-only aggregates. */
@@ -153,17 +167,31 @@ type RecordRow = {
   eventTitle: string | null;
 };
 
-type RefKeys = "albumId" | "albumTitle" | "eventId" | "eventYear" | "eventSlug" | "eventTitle";
+type SocialRow = {
+  likeCount?: number;
+  likedByMe?: boolean;
+  commentCount?: number;
+  tagCount?: number;
+};
 
-function toRecord<TRow extends RecordRow>(row: TRow): Omit<TRow, RefKeys> & Pick<MediaRecord, "album" | "event"> {
-  const { albumId, albumTitle, eventId, eventYear, eventSlug, eventTitle, ...rest } = row;
+type RefKeys = "albumId" | "albumTitle" | "eventId" | "eventYear" | "eventSlug" | "eventTitle" | keyof SocialRow;
+
+function toRecord<TRow extends RecordRow & SocialRow>(
+  row: TRow
+): Omit<TRow, RefKeys> & Pick<MediaRecord, "album" | "event" | "social"> {
+  const { albumId, albumTitle, eventId, eventYear, eventSlug, eventTitle, likeCount, likedByMe, commentCount, tagCount, ...rest } =
+    row;
+  const social =
+    likeCount === undefined || likedByMe === undefined || commentCount === undefined || tagCount === undefined
+      ? null
+      : { likeCount, likedByMe, commentCount, tagCount };
   const album =
     albumId !== null && albumTitle !== null && eventId !== null ? { id: albumId, title: albumTitle, eventId } : null;
   const event =
     eventId !== null && eventYear !== null && eventSlug !== null && eventTitle !== null
       ? { id: eventId, year: eventYear, slug: eventSlug, title: eventTitle }
       : null;
-  return { ...rest, album, event };
+  return { ...rest, album, event, social };
 }
 
 function selectRecords(db: DbOrTx) {
@@ -176,9 +204,25 @@ function selectRecords(db: DbOrTx) {
     .leftJoin(users, eq(users.id, mediaItems.uploadedByUserId));
 }
 
-function selectAdminRecords(db: DbOrTx) {
+/** {@link selectRecords} plus the viewer's social counts (WP-6.2, scalar subqueries). */
+function selectSocialRecords(db: DbOrTx, viewer: Viewer) {
   return db
-    .select({ ...recordColumns, reportCount: reportCountSql, moderatedByName: moderator.displayName })
+    .select({ ...recordColumns, ...socialCountColumns(viewer) })
+    .from(mediaItems)
+    .leftJoin(cuencadas, eq(cuencadas.id, mediaItems.cuencadaId))
+    .leftJoin(eventAlbums, eq(eventAlbums.id, mediaItems.albumId))
+    .leftJoin(events, eq(events.id, eventAlbums.eventId))
+    .leftJoin(users, eq(users.id, mediaItems.uploadedByUserId));
+}
+
+function selectAdminRecords(db: DbOrTx, viewer?: Viewer) {
+  return db
+    .select({
+      ...recordColumns,
+      ...(viewer === undefined ? {} : socialCountColumns(viewer)),
+      reportCount: reportCountSql,
+      moderatedByName: moderator.displayName
+    })
     .from(mediaItems)
     .leftJoin(cuencadas, eq(cuencadas.id, mediaItems.cuencadaId))
     .leftJoin(eventAlbums, eq(eventAlbums.id, mediaItems.albumId))
@@ -207,7 +251,7 @@ function toPage<TRecord extends MediaRecord>(rows: TRecord[], limit: number): Re
  * @returns The record, or `null` (callers answer 404).
  */
 export async function findViewableRecord(db: DbOrTx, id: string, viewer: Viewer): Promise<MediaRecord | null> {
-  const [row] = await selectRecords(db)
+  const [row] = await selectSocialRecords(db, viewer)
     .where(and(eq(mediaItems.id, id), viewableSql(viewer)))
     .limit(1);
   return row === undefined ? null : toRecord(row);
@@ -254,11 +298,43 @@ export type GalleryListOptions = ({ cuencadaId: string; albumId?: never } | { al
 export async function listGallery(db: DbOrTx, options: GalleryListOptions): Promise<RecordPage<MediaRecord>> {
   const scope =
     options.albumId !== undefined ? eq(mediaItems.albumId, options.albumId) : eq(mediaItems.cuencadaId, options.cuencadaId);
-  const rows = await selectRecords(db)
+  const rows = await selectSocialRecords(db, options.viewer)
     .where(
       and(
         scope,
         memberVisibleSql(options.viewer.id),
+        options.kind === undefined ? undefined : eq(mediaItems.kind, options.kind),
+        keysetSql(options.cursor)
+      )
+    )
+    .orderBy(desc(mediaItems.createdAt), desc(mediaItems.id))
+    .limit(options.limit + 1);
+  return toPage(rows.map(toRecord), options.limit);
+}
+
+/** Options for {@link listViewable}. */
+export interface ViewableListOptions {
+  viewer: Viewer;
+  /** Extra filter on `media_items` (e.g. "the person is tagged"). */
+  where: SQL;
+  limit: number;
+  cursor?: string | undefined;
+  kind?: MediaRow["kind"] | undefined;
+}
+
+/**
+ * A page of items the viewer may open (`viewableSql`: scope first) that
+ * match `where`, newest first, with the viewer's social counts. Edition
+ * media count only while their edition is **published** (ADR 0001 §8
+ * requirement 5a). For lists that span scopes, such as "Fotos de {persona}".
+ */
+export async function listViewable(db: DbOrTx, options: ViewableListOptions): Promise<RecordPage<MediaRecord>> {
+  const rows = await selectSocialRecords(db, options.viewer)
+    .where(
+      and(
+        viewableSql(options.viewer),
+        sql`(${mediaItems.cuencadaId} is null or ${cuencadas.isPublished} = true)`,
+        options.where,
         options.kind === undefined ? undefined : eq(mediaItems.kind, options.kind),
         keysetSql(options.cursor)
       )
@@ -293,7 +369,7 @@ export async function listAdmin(db: DbOrTx, options: AdminListOptions): Promise<
       : options.reported
         ? sql`exists (select 1 from ${mediaReports} where ${mediaReports.mediaId} = ${mediaItems.id})`
         : sql`not exists (select 1 from ${mediaReports} where ${mediaReports.mediaId} = ${mediaItems.id})`;
-  const rows = await selectAdminRecords(db)
+  const rows = await selectAdminRecords(db, options.viewer)
     .where(
       and(
         isNull(mediaItems.deletedAt),
@@ -402,7 +478,8 @@ export async function toMediaItem(storage: StorageService, record: MediaRecord, 
     moderationStatus: item.moderationStatus,
     createdAt: item.createdAt.toISOString(),
     album: item.albumId === null ? null : record.album,
-    event: item.albumId === null ? null : record.event
+    event: item.albumId === null ? null : record.event,
+    ...(record.social ?? {})
   };
 }
 
