@@ -1,8 +1,9 @@
 /**
  * Where a gallery list or upload belongs (WP-5.4): an edition's year (the
- * original gallery, `/api/cuencadas/:year/media…`) or an event album
- * (`/api/events/:eventId/albums/:albumId/media…`). The grid, lightbox,
- * uploader and upload manager are shared; only the endpoints differ.
+ * original gallery, `/api/cuencadas/:year/media…`), an event album
+ * (`/api/events/:eventId/albums/:albumId/media…`) or, WP-6.3, a Memory Box
+ * (`/api/memories/:id/media…`). The grid, lightbox, uploader and upload
+ * manager are shared; only the endpoints differ.
  */
 
 /** An edition's gallery. */
@@ -19,8 +20,15 @@ export interface AlbumMediaScope {
   label: string;
 }
 
+/** A Memory Box ("Baúl de recuerdos", WP-6.3). `label` is the box title. */
+export interface MemoryMediaScope {
+  kind: "memory";
+  memoryAlbumId: string;
+  label: string;
+}
+
 /** A gallery list / upload target. */
-export type MediaScope = YearMediaScope | AlbumMediaScope;
+export type MediaScope = YearMediaScope | AlbumMediaScope | MemoryMediaScope;
 
 /**
  * @param year - Edition year.
@@ -34,10 +42,17 @@ export function yearScope(year: number): YearMediaScope {
  * Stable identity of a scope (the label is not part of it).
  *
  * @param scope - The scope.
- * @returns `year:2026` or `album:{albumId}`.
+ * @returns `year:2026`, `album:{albumId}` or `memory:{memoryAlbumId}`.
  */
 export function mediaScopeKey(scope: MediaScope): string {
-  return scope.kind === "year" ? `year:${scope.year}` : `album:${scope.albumId}`;
+  switch (scope.kind) {
+    case "year":
+      return `year:${scope.year}`;
+    case "album":
+      return `album:${scope.albumId}`;
+    case "memory":
+      return `memory:${scope.memoryAlbumId}`;
+  }
 }
 
 /**

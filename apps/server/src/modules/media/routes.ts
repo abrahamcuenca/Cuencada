@@ -12,7 +12,9 @@
  * anyone outside the event (non-participants, and participants of an event
  * that is no longer visible to them). Album uploads start at
  * `POST /api/events/:id/albums/:albumId/uploads` (events module) and are
- * confirmed here.
+ * confirmed here. WP-6.3: so do Memory Box uploads
+ * (`POST /api/memories/:id/uploads`); box media of a draft or hidden box
+ * answer 404 to members on every route here.
  */
 import {
   AuditAction,
@@ -31,13 +33,13 @@ import {
 import { and, eq, isNull } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
-import { cuencadas, mediaItems, mediaReports } from "../../db/schema/index.js";
-import { recordAudit } from "../../lib/audit.js";
+import { cuencadas, mediaItems, mediaReports, memoryAlbums } from "../../db/schema/index.js";
+import { recordAudit, type Transaction } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
 import { authUser } from "../../plugins/auth.js";
 import { AdminViewSurface, auditAdminEventView } from "../events/adminView.js";
 import { CONFIRM_RATE_LIMIT, REPORT_RATE_LIMIT, SNIFF_BYTES, UPLOAD_INTENT_RATE_LIMIT } from "./constants.js";
-import { albumStoragePrefix, editionStoragePrefix, mediaKeys, normalizeContentType, signatureMatches } from "./files.js";
+import { albumStoragePrefix, editionStoragePrefix, mediaKeys, memoryStoragePrefix, normalizeContentType, signatureMatches } from "./files.js";
 import { enqueueMediaProcessing } from "./jobs/mediaProcess.js";
 import {
   allObjectKeys,
@@ -89,7 +91,8 @@ function isOwner(record: MediaRecord, viewer: Viewer): boolean {
 
 /**
  * [SEC] Security requirement 7 (and PR #54 L3): the prefix is re-derived
- * from the scope row itself, the album (`events/{album.eventId}/{album.id}`)
+ * from the scope row itself, the album (`events/{album.eventId}/{album.id}`),
+ * the Memory Box (`memories/{box.id}`, WP-6.3, ADR 0001 §8 requirement 5)
  * or the edition (`cuencadas/{year}`), never taken from the stored
  * `storage_prefix`; the stored prefix (when set) and the original key must
  * both match it. A row whose keys sit elsewhere is never confirmed (and so
@@ -101,12 +104,33 @@ function keysMatchPrefix(record: MediaRecord): boolean {
   if (item.albumId !== null) {
     if (record.album === null || record.album.id !== item.albumId) return false;
     expectedPrefix = albumStoragePrefix(record.album);
+  } else if (item.memoryAlbumId !== null) {
+    if (record.memoryAlbum === null || record.memoryAlbum.id !== item.memoryAlbumId) return false;
+    expectedPrefix = memoryStoragePrefix(record.memoryAlbum);
   } else {
     if (record.year === null) return false;
     expectedPrefix = editionStoragePrefix(record.year);
   }
   if (item.storagePrefix !== null && item.storagePrefix !== expectedPrefix) return false;
   return item.objectKey === mediaKeys(expectedPrefix, item.id, item.mimeType).original;
+}
+
+/**
+ * [SEC] WP-6.3 (ADR 0001 §8 requirement 5): a box upload is re-checked at
+ * confirm **under the box row lock** (`for share`; hiding a box takes
+ * `for update`), so a confirm racing a hide either commits before the hide
+ * or sees the box hidden and answers 404. Members need a `published` box;
+ * admins reach every box. Other scopes: nothing to do here (their checks
+ * are `mediaScopeSql` in the lookup).
+ */
+async function recheckMemoryConfirm(tx: Transaction, item: MediaRecord["item"], viewer: Viewer): Promise<void> {
+  if (item.memoryAlbumId === null) return;
+  const [box] = await tx
+    .select({ status: memoryAlbums.status })
+    .from(memoryAlbums)
+    .where(eq(memoryAlbums.id, item.memoryAlbumId))
+    .for("share");
+  if (box === undefined || (!isAdmin(viewer) && box.status !== "published")) throw new AppError("NOT_FOUND", NOT_FOUND_MESSAGE);
 }
 
 /** Member media routes. */
@@ -208,6 +232,7 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       const confirmed = await app.db.transaction(async (tx) => {
+        await recheckMemoryConfirm(tx, item, viewer);
         const [row] = await tx
           .update(mediaItems)
           .set({ uploadStatus: "processing", confirmedAt: app.clock.now() })
@@ -221,7 +246,13 @@ const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
           action: AuditAction.MediaUploaded,
           entityType: "media",
           entityId: row.id,
-          metadata: { kind: row.kind, mimeType: row.mimeType, byteSize: row.byteSize, ...(row.albumId === null ? {} : { albumId: row.albumId }) },
+          metadata: {
+            kind: row.kind,
+            mimeType: row.mimeType,
+            byteSize: row.byteSize,
+            ...(row.albumId === null ? {} : { albumId: row.albumId }),
+            ...(row.memoryAlbumId === null ? {} : { memoryAlbumId: row.memoryAlbumId })
+          },
           ip: request.ip
         });
         return row;

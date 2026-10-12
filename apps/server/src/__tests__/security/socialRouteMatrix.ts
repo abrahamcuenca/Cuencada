@@ -16,6 +16,7 @@ import { createUser } from "../../../test/helpers/factories.js";
 import { insertPerson } from "../../../test/helpers/family.js";
 import { insertCuencada } from "../../../test/helpers/cuencadas.js";
 import { insertMedia } from "../../../test/helpers/media.js";
+import { memoryMediaProbes } from "./memoryRouteMatrix.js";
 import type { Actor, BuiltRequest, Expectation, MatrixContext, Probe, ProbeRequest, RouteSpec } from "./routeMatrix.js";
 
 const NOT_FOUND: Expectation = { status: 404, code: "NOT_FOUND" };
@@ -105,7 +106,7 @@ export const SOCIAL_ROUTE_SPECS: readonly RouteSpec[] = [
     ...member,
     note: "pending tags only for the tagger, the tagged user and admins",
     build: async (ctx) => json(`/api/media/${await editionPhoto(ctx, ctx.other)}/detail`),
-    probes: [hiddenPhotoProbe((_ctx, id) => json(`/api/media/${id}/detail`))]
+    probes: [hiddenPhotoProbe((_ctx, id) => json(`/api/media/${id}/detail`)), ...memoryMediaProbes((id) => json(`/api/media/${id}/detail`))]
   },
   {
     method: "GET",
@@ -113,7 +114,10 @@ export const SOCIAL_ROUTE_SPECS: readonly RouteSpec[] = [
     ...member,
     note: "any person; name only for unlisted/disabled members",
     build: async (ctx) => json(`/api/media/${await editionPhoto(ctx, ctx.other)}/tag-candidates?q=Persona`),
-    probes: [hiddenPhotoProbe((_ctx, id) => json(`/api/media/${id}/tag-candidates?q=Persona`))]
+    probes: [
+      hiddenPhotoProbe((_ctx, id) => json(`/api/media/${id}/tag-candidates?q=Persona`)),
+      ...memoryMediaProbes((id) => json(`/api/media/${id}/tag-candidates?q=Persona`))
+    ]
   },
   {
     method: "POST",
@@ -198,7 +202,7 @@ export const SOCIAL_ROUTE_SPECS: readonly RouteSpec[] = [
     url: "/api/media/:id/like",
     ...member,
     build: async (ctx) => json(`/api/media/${await editionPhoto(ctx, ctx.other)}/like`),
-    probes: [hiddenPhotoProbe((_ctx, id) => json(`/api/media/${id}/like`))]
+    probes: [hiddenPhotoProbe((_ctx, id) => json(`/api/media/${id}/like`)), ...memoryMediaProbes((id) => json(`/api/media/${id}/like`))]
   },
   {
     method: "DELETE",
@@ -224,7 +228,7 @@ export const SOCIAL_ROUTE_SPECS: readonly RouteSpec[] = [
     ...member,
     note: "names; avatars only for listed active members; no account ids",
     build: async (ctx) => json(`/api/media/${await editionPhoto(ctx, ctx.other)}/likes`),
-    probes: [hiddenPhotoProbe((_ctx, id) => json(`/api/media/${id}/likes`))]
+    probes: [hiddenPhotoProbe((_ctx, id) => json(`/api/media/${id}/likes`)), ...memoryMediaProbes((id) => json(`/api/media/${id}/likes`))]
   },
   {
     method: "GET",
@@ -232,14 +236,17 @@ export const SOCIAL_ROUTE_SPECS: readonly RouteSpec[] = [
     ...member,
     note: "deleted comments are tombstones (no body, no author)",
     build: async (ctx) => json(`/api/media/${await editionPhoto(ctx, ctx.other)}/comments`),
-    probes: [hiddenPhotoProbe((_ctx, id) => json(`/api/media/${id}/comments`))]
+    probes: [hiddenPhotoProbe((_ctx, id) => json(`/api/media/${id}/comments`)), ...memoryMediaProbes((id) => json(`/api/media/${id}/comments`))]
   },
   {
     method: "POST",
     url: "/api/media/:id/comments",
     ...member,
     build: async (ctx) => json(`/api/media/${await editionPhoto(ctx, ctx.other)}/comments`, { body: "Hola" }),
-    probes: [hiddenPhotoProbe((_ctx, id) => json(`/api/media/${id}/comments`, { body: "Hola" }))]
+    probes: [
+      hiddenPhotoProbe((_ctx, id) => json(`/api/media/${id}/comments`, { body: "Hola" })),
+      ...memoryMediaProbes((id) => json(`/api/media/${id}/comments`, { body: "Hola" }))
+    ]
   },
   {
     method: "DELETE",

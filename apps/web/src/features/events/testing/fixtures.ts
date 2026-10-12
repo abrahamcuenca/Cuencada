@@ -6,7 +6,6 @@
 import type { EventAlbum, EventDetail, EventParticipant, EventSummary, MediaItem } from "@cuencada/types";
 import { HttpResponse, http, type HttpHandler } from "msw";
 import { apiUrl, errorBody } from "../../../../test/auth";
-import type { EventNotice } from "@cuencada/types";
 
 /** A v4-shaped UUID for fixture `n` (namespace 7 = events). */
 export function eventId(n: number): string {
@@ -155,8 +154,6 @@ export interface EventsDb {
   failNext: { status: number; code: string; message: string } | null;
   /** Page size the fake list uses (to test "Cargar más"). */
   pageSize: number;
-  /** Consent notices (WP-5.3 contract). */
-  notices: EventNotice[];
 }
 
 /** A fresh fake events server. */
@@ -170,7 +167,6 @@ export function makeEventsDb(overrides: Partial<EventsDb> = {}): EventsDb {
     bodies: {},
     failNext: null,
     pageSize: 12,
-    notices: [],
     ...overrides
   };
 }
@@ -228,15 +224,6 @@ function save(db: EventsDb, event: EventDetail): Response {
  */
 export function eventsHandlers(db: EventsDb): HttpHandler[] {
   return [
-    http.get(apiUrl("/events/notices"), ({ request }) => {
-      record(db, request);
-      return HttpResponse.json({ items: db.notices });
-    }),
-    http.delete(apiUrl("/events/:id/notice"), ({ params, request }) => {
-      record(db, request);
-      db.notices = db.notices.filter((notice) => notice.event.id !== params.id);
-      return new HttpResponse(null, { status: 204 });
-    }),
     http.get(apiUrl("/events"), ({ request }) => {
       record(db, request);
       const url = new URL(request.url);
@@ -322,8 +309,6 @@ export function eventsHandlers(db: EventsDb): HttpHandler[] {
       record(db, request);
       const forced = failure(db);
       if (forced !== null) return forced;
-      // Leaving removes the participant row, and with it the notice (WP-5.3).
-      db.notices = db.notices.filter((notice) => notice.event.id !== params.id);
       const event = findById(db, String(params.id));
       if (event === undefined) return new HttpResponse(null, { status: 204 });
       save(db, {

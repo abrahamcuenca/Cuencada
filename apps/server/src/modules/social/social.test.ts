@@ -15,6 +15,7 @@ import { type EventActor, eventActor, errorOf, insertAlbumMedia, insertEvent } f
 import { FakeStorage } from "../../../test/helpers/fakes.js";
 import { insertPerson } from "../../../test/helpers/family.js";
 import { createCuencada, insertMedia } from "../../../test/helpers/media.js";
+import { insertMemoryAlbum, insertMemoryMedia } from "../../../test/helpers/memories.js";
 import type { App } from "../../app.js";
 import { auditLogs, mediaComments, mediaTags, people, profiles } from "../../db/schema/index.js";
 import { moveMediaTagsTx } from "./index.js";
@@ -449,6 +450,20 @@ describe("counts in gallery lists", () => {
     expect(asFan).toMatchObject({ likeCount: 1, likedByMe: true, commentCount: 1, tagCount: 2 });
     const asUploader = body<Page<MediaItem>>(await call(uploader, "GET", "/api/cuencadas/2034/media")).items[0];
     expect(asUploader).toMatchObject({ likeCount: 1, likedByMe: false, commentCount: 1, tagCount: 1 });
+  });
+});
+
+describe("counts in Memory Box lists (WP-6.3)", () => {
+  it("fills the social counts on a published box's media page", async () => {
+    const uploader = await eventActor();
+    const fan = await eventActor();
+    const box = await insertMemoryAlbum({ status: "published" });
+    const media = await insertMemoryMedia(box, { uploadedByUserId: uploader.user.id });
+    expect((await call(fan, "PUT", `/api/media/${media.id}/like`)).statusCode).toBe(200);
+    await call(fan, "POST", `/api/media/${media.id}/comments`, { body: "Qué recuerdo" });
+    const page = await call(fan, "GET", `/api/memories/${box.id}/media`);
+    expect(page.statusCode, page.body).toBe(200);
+    expect(body<Page<MediaItem>>(page).items[0]).toMatchObject({ likeCount: 1, likedByMe: true, commentCount: 1, tagCount: 0 });
   });
 });
 

@@ -53,7 +53,7 @@ test.describe("photo social", () => {
     const chips = viewer.getByRole("list", { name: "Personas etiquetadas" });
     await expect(chips.getByText(ana.displayName)).toBeVisible();
     await expect(chips.getByText(/Esperando aprobación/)).toHaveCount(0);
-    await docShot(page, testInfo, "w62", "lightbox-social", chips);
+    await docShot(page, testInfo, "fotos-social", "lightbox-social", chips);
 
     // Comment.
     await viewer.getByRole("button", { name: /Comentarios/ }).click();
@@ -61,7 +61,7 @@ test.describe("photo social", () => {
     await sheet.getByRole("textbox", { name: "Escribe un comentario" }).fill(comment);
     await sheet.getByRole("button", { name: "Publicar" }).click();
     await expect(sheet.getByRole("list", { name: "Lista de comentarios" }).getByText(comment)).toBeVisible();
-    await docShot(page, testInfo, "w62", "comentarios", sheet);
+    await docShot(page, testInfo, "fotos-social", "comentarios", sheet);
 
     // Ana opens the deep link on her phone and approves the tag.
     const anaPage = await newPhone();
@@ -70,7 +70,7 @@ test.describe("photo social", () => {
     const banner = anaPage.getByRole("region", { name: "Etiqueta por aprobar" });
     await expect(banner).toBeVisible({ timeout: 30_000 });
     await expect(anaPage.getByText(/Esperando aprobación/)).toBeVisible();
-    await docShot(anaPage, testInfo, "w62", "aprobar-etiqueta", banner);
+    await docShot(anaPage, testInfo, "fotos-social", "aprobar-etiqueta", banner);
     await banner.getByRole("button", { name: "Aprobar" }).click();
     await expect(anaPage.getByText("Listo, aprobaste la etiqueta.")).toBeVisible();
     await expect(banner).toBeHidden();

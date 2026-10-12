@@ -32,8 +32,8 @@ Registered by the media module (`media/index.ts`), so photos and their social da
 3. **Residual oracles accepted** (ADR §8, A15): a decline makes the tag vanish for the tagger; re-tagging a person already pending-tagged by someone else returns that tag mapped as approved, which the caller then does not see; `TAG_LIMIT` at the boundary counts hidden pending tags (`canTag` counts visible ones).
 4. **Uploader removal** covers approved tags only (a pending tag of someone else is invisible to the uploader: 404).
 5. **Avatars** of comment authors and likers: own always; others only when listed in the directory and active (a missing profile counts as unlisted, fail closed). Tags and candidates use the family rules (`presignPersonAvatars`, 64 px).
-6. **Approve marks the request seen** through `markNotificationSeen(tx, userId, dedupeKey)`, the helper WP-6.1 announced: WP-6.2 adds it to the `notify.ts` stub (no-op, same signature) so WP-6.1's implementation replaces it on merge.
-7. **Deep links** (`usePhotoParam`, `?foto=<uuid>`, anything else ignored): `/galeria/{year}?foto=`, `/eventos/{y}/{slug}?vista=fotos&foto=` (a bare `?foto=` also opens the Fotos tab; a photo of another album loads through `/detail`), and the person "Fotos" tab. WP-6.3's `/recuerdos/{boxId}?foto=` only needs to use `usePhotoParam()` instead of `useState` for the open id; `GalleryLightbox` is unchanged. Missing and invisible photos show the same "No encontramos esa foto".
+6. **Approve marks the request seen** through WP-6.1's `markNotificationSeen(tx, userId, dedupeKey)` (`notify.ts` from #57; the interim stub was dropped at the merge).
+7. **Deep links** (`usePhotoParam`, `?foto=<uuid>`, anything else ignored): `/galeria/{year}?foto=`, `/eventos/{y}/{slug}?vista=fotos&foto=` (a bare `?foto=` also opens the Fotos tab; a photo of another album loads through `/detail`), and the person "Fotos" tab. `/recuerdos/{boxId}?foto=` (WP-6.3's box page) now uses `usePhotoParam()` too, so a box photo beyond the first page opens; `GalleryLightbox` is unchanged. Missing and invisible photos show the same "No encontramos esa foto".
 8. **Social module registered by the media module**, so `app.ts` is untouched (fewer conflicts with 6.1/6.3).
 
 ## Security
@@ -52,9 +52,15 @@ ADR 0001 §8 requirements 1, 3, 4, 8, 9, 10 for 6.2: scope first on every route 
 - **Admin `/admin/media`:** "Comentarios reportados" tab (`?cola=comments`, lazy): the queue, "Mostrar también los eliminados", open the photo, confirmed "Eliminar comentario".
 - **RTK Query** endpoints in `features/gallery/social/api.ts` (reusing the existing tag types; mutations patch the cached detail and list item instead of refetching, so presigned URLs are not re-signed).
 - Tests: `social/LightboxSocial.test.tsx` (15), `family/pages/PersonPhotos.test.tsx` (2), a `Lightbox` slot test, and `events/pages/EventDetailPage.test.tsx` deep links (`?vista=fotos&foto=` and bare `?foto=`, a photo of another album). `gallery/testUtils.ts` serves the social endpoints.
-- e2e: `tests/e2e/photoSocial.spec.ts` (Fede uploads, hearts, tags Ana and sees a plain chip, comments; Ana opens the deep link on her phone, sees "Esperando aprobación" and approves; Fede deletes his comment → tombstone; a missing photo's deep link → not-found). Screenshots `docs/ux/screenshots/w62/` (375 and 1280: lightbox social, comments, approve banner).
+- e2e: `tests/e2e/photoSocial.spec.ts` (Fede uploads, hearts, tags Ana and sees a plain chip, comments; Ana opens the deep link on her phone, sees "Esperando aprobación" and approves; Fede deletes his comment → tombstone; a missing photo's deep link → not-found). Screenshots `docs/ux/screenshots/fotos-social/` (375 and 1280: lightbox social, comments, approve banner).
 
 ## Verification
 Branch tip on `origin/main` @ 83dbb88 (main had not moved; the merge is a no-op).
 - `pnpm lint`: clean. `pnpm turbo run typecheck --force`: 6/6. `pnpm test`: 215 files / 2811 tests passed. `pnpm build`: ok. Initial JS 180.66 kB gzip (budget 190 kB; was ~180.6).
 - `pnpm e2e` on isolated ports (API 4262, storage 4263, web 5262, DB `cuencada_w62_e2e`): 87 passed, 1 failed (`directory.spec.ts` desktop: "Clicking the checkbox did not change its state" on the profile switch, untouched by this WP; passed 3/3 on rerun); `photoSocial.spec.ts` 5/5 on all three projects; Lighthouse mobile passed.
+
+### Integration with WP-6.1 (#57) and WP-6.3 (#58)
+- Merged `origin/main`: `notify.ts` taken from #57 whole; `media/service.ts` unions the box scope (`memoryAlbum`, `listGallery({ memoryAlbumId })`) with the social counts, so **box media pages carry `likeCount`/`likedByMe`/`commentCount`/`tagCount`** (`social.test.ts` "counts in Memory Box lists"); `gallery/api.ts` `patchLoadedMedia` also patches the box list; `routeMatrix.ts` spreads the memory, notification and social specs; the social matrix rows also run 6.3's `memoryMediaProbes` (own and others' photos in draft/hidden boxes → 404); `pii-leak.test.ts` keeps both new cases; `routes.md` regenerated.
+- Box page (`MemoryAlbumPage.tsx` `BoxGallery`): the local open-photo state and interim `?foto=` effect replaced by `usePhotoParam()`; `MemoriesPage.test.tsx` covers a photo beyond the first page.
+- e2e: `setControl` scrolls with `behavior: "instant"` before the forced click (the directory-switch flake); screenshots moved to `docs/ux/screenshots/fotos-social/`.
+- WP-6.0.md: the unread count cap is `NOTIFICATION_UNREAD_COUNT_MAX` = 999.

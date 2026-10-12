@@ -1,20 +1,11 @@
 import type { ReactNode } from "react";
-import styles from "../events.module.css";
-import { EventNotices } from "../notices/AddedToEventNotice";
 import { UpcomingEventsStrip } from "./UpcomingEventsStrip";
 
 /**
- * Home's events block (WP-5.4, members, one lazy chunk): the "Te agregaron
- * a…" notices, then the "Próximos eventos" strip. Each renders nothing when
- * empty, loading or failing.
+ * Home's events block (WP-5.4, members, one lazy chunk): the "Próximos
+ * eventos" strip; renders nothing when empty, loading or failing. WP-6.1
+ * moved the "Te agregaron a…" notices to the notifications bell.
  */
 export function HomeEvents(): ReactNode {
-  return (
-    <>
-      <div className={`cu-container ${styles.homeNotices}`}>
-        <EventNotices />
-      </div>
-      <UpcomingEventsStrip />
-    </>
-  );
+  return <UpcomingEventsStrip />;
 }

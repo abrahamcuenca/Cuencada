@@ -11,7 +11,7 @@ same guard config. `401`/`403` cells are guard denials (`UNAUTHENTICATED`,
 `PASSWORD_CHANGE_REQUIRED`, `FORBIDDEN`, `EMAIL_UNVERIFIED`); other non-2xx
 cells are handler answers for that principal's own data.
 
-Total: 153 routes (14 public, 78 user, 59 admin, 2 cookie).
+Total: 165 routes (14 public, 85 user, 64 admin, 2 cookie).
 
 | Method | Path | auth | Verified email | Pending pw allowed | Anon | Member | Unverified | Pending pw | Disabled | Revoked | Admin | Other member (IDOR) | Scope / notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -59,6 +59,11 @@ Total: 153 routes (14 public, 78 user, 59 admin, 2 cookie).
 | GET | `/api/admin/media/:id/reports` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | GET | `/api/admin/media/comment-reports` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | DELETE | `/api/admin/media/comments/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | audited media_comment.deleted (ids only); the body is scrubbed |
+| GET | `/api/admin/memory-albums` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | every box, drafts and hidden included |
+| POST | `/api/admin/memory-albums` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | draft by default; audited |
+| DELETE | `/api/admin/memory-albums/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | 409 MEMORY_ALBUM_NOT_EMPTY with live media; purges soft-deleted rows |
+| PATCH | `/api/admin/memory-albums/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | cover must be a photo of this box (400); publish/hide audited |
+| PUT | `/api/admin/memory-albums/order` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | every box id (409 when the set changed) |
 | POST | `/api/admin/people` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | DELETE | `/api/admin/people/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | PATCH | `/api/admin/people/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
@@ -160,6 +165,13 @@ Total: 153 routes (14 public, 78 user, 59 admin, 2 cookie).
 | DELETE | `/api/media/comments/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | the author only (admins moderate on the admin route) |
 | POST | `/api/media/comments/:id/report` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | any viewer except the author (403 on own comments); probe: report own comment → 403 |
 | POST | `/api/media/tags/:id/approve` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | the tagged person's linked user only |
+| GET | `/api/memories` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | published boxes only (drafts and hidden boxes never listed) |
+| GET | `/api/memories/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | published boxes for members; admins any (404 MEMORY_ALBUM_NOT_FOUND) |
+| GET | `/api/memories/:id/media` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | published boxes for members; admins any (404 MEMORY_ALBUM_NOT_FOUND) |
+| POST | `/api/memories/:id/uploads` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | any verified member to a published box; admins any; shared daily upload budget |
+| GET | `/api/notifications` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | the caller's own notifications, targets re-checked for visibility |
+| POST | `/api/notifications/read` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 2xx | the caller's own notifications; other ids are ignored |
+| GET | `/api/notifications/unread-count` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | the caller's own unread count |
 | GET | `/api/profile/me` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
 | PATCH | `/api/profile/me` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
 | DELETE | `/api/profile/me/avatar` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |

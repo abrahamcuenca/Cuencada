@@ -32,6 +32,8 @@ import eventsModule from "./modules/events/index.js";
 import familyModule from "./modules/family/index.js";
 import invitesModule from "./modules/invites/index.js";
 import mediaModule from "./modules/media/index.js";
+import memoriesModule from "./modules/memories/index.js";
+import notificationsModule from "./modules/notifications/index.js";
 import profileModule from "./modules/profile/index.js";
 import rsvpModule from "./modules/rsvp/index.js";
 import { registerAuthGuard } from "./plugins/auth.js";
@@ -243,6 +245,8 @@ async function configureApp(app: App, config: AppConfig, deps: AppDeps, owned: O
     familyModule,
     chatModule,
     eventsModule,
+    memoriesModule,
+    notificationsModule,
     announcementsModule,
     adminModule
   ];

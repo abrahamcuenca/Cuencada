@@ -179,6 +179,13 @@ export const SEEDED_YEAR = 2026;
 /** A fictional announced edition (WP-3.1a): published, no dates and no place yet. */
 export const ANNOUNCED_YEAR = 2028;
 
+/** WP-6.3: the seeded published Memory Box ("Fotos antiguas de la familia", no photos at seed time). */
+export const MEMORY_BOX_ID = "66666666-0000-4000-8000-0000000000e1";
+/** WP-6.3: a seeded hidden Memory Box: members must get the same 404 as a missing one. */
+export const HIDDEN_MEMORY_BOX_ID = "66666666-0000-4000-8000-0000000000e2";
+/** Title of {@link MEMORY_BOX_ID}. */
+export const MEMORY_BOX_TITLE = "Fotos antiguas de la familia";
+
 /**
  * The "Cuencada anterior" (WP-5.1) each project's admin adds, undated: one
  * year per project so parallel projects never collide on the unique year.

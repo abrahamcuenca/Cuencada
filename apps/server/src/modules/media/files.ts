@@ -83,6 +83,16 @@ export function albumStoragePrefix(album: { id: string; eventId: string }): stri
 }
 
 /**
+ * The key prefix of a Memory Box's media (`memories/{albumId}`, WP-6.3).
+ * [SEC] Always built from the box **row** (ADR 0001 §8, requirement 5),
+ * never from request input; the DB CHECK `media_items_memory_prefix_check`
+ * pins a box row's prefix to exactly this value.
+ */
+export function memoryStoragePrefix(album: { id: string }): string {
+  return `memories/${album.id}`;
+}
+
+/**
  * The key prefix of a stored row: `storage_prefix`, else (legacy edition
  * rows) `cuencadas/{year}`.
  *

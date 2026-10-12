@@ -1,12 +1,14 @@
 /**
  * Media queries, visibility rules and response mapping (T4, scopes WP-5.3).
  *
- * **Scope** (WP-5.2/5.3, ADR 0001 §7) [SEC]: every row belongs to an edition
- * (`cuencada_id`) or an event album (`album_id`). {@link mediaScopeSql}
- * decides whether the viewer may reach a row's scope at all: edition media
- * as before (every member), album media only for the event's participants
- * and admins while the event is visible to them. Every by-id read and write
- * applies it, so album media outside the caller's scope answer 404.
+ * **Scope** (WP-5.2/5.3, WP-6.3, ADR 0001 §7/§8) [SEC]: every row belongs to
+ * an edition (`cuencada_id`), an event album (`album_id`) or a Memory Box
+ * (`memory_album_id`). {@link mediaScopeSql} decides whether the viewer may
+ * reach a row's scope at all: edition media as before (every member), album
+ * media only for the event's participants and admins while the event is
+ * visible to them, box media only while the box is `published` (admins:
+ * every box). Every by-id read and write applies it, so media outside the
+ * caller's scope answer 404.
  *
  * Visibility within a scope (members): a row is visible when it is not
  * deleted and either
@@ -18,10 +20,10 @@
  * Responses never contain object keys or bucket names; media URLs are
  * presigned GETs.
  */
-import type { AdminMediaItem, EventRef, MediaAlbumRef, MediaItem, MediaReport, UserRole } from "@cuencada/types";
+import type { AdminMediaItem, EventRef, MediaAlbumRef, MediaItem, MediaReport, MemoryAlbumRef, UserRole } from "@cuencada/types";
 import { and, count, desc, eq, inArray, isNull, type SQL, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
-import { cuencadas, eventAlbums, events, mediaItems, mediaReports, users } from "../../db/schema/index.js";
+import { cuencadas, eventAlbums, events, mediaItems, mediaReports, memoryAlbums, users } from "../../db/schema/index.js";
 import type { DbOrTx } from "../../lib/audit.js";
 import type { StorageService } from "../../lib/storage/types.js";
 import { eventMemberAccessSql } from "../events/access.js";
@@ -51,6 +53,8 @@ export interface MediaRecord {
   album: MediaAlbumRef | null;
   /** The album's event (album media only). */
   event: EventRef | null;
+  /** The Memory Box (box media only, WP-6.3). */
+  memoryAlbum: MemoryAlbumRef | null;
   /**
    * WP-6.2: hearts, comments and tags for the viewer the record was read for
    * (`null` when the read did not compute them, e.g. a confirm or an edit).
@@ -80,6 +84,7 @@ const moderator = alias(users, "moderator");
  */
 const scopeAlbum = alias(eventAlbums, "scope_album");
 const scopeEvent = alias(events, "scope_event");
+const scopeMemory = alias(memoryAlbums, "scope_memory");
 
 const cursorMicrosSql = sql<string>`(extract(epoch from ${mediaItems.createdAt}) * 1000000)::bigint::text`;
 
@@ -97,8 +102,10 @@ export function isAdmin(viewer: Viewer): boolean {
  * requirement 1). Admins reach every scope.
  *
  * WP-6.0 (ADR 0001 §8): one explicit branch per known scope, and any other
- * row (a Memory Box row, `memory_album_id`, until WP-6.3 adds its branch, or
- * a future scope) is **denied** rather than let through.
+ * row (a future scope) is **denied** rather than let through. WP-6.3 adds
+ * the Memory Box branch: the box is `published`. Draft and hidden boxes are
+ * unreachable for members everywhere this predicate runs (by-id routes,
+ * social routes through `viewableSql`, counts, notifications).
  */
 export function mediaScopeSql(viewer: Viewer): SQL {
   if (isAdmin(viewer)) return sql`true`;
@@ -106,6 +113,9 @@ export function mediaScopeSql(viewer: Viewer): SQL {
     select 1 from ${eventAlbums} scope_album
     inner join ${events} scope_event on ${scopeEvent.id} = ${scopeAlbum.eventId}
     where ${scopeAlbum.id} = ${mediaItems.albumId} and ${eventMemberAccessSql(viewer, scopeEvent)}
+  )) or (${mediaItems.memoryAlbumId} is not null and exists (
+    select 1 from ${memoryAlbums} scope_memory
+    where ${scopeMemory.id} = ${mediaItems.memoryAlbumId} and ${scopeMemory.status} = 'published'
   )))`;
 }
 
@@ -151,7 +161,9 @@ const recordColumns = {
   eventId: events.id,
   eventYear: events.year,
   eventSlug: events.slug,
-  eventTitle: events.title
+  eventTitle: events.title,
+  memoryAlbumId: memoryAlbums.id,
+  memoryAlbumTitle: memoryAlbums.title
 };
 
 type RecordRow = {
@@ -165,6 +177,8 @@ type RecordRow = {
   eventYear: number | null;
   eventSlug: string | null;
   eventTitle: string | null;
+  memoryAlbumId: string | null;
+  memoryAlbumTitle: string | null;
 };
 
 type SocialRow = {
@@ -174,13 +188,35 @@ type SocialRow = {
   tagCount?: number;
 };
 
-type RefKeys = "albumId" | "albumTitle" | "eventId" | "eventYear" | "eventSlug" | "eventTitle" | keyof SocialRow;
+type RefKeys =
+  | "albumId"
+  | "albumTitle"
+  | "eventId"
+  | "eventYear"
+  | "eventSlug"
+  | "eventTitle"
+  | "memoryAlbumId"
+  | "memoryAlbumTitle"
+  | keyof SocialRow;
 
 function toRecord<TRow extends RecordRow & SocialRow>(
   row: TRow
-): Omit<TRow, RefKeys> & Pick<MediaRecord, "album" | "event" | "social"> {
-  const { albumId, albumTitle, eventId, eventYear, eventSlug, eventTitle, likeCount, likedByMe, commentCount, tagCount, ...rest } =
-    row;
+): Omit<TRow, RefKeys> & Pick<MediaRecord, "album" | "event" | "memoryAlbum" | "social"> {
+  const {
+    albumId,
+    albumTitle,
+    eventId,
+    eventYear,
+    eventSlug,
+    eventTitle,
+    memoryAlbumId,
+    memoryAlbumTitle,
+    likeCount,
+    likedByMe,
+    commentCount,
+    tagCount,
+    ...rest
+  } = row;
   const social =
     likeCount === undefined || likedByMe === undefined || commentCount === undefined || tagCount === undefined
       ? null
@@ -191,7 +227,8 @@ function toRecord<TRow extends RecordRow & SocialRow>(
     eventId !== null && eventYear !== null && eventSlug !== null && eventTitle !== null
       ? { id: eventId, year: eventYear, slug: eventSlug, title: eventTitle }
       : null;
-  return { ...rest, album, event, social };
+  const memoryAlbum = memoryAlbumId !== null && memoryAlbumTitle !== null ? { id: memoryAlbumId, title: memoryAlbumTitle } : null;
+  return { ...rest, album, event, memoryAlbum, social };
 }
 
 function selectRecords(db: DbOrTx) {
@@ -201,6 +238,7 @@ function selectRecords(db: DbOrTx) {
     .leftJoin(cuencadas, eq(cuencadas.id, mediaItems.cuencadaId))
     .leftJoin(eventAlbums, eq(eventAlbums.id, mediaItems.albumId))
     .leftJoin(events, eq(events.id, eventAlbums.eventId))
+    .leftJoin(memoryAlbums, eq(memoryAlbums.id, mediaItems.memoryAlbumId))
     .leftJoin(users, eq(users.id, mediaItems.uploadedByUserId));
 }
 
@@ -212,6 +250,7 @@ function selectSocialRecords(db: DbOrTx, viewer: Viewer) {
     .leftJoin(cuencadas, eq(cuencadas.id, mediaItems.cuencadaId))
     .leftJoin(eventAlbums, eq(eventAlbums.id, mediaItems.albumId))
     .leftJoin(events, eq(events.id, eventAlbums.eventId))
+    .leftJoin(memoryAlbums, eq(memoryAlbums.id, mediaItems.memoryAlbumId))
     .leftJoin(users, eq(users.id, mediaItems.uploadedByUserId));
 }
 
@@ -227,6 +266,7 @@ function selectAdminRecords(db: DbOrTx, viewer?: Viewer) {
     .leftJoin(cuencadas, eq(cuencadas.id, mediaItems.cuencadaId))
     .leftJoin(eventAlbums, eq(eventAlbums.id, mediaItems.albumId))
     .leftJoin(events, eq(events.id, eventAlbums.eventId))
+    .leftJoin(memoryAlbums, eq(memoryAlbums.id, mediaItems.memoryAlbumId))
     .leftJoin(users, eq(users.id, mediaItems.uploadedByUserId))
     .leftJoin(moderator, eq(moderator.id, mediaItems.moderatedByUserId));
 }
@@ -281,7 +321,11 @@ export async function findScopedRecord(db: DbOrTx, id: string, viewer: Viewer): 
 }
 
 /** Options for {@link listGallery}: exactly one scope. */
-export type GalleryListOptions = ({ cuencadaId: string; albumId?: never } | { albumId: string; cuencadaId?: never }) & {
+export type GalleryListOptions = (
+  | { cuencadaId: string; albumId?: never; memoryAlbumId?: never }
+  | { albumId: string; cuencadaId?: never; memoryAlbumId?: never }
+  | { memoryAlbumId: string; cuencadaId?: never; albumId?: never }
+) & {
   viewer: Viewer;
   limit: number;
   cursor?: string | undefined;
@@ -289,15 +333,20 @@ export type GalleryListOptions = ({ cuencadaId: string; albumId?: never } | { al
 };
 
 /**
- * Gallery page for one Cuencada or one event album, newest first
+ * Gallery page for one Cuencada, event album or Memory Box, newest first
  * (`created_at desc, id desc`). Admins get the member view here (plus their
  * own items); the moderation queue is `listAdmin`. Callers check that the
  * viewer may reach the scope (the edition is published / the viewer takes
- * part in the event).
+ * part in the event / the box is published).
  */
 export async function listGallery(db: DbOrTx, options: GalleryListOptions): Promise<RecordPage<MediaRecord>> {
   const scope =
-    options.albumId !== undefined ? eq(mediaItems.albumId, options.albumId) : eq(mediaItems.cuencadaId, options.cuencadaId);
+    options.albumId !== undefined
+      ? eq(mediaItems.albumId, options.albumId)
+      : options.memoryAlbumId !== undefined
+        ? eq(mediaItems.memoryAlbumId, options.memoryAlbumId)
+        : eq(mediaItems.cuencadaId, options.cuencadaId);
+  // WP-6.2: every gallery (edition, event album, Memory Box) carries the viewer's social counts.
   const rows = await selectSocialRecords(db, options.viewer)
     .where(
       and(
@@ -354,12 +403,15 @@ export interface AdminListOptions {
   cuencadaId?: string | undefined;
   /** WP-5.3: only media of this event's albums. */
   eventId?: string | undefined;
+  /** WP-6.3: only media of this Memory Box. */
+  memoryAlbumId?: string | undefined;
   reported?: boolean | undefined;
 }
 
 /**
- * Moderation queue: live rows of every scope (edition and album media, left
- * joins + {@link mediaScopeSql}, Security requirement 10), newest first.
+ * Moderation queue: live rows of every scope (edition, album and Memory Box
+ * media, left joins + {@link mediaScopeSql}, Security requirement 10),
+ * newest first.
  * `pending_upload` rows are only listed when asked for explicitly.
  */
 export async function listAdmin(db: DbOrTx, options: AdminListOptions): Promise<RecordPage<AdminMediaRecord>> {
@@ -380,6 +432,7 @@ export async function listAdmin(db: DbOrTx, options: AdminListOptions): Promise<
         options.moderationStatus === undefined ? undefined : eq(mediaItems.moderationStatus, options.moderationStatus),
         options.cuencadaId === undefined ? undefined : eq(mediaItems.cuencadaId, options.cuencadaId),
         options.eventId === undefined ? undefined : eq(eventAlbums.eventId, options.eventId),
+        options.memoryAlbumId === undefined ? undefined : eq(mediaItems.memoryAlbumId, options.memoryAlbumId),
         reportedFilter,
         keysetSql(options.cursor)
       )
@@ -447,7 +500,7 @@ async function presign(storage: StorageService, key: string | null): Promise<str
  * Map a record to the member contract, presigning the view URLs (1 h).
  * Only `ready` items get URLs; videos have no thumbnail and display the original.
  * `album`/`event` are set for album media (the record passed the scope check,
- * so the viewer may see that event).
+ * so the viewer may see that event); `memoryAlbum` for box media (WP-6.3).
  */
 export async function toMediaItem(storage: StorageService, record: MediaRecord, viewer: Viewer): Promise<MediaItem> {
   const { item } = record;
@@ -479,6 +532,7 @@ export async function toMediaItem(storage: StorageService, record: MediaRecord, 
     createdAt: item.createdAt.toISOString(),
     album: item.albumId === null ? null : record.album,
     event: item.albumId === null ? null : record.event,
+    memoryAlbum: item.memoryAlbumId === null ? null : record.memoryAlbum,
     ...(record.social ?? {})
   };
 }
@@ -510,7 +564,7 @@ export async function toAdminMediaItem(
  *
  * @param item - The row.
  * @param year - Its edition year, for legacy rows without `storage_prefix`
- *   (`null` for album media, which always have a prefix).
+ *   (`null` for album and box media, which always have a prefix).
  */
 export function allObjectKeys(item: MediaRow, year: number | null): string[] {
   const keys = [item.objectKey, item.thumbKey, item.displayKey].filter((key): key is string => key !== null);
