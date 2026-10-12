@@ -13,6 +13,7 @@ import { directoryRoutes } from "../features/directory/routes";
 import { eventsRoutes } from "../features/events/routes";
 import { familyRoutes } from "../features/family/routes";
 import { galleryRoutes } from "../features/gallery/routes";
+import { notificationsRoutes } from "../features/notifications/routes";
 import { profileRoutes } from "../features/profile/routes";
 import { pwaRoutes } from "../features/pwa/routes";
 import { rsvpRoutes } from "../features/rsvp/routes";
@@ -31,6 +32,7 @@ export const featureRoutes: readonly FeatureRoutes[] = [
   familyRoutes,
   chatRoutes,
   eventsRoutes,
+  notificationsRoutes,
   adminRoutes,
   pwaRoutes
 ];

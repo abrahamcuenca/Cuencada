@@ -368,6 +368,25 @@ export class ChatHub {
   }
 
   /**
+   * Send a per-user frame (WP-6.1 `notification`) to **that user's own
+   * sockets only** (the `byUser` set; never a room fan-out or a broadcast).
+   * The caller builds the frame for this recipient after its own
+   * visibility check.
+   *
+   * @returns How many sockets it was written to (0 when the user is offline).
+   */
+  sendToUser(userId: string, frame: WsServerMessage): number {
+    const connections = [...(this.byUser.get(userId) ?? [])];
+    for (const connection of connections) connection.send(frame);
+    return connections.length;
+  }
+
+  /** True while the user has at least one live socket in this process. */
+  isUserConnected(userId: string): boolean {
+    return this.byUser.has(userId);
+  }
+
+  /**
    * Send a non-room frame (presence) to every live connection. Room frames
    * must use {@link fanOutRoom}.
    *

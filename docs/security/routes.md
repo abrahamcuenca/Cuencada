@@ -11,7 +11,7 @@ same guard config. `401`/`403` cells are guard denials (`UNAUTHENTICATED`,
 `PASSWORD_CHANGE_REQUIRED`, `FORBIDDEN`, `EMAIL_UNVERIFIED`); other non-2xx
 cells are handler answers for that principal's own data.
 
-Total: 151 routes (14 public, 72 user, 63 admin, 2 cookie).
+Total: 154 routes (14 public, 75 user, 63 admin, 2 cookie).
 
 | Method | Path | auth | Verified email | Pending pw allowed | Anon | Member | Unverified | Pending pw | Disabled | Revoked | Admin | Other member (IDOR) | Scope / notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -158,6 +158,9 @@ Total: 151 routes (14 public, 72 user, 63 admin, 2 cookie).
 | PATCH | `/api/media/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | uploader or admin (404 for other members) |
 | POST | `/api/media/:id/confirm` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | uploader only (404 for others) |
 | POST | `/api/media/:id/report` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | any member except the uploader (403 on own items); probe: report own item → 403 |
+| GET | `/api/notifications` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | the caller's own notifications, targets re-checked for visibility |
+| POST | `/api/notifications/read` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 2xx | the caller's own notifications; other ids are ignored |
+| GET | `/api/notifications/unread-count` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | the caller's own unread count |
 | GET | `/api/profile/me` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
 | PATCH | `/api/profile/me` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
 | DELETE | `/api/profile/me/avatar` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |

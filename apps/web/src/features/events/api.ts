@@ -61,8 +61,11 @@ export interface EventWrite<TBody> {
 const LIST_TAG = { type: "Event", id: "LIST" } as const;
 const ADMIN_LIST_TAG = { type: "Event", id: "ADMIN-LIST" } as const;
 const CHAT_ROOMS_TAG = { type: "ChatRoom", id: "LIST" } as const;
-/** The consent notices (`notices/api.ts`): leaving an event removes its notice. */
-const NOTICES_TAG = { type: "Event", id: "NOTICES" } as const;
+/** WP-6.1: leaving an event retracts its "Te agregaron a…" notification (feed and badge). */
+const NOTIFICATION_TAGS = [
+  { type: "Notification", id: "FEED" },
+  { type: "Notification", id: "UNREAD" }
+] as const;
 
 function eventPath(id: string): string {
   return `/events/${encodeURIComponent(id)}`;
@@ -146,7 +149,7 @@ export const eventsApi = baseApi.injectEndpoints({
     /** "Salir del evento": `DELETE /events/:id/participants/me`. */
     leaveEvent: build.mutation<void, { id: string }>({
       query: ({ id }) => ({ url: `${eventPath(id)}/participants/me`, method: "DELETE" }),
-      invalidatesTags: (_result, error, { id }) => (error ? [] : [...writeTags(id), CHAT_ROOMS_TAG, NOTICES_TAG])
+      invalidatesTags: (_result, error, { id }) => (error ? [] : [...writeTags(id), CHAT_ROOMS_TAG, ...NOTIFICATION_TAGS])
     }),
 
     /** Organizers/admins add members (from the directory). */

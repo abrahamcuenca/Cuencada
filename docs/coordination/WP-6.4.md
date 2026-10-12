@@ -55,6 +55,10 @@ Based on `origin/main` @ 83dbb88 (WP-6.0, migration 0010, contracts in `packages
 - **WP-6.2** (PR open): `moveMediaTagsTx` is exported from `modules/social/index.ts`; the second of 6.2/6.4 to merge swaps the placeholder import in `family/merge.ts` for it, deletes the placeholder and adds a merge test with tags. The call site already sits before the account-link move.
 - **WP-6.1:** its `tree_proposal_resolved` notification links to `/arbol?propuesta={id}`, handled here (redirect to "Mis propuestas", focused). Otherwise nothing to change; `recordNotification`/`pushNotifications` start working when 6.1 fills the stubs (the proposer's notification then shows in the feed; `proposalNotify.test.ts` can switch from observing the calls to asserting rows).
 
+## Review log
+- PR #60 approved (TL conditional on integration + green CI, Security with Lows). Security L2 fixed: `applyToPair` takes `parent_of` proposals in the **same direction only** (the opposite claim stays pending; `partner_of` and `same_person` stay symmetric), mirrored in the queue's "otras propuestas iguales" count; test in `proposals.test.ts`. Info: the resolve dialog says the note reaches every proposer of the pair when others follow.
+- Merged `origin/main` with WP-6.1 (#57): kept both sides in `pii-leak.test.ts` and `threat-model.md`, regenerated `routes.md`. Then `pnpm lint` clean, `typecheck --force` 6/6, `typecheck:e2e` clean, `pnpm test` 221 files / 2866 tests passed, `pnpm build` ok, initial JS 182.28 kB gzip. Still pending: the WP-6.2 integration (real `moveMediaTagsTx`) after #58/#59.
+
 ## Verification
 - Merged `origin/main`: already up to date at 83dbb88 (nothing landed since WP-6.0).
 - `pnpm lint` clean; `pnpm turbo run typecheck --force` 6/6; `pnpm typecheck:e2e` clean; `pnpm test` **218 files / 2835 tests** passed; `pnpm build` ok; initial JS **181.11 kB** gzip (budget 190).
