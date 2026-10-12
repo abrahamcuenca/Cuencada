@@ -228,6 +228,27 @@ describe("login with two-step verification", () => {
   });
 });
 
+describe("encryption key", () => {
+  it("fails closed when the stored secret does not decrypt with the configured key", async () => {
+    const lines: string[] = [];
+    // A different (valid) key than the one the factory encrypted with.
+    app = await createTestApp({
+      config: { TOTP_ENCRYPTION_KEY: "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100" },
+      logStream: { write: (line) => lines.push(line) }
+    });
+    const member = await createUser({ emailVerified: true, twoFactor: true });
+    const response = await post(app, "/api/auth/2fa/verify", {
+      challengeToken: await challengeFor(app, member),
+      code: await freshTotpCode(app, member.id)
+    });
+    expect(response.statusCode).toBe(400);
+    expect(errorCode(response)).toBe("TWO_FACTOR_INVALID");
+    expect(await sessionCount(member.id)).toBe(0);
+    expect(lines.join("\n")).toContain("totp.decrypt_failed");
+    expect(lines.join("\n")).not.toContain(TEST_TOTP_SECRET);
+  });
+});
+
 describe("trusted devices", () => {
   it("lets a member skip the code for 30 days on that browser only, bound to the user, stored hashed", async () => {
     const clock = new TestClock();
