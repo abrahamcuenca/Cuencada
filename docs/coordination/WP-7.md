@@ -59,6 +59,8 @@ Based on `origin/main` @ 2304d99 (latest migration 0010). Rules: ADR 0001 §3 (a
 10. **Mail budget:** the four notices are security notices: reserved tier of the daily cap, one count per audit row (like password-changed). The admin reset of an admin is a cap-exempt admin alert.
 11. **Audit action names** follow the task (`auth.2fa_verified`, …): `auditActionSchema` now allows a digit at the start of a later segment.
 12. **Key rotation:** no key id or second key slot in this WP; the runbook says never to replace the key alone and describes re-encryption (a script is a backlog item).
+13. **Magic-link-only members** (no password) cannot pass the password re-authentication of disable and regenerate, so they cannot turn 2FA off or get new codes themselves; only an admin reset helps (fail-safe). Backlog: a "set a password" path.
+14. **Security review of PR #61:** L1 — the e2e TOTP helper reaches the database only through the harness guard (`resolveE2eDatabase(...).url`, the test-cluster catalog marker, `current_database()`). L2 — change-password, password reset (confirm) and the admin forced reset burn the user's open login challenges in the same transaction; `twoFactorRoutes.test.ts` "password changes burn open challenges" covers all three.
 
 ## Tests
 - `lib/totp.test.ts`: window ±1 (and not ±2), replay at and below the last step, malformed codes, AES-GCM (fresh nonce, never the secret in clear, wrong key / other user / tampered tag fail closed, no secret in errors), URI, QR, recovery codes.

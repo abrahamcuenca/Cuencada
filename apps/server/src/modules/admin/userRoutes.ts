@@ -44,7 +44,13 @@ import {
 import { closeChatSockets as closeUserChatSockets } from "../auth/chatSockets.js";
 import { chatUserRoleChanged } from "../chat/index.js";
 import { revokeSessions } from "../auth/sessions.js";
-import { isTwoFactorEnabled, queueTwoFactorNotice, removeTwoFactor, revokeTrustedDevices } from "../auth/twoFactor.js";
+import {
+  burnChallenges,
+  isTwoFactorEnabled,
+  queueTwoFactorNotice,
+  removeTwoFactor,
+  revokeTrustedDevices
+} from "../auth/twoFactor.js";
 import { adminAlertMetadata, type AdminAlert, type AdminAlertPlan, planAdminAlert, queueAdminAlerts } from "./adminAlerts.js";
 import {
   AdminUserMessages,
@@ -353,6 +359,8 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
         await tx.update(users).set({ mustChangePassword: true }).where(eq(users.id, target.id));
         const revoked = await revokeSessions(tx, { userId: target.id }, "admin_revoked", now);
         const burned = await burnPendingEmailTokens(tx, target.id, now);
+        // WP-7 (Security L2): a pending login challenge (old password) must not finish after a forced reset.
+        await burnChallenges(tx, target.id, now);
         const token =
           target.status === "active"
             ? await issueBudgetedEmailToken(app, tx, {

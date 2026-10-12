@@ -228,6 +228,53 @@ describe("login with two-step verification", () => {
   });
 });
 
+describe("password changes burn open challenges (Security L2)", () => {
+  it("rejects a challenge obtained before a change-password", async () => {
+    app = await createTestApp();
+    const member = await createUser({ emailVerified: true, twoFactor: true });
+    const challengeToken = await challengeFor(app, member);
+    const session = await createSession(member.id);
+    const changed = await post(
+      app,
+      "/api/auth/change-password",
+      { currentPassword: member.password, newPassword: "una-frase-nueva-larga-2026" },
+      { headers: (await bearerFor(member, session)).headers }
+    );
+    expect(changed.statusCode).toBe(200);
+    const late = await post(app, "/api/auth/2fa/verify", { challengeToken, code: await freshTotpCode(app, member.id) });
+    expect(errorCode(late)).toBe("TOKEN_INVALID");
+  });
+
+  it("rejects a challenge obtained before a password reset", async () => {
+    app = await createTestApp();
+    const member = await createUser({ emailVerified: true, twoFactor: true });
+    const challengeToken = await challengeFor(app, member);
+    const { token } = await getTestDb().transaction((tx) =>
+      createEmailToken(tx, { userId: member.id, email: member.email, purpose: MagicLinkPurpose.PasswordReset, requestIp: "203.0.113.9", now: new Date() })
+    );
+    const reset = await post(app, "/api/auth/password-reset/confirm", { token, newPassword: "una-frase-nueva-larga-2026" });
+    expect(reset.statusCode).toBe(204);
+    const late = await post(app, "/api/auth/2fa/verify", { challengeToken, code: await freshTotpCode(app, member.id) });
+    expect(errorCode(late)).toBe("TOKEN_INVALID");
+  });
+
+  it("rejects a challenge obtained before an admin's forced password reset", async () => {
+    app = await createTestApp();
+    const admin = await createUser({ role: "admin", emailVerified: true });
+    const member = await createUser({ emailVerified: true, twoFactor: true });
+    const challengeToken = await challengeFor(app, member);
+    const forced = await app.inject({
+      method: "POST",
+      url: `/api/admin/users/${member.id}/force-password-reset`,
+      ...(await bearerFor(admin, await createSession(admin.id)))
+    });
+    expect(forced.statusCode).toBe(200);
+    const late = await post(app, "/api/auth/2fa/verify", { challengeToken, code: await freshTotpCode(app, member.id) });
+    expect(errorCode(late)).toBe("TOKEN_INVALID");
+    expect(await sessionCount(member.id)).toBe(0);
+  });
+});
+
 describe("encryption key", () => {
   it("fails closed when the stored secret does not decrypt with the configured key", async () => {
     const lines: string[] = [];

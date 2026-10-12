@@ -180,6 +180,7 @@ Still open:
 - `TOTP_ENCRYPTION_KEY` rotation script (decrypt with the old key, re-encrypt with the new one in one transaction over the tunnel) and a key-id column, so the key can rotate without locking enrolled users out (runbook § 11 "Rotating `TOTP_ENCRYPTION_KEY`").
 - WebAuthn/passkeys as a phishing-resistant second factor (threat model A16).
 - Admin dashboard counter: admins and members with two-step verification on; alert on bursts of `auth.2fa_failed`.
+- A "set a password" path for magic-link-only members (no password): today they cannot pass the re-authentication of 2FA disable/regenerate, so only an admin reset helps them (ADR 0001 §9).
 - The per-user code-check limiter is in memory (like the login limits): it resets on restart and is per process.
 
 ## Post-launch (after the 2026-10-07 deploy)

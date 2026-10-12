@@ -35,7 +35,7 @@ import {
 } from "./emailTokens.js";
 import { MailTier, withinGlobalMailCap } from "./mailBudget.js";
 import { revokeSessions, sessionOrigin, startSession } from "./sessions.js";
-import { revokeTrustedDevices } from "./twoFactor.js";
+import { burnChallenges, revokeTrustedDevices } from "./twoFactor.js";
 import { sessionTwoFactorVerifiedAt } from "./currentUser.js";
 
 const noContent = z.null().describe("No content");
@@ -139,6 +139,8 @@ const passwordRoutes: FastifyPluginAsyncZod = async (app) => {
         const revoked = await revokeSessions(tx, { userId: current.id }, "password_changed", now);
         await burnPendingEmailTokens(tx, current.id, now);
         const revokedDevices = await revokeTrustedDevices(tx, current.id, now);
+        // WP-7 (Security L2): a challenge earned with the old password must not finish a login.
+        await burnChallenges(tx, current.id, now);
         const started = await startSession(tx, app.config, current.id, sessionOrigin(request), now, { twoFactorVerifiedAt });
         await recordAudit(tx, {
           actorUserId: current.id,
@@ -250,6 +252,8 @@ const passwordRoutes: FastifyPluginAsyncZod = async (app) => {
         await burnPendingEmailTokens(tx, consumed.userId, now);
         // WP-7: a reset also stops trusting this member's devices (2FA itself stays on).
         const revokedDevices = await revokeTrustedDevices(tx, consumed.userId, now);
+        // WP-7 (Security L2): open login challenges were earned with the old password.
+        await burnChallenges(tx, consumed.userId, now);
         await recordAudit(tx, {
           actorUserId: consumed.userId,
           action: AuthAuditAction.PasswordReset,
