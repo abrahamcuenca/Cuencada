@@ -1,0 +1,418 @@
+/* WP-6.3 Baúl de recuerdos: list, box page, Home strip and the admin panel.
+   Mobile-first (360–414 px), no overflow at 320. The cover reads as an old
+   print: a cream mat around a 4:3 photo. */
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding-block: var(--space-5) var(--space-10);
+}
+
+.title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  line-height: var(--leading-tight);
+  overflow-wrap: anywhere;
+}
+
+.intro {
+  margin: var(--space-1) 0 0;
+  max-width: var(--reading-max);
+  color: var(--color-text-muted);
+}
+
+.muted {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.description {
+  margin: 0;
+  max-width: var(--reading-max);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  min-height: var(--tap-min);
+  color: var(--color-primary);
+  font-weight: var(--weight-bold);
+  text-decoration: none;
+}
+
+.listHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.boxHeader {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.headerSkeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 480px) {
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1000px) {
+  .grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* ---------------------------------------------------------------------- cards */
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.card:focus-within {
+  box-shadow: var(--shadow-md);
+}
+
+@media (hover: hover) {
+  .card:hover {
+    box-shadow: var(--shadow-md);
+  }
+}
+
+.card .cover {
+  margin: var(--space-3) var(--space-3) 0;
+  width: auto;
+  border: 6px solid var(--brand-cream);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.18);
+}
+
+.cardBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+
+.cardTitle {
+  margin: 0;
+  font-size: var(--text-lg);
+  line-height: var(--leading-snug);
+  overflow-wrap: anywhere;
+}
+
+/* The title link is stretched over the whole card: one big tap target, one tab stop. */
+.cardLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-min);
+  color: inherit;
+  text-decoration: none;
+}
+
+.cardLink::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.cardLink:focus-visible {
+  outline: none;
+}
+
+.cardLink:focus-visible::after {
+  border-radius: var(--radius-lg);
+  outline: var(--focus-outline);
+  outline-offset: calc(-1 * var(--focus-offset));
+}
+
+.cardCount {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.cardDescription {
+  display: -webkit-box;
+  margin: var(--space-1) 0 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow-wrap: anywhere;
+}
+
+.cardCompact .cardBody {
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+
+/* --------------------------------------------------------------- cover (4:3) */
+
+.cover {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  background: var(--brand-gold-100);
+}
+
+.coverImage {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.coverPlaceholder {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(circle at 30% 25%, rgb(255 255 255 / 0.55), transparent 55%),
+    linear-gradient(160deg, var(--brand-gold-100) 0%, var(--brand-gold-300) 60%, var(--brand-gold-500) 100%);
+  font-size: clamp(2rem, 9vw, 3.5rem);
+}
+
+/* ---------------------------------------------------------------- Home strip */
+
+.strip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-block: var(--space-6);
+}
+
+.stripHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.stripTitle {
+  margin: 0;
+  font-size: var(--text-xl);
+}
+
+.stripLink {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-min);
+  color: var(--color-primary);
+  font-weight: var(--weight-bold);
+}
+
+.stripList {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 480px) {
+  .stripList {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* --------------------------------------------------------------------- admin */
+
+.adminList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.adminRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.adminCover {
+  flex: 0 0 auto;
+  width: 5.5rem;
+  border-radius: var(--radius-sm);
+}
+
+.adminCover .coverPlaceholder {
+  font-size: var(--text-xl);
+}
+
+.adminInfo {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.adminTitle {
+  margin: 0;
+  font-size: var(--text-md);
+  overflow-wrap: anywhere;
+}
+
+.adminTitle a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tap-min);
+  color: var(--color-primary);
+}
+
+.adminActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 1 1 100%;
+}
+
+@media (min-width: 900px) {
+  .adminActions {
+    flex: 0 1 auto;
+  }
+}
+
+.orderButtons {
+  display: flex;
+  gap: var(--space-1);
+  margin-inline-end: auto;
+}
+
+/* ---------------------------------------------------------------------- form */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.formError {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.coverPicker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.coverLegend {
+  margin-bottom: var(--space-1);
+  padding: 0;
+  font-weight: var(--weight-bold);
+}
+
+.coverGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(5.5rem, 1fr));
+  gap: var(--space-2);
+}
+
+.coverOption {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap-min);
+  cursor: pointer;
+}
+
+.coverOption input {
+  flex: 0 0 auto;
+  width: 1.25rem;
+  height: 1.25rem;
+  margin: 0;
+  accent-color: var(--color-primary);
+}
+
+.coverGrid .coverOption input {
+  position: absolute;
+  top: var(--space-1);
+  left: var(--space-1);
+}
+
+.coverThumb {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border: 3px solid transparent;
+  border-radius: var(--radius-sm);
+}
+
+.coverOption input:checked + .coverThumb {
+  border-color: var(--color-primary);
+}
+
+.coverOption input:focus-visible + .coverThumb {
+  outline: var(--focus-outline);
+  outline-offset: 2px;
+}
+
+.coverAuto {
+  font-size: var(--text-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card {
+    transition: none;
+  }
+}
