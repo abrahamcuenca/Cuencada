@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { type BrowserContext, test as base, expect, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { type CastMember, CastRole, castMember, PROJECT_KEYS, type ProjectKey } from "../harness/people.js";
 import { REPO_ROOT, SCREENSHOT_DIR, STORAGE_ORIGIN, WEB_ORIGIN } from "../harness/settings.js";
-import { nextTotpCode } from "./totp.js";
+import { freshCode, withAccountLock } from "./totp.js";
 
 const ALLOWED_ORIGINS = new Set([new URL(WEB_ORIGIN).origin, STORAGE_ORIGIN]);
 
@@ -108,17 +108,23 @@ export async function login(page: Page, member: Pick<CastMember, "email" | "pass
 }
 
 /**
- * Answer the login code step with the next unused code of `secret` (WP-7).
+ * Answer the login code step with a fresh code of `secret` (WP-7), under the
+ * account's cross-worker lock until the code step is gone (see `totp.ts`).
  *
  * @param page - On the code step.
- * @param account - Key for the per-account replay tracker (the email).
+ * @param account - The email.
  * @param secret - The account's test-only TOTP secret.
+ * @param trustDevice - Tick "Confiar en este dispositivo 30 días" first.
  */
-export async function answerTwoFactor(page: Page, account: string, secret: string): Promise<void> {
+export async function answerTwoFactor(page: Page, account: string, secret: string, trustDevice = false): Promise<void> {
   const field = page.getByRole("textbox", { name: /Código de 6 números/ });
   await expect(field).toBeVisible();
-  await field.fill(await nextTotpCode(account, secret));
-  await page.getByRole("button", { name: "Verificar", exact: true }).click();
+  if (trustDevice) await setControl(page.getByRole("checkbox", { name: "Confiar en este dispositivo 30 días" }), true);
+  await withAccountLock(account, async () => {
+    await field.fill(await freshCode(account, secret));
+    await page.getByRole("button", { name: "Verificar", exact: true }).click();
+    await expect(field).toBeHidden();
+  });
 }
 
 /**

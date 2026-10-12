@@ -1,21 +1,20 @@
 /**
- * Journeys 12 and 12b (WP-7): two-step verification.
+ * Journeys 19 and 19b (WP-7): two-step verification.
  *
- * - 12: a member turns it on from "Sesiones y seguridad", logs in with a
+ * - 19: a member turns it on from "Sesiones y seguridad", logs in with a
  *   code, trusts the device (the next login skips the code), then removes
  *   the trusted device (the code is back).
- * - 12b: a pre-enrolled member logs in with a recovery code (and gets the
+ * - 19b: a pre-enrolled member logs in with a recovery code (and gets the
  *   email), then an admin resets her two-step verification: her session
  *   ends and she logs in with the password alone.
  */
 import { E2E_RECOVERY_CODES, ProjectKey } from "./harness/people.js";
-import { CastRole, expect, journeyShot, login, test } from "./support/fixtures.js";
+import { answerTwoFactor, CastRole, expect, journeyShot, login, test } from "./support/fixtures.js";
 import { waitForMail } from "./support/mail.js";
-import { nextTotpCode } from "./support/totp.js";
 import { enrollInWizard, logoutFromMenu } from "./support/twoFactor.js";
 
 test.describe("two-step verification", () => {
-  test("12 · a member turns on two-step verification, trusts this device, then removes it @desktop", async ({ page, cast }, testInfo) => {
+  test("19 · a member turns on two-step verification, trusts this device, then removes it @desktop", async ({ page, cast }, testInfo) => {
     // Up to three codes; each may wait for the next 30-second step.
     test.setTimeout(240_000);
     const hugo = cast(CastRole.TwoFactor);
@@ -25,7 +24,7 @@ test.describe("two-step verification", () => {
     await expect(section.getByText("Desactivada")).toBeVisible();
     await section.getByRole("button", { name: "Activar", exact: true }).click();
     const wizard = page.getByRole("dialog", { name: "Activar la verificación en dos pasos" });
-    await journeyShot(page, testInfo, "12-2fa-enable-password");
+    await journeyShot(page, testInfo, "19-2fa-enable-password");
     const since = new Date();
     const { secret } = await enrollInWizard(wizard, hugo.email, hugo.password);
     await expect(section.getByText("Activada", { exact: true })).toBeVisible();
@@ -40,10 +39,8 @@ test.describe("two-step verification", () => {
     const code = page.getByRole("textbox", { name: /Código de 6 números/ });
     await expect(code).toHaveAttribute("autocomplete", "one-time-code");
     await expect(code).toHaveAttribute("inputmode", "numeric");
-    await journeyShot(page, testInfo, "12-2fa-code-step");
-    await code.fill(await nextTotpCode(hugo.email, secret));
-    await page.getByRole("checkbox", { name: "Confiar en este dispositivo 30 días" }).check();
-    await page.getByRole("button", { name: "Verificar", exact: true }).click();
+    await journeyShot(page, testInfo, "19-2fa-code-step");
+    await answerTwoFactor(page, hugo.email, secret, true);
     await expect(page.getByRole("button", { name: /^Mi cuenta/ })).toBeVisible();
 
     // The trusted browser skips the code next time.
@@ -54,7 +51,7 @@ test.describe("two-step verification", () => {
     await page.goto("/perfil/sesiones");
     const devices = page.getByRole("list", { name: "Dispositivos de confianza" });
     await expect(devices.getByText("Este navegador")).toBeVisible();
-    await journeyShot(page, testInfo, "12-2fa-trusted-devices");
+    await journeyShot(page, testInfo, "19-2fa-trusted-devices");
     await devices.getByRole("button", { name: /^Quitar / }).click();
     await expect(page.getByText("Ese dispositivo volverá a pedir el código.")).toBeVisible();
     await logoutFromMenu(page);
@@ -65,7 +62,7 @@ test.describe("two-step verification", () => {
     await expect(page.getByRole("textbox", { name: /Código de 6 números/ })).toBeVisible();
   });
 
-  test("12b · recovery-code login, then an admin resets the member's two-step verification @desktop", async ({
+  test("19b · recovery-code login, then an admin resets the member's two-step verification @desktop", async ({
     page,
     cast,
     project,
@@ -101,7 +98,7 @@ test.describe("two-step verification", () => {
     const resetSince = new Date();
     await sheet.getByRole("button", { name: "Restablecer verificación en dos pasos" }).click();
     const confirm = adminPhone.getByRole("alertdialog", { name: /Restablecer la verificación en dos pasos/ });
-    await journeyShot(adminPhone, testInfo, "12b-admin-reset-confirm");
+    await journeyShot(adminPhone, testInfo, "19b-admin-reset-confirm");
     await confirm.getByRole("button", { name: "Restablecer", exact: true }).click();
     await expect(sheet.getByText(/Restablecimos su verificación en dos pasos/)).toBeVisible();
     const reset = await waitForMail({ to: ines.email, category: "two-factor-notice", since: resetSince });

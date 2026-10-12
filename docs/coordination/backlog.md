@@ -176,6 +176,12 @@ Still open:
 - [x] **WP-4.4 merge:** the tree's "Detalles" accordion uses WP-4.4's `ContactList` (done in WP-4.1 after merging PR #45).
 - The "Deshacer" of a `person.update` refuses (409) when the person changed afterwards; an admin undoes newer changes first. A "restore this version" (overwrite) action could come later.
 
+### WP-7 follow-ups (two-step verification)
+- `TOTP_ENCRYPTION_KEY` rotation script (decrypt with the old key, re-encrypt with the new one in one transaction over the tunnel) and a key-id column, so the key can rotate without locking enrolled users out (runbook § 11 "Rotating `TOTP_ENCRYPTION_KEY`").
+- WebAuthn/passkeys as a phishing-resistant second factor (threat model A16).
+- Admin dashboard counter: admins and members with two-step verification on; alert on bursts of `auth.2fa_failed`.
+- The per-user code-check limiter is in memory (like the login limits): it resets on restart and is per process.
+
 ## Post-launch (after the 2026-10-07 deploy)
 
 First production deploy and seed: 2026-10-07 (WP-3.2 recorded the lessons in

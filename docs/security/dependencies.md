@@ -67,7 +67,11 @@ lockfile):
   `@fastify/cookie`, `@fastify/rate-limit`, `@fastify/websocket`, `jose` 6,
   `argon2` 0.44, `zod` 4.6, `drizzle-orm` 0.45, `postgres` 3.4,
   `@aws-sdk/client-s3` and `@aws-sdk/s3-request-presigner` 3.x, `sharp`
-  0.35, `resend` 6.30.
+  0.35, `resend` 6.30, and (WP-7) `otplib` 13.5 (MIT; with `@otplib/*`
+  13.5, `@noble/hashes` 2.4 and `@scure/base` 2.4, all MIT, pure JS) for
+  TOTP and `uqr` 0.1.3 (MIT, zero dependencies) for the server-rendered QR
+  SVG. `pnpm audit` and `pnpm audit --prod` were clean after adding them
+  (2026-10-11).
 - **Web:** React 19, Redux Toolkit / RTK Query, `vite-plugin-pwa` / Workbox.
 
 All of them are actively maintained upstream projects. None is deprecated,

@@ -2,31 +2,50 @@
  * TOTP codes for the e2e journeys (WP-7), computed with the server's own
  * otplib wrapper (SHA-1, 6 digits, 30 s).
  *
- * The API refuses a step it already accepted for that account (replay
- * prevention), and several Playwright workers may log the same admin in
- * within one 30-second step. A tiny file-based tracker in the run directory
- * (shared by every worker, wiped by the harness at start) hands out each
- * step at most once per account: the current step, else the next one (the
- * server accepts ±1 step), else it waits for the clock to move on.
+ * The API refuses a step it already accepted for an account (replay
+ * prevention, covered by the server tests), and several Playwright workers
+ * log the same admin in within one 30-second step. So a code is answered
+ * under a per-account lock shared by every worker (a directory in the run
+ * directory, which the harness wipes at start), and, test-only, the
+ * account's replay marker (`user_totp.last_used_step`) is cleared in the
+ * isolated `*_e2e` database first, like the server tests' `freshTotpCode`.
+ * The lock is held until the API answered, so no two answers of one account
+ * ever race.
  */
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
+import postgres from "postgres";
 import { totpCodeAt } from "../../../apps/server/dist/lib/totp.js";
-import { E2E_RUN_DIR } from "../harness/settings.js";
+import { E2E_DATABASE_URL, E2E_RUN_DIR } from "../harness/settings.js";
 
-const STEP_MS = 30_000;
-const LOCK_STALE_MS = 30_000;
-const TRACKER_DIR = join(E2E_RUN_DIR, "totp");
+const LOCK_STALE_MS = 60_000;
+const LOCK_DIR = join(E2E_RUN_DIR, "totp-locks");
+
+let sql: postgres.Sql | null = null;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Run `task` holding a per-account lock (a directory: `mkdir` is atomic). */
-async function withLock<T>(key: string, task: () => Promise<T>): Promise<T> {
-  mkdirSync(TRACKER_DIR, { recursive: true });
-  const lock = join(TRACKER_DIR, `${key}.lock`);
+/** The e2e database (the harness already refused anything but a loopback `*_e2e` database). */
+function database(): postgres.Sql {
+  if (!new URL(E2E_DATABASE_URL).pathname.endsWith("_e2e")) throw new Error("totp helper: not an *_e2e database");
+  // Short idle timeout: the connection closes between logins, so a worker can always exit.
+  sql ??= postgres(E2E_DATABASE_URL, { max: 1, idle_timeout: 2, onnotice: () => {} });
+  return sql;
+}
+
+/**
+ * Run `task` holding the account's lock (a directory: `mkdir` is atomic
+ * across processes). A lock older than a minute is treated as abandoned.
+ *
+ * @param account - The email.
+ * @param task - Generate and submit the code.
+ */
+export async function withAccountLock<T>(account: string, task: () => Promise<T>): Promise<T> {
+  mkdirSync(LOCK_DIR, { recursive: true });
+  const lock = join(LOCK_DIR, createHash("sha256").update(account).digest("hex").slice(0, 16));
   const deadline = Date.now() + 120_000;
   for (;;) {
     try {
@@ -38,7 +57,7 @@ async function withLock<T>(key: string, task: () => Promise<T>): Promise<T> {
       } catch {
         // Released meanwhile.
       }
-      if (Date.now() > deadline) throw new Error("nextTotpCode: lock timeout");
+      if (Date.now() > deadline) throw new Error("totp helper: lock timeout");
       await sleep(100);
     }
   }
@@ -50,40 +69,15 @@ async function withLock<T>(key: string, task: () => Promise<T>): Promise<T> {
 }
 
 /**
- * The code of the next step the API has not accepted yet for `account`.
+ * The current code of `secret`, after clearing the account's replay marker
+ * (test-only; call it inside {@link withAccountLock} and submit before releasing).
  *
- * @param account - Tracker key (the email).
+ * @param account - The email.
  * @param secret - Base32 test-only secret.
  */
-export async function nextTotpCode(account: string, secret: string): Promise<string> {
-  const key = createHash("sha256").update(account).digest("hex").slice(0, 16);
-  return withLock(key, async () => {
-    const file = join(TRACKER_DIR, `${key}.step`);
-    let last = -1;
-    try {
-      last = Number(readFileSync(file, "utf8"));
-    } catch {
-      last = -1;
-    }
-    for (;;) {
-      const current = Math.floor(Date.now() / STEP_MS);
-      const step = current > last ? current : current + 1 > last ? current + 1 : null;
-      if (step !== null) {
-        writeFileSync(file, String(step));
-        return totpCodeAt(secret, new Date(step * STEP_MS));
-      }
-      await sleep(1000);
-    }
-  });
-}
-
-/**
- * The code of `secret` right now (for a secret only this journey uses, e.g.
- * one read from the enrollment screen). Still goes through the tracker.
- *
- * @param account - Tracker key.
- * @param secret - Base32 secret.
- */
-export function codeFor(account: string, secret: string): Promise<string> {
-  return nextTotpCode(account, secret);
+export async function freshCode(account: string, secret: string): Promise<string> {
+  await database()`
+    update user_totp set last_used_step = null
+    where user_id = (select id from users where lower(email) = ${account.toLowerCase()})`;
+  return totpCodeAt(secret, new Date());
 }

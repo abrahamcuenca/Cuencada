@@ -9,8 +9,8 @@ CI against real Postgres.
 The security suite lives in `apps/server/src/__tests__/security/`:
 
 - `inventory.test.ts`: route drift guard. It generates [routes.md](routes.md).
-- `authz-matrix.test.ts`: 99 routes × 7 principals, plus IDOR, CSRF and
-  WebSocket checks.
+- `authz-matrix.test.ts`: every route × 8 principals (WP-7 added "admin
+  without 2FA"), plus IDOR, CSRF and WebSocket checks.
 - `pii-leak.test.ts`: response-body scans.
 - `headers.test.ts`: security headers, CSP, CORS and `no-store`.
 
@@ -38,10 +38,11 @@ The table covers both the 2021 and 2025 editions.
 |---|---|---|---|
 | V1 | Architecture, threat modeling | **met** | [threat-model.md](threat-model.md), ADR 0001, coordination WPs, and a security review on every [SEC] PR. |
 | V2.1 | Password security | **met** | Min 12 chars, no composition rules, max length bounded (`packages/types/src/auth.ts`). Change requires the current password. **2.1.7 met (WP-2.3c, was L5):** invite accept, change-password and reset-password reject a password seen in ≥ 1 breach (HIBP range API, k-anonymity: only a 5-char SHA-1 prefix leaves the server), 400 `VALIDATION` with a `PASSWORD_BREACHED` detail on the field, before argon2 and before any token is consumed. Fails open on timeout (1.5 s) or upstream error, with a `password.breach_check_unavailable` warn (`lib/breachedPasswords.ts`, `breachedPasswords.test.ts`, `breachedPasswordRoutes.test.ts`). The prod seed refuses a breached admin temporary password. |
-| V2.2 | General authenticator security | **met** | Anti-automation (credential rate limits, mail budgets). Users are notified of password changes (`password-changed` email) and admins of role changes. |
+| V2.2 | General authenticator security | **met** | Anti-automation (credential rate limits, mail budgets). Users are notified of password changes (`password-changed` email) and admins of role changes. **WP-7:** two-step verification (TOTP) is available to every member and mandatory for admins (2.2.x multi-factor at L2); users are notified when it is enabled, disabled, reset by an admin or a recovery code is used. |
 | V2.4 | Credential storage | **met** | argon2id; `needsRehash` upgrades parameters on login. |
 | V2.5 | Credential recovery | **met** | Reset tokens are single-use, last 30 min and are hashed. A reset revokes every session. The response is a generic 202. |
-| V2.7/2.8 | Out-of-band / one-time tokens | **met** | Magic links last 15 min, are single-use and hashed, and are bound to the user and address. Email verification links last 24 h. |
+| V2.7 | Out-of-band verifiers | **met** | Magic links last 15 min, are single-use and hashed, and are bound to the user and address. Email verification links last 24 h. **WP-7:** a magic link no longer replaces the second factor: for a user with two-step verification it answers a challenge like the password does (2.7.x out-of-band is the first factor only). |
+| V2.8 | One-time verifiers (TOTP, WP-7) | **met** | RFC 6238 TOTP via otplib 13 (SHA-1, 6 digits, 30 s): **2.8.1** codes live one step, accepted window ±1 step; **2.8.2** the secret is 160-bit random, encrypted at rest with AES-256-GCM under `TOTP_ENCRYPTION_KEY` (AAD = user id; production refuses a weak or missing key; a wrong key fails closed); **2.8.3** approved algorithms (HMAC-SHA-1 for TOTP, AES-GCM, SHA-256); **2.8.4** a step is accepted once (`last_used_step`, row lock); **2.8.5** reuse attempts fail with a generic error and are audited (`auth.2fa_failed`); **2.8.6** lost authenticator: 10 single-use recovery codes (80-bit, SHA-256 at rest, use emailed) and an audited admin reset (never on yourself; admins alerted; target emailed); **2.8.7** n/a (no biometrics). Anti-automation: 5 attempts per challenge, 10 checks per user and 20 per IP per 15 min. Mandatory for administrators (403 `TWO_FACTOR_SETUP_REQUIRED` gate); trusted devices (members only) last 30 days and are revocable. Evidence: `apps/server/src/lib/totp.test.ts`, `apps/server/src/modules/auth/twoFactorRoutes.test.ts`, the "Admin no 2FA" column of [routes.md](routes.md), e2e journeys 1, 12, 12b. |
 | V3.1–3.3 | Session management, termination | **met** | Sessions live server-side, are checked on every request, and support logout, logout-all, revoke-others, password-change revoke, admin revoke and disable (matrix "revoked"/"disabled" columns). |
 | V3.4 | Cookie-based session management | **met** | `__Secure-` prefix, HttpOnly, Secure, SameSite=Strict, `Path=/api/auth` (`modules/auth/cookies.ts`, `sessionRoutes.test.ts`). |
 | V3.5 | Token-based session management | **met** | The access JWT lasts 15 min and lives in memory only. Refresh rotation is single-use and detects reuse. |
