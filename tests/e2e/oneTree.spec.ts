@@ -107,9 +107,11 @@ test.describe("one family tree", () => {
     await expect(page.getByRole("article").filter({ hasText: branch.father })).toHaveCount(0);
 
     // The cousin: approved, with the admin's note; connected (no CTA); Primos shows his cousins.
+    // The merged-away copy reads as "una persona eliminada" (people come from the current rows).
     await phone.goto("/arbol/propuestas");
-    await expect(mine.getByText("Aprobada")).toBeVisible();
-    await expect(mine.getByText("¡Listo! Ya están unidas las dos ramas.")).toBeVisible();
+    const approved = phone.getByRole("article", { name: `una persona eliminada es la misma persona que ${family.grandparent}` });
+    await expect(approved.getByText("Aprobada")).toBeVisible();
+    await expect(approved.getByText("¡Listo! Ya están unidas las dos ramas.")).toBeVisible();
     await phone.goto("/arbol");
     await expect(phone.getByRole("article", { name: branch.cousin })).toBeVisible();
     const primos = phone.locator("details").filter({ has: phone.getByText(/^Primos \(\d+\)$/) });

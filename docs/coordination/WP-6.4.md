@@ -1,0 +1,59 @@
+# WP-6.4 One family tree [SEC]
+Owner: Senior full-stack JS (BE + FE) with UI/UX · Branch: `wp/6.4-one-tree` · PR: (not opened)
+
+Based on `origin/main` @ 83dbb88 (WP-6.0, migration 0010, contracts in `packages/types/src/treeLinks.ts`). Rules: ADR 0001 §6 (circle, living-person privacy) and **§8** (binding). Interfaces: `docs/coordination/WP-6.0.md` "WP-6.4". No migration: everything uses 0010.
+
+**Root cause** (plan): the tree is one global graph, but cousins re-created shared ancestors in their own branches (members can only add *new* people inside their circle), admins had no view of the disconnected branches, duplicate detection matched names only, and the tree page showed only direct lines plus siblings. **Owner decision:** members propose, admins approve.
+
+## What shipped
+### Server (`apps/server/src/modules/family/`)
+| Route | Who | Notes |
+|---|---|---|
+| `POST /api/family/proposals` | member | `same_person` or `relate` (`parent_of`/`partner_of`) + note; tree lock + per-user advisory lock; 20 per rolling day (DB count, admins exempt) + 30/h route limiter; 409 `PROPOSAL_DUPLICATE` only for the caller's own pending pair; 404 for an unknown person |
+| `GET /api/family/proposals` | member | own only, newest first (keyset), `status` filter |
+| `DELETE /api/family/proposals/:id` | proposer | 204; 404 for anyone else; 409 `PROPOSAL_NOT_PENDING` |
+| `GET /api/admin/family/proposals[/:id]` | admin | grouped by unordered pair (offset cursor over groups; pending groups first, oldest pending first) |
+| `POST /api/admin/family/proposals/:id/resolve` | admin | `approve` → `mergePeopleTx` (keep = `keepPersonId ?? to`, `fields`) or `createRelationshipTx` (admin provenance), in the resolve transaction with the proposal rows locked; `reject`; `applyToPair` (default) |
+| `GET /api/family/settings`, `GET|PUT /api/admin/family/settings` | member / admin | root ancestor; upsert; missing row = no root; audited |
+| `GET /api/family/tree/extended?personId=` | member | tíos (+ partners), primos, tíos abuelos (`PersonSummary`) |
+| `GET /api/family/overview?personId=&depth=` | member | "Árbol completo", names only, privacy-filtered years, `childrenCount`, `hasMore`, `viewerConnected` |
+| `GET /api/family/overview/path?personId=` | member | root → person ("Ir a mí") |
+| `GET /api/admin/family/branches` | admin | components the root cannot reach, largest first, representatives, size, linked accounts (count), suggested matches |
+
+- **Files:** `proposals.ts` (service), `proposalCleanup.ts` (the delete sites), `settings.ts`, `graph.ts` (in-memory graph), `oneTree.ts` (bands, overview, path, branches), `one-tree-routes.ts`; `duplicates.ts` gains `scoreMatch` (+ `normalizedName`).
+- **Person-delete sites (all three):** `deletePersonTx` and the `revert.ts` revert of a `person.create` withdraw pending proposals naming the person (`tree_proposal.withdrawn`, `reason: person_deleted`); `mergePeopleTx` (owned here) re-points the duplicate's pending proposals to keep **before** deleting it, withdrawing those that collapse (keep↔keep) or collide with the same proposer's pending pair (`person_merged`), moves `family_settings.root_person_id`, and calls `moveMediaTagsTx`. The merge audit counts `proposalsRepointed`, `proposalsWithdrawn`, `tagsMoved`, `tagsDropped`, `rootMoved`. Merge undo restores none of them (WP-6.0 decision 16).
+- **`moveMediaTagsTx` (WP-6.2):** `modules/social/` does not exist on `main`, so `merge.ts` imports a no-op placeholder `modules/social/moveMediaTagsPlaceholder.ts` with a `TODO(WP-6.2)`. Exact until 6.2 lands (no code writes `media_tags` before it). **Whichever of 6.2/6.4 merges second points the import at 6.2's real function and deletes the placeholder** (backlog item).
+- **Notifications:** resolve calls `recordNotification(tx, { kind: tree_proposal_resolved, target: { proposalId } })` for each proposer (not the resolving admin; never the note), and `pushNotifications` after the commit. Both are WP-6.0 stubs until WP-6.1.
+
+### Web (`apps/web/src/features/family/oneTree/`, all lazy)
+- **Tree page** (`/arbol/:id`): "Es la misma persona…" and "Conectar con…" on every person (`ProposeDialog`: search, relation radio, note); bands **Tíos**, **Primos**, **Tíos abuelos** (`ExtendedBands`, native `<details>`, collapsed below 700 px); the CTA "¿No ves a tu familia? Propón una conexión" (`ConnectCta`) on your own node when `viewerConnected === false`; header links "Árbol completo" and "Mis propuestas".
+- **`/arbol/propuestas`** ("Mis propuestas"): status badges, the admin's note, "una persona eliminada", "Retirar".
+- **`/arbol/completo`** ("Árbol completo"): collapsible outline from the root, one generation per request, search (path expansion) and "Ir a mí" (focus + highlight).
+- **Admin:** `/admin/familia/propuestas` ("Propuestas del árbol": grouped, side by side, "Aprobar…" with the merge preview, "Cambiar cuál se queda", conflict explanations; "Rechazar…" with a note) and `/admin/familia/ramas` ("Ramas sin conectar" with the "Raíz del árbol" setting; each match opens the existing merge sheet or the person page to link). Both are in Panel → sections.
+- Initial JS: **181.12 kB** gzip (budget 190; was ~180.6, +0.5 kB for the route entries and Panel rows).
+
+## Decisions
+1. **Overview children = the couple's children.** The outline puts under a person their own children **and** their partners' children (a couple's children are often recorded on one parent only). A person reached twice (cousins who married) shows under the first parent only. The path endpoint walks the same rule.
+2. **Bands are strict blood relations.** Tíos = children of the grandparents except the parents (full or half siblings), plus their partners; primos = children of the blood tíos; tíos abuelos = children of the great-grandparents except the grandparents (no partners, per contract). Direct line and siblings never appear in a band (also guards cyclic data).
+3. **In-memory graph** (`graph.ts`): every one-tree read loads all edges in one statement and walks them in memory with visited sets (cycle-safe). Family scale (hundreds to a few thousand people); revisit with caching beyond that (backlog).
+4. **Proposal direction from the UI:** "Es la misma persona" sends `from` = the person on screen, `to` = the person picked, so an approval keeps the picked one by default (the one the member recognised in the main tree). The admin can swap.
+5. **System withdrawals have no resolver** (`resolved_by_user_id` null): a proposer is not told who deleted or merged the person. They are not notified (the notification kind is "resolved", by an admin).
+6. **Create takes the tree lock** (then the per-user lock): a concurrent person delete cannot leave a pending proposal naming nobody (the delete takes the same lock and withdraws first).
+7. **Resolve order:** tree lock → proposal row(s) `for update` → set `approved`/`rejected` → merge or edge. Any 400/409 from the merge or edge rolls the whole transaction back, so the proposal stays pending (tested for both-linked, relationship conflicts, cycles and an existing edge).
+8. **Branch matches** (`scoreMatch`): same name 60, similar name 45, nickname 25, same partner 30, shared children 25 (+10 for two or more); years must be compatible (±1); structural signals only count next to some name evidence (a name or nickname match); suggestions from 40. "Posibles duplicados" (WP-4.5) keeps its own rules (its contract has no new reasons).
+9. **No account ids in the branches report:** summaries are sent with `userId: null` even to admins; linked accounts are a count. Overview nodes have no photo or account fields by contract.
+10. **The queue acts on the oldest pending proposal of a pair**; `applyToPair` brings the same-kind ones along. Per-field merge choices are API-only here (the queue uses the defaults; "Fusionar" stays available for field-by-field merges).
+11. **E2E journey 18 runs in one project (iPhone)**: the root is a single global setting, and the three projects run in parallel against one database. It also takes the 1280 px doc shots.
+
+## Tests
+- Server: `proposals.test.ts` (18: create/validation/404/duplicate per proposer/20-a-day under the lock incl. a concurrent burst/admins exempt; own list and paging; withdraw 404/409; current names and deleted → null; grouped admin queue; reject with the note kept out of audit and logs; approve → merge, keep choice, `applyToPair`; both-linked, relationship-conflict, cycle and duplicate-edge 409s leave it pending), `proposalDeleteSites.test.ts` (6: admin delete, purge-history delete, member delete, revert-of-create, merge re-point/collapse/collide/root + undo restores none, preview changes nothing), `proposalNotify.test.ts` (3: proposer notified without the note and pushed after the commit; never the resolver; nothing pushed on rollback), `oneTree.test.ts` (13: settings upsert/missing row/SET NULL; bands incl. partners and cyclic data; overview privacy, names-only keys, lazy paging, `viewerConnected`; path; branches with matches and no account ids, cleared by an approved proposal, without a root, paging), `graph.test.ts`, `duplicates.test.ts` (`scoreMatch`).
+- Security: 13 new authz-matrix rows (incl. IDOR withdraw → 404 with the row unchanged, mass assignment on create → 400), `routes.md` regenerated, PII scan case (overview/bands/settings/path/proposals; others' notes never shown; admin report without account ids).
+- Web: `OneTree.test.tsx` (11: bands, propose same person / connect, duplicate message, CTA shown/hidden, Mis propuestas incl. withdraw and "una persona eliminada", Árbol completo lazy load and "Ir a mí"), `OneTreeAdmin.test.tsx` (7: grouped queue, approve with preview + swap, conflict explanation, reject with note, root setting, branches with matches → merge sheet).
+- E2E: journey 18 (`tests/e2e/oneTree.spec.ts`): admin sets the root → the cousin's branch is listed with a match → the cousin (CTA visible) proposes "Es la misma persona" for his grandmother → the admin approves → the branch is gone from the report → the cousin sees "Aprobada" with the note, no CTA, and Ana/Beto in Primos → "Ir a mí" in Árbol completo. Seed: a per-project cousin branch (`cousinBranchNames`, cast role `primo`). Quality gates: `/arbol/completo`, `/arbol/propuestas`, `/admin/familia/propuestas`, `/admin/familia/ramas`. Screenshots: `docs/ux/screenshots/wp64/*-{375,1280}.webp`.
+
+## Merge order and coordination
+- **WP-6.2:** wire `moveMediaTagsTx` (see above) when the second of the two merges; then add a merge test with tags.
+- **WP-6.1:** nothing to change here; `recordNotification`/`pushNotifications` start working when 6.1 fills the stubs (the proposer's notification then shows in the feed; `proposalNotify.test.ts` can switch from observing the calls to asserting rows).
+
+## Verification
+(filled in below after the final run)
