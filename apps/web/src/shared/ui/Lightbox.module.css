@@ -107,14 +107,11 @@
   }
 }
 
-/* WP-6.2: laid over the image's own box (measured), so children use percentages of the photo. */
+/* WP-6.2: laid over the image's own box (measured), so children use percentages of the photo.
+   Transparent to pointers; an interactive child opts in with `pointer-events: auto`. */
 .overlay {
   position: absolute;
   pointer-events: none;
-}
-
-.overlay > * {
-  pointer-events: auto;
 }
 
 .footer {

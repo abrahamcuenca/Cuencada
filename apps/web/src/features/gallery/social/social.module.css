@@ -185,6 +185,7 @@
   border: 2px dashed var(--brand-gold-300);
   background: rgb(255 255 255 / 0.08);
   cursor: crosshair;
+  pointer-events: auto;
 }
 
 /* Sheets (light). */
