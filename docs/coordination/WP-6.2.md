@@ -44,5 +44,17 @@ ADR 0001 §8 requirements 1, 3, 4, 8, 9, 10 for 6.2: scope first on every route 
 - `modules/social/notifications.test.ts` (mocks `notify.ts`): the tag request from the job (recipient/actor/kind/target), none for unlinked/self tags, none after a decline that beats the job, retraction on decline, likes/comments to the uploader only on new rows.
 - Security: `socialRouteMatrix.ts` (15 routes, principals + IDOR/rule probes), `docs/security/routes.md` regenerated, `pii-leak.test.ts` WP-6.2 case.
 
+## Web (`apps/web`)
+- **`Lightbox`** gains optional `footer` (full-width row under the caption) and `overlay` (over the measured image box, images only; pointer-transparent except the tap-to-place target); existing callers unchanged.
+- **`GalleryLightbox`** loads the social layer lazily (`features/gallery/social/LightboxSocial.tsx`, ~5.9 kB gzip): heart (`aria-pressed`, optimistic, rolled back on error), "N Me gusta" → likers sheet, "Comentarios (n)" → comments sheet (bottom sheet on mobile; oldest first, "Ver más comentarios", composer with a reused `crypto.randomUUID` client id, "Eliminar" → inline confirm → "Comentario eliminado", "Reportar" with a reason, admins "Eliminar (moderación)"), "Etiquetar" (when `canTag`) → picker that shows only the server's candidates, optional "Señalar en la foto" (tap-to-place, 4 decimals), tag chips ("Esperando aprobación" only when the server says `pending`; "Quitar mi etiqueta"; remove for `canRemove`), and the "Te etiquetaron en esta foto. ¿Eres tú?" banner with one-tap Aprobar / Rechazar.
+- **Grid tiles** show small heart/comment counts (hidden from screen readers).
+- **Person page:** "Detalles" gets "Datos" / "Fotos" tabs; "Fotos" (`PersonPhotos`, lazy) uses `/api/family/people/:id/photos` with the same lightbox.
+- **Admin `/admin/media`:** "Comentarios reportados" tab (`?cola=comments`, lazy): the queue, "Mostrar también los eliminados", open the photo, confirmed "Eliminar comentario".
+- **RTK Query** endpoints in `features/gallery/social/api.ts` (reusing the existing tag types; mutations patch the cached detail and list item instead of refetching, so presigned URLs are not re-signed).
+- Tests: `social/LightboxSocial.test.tsx` (15), `family/pages/PersonPhotos.test.tsx` (2), a `Lightbox` slot test, and `events/pages/EventDetailPage.test.tsx` deep links (`?vista=fotos&foto=` and bare `?foto=`, a photo of another album). `gallery/testUtils.ts` serves the social endpoints.
+- e2e: `tests/e2e/photoSocial.spec.ts` (Fede uploads, hearts, tags Ana and sees a plain chip, comments; Ana opens the deep link on her phone, sees "Esperando aprobación" and approves; Fede deletes his comment → tombstone; a missing photo's deep link → not-found). Screenshots `docs/ux/screenshots/w62/` (375 and 1280: lightbox social, comments, approve banner).
+
 ## Verification
-(filled at the end)
+Branch tip on `origin/main` @ 83dbb88 (main had not moved; the merge is a no-op).
+- `pnpm lint`: clean. `pnpm turbo run typecheck --force`: 6/6. `pnpm test`: 215 files / 2811 tests passed. `pnpm build`: ok. Initial JS 180.66 kB gzip (budget 190 kB; was ~180.6).
+- `pnpm e2e` on isolated ports (API 4262, storage 4263, web 5262, DB `cuencada_w62_e2e`): 87 passed, 1 failed (`directory.spec.ts` desktop: "Clicking the checkbox did not change its state" on the profile switch, untouched by this WP; passed 3/3 on rerun); `photoSocial.spec.ts` 5/5 on all three projects; Lighthouse mobile passed.
