@@ -151,3 +151,14 @@
     margin-left: var(--space-2);
   }
 }
+
+/* WP-5.4: links that only fit from 1000px (TOP_NAV_WIDE_MIN_PX in nav.tsx). */
+.wideOnly {
+  display: none;
+}
+
+@media (min-width: 1000px) {
+  .wideOnly {
+    display: list-item;
+  }
+}

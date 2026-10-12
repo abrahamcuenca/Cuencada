@@ -2,11 +2,12 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ImageDecodeError } from "../../gallery/lib/resizeCore";
-import { CROPPER_DECODE_ERROR, ImageCropper } from "./ImageCropper";
+import { CROPPER_CIRCLE_HINT, CROPPER_DECODE_ERROR, CROPPER_FRAME_HINT, ImageCropper } from "./ImageCropper";
 
 const decodeForPreview = vi.hoisted(() => vi.fn());
 const cropImageToSquare = vi.hoisted(() => vi.fn());
-vi.mock("../../gallery/lib/resizeImage", () => ({ decodeForPreview, cropImageToSquare }));
+const cropImageToRect = vi.hoisted(() => vi.fn());
+vi.mock("../../gallery/lib/resizeImage", () => ({ decodeForPreview, cropImageToSquare, cropImageToRect }));
 
 /** A decoded 400 × 200 preview. */
 function bitmap(): ImageBitmap {
@@ -18,6 +19,7 @@ const picked = new File([new Uint8Array([0xff, 0xd8, 0xff])], "foto.jpg", { type
 beforeEach(() => {
   decodeForPreview.mockReset();
   cropImageToSquare.mockReset();
+  cropImageToRect.mockReset();
   // jsdom has no 2D canvas: painting is skipped (the component handles a null context).
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
 });
@@ -92,5 +94,38 @@ describe("ImageCropper", () => {
     expect(onCancel).toHaveBeenCalled();
     unmount();
     expect(preview.close).toHaveBeenCalled();
+  });
+
+  it("keeps the square circle crop by default", async () => {
+    decodeForPreview.mockResolvedValue(bitmap());
+    cropImageToSquare.mockResolvedValue(picked);
+    render(<ImageCropper file={picked} onCancel={vi.fn()} onCropped={vi.fn()} />);
+    expect(screen.getByText(CROPPER_CIRCLE_HINT)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Guardar" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(cropImageToSquare).toHaveBeenCalled());
+    expect(cropImageToRect).not.toHaveBeenCalled();
+  });
+
+  it("frames a 16:9 cover with aspect and renders a 1920 × 1080 JPEG (WP-5.4)", async () => {
+    decodeForPreview.mockResolvedValue(bitmap());
+    const result = new File([new Uint8Array([1])], "portada.jpg", { type: "image/jpeg" });
+    cropImageToRect.mockResolvedValue(result);
+    const onCropped = vi.fn();
+    render(<ImageCropper file={picked} aspect={16 / 9} title="Portada del evento" onCancel={vi.fn()} onCropped={onCropped} />);
+    expect(screen.getByRole("heading", { name: "Portada del evento" })).toBeInTheDocument();
+    expect(screen.getByText(CROPPER_FRAME_HINT)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Guardar" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+
+    await waitFor(() => expect(onCropped).toHaveBeenCalledWith(result));
+    expect(cropImageToSquare).not.toHaveBeenCalled();
+    const [file, spec, output] = cropImageToRect.mock.calls[0] ?? [];
+    expect(file).toBe(picked);
+    expect(output).toEqual({ width: 1920, height: 1080 });
+    // A 400 × 200 (2:1) preview is wider than 16:9: the full height, a centred 355.6 px wide band.
+    expect(spec.height).toBeCloseTo(1);
+    expect((spec.width * 400) / (spec.height * 200)).toBeCloseTo(16 / 9);
+    expect(spec.x).toBeCloseTo((400 - 200 * (16 / 9)) / 2 / 400);
   });
 });

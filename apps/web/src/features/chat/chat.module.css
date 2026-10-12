@@ -605,3 +605,40 @@
 .forbidden {
   padding: var(--space-6) var(--gutter, var(--space-4));
 }
+
+/* WP-5.4: "Ver evento" in an event room's header. */
+.eventLink {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: var(--tap-min);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-pill);
+  color: var(--color-primary);
+  font-weight: var(--weight-bold);
+  font-size: var(--text-sm);
+  text-decoration: none;
+}
+
+.eventLink:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+@media (hover: hover) {
+  .eventLink:hover {
+    background: var(--color-primary-soft);
+  }
+}
+
+/* WP-5.4: the conversation inside an event's "Chat" tab (a bounded, scrolling card). */
+.embedded {
+  display: flex;
+  flex-direction: column;
+  height: min(70dvh, 40rem);
+  min-height: 22rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  overflow: hidden;
+}

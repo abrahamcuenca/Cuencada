@@ -13,7 +13,7 @@
  *   decoded bitmaps in memory at once.
  */
 import { IMAGE_HEADER_BYTES, readImageSize } from "./imageSize";
-import type { SquareCropSpec } from "./cropCore";
+import type { CropOutputSize, SquareCropSpec } from "./cropCore";
 import { decode, decodeAndCrop, decodeAndScale, type EncodeOptions, ImageDecodeError, type ResizePolicy, targetSize } from "./resizeCore";
 import type { ResizeCropRequest, ResizeScaleRequest, ResizeWorkerRequest, ResizeWorkerResponse } from "./resize.worker";
 
@@ -187,10 +187,28 @@ export const CROP_JPEG_QUALITY = 0.9;
  * @throws {ImageDecodeError} When the file can't be decoded; other errors when the canvas fails.
  */
 export async function cropImageToSquare(file: File, crop: SquareCropSpec): Promise<File> {
+  return cropImage(file, crop, CROP_OUTPUT_SIZE);
+}
+
+/**
+ * {@link cropImageToSquare} for a fixed-aspect frame (WP-5.4 event covers,
+ * 16:9): the crop is drawn into an `output.width × output.height` JPEG.
+ *
+ * @param file - The picked JPEG/PNG/WebP.
+ * @param crop - Rotation and crop from the cropper (fractions of the rotated image).
+ * @param output - Output size in pixels (its ratio should match the crop's).
+ * @returns A new JPEG `File`.
+ * @throws {ImageDecodeError} When the file can't be decoded; other errors when the canvas fails.
+ */
+export async function cropImageToRect(file: File, crop: SquareCropSpec, output: CropOutputSize): Promise<File> {
+  return cropImage(file, crop, output);
+}
+
+async function cropImage(file: File, crop: SquareCropSpec, output: number | CropOutputSize): Promise<File> {
   const known = await headerSize(file);
   const encode: EncodeOptions = { type: "image/jpeg", quality: CROP_JPEG_QUALITY };
   const blob = await oneAtATime(async () => {
-    const request: ResizeCropRequest = { kind: "crop", blob: file, crop, output: CROP_OUTPUT_SIZE, encode, stored: known };
+    const request: ResizeCropRequest = { kind: "crop", blob: file, crop, output, encode, stored: known };
     if (canUseWorker()) {
       try {
         const result = await inWorker(request);
@@ -200,7 +218,7 @@ export async function cropImageToSquare(file: File, crop: SquareCropSpec): Promi
         // No OffscreenCanvas/createImageBitmap in this worker: do it here instead.
       }
     }
-    return decodeAndCrop(file, crop, CROP_OUTPUT_SIZE, encode, known);
+    return decodeAndCrop(file, crop, output, encode, known);
   });
   return new File([blob], renamed(file.name, encode.type), { type: encode.type, lastModified: file.lastModified });
 }

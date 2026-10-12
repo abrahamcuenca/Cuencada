@@ -16,6 +16,8 @@ interface MoreLink {
 }
 
 const MEMBER_LINKS: readonly MoreLink[] = [
+  // WP-5.4: the bottom bar has no room for "Eventos".
+  { to: "/eventos", label: "Eventos", icon: "🎉" },
   { to: "/directorio", label: "Directorio", icon: "🧭" },
   { to: "/arbol", label: "Árbol familiar", icon: "🌳" },
   { to: "/perfil", label: "Mi perfil", icon: "🙂" },

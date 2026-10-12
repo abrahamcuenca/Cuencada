@@ -10,6 +10,7 @@ import { authRoutes } from "../features/auth/routes";
 import { chatRoutes } from "../features/chat/routes";
 import { cuencadasRoutes } from "../features/cuencadas/routes";
 import { directoryRoutes } from "../features/directory/routes";
+import { eventsRoutes } from "../features/events/routes";
 import { familyRoutes } from "../features/family/routes";
 import { galleryRoutes } from "../features/gallery/routes";
 import { profileRoutes } from "../features/profile/routes";
@@ -29,6 +30,7 @@ export const featureRoutes: readonly FeatureRoutes[] = [
   directoryRoutes,
   familyRoutes,
   chatRoutes,
+  eventsRoutes,
   adminRoutes,
   pwaRoutes
 ];

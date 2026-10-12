@@ -143,3 +143,57 @@ describe("pinchGeometry", () => {
     expect(pinchGeometry({ x: 0, y: 0 }, { x: 0.3, y: 0.4 })).toEqual({ distance: 0.5, mid: { x: 0.15, y: 0.2 } });
   });
 });
+
+describe("16:9 frame (WP-5.4 event covers)", () => {
+  const wide = 16 / 9;
+  const photo = { width: 4000, height: 3000 };
+  const panorama = { width: 3200, height: 1000 };
+
+  it("covers the wide frame at zoom 1: the width fills it for a 4:3 photo, the height for a panorama", () => {
+    // 4:3 is taller than 16:9, so the width is the limiting side: 16/9 units over 4000 px.
+    expect(viewScale(photo, { rotation: 0, zoom: 1 }, wide)).toBeCloseTo(wide / 4000);
+    // 3.2:1 is wider than 16:9, so the height fills the frame.
+    expect(viewScale(panorama, { rotation: 0, zoom: 1 }, wide)).toBeCloseTo(1 / 1000);
+  });
+
+  it("pans only along the spare axis at zoom 1", () => {
+    const view = clampView(photo, { rotation: 0, zoom: 1, offsetX: 5, offsetY: 5 }, wide);
+    expect(view.offsetX).toBe(0);
+    // Displayed height: 3000 × (16/9)/4000 = 4/3 units, so ±(4/3 − 1)/2.
+    expect(view.offsetY).toBeCloseTo((4 / 3 - 1) / 2);
+  });
+
+  it("crops a 16:9 region in pixels, centred at zoom 1", () => {
+    const spec = cropSpecFor(photo, INITIAL_CROP_VIEW, wide);
+    const widthPx = spec.width * photo.width;
+    const heightPx = spec.height * photo.height;
+    expect(widthPx / heightPx).toBeCloseTo(wide);
+    expect(widthPx).toBeCloseTo(4000);
+    expect(heightPx).toBeCloseTo(2250);
+    expect(spec.x).toBeCloseTo(0);
+    expect(spec.y * photo.height).toBeCloseTo((3000 - 2250) / 2);
+  });
+
+  it("keeps 16:9 after zooming, panning to the edge and rotating", () => {
+    let view = zoomView(photo, INITIAL_CROP_VIEW, 2, undefined, wide);
+    view = panView(photo, view, -10, 10, wide);
+    let spec = cropSpecFor(photo, view, wide);
+    expect((spec.width * photo.width) / (spec.height * photo.height)).toBeCloseTo(wide);
+    // Panned fully left and up (offset negative x → image moves left → crop at the right edge; +y → top edge).
+    expect(spec.x + spec.width).toBeCloseTo(1);
+    expect(spec.y).toBeCloseTo(0);
+    view = rotateView(photo, view, wide);
+    spec = cropSpecFor(photo, view, wide);
+    // Rotated: the rotated image is 3000 × 4000.
+    expect((spec.width * 3000) / (spec.height * 4000)).toBeCloseTo(wide);
+    expect(spec.x).toBeGreaterThanOrEqual(-1e-9);
+    expect(spec.x + spec.width).toBeLessThanOrEqual(1 + 1e-9);
+    expect(spec.y).toBeGreaterThanOrEqual(-1e-9);
+    expect(spec.y + spec.height).toBeLessThanOrEqual(1 + 1e-9);
+  });
+
+  it("treats a non-finite or non-positive aspect as a square", () => {
+    expect(cropSpecFor(square, INITIAL_CROP_VIEW, 0)).toEqual(cropSpecFor(square, INITIAL_CROP_VIEW));
+    expect(viewScale(landscape, { rotation: 0, zoom: 1 }, Number.NaN)).toBeCloseTo(1 / 200);
+  });
+});

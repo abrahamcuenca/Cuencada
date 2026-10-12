@@ -14,8 +14,8 @@ interface AdminSection {
 }
 
 /**
- * Admin sections. Cuencadas, Asistencia, Fotos and Personas belong to other
- * tracks (T2, T3, T4, T6); this console only links to them. Asistencia is per
+ * Admin sections. Cuencadas, Asistencia, Fotos, Eventos (WP-5.4) and Personas
+ * belong to other tracks (T2, T3, T4, T6); this console only links to them. Asistencia is per
  * edition (`/admin/cuencadas/:id/asistencia`), so it opens from Cuencadas.
  */
 export const ADMIN_SECTIONS: readonly AdminSection[] = [
@@ -23,6 +23,7 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
   { to: "/admin/cuencadas", icon: "📅", label: "Cuencadas", hint: "Ediciones, itinerario, lugares y avisos" },
   { to: "/admin/cuencadas", icon: "✅", label: "Asistencia", hint: "Ábrela desde cada Cuencada" },
   { to: "/admin/media", icon: "📷", label: "Fotos", hint: "Revisar y moderar fotos" },
+  { to: "/admin/eventos", icon: "🎉", label: "Eventos", hint: "Todos los eventos, ocultar o eliminar" },
   { to: "/admin/familia", icon: "🌳", label: "Personas y árbol", hint: "Familia, parentescos y cuentas" },
   { to: "/admin/familia/actividad", icon: "🕰️", label: "Actividad del árbol", hint: "Cambios de todos, con «Deshacer»" },
   { to: "/admin/invitaciones", icon: "💌", label: "Invitaciones", hint: "Invitar por correo o enlace" },

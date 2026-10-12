@@ -5,7 +5,9 @@ import { selectPasswordChangeRequired } from "../features/auth/authSlice";
 import { logout } from "../features/auth/session";
 import { PROFILE_CONTACT_PATH, PROFILE_PATH } from "../features/profile/paths";
 import { reportUnexpected } from "../shared/lib/reportUnexpected";
+import { useMediaQuery } from "../shared/lib/useMediaQuery";
 import { AvatarCircle } from "../shared/ui/AvatarCircle";
+import { TOP_NAV_WIDE_MIN_PX } from "../shared/ui/nav";
 import styles from "./accountMenu.module.css";
 import { useAppDispatch, useAppSelector } from "./hooks";
 
@@ -24,6 +26,13 @@ const MEMBER_LINKS: readonly AccountLink[] = [
   { to: "/perfil/sesiones", label: "Sesiones y seguridad", icon: "🔐" }
 ];
 
+/**
+ * WP-5.4: "Eventos" does not fit the TopNav at 900–999px, so below
+ * {@link TOP_NAV_WIDE_MIN_PX} it lives here (and in Más on phones); from
+ * 1000px the TopNav shows it and the menu drops it (no duplicate).
+ */
+const EVENTS_LINK: AccountLink = { to: "/eventos", label: "Eventos", icon: "🎉" };
+
 /** The admin console entry. Lives only here, not in the TopNav links (no duplicate, WP-4.7). */
 const ADMIN_LINK: AccountLink = { to: "/admin", label: "Panel", icon: "⭐" };
 
@@ -39,8 +48,8 @@ export function firstName(user: Pick<CurrentUser, "displayName" | "email">): str
 /**
  * The account entry of the TopNav for members and admins (WP-4.7): the
  * user's avatar (or initials) and first name; it opens a disclosure list with
- * Mi perfil, Contacto (`/perfil#contacto`), Sesiones y seguridad, Panel
- * (admins) and Cerrar sesión.
+ * Mi perfil, Contacto (`/perfil#contacto`), Sesiones y seguridad, Eventos
+ * (below 1000px, WP-5.4), Panel (admins) and Cerrar sesión.
  *
  * Keyboard: Enter/Space toggle; ArrowDown/ArrowUp open and move between the
  * entries; Home/End jump; Escape closes and returns focus to the button.
@@ -64,7 +73,9 @@ export function AccountMenu({ user }: { user: CurrentUser }): ReactNode {
   /** A press inside the menu is in progress (Safari blurs the button on press without focusing the entry). */
   const pressInside = useRef(false);
 
-  const links = mustChange ? [] : user.role === "admin" ? [...MEMBER_LINKS, ADMIN_LINK] : MEMBER_LINKS;
+  const wideNav = useMediaQuery(`(min-width: ${TOP_NAV_WIDE_MIN_PX}px)`);
+  const memberLinks = wideNav ? MEMBER_LINKS : [...MEMBER_LINKS, EVENTS_LINK];
+  const links = mustChange ? [] : user.role === "admin" ? [...memberLinks, ADMIN_LINK] : memberLinks;
 
   // Any navigation (an entry, the back button, another link) closes the menu.
   // biome-ignore lint/correctness/useExhaustiveDependencies: location.key is the trigger, not a value read inside.

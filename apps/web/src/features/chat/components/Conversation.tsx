@@ -14,7 +14,7 @@ import styles from "../chat.module.css";
 import { sendChatFrame, setViewingRoom, subscribeChatEvents } from "../events";
 import { type ChatDenial, chatDenial } from "../lib/access";
 import { buildConversation } from "../lib/format";
-import type { ChatRoomView } from "../lib/rooms";
+import { type ChatRoomView, roomDisplayTitle } from "../lib/rooms";
 import { applyDeletedMessage, firstUnreadMessageId, lastServerMessage, type ThreadMessage } from "../lib/thread";
 import type { ChatConnectionStatus } from "../socket";
 import { Composer, enterSends } from "./Composer";
@@ -43,6 +43,11 @@ export interface ConversationProps {
   onForbidden: (denial: ChatDenial) => void;
   /** Reopens the socket after it was taken over by another tab. */
   onReconnect: () => void;
+  /**
+   * Rendered inside another page (WP-5.4: the event's "Chat" tab): no "back
+   * to the rooms" arrow and no link to the event (the page is the event).
+   */
+  embedded?: boolean;
 }
 
 const STATUS_TEXT: Partial<Record<ChatConnectionStatus, string>> = {
@@ -126,7 +131,7 @@ function errorStatus(error: unknown): number | string | null {
  * The conversation (wireframes §8.2): app bar, connection banner, the
  * message log, the typing line and the composer pinned above the keyboard.
  */
-export function Conversation({ roomId, room, connection, timeZone, now, onForbidden, onReconnect }: ConversationProps): ReactNode {
+export function Conversation({ roomId, room, connection, timeZone, now, onForbidden, onReconnect, embedded = false }: ConversationProps): ReactNode {
   const dispatch = useAppDispatch();
   const toast = useToast();
   const me = useAppSelector(selectCurrentUser);
@@ -264,7 +269,8 @@ export function Conversation({ roomId, room, connection, timeZone, now, onForbid
   };
 
   const menuMine = menuMessage?.sender !== null && menuMessage?.sender?.userId === meId;
-  const title = room?.title ?? "Chat";
+  const title = room === undefined ? "Chat" : roomDisplayTitle(room);
+  const event = room?.event ?? null;
   const statusText = STATUS_TEXT[connection];
 
   let body: ReactNode;
@@ -316,12 +322,20 @@ export function Conversation({ roomId, room, connection, timeZone, now, onForbid
   return (
     <>
       <header className={styles.header}>
-        <Link to="/chat" className={styles.back} aria-label="Volver a las salas">
-          <span aria-hidden="true">‹</span>
-        </Link>
+        {embedded ? null : (
+          <Link to="/chat" className={styles.back} aria-label="Volver a las salas">
+            <span aria-hidden="true">‹</span>
+          </Link>
+        )}
         <h2 ref={titleRef} className={styles.title} tabIndex={-1}>
           {title}
         </h2>
+        {event !== null && !embedded ? (
+          // WP-5.4: an event room leads back to its event (details, photos, participants).
+          <Link to={`/eventos/${event.year}/${encodeURIComponent(event.slug)}`} className={styles.eventLink}>
+            Ver evento
+          </Link>
+        ) : null}
       </header>
       {statusText === undefined ? null : (
         <div className={cx(styles.status, (connection === "offline" || connection === "failed") && styles.statusOffline)}>

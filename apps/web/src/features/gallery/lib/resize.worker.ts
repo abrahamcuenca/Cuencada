@@ -4,7 +4,7 @@
  * answer and terminates it, so the decoded bitmap's memory goes away with
  * the worker. Same-origin module worker (`worker-src 'self'`).
  */
-import type { SquareCropSpec } from "./cropCore";
+import type { CropOutputSize, SquareCropSpec } from "./cropCore";
 import type { ImageSize } from "./imageSize";
 import { decodeAndCrop, decodeAndScale, type EncodeOptions, ImageDecodeError, type ResizePolicy } from "./resizeCore";
 
@@ -18,13 +18,13 @@ export interface ResizeScaleRequest {
   stored: ImageSize | null;
 }
 
-/** Square crop job (WP-4.3 `ImageCropper`). */
+/** Crop job (WP-4.3 `ImageCropper`; fixed-aspect covers since WP-5.4). */
 export interface ResizeCropRequest {
   kind: "crop";
   blob: Blob;
   crop: SquareCropSpec;
-  /** Output side (px). */
-  output: number;
+  /** Output side (px) of a square crop, or the output size. */
+  output: number | CropOutputSize;
   encode: EncodeOptions;
   stored: ImageSize | null;
 }

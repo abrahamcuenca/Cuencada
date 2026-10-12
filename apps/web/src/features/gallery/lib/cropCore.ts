@@ -1,5 +1,6 @@
 /**
- * Square crop with a quarter-turn rotation, drawn onto a canvas (WP-4.3).
+ * Square (WP-4.3) or fixed-aspect (WP-5.4 event covers, 16:9) crop with a
+ * quarter-turn rotation, drawn onto a canvas.
  * Pure geometry plus one draw call, shared by the resize worker and the
  * main-thread fallback (see `resizeImage.ts`). No React, no store.
  *
@@ -11,7 +12,11 @@
 /** Clockwise quarter turns, in degrees. */
 export type QuarterTurn = 0 | 90 | 180 | 270;
 
-/** A crop of the image after `rotation`, in fractions of the rotated width/height. */
+/**
+ * A crop of the image after `rotation`, in fractions of the rotated
+ * width/height. The name predates WP-5.4: the crop is square for avatars and
+ * `aspect : 1` in pixels for covers (see `cropSpecFor`).
+ */
 export interface SquareCropSpec {
   rotation: QuarterTurn;
   /** Left edge / rotated width. */
@@ -20,7 +25,16 @@ export interface SquareCropSpec {
   y: number;
   /** Crop width / rotated width. */
   width: number;
-  /** Crop height / rotated height (the same pixel side as `width`). */
+  /** Crop height / rotated height (the same pixel side as `width` for a square crop). */
+  height: number;
+}
+
+/** Alias of {@link SquareCropSpec} for crops of any aspect ratio. */
+export type CropSpec = SquareCropSpec;
+
+/** Output canvas size of a crop, in pixels. */
+export interface CropOutputSize {
+  width: number;
   height: number;
 }
 
@@ -100,9 +114,37 @@ export type CropContext = Pick<
 > & { fillStyle: string | CanvasGradient | CanvasPattern };
 
 /**
- * Draw `source` rotated and cropped so the crop fills an `output × output`
- * canvas. The background is painted white first (transparent PNGs become
- * JPEG without a black background).
+ * Draw `source` rotated and cropped so the crop fills an `output.width ×
+ * output.height` canvas. The background is painted white first (transparent
+ * PNGs become JPEG without a black background).
+ *
+ * @param context - The output canvas' 2D context.
+ * @param source - The decoded image (EXIF orientation already applied).
+ * @param sourceSize - Its unrotated size.
+ * @param spec - The crop.
+ * @param output - Output size in pixels.
+ */
+export function drawCrop(
+  context: CropContext,
+  source: CanvasImageSource,
+  sourceSize: { width: number; height: number },
+  spec: CropSpec,
+  output: CropOutputSize
+): void {
+  const crop = cropPixels(spec, sourceSize.width, sourceSize.height);
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, output.width, output.height);
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.scale(output.width / crop.width, output.height / crop.height);
+  context.translate(-crop.x, -crop.y);
+  context.transform(...rotationMatrix(spec.rotation, sourceSize.width, sourceSize.height));
+  context.drawImage(source, 0, 0, sourceSize.width, sourceSize.height);
+}
+
+/**
+ * {@link drawCrop} onto a square `output × output` canvas (WP-4.3 avatars).
  *
  * @param context - The output canvas' 2D context.
  * @param source - The decoded image (EXIF orientation already applied).
@@ -117,14 +159,5 @@ export function drawSquareCrop(
   spec: SquareCropSpec,
   output: number
 ): void {
-  const crop = cropPixels(spec, sourceSize.width, sourceSize.height);
-  context.setTransform(1, 0, 0, 1, 0, 0);
-  context.fillStyle = "#ffffff";
-  context.fillRect(0, 0, output, output);
-  context.imageSmoothingEnabled = true;
-  context.imageSmoothingQuality = "high";
-  context.scale(output / crop.width, output / crop.height);
-  context.translate(-crop.x, -crop.y);
-  context.transform(...rotationMatrix(spec.rotation, sourceSize.width, sourceSize.height));
-  context.drawImage(source, 0, 0, sourceSize.width, sourceSize.height);
+  drawCrop(context, source, sourceSize, spec, { width: output, height: output });
 }
