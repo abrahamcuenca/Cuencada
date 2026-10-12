@@ -45,8 +45,11 @@ export const MEDIA_NOTIFICATION_KINDS = [
 
 /** Rows older than this are deleted by the cleanup job (WP-6.1). */
 export const NOTIFICATION_RETENTION_DAYS = 180;
-/** Unread counts stop here (the badge shows "99+"). */
-export const NOTIFICATION_UNREAD_COUNT_MAX = 99;
+/**
+ * Unread counts stop here (the badge shows "999+"). WP-6.1 raised it from
+ * 99 (owner brief: a "999+" cap); the count query stops at this many rows.
+ */
+export const NOTIFICATION_UNREAD_COUNT_MAX = 999;
 /**
  * Most rows kept per recipient: writing beyond it deletes that recipient's
  * oldest rows in the same transaction (seen ones first).
@@ -98,18 +101,41 @@ export const NotificationTargetKind = {
 } as const;
 export type NotificationTargetKind = (typeof NotificationTargetKind)[keyof typeof NotificationTargetKind];
 
+/**
+ * Where a photo lives, so the client can open it on its own page (WP-6.1):
+ * the edition gallery, the event's photos tab or the Memory Box. Only sent
+ * with a photo the recipient can see, so its event (or box) is visible too.
+ */
+export type NotificationMediaPlace =
+  | { kind: "edition"; year: number }
+  | { kind: "album"; event: EventRef }
+  | { kind: "memory"; memoryAlbumId: string };
+
+export const notificationMediaPlaceSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("edition"), year: z.number().int() }),
+  z.object({ kind: z.literal("album"), event: eventRefSchema }),
+  z.object({ kind: z.literal("memory"), memoryAlbumId: idSchema })
+]) satisfies z.ZodType<NotificationMediaPlace>;
+
 /** A photo the recipient can see (re-checked at read time). */
 export interface NotificationMediaTarget {
   kind: "media";
   mediaId: string;
   /** Presigned 400 px thumbnail, `null` until processed (or for some videos). */
   thumbUrl: string | null;
+  /** Where to open it (WP-6.1). */
+  place: NotificationMediaPlace;
 }
 
 /** An event the recipient can see (re-checked at read time). */
 export interface NotificationEventTarget {
   kind: "event";
   event: EventRef;
+  /**
+   * WP-6.1: the recipient takes part and may leave ("Salir"); false once
+   * they left, or while they are its last organizer.
+   */
+  canLeave: boolean;
 }
 
 /** The recipient's own tree-link proposal. */
@@ -125,9 +151,10 @@ export const notificationTargetSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal(NotificationTargetKind.Media),
     mediaId: idSchema,
-    thumbUrl: z.string().max(4096).nullable()
+    thumbUrl: z.string().max(4096).nullable(),
+    place: notificationMediaPlaceSchema
   }),
-  z.object({ kind: z.literal(NotificationTargetKind.Event), event: eventRefSchema }),
+  z.object({ kind: z.literal(NotificationTargetKind.Event), event: eventRefSchema, canLeave: z.boolean() }),
   z.object({
     kind: z.literal(NotificationTargetKind.Proposal),
     proposalId: idSchema,

@@ -96,7 +96,7 @@ const eventRoutes: FastifyPluginAsyncZod = async (app) => {
   });
   const eventWrites = rateLimitByUser("event-write", EVENT_WRITE_LIMIT);
 
-  /** `GET /api/events/notices`: "you were added" notices of the caller (consent, requirement 3). */
+  /** `GET /api/events/notices` (**deprecated**, WP-6.1 shim over `event_added` notifications). */
   app.get(
     "/events/notices",
     { config: member, schema: { response: { 200: eventNoticeListSchema, ...eventErrorResponses } } },
@@ -388,7 +388,7 @@ const eventRoutes: FastifyPluginAsyncZod = async (app) => {
     }
   );
 
-  /** `DELETE /api/events/:id/notice`: dismiss the caller's "you were added" notice (204). */
+  /** `DELETE /api/events/:id/notice` (**deprecated**, WP-6.1 shim: marks the `event_added` notification seen; 204). */
   app.delete(
     "/events/:id/notice",
     { config: member, schema: { params: eventIdParamsSchema, response: { 204: noContent, ...eventErrorResponses } } },
