@@ -87,7 +87,13 @@ describe("social notifications", () => {
     const personId = (await insertPerson({ userId: tagged.user.id })).id;
     // Hold the queue so the decline commits first.
     let release: () => void = () => undefined;
-    app.jobs.enqueue("test.hold", () => new Promise<void>((resolve) => (release = resolve)));
+    app.jobs.enqueue(
+      "test.hold",
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        })
+    );
     const tag = (await call(tagger, "POST", `/api/media/${mediaId}/tags`, { personId })).json() as MediaTag; // schema-validated
     expect((await call(tagged, "DELETE", `/api/media/${mediaId}/tags/${tag.id}`)).statusCode).toBe(204);
     release();
