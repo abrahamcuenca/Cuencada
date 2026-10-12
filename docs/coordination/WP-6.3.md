@@ -61,4 +61,8 @@ Based on `origin/main` @ 83dbb88 (WP-6.0 contracts + migration 0010). Implements
 - **Screenshots** (`docs/ux/screenshots/recuerdos/`): `lista`, `baul` (375 + 1280), `panel` (1280).
 
 ## Verification
-See the end of this file (filled in when the branch was last verified).
+On `origin/main` @ 83dbb88 (merged: already up to date):
+- `pnpm lint` clean; `pnpm turbo run typecheck --force` 6/6; `pnpm test` 216 files / 2806 tests passed (then the web project again after the `?foto=` change: 111 files / 1158 tests); `pnpm build` ok; `pnpm typecheck:e2e` ok.
+- Bundle: initial JS 180.91 kB gzip (budget 190; +0.3 kB for the gallery scope wiring, the nav entries and the lazy Home loader; every Memory Box page and the Home strip are lazy chunks).
+- `pnpm e2e` on isolated ports and database (`E2E_API_PORT=4363 E2E_STORAGE_PORT=4364 E2E_WEB_PORT=5363`, `cuencada_w63_e2e`): 87 passed, 2 skipped (the admin journey runs on desktop only); the mobile gates (320/375 + axe) pass on the new routes. Lighthouse failed once on performance (87, 78, 83) at load average 25–35 from parallel agents and passed on a re-run at a lower load (no Memory Box code on those pages for visitors).
+- Screenshots refreshed with `E2E_UPDATE_DOCS=1`; only `recuerdos/*` and `nav/account-menu-*` (the new menu entry) are committed, the other re-rendered shots were left as they were.
