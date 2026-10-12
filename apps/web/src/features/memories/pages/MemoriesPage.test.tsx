@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { authenticatedState, makeUser } from "../../../../test/auth";
@@ -70,6 +70,19 @@ describe("MemoryAlbumPage (/recuerdos/:id)", { timeout: 20_000 }, () => {
     const viewer = await screen.findByRole("dialog", { name: "Visor de fotos" });
     expect(within(viewer).getByText("2 de 2")).toBeInTheDocument();
     expect(db.log).toContain(`GET /memories/${box.id}/media?limit=30`);
+  });
+
+  it("opens ?foto=<id> (notification links) in the lightbox and drops it from the URL on close", async () => {
+    const box = makeBox(1, { mediaCount: 2 });
+    db.boxes = [box];
+    db.media.set(box.id, [makeBoxMedia(1, box), makeBoxMedia(2, box)]);
+    const user = userEvent.setup();
+    const { router } = renderApp(`/recuerdos/${box.id}?foto=${makeBoxMedia(2, box).id}`, authenticatedState());
+    const viewer = await screen.findByRole("dialog", { name: "Visor de fotos" });
+    expect(within(viewer).getByText("2 de 2")).toBeInTheDocument();
+    await user.click(within(viewer).getByRole("button", { name: "Cerrar visor" }));
+    await waitFor(() => expect(router.state.location.search).toBe(""));
+    expect(screen.queryByRole("dialog", { name: "Visor de fotos" })).not.toBeInTheDocument();
   });
 
   it("shows the same not-found state for a hidden, a draft and a missing box (no request leaks the difference)", async () => {

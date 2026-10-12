@@ -2,8 +2,10 @@
  * `/recuerdos/:id` (members, WP-6.3): one box. The title, description and
  * count, then the gallery's own grid, lightbox, uploader and upload panel,
  * unchanged, scoped to `/api/memories/:id/…` through the gallery's
- * `memory` scope. The lightbox's social features (hearts, tags, comments,
- * `?foto=`) come from the gallery (WP-6.2) with no change here.
+ * `memory` scope. The lightbox's social features (hearts, tags, comments)
+ * come from the gallery (WP-6.2) with no change here. `?foto={mediaId}`
+ * (WP-6.1 notification links) opens that photo once it is in the loaded
+ * list; WP-6.2's deep link also covers photos not loaded yet.
  *
  * [SEC] A draft or hidden box answers 404 like a missing one, and the page
  * shows the same "No encontramos ese baúl" for both. The uploader keeps the
@@ -11,8 +13,8 @@
  * URL must be on the bucket origin.
  */
 import type { MemoryAlbumDetail } from "@cuencada/types";
-import { type ReactNode, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { isAbortError } from "../../../shared/api/errors";
 import { Button } from "../../../shared/ui/Button";
 import { EmptyState } from "../../../shared/ui/EmptyState";
@@ -115,6 +117,7 @@ function MemoryAlbumContent({ id }: { id: string }): ReactNode {
 function BoxGallery({ box }: { box: MemoryAlbumDetail }): ReactNode {
   const uploader = useRef<UploaderHandle>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [search, setSearch] = useSearchParams();
   const { uploads } = useUploadManager();
   const scope = useMemo<MemoryMediaScope>(() => ({ kind: "memory", memoryAlbumId: box.id, label: box.title }), [box.id, box.title]);
   const { data, isLoading, isError, error, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } = useListMemoryMediaInfiniteQuery(box.id);
@@ -122,6 +125,26 @@ function BoxGallery({ box }: { box: MemoryAlbumDetail }): ReactNode {
   const viewable = useMemo(() => items.filter(isViewable), [items]);
   const onMediaError = useExpiredUrlRefetch(refetch);
   const canUpload = box.canUpload && uploadsConfigured();
+
+  // `?foto=<id>` (notification links): open it once it is among the viewable items.
+  const foto = search.get("foto");
+  const openedFoto = useRef<string | null>(null);
+  useEffect(() => {
+    if (foto === null || openId !== null || openedFoto.current === foto) return;
+    if (viewable.some((item) => item.id === foto)) {
+      openedFoto.current = foto;
+      setOpenId(foto);
+    }
+  }, [foto, openId, viewable]);
+  const onOpenIdChange = (id: string | null): void => {
+    setOpenId(id);
+    // Closing the viewer drops `?foto=` so it does not reopen (replace: no extra history entry).
+    if (id === null && foto !== null) {
+      const next = new URLSearchParams(search);
+      next.delete("foto");
+      setSearch(next, { replace: true });
+    }
+  };
 
   // The upload manager polls its own uploads; the page polls the rest (e.g. another tab's).
   const managerPolls = uploads.some((upload) => upload.scopeKey === mediaScopeKey(scope) && upload.phase === "processing");
@@ -194,7 +217,7 @@ function BoxGallery({ box }: { box: MemoryAlbumDetail }): ReactNode {
       ) : null}
       {content}
       <UploadPanel year={scope} />
-      <GalleryLightbox items={viewable} openId={openId} onOpenIdChange={setOpenId} onMediaError={onMediaError} />
+      <GalleryLightbox items={viewable} openId={openId} onOpenIdChange={onOpenIdChange} onMediaError={onMediaError} />
     </>
   );
 }
