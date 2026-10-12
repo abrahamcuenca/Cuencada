@@ -440,7 +440,12 @@ If `/health/ready` reports `db:false`, check, in order:
   `album_id` null through its scope check, so it would show box photos
   (drafts and hidden boxes included) to every member. Check first:
   `select count(*) from media_items where memory_album_id is not null;`
-  (0 → a rollback below WP-6.0 is still safe).
+  (0 → a rollback below WP-6.0 is still safe). Rolling back from WP-6.3 to
+  WP-6.0–6.2 code is safe: its `mediaScopeSql` denies every box row to
+  members, so box photos (and their tags, hearts and comments) become
+  admin-only until WP-6.3 is redeployed; nothing is exposed. The floor
+  covers every box status (draft, published and hidden) and every route that
+  reads media (by id, social, notifications, "Fotos de").
 - **First deploy gone wrong:**
   ```sh
   sudo systemctl stop cuencada-server
@@ -670,6 +675,15 @@ Clear these items once the release that carries them is live.
   in the migration). Data steps: the single `family_settings` row, and every
   undismissed WP-5.3 event notice copied into `notifications`. Sets the
   **rollback floor** above (§ 5) once box rows exist.
+- **WP-6.3 Baúl de recuerdos:** no migration (it uses 0010). New routes
+  `/api/memories…` and `/api/admin/memory-albums…`, a new bucket prefix
+  `memories/{boxId}/` (same CORS, no lifecycle change: like `cuencadas/`,
+  accepted originals are swept by the app, not by an expiry rule). Boxes
+  start as drafts: nothing is visible to members until an admin publishes
+  one. From the first box upload on, the § 5 rollback floor applies (never
+  below WP-6.0). Smoke test after the deploy: as admin, create a draft box
+  in Panel → "Baúl de recuerdos"; as a member, `/recuerdos/<id>` must show
+  "No encontramos ese baúl"; publish it and the member sees it.
 
 - **0004 `family_people_contacts`** (WP-4.0): expand-only (new nullable columns
   and tables). No data step.

@@ -12,7 +12,7 @@
 import { writeFileSync } from "node:fs";
 import AxeBuilder from "@axe-core/playwright";
 import type { Page, TestInfo } from "@playwright/test";
-import { CastRole, castMember, FUTURE_YEAR, ProjectKey, SEEDED_YEAR } from "./harness/people.js";
+import { CastRole, castMember, FUTURE_YEAR, HIDDEN_MEMORY_BOX_ID, MEMORY_BOX_ID, MEMORY_BOX_TITLE, ProjectKey, SEEDED_YEAR } from "./harness/people.js";
 import { expect, login, test } from "./support/fixtures.js";
 import { generateJpeg } from "./support/images.js";
 import { type GateFinding, horizontalOverflow, type OverflowResult, recordTransientOverflow, smallInputFonts, smallTouchTargets } from "./support/gates.js";
@@ -59,6 +59,10 @@ const MEMBER_ROUTES: RouteCheck[] = [
   { name: "mas", open: "/mas" },
   // WP-5.4: the events list.
   { name: "eventos", open: "/eventos", ready: "Eventos", readyExact: true },
+  // WP-6.3: the Memory Box list, a published box and a hidden one (the not-found screen).
+  { name: "recuerdos", open: "/recuerdos", ready: "Baúl de recuerdos", readyExact: true },
+  { name: "recuerdos-baul", open: `/recuerdos/${MEMORY_BOX_ID}`, ready: MEMORY_BOX_TITLE, readyExact: true },
+  { name: "recuerdos-no-encontrado", open: `/recuerdos/${HIDDEN_MEMORY_BOX_ID}`, ready: "No encontramos ese baúl" },
   // WP-6.1: the notifications feed.
   { name: "notificaciones", open: "/notificaciones", ready: "Notificaciones", readyExact: true },
   // WP-4.7: the profile's Contacto section from a link, and the open account menu.
@@ -88,6 +92,16 @@ const ADMIN_ROUTES: RouteCheck[] = [
   { name: "admin-cuencadas", open: "/admin/cuencadas" },
   // WP-5.4.
   { name: "admin-eventos", open: "/admin/eventos", ready: "Eventos", readyExact: true },
+  // WP-6.3: the Memory Box panel and its edit sheet.
+  { name: "admin-recuerdos", open: "/admin/recuerdos", ready: "Baúl de recuerdos", readyExact: true },
+  {
+    name: "admin-recuerdos-editar",
+    open: async (page) => {
+      await page.goto("/admin/recuerdos");
+      await page.getByRole("button", { name: "Editar" }).first().click();
+      await expect(page.getByRole("dialog", { name: /^Editar / })).toBeVisible();
+    }
+  },
   // WP-5.1: the open "Agregar Cuencada anterior" form.
   {
     name: "admin-cuencada-anterior",

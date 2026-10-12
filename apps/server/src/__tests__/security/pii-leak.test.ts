@@ -18,7 +18,18 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { App } from "../../app.js";
 import { eq } from "drizzle-orm";
-import { cuencadaAttendance, cuencadas, MagicLinkPurpose, personRelationships, profiles } from "../../db/schema/index.js";
+import {
+  cuencadaAttendance,
+  cuencadas,
+  MagicLinkPurpose,
+  mediaComments,
+  mediaLikes,
+  mediaTags,
+  memoryAlbums,
+  notifications,
+  personRelationships,
+  profiles
+} from "../../db/schema/index.js";
 import { systemClock } from "../../lib/clock.js";
 import { S3Storage } from "../../lib/storage/s3.js";
 import { createEmailToken } from "../../modules/auth/emailTokens.js";
@@ -34,6 +45,7 @@ import { FakeMailer } from "../../../test/helpers/fakes.js";
 import { insertPerson } from "../../../test/helpers/family.js";
 import { addParticipant, insertAlbumMedia, insertEvent } from "../../../test/helpers/events.js";
 import { insertMedia } from "../../../test/helpers/media.js";
+import { insertMemoryAlbum, insertMemoryMedia } from "../../../test/helpers/memories.js";
 
 const BUCKET = "w23-pii-bucket";
 const S3_CONFIG = {
@@ -560,6 +572,47 @@ describe("member-facing reads never leak PII", () => {
     const unlistedRow = detail.participants.find((row) => row.displayName === UNLISTED_NAME);
     if (unlistedRow === undefined || unlistedRow.avatarUrl !== null || "userId" in unlistedRow) {
       problems.push("event detail: the unlisted participant's avatar or id");
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it("Memory Box (WP-6.3): a hidden box's title, photos, tags, likes, comments and notifications never reach a member", async () => {
+    const uploader = await member({ displayName: "Subió W63" });
+    const openBox = await insertMemoryAlbum({ title: "Baúl abierto W63", description: "Fotos de la Rama Norte." });
+    const openPhoto = await insertMemoryMedia(openBox, { uploadedByUserId: uploader.user.id });
+    await getTestDb().update(memoryAlbums).set({ coverMediaId: openPhoto.id }).where(eq(memoryAlbums.id, openBox.id));
+    const hiddenBox = await insertMemoryAlbum({ title: "Baúl oculto W63" });
+    const hiddenPhoto = await insertMemoryMedia(hiddenBox, { uploadedByUserId: viewer.user.id, caption: "pie-oculto-w63" });
+    const tagged = await insertPerson({ fullName: "Persona Etiquetada W63" });
+    await getTestDb().insert(mediaTags).values({ mediaId: hiddenPhoto.id, personId: tagged.id, taggedByUserId: uploader.user.id, status: "approved", approvedAt: new Date() });
+    await getTestDb().insert(mediaLikes).values({ mediaId: hiddenPhoto.id, userId: uploader.user.id });
+    await getTestDb().insert(mediaComments).values({ mediaId: hiddenPhoto.id, authorUserId: uploader.user.id, body: "comentario-oculto-w63" });
+    await getTestDb()
+      .insert(notifications)
+      .values({ userId: viewer.user.id, actorUserId: uploader.user.id, kind: "photo_commented", mediaId: hiddenPhoto.id, dedupeKey: `comment:${hiddenPhoto.id}` });
+    // Published while the social data was written; hidden now.
+    await getTestDb().update(memoryAlbums).set({ status: "hidden" }).where(eq(memoryAlbums.id, hiddenBox.id));
+
+    const bodies: Array<[string, unknown]> = [
+      ["GET /api/memories", await get("/api/memories", viewer.auth)],
+      ["GET /api/memories/:id", await get(`/api/memories/${openBox.id}`, viewer.auth)],
+      ["GET /api/memories/:id/media", await get(`/api/memories/${openBox.id}/media`, viewer.auth)],
+      ["GET /api/media/:id (box)", await get(`/api/media/${openPhoto.id}`, viewer.auth)]
+    ];
+    const problems = bodies.flatMap(([label, body]) => scan(label, body));
+    for (const [label, body] of bodies) {
+      const text = JSON.stringify(body);
+      for (const planted of ["Baúl oculto W63", hiddenBox.id, hiddenPhoto.id, "pie-oculto-w63", "comentario-oculto-w63", "Persona Etiquetada W63"]) {
+        if (text.includes(planted)) problems.push(`${label}: hidden box data ${planted}`);
+      }
+    }
+    // By id, the hidden box and its photo look exactly like missing ones, even to the photo's uploader.
+    for (const url of [`/api/memories/${hiddenBox.id}`, `/api/memories/${hiddenBox.id}/media`, `/api/media/${hiddenPhoto.id}`]) {
+      const response = await app.inject({ method: "GET", url, remoteAddress: "203.0.113.50", ...viewer.auth });
+      if (response.statusCode !== 404) problems.push(`${url}: ${response.statusCode}`);
+      for (const planted of ["Baúl oculto W63", "comentario-oculto-w63", "Persona Etiquetada W63"]) {
+        if (response.body.includes(planted)) problems.push(`${url}: hidden box data ${planted}`);
+      }
     }
     expect(problems).toEqual([]);
   });

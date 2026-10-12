@@ -72,6 +72,16 @@ function albumPath({ eventId, albumId }: AlbumArgs): string {
   return `/events/${encodeURIComponent(eventId)}/albums/${encodeURIComponent(albumId)}`;
 }
 
+/** Args of `memoryMediaHead`: the first page of a Memory Box (WP-6.3). */
+export interface MemoryHeadArgs {
+  memoryAlbumId: string;
+  limit: number;
+}
+
+function memoryPath(memoryAlbumId: string): string {
+  return `/memories/${encodeURIComponent(memoryAlbumId)}`;
+}
+
 /**
  * Year switcher + default year from the editions list (pure, for tests).
  *
@@ -103,6 +113,21 @@ export function mediaHeadTag(year: number): { type: "Media"; id: string } {
 export function albumMediaTag(albumId: string): { type: "Media"; id: string } {
   return { type: "Media", id: `ALBUM-${albumId}` };
 }
+
+/** Tag of a Memory Box's media (the infinite list and its first-page queries, WP-6.3). */
+export function memoryMediaTag(memoryAlbumId: string): { type: "Media"; id: string } {
+  return { type: "Media", id: `MEMORY-${memoryAlbumId}` };
+}
+
+/** The box card and page (`features/memories`): its count and cover change with uploads and deletes. */
+function memoryAlbumTag(memoryAlbumId: string): { type: "MemoryAlbum"; id: string } {
+  return { type: "MemoryAlbum", id: memoryAlbumId };
+}
+
+const MEMORY_LISTS_TAGS = [
+  { type: "MemoryAlbum", id: "LIST" },
+  { type: "MemoryAlbum", id: "ADMIN-LIST" }
+] as const;
 
 const ADMIN_LIST_TAG = { type: "Media", id: "ADMIN-LIST" } as const;
 const YEARS_TAG = { type: "Media", id: "YEARS" } as const;
@@ -149,6 +174,19 @@ const galleryListApi = baseApi.injectEndpoints({
         params: pageParam === null ? { limit: MEDIA_PAGE_SIZE } : { limit: MEDIA_PAGE_SIZE, cursor: pageParam }
       }),
       providesTags: (_result, _error, { albumId }) => [albumMediaTag(albumId)]
+    }),
+
+    /** A Memory Box's media, newest first, by cursor (WP-6.3; published boxes, admins any). */
+    listMemoryMedia: build.infiniteQuery<Page<MediaItem>, string, string | null>({
+      infiniteQueryOptions: {
+        initialPageParam: null,
+        getNextPageParam: (lastPage) => lastPage.nextCursor
+      },
+      query: ({ queryArg: memoryAlbumId, pageParam }) => ({
+        url: `${memoryPath(memoryAlbumId)}/media`,
+        params: pageParam === null ? { limit: MEDIA_PAGE_SIZE } : { limit: MEDIA_PAGE_SIZE, cursor: pageParam }
+      }),
+      providesTags: (_result, _error, memoryAlbumId) => [memoryMediaTag(memoryAlbumId)]
     })
   })
 });
@@ -190,9 +228,21 @@ function upsertIntoAlbum(album: AlbumArgs, fresh: readonly MediaItem[]): ReturnT
   return galleryListApi.util.updateQueryData("listAlbumMedia", { eventId: album.eventId, albumId: album.albumId }, (draft) => upsertPages(draft, fresh));
 }
 
+/** {@link upsertIntoList} for a Memory Box (WP-6.3). */
+function upsertIntoMemory(memoryAlbumId: string, fresh: readonly MediaItem[]): ReturnType<typeof galleryListApi.util.updateQueryData> {
+  return galleryListApi.util.updateQueryData("listMemoryMedia", memoryAlbumId, (draft) => upsertPages(draft, fresh));
+}
+
 /** Upserts into the list of `scope`. */
 function upsertIntoScope(scope: MediaScope, fresh: readonly MediaItem[]): ReturnType<typeof galleryListApi.util.updateQueryData> {
-  return scope.kind === "year" ? upsertIntoList(scope.year, fresh) : upsertIntoAlbum(scope, fresh);
+  switch (scope.kind) {
+    case "year":
+      return upsertIntoList(scope.year, fresh);
+    case "album":
+      return upsertIntoAlbum(scope, fresh);
+    case "memory":
+      return upsertIntoMemory(scope.memoryAlbumId, fresh);
+  }
 }
 
 /** Applies `change` to the loaded copy of one item. */
@@ -207,9 +257,19 @@ export interface ItemAlbum {
   albumId: string;
 }
 
-/** Where an item's loaded copy lives: its year list, or its album list (`albumOf`). */
-function patchItem(year: number | null, album: ItemAlbum | undefined, id: string, change: (item: MediaItem) => void): ReturnType<typeof galleryListApi.util.updateQueryData> | null {
+/**
+ * Where an item's loaded copy lives: its year list, its album list
+ * (`albumOf`) or, WP-6.3, its Memory Box list (`memoryAlbumOf`).
+ */
+function patchItem(
+  year: number | null,
+  album: ItemAlbum | undefined,
+  id: string,
+  change: (item: MediaItem) => void,
+  memoryAlbumId?: string
+): ReturnType<typeof galleryListApi.util.updateQueryData> | null {
   if (album !== undefined) return galleryListApi.util.updateQueryData("listAlbumMedia", album, (draft) => patchPages(draft, id, change));
+  if (memoryAlbumId !== undefined) return galleryListApi.util.updateQueryData("listMemoryMedia", memoryAlbumId, (draft) => patchPages(draft, id, change));
   return year === null ? null : patchListItem(year, id, change);
 }
 
@@ -220,6 +280,15 @@ function patchItem(year: number | null, album: ItemAlbum | undefined, id: string
 export function albumOf(item: Pick<MediaItem, "album">): ItemAlbum | undefined {
   const album = item.album ?? null;
   return album === null ? undefined : { eventId: album.eventId, albumId: album.id };
+}
+
+/**
+ * @param item - A media item.
+ * @returns `{ memoryAlbumId }` for Memory Box media (WP-6.3), else `{}` (spread into the mutation args).
+ */
+export function memoryAlbumOf(item: Pick<MediaItem, "memoryAlbum">): { memoryAlbumId?: string } {
+  const box = item.memoryAlbum ?? null;
+  return box === null ? {} : { memoryAlbumId: box.id };
 }
 
 export const galleryApi = galleryListApi.injectEndpoints({
@@ -272,6 +341,23 @@ export const galleryApi = galleryListApi.injectEndpoints({
       }
     }),
 
+    /**
+     * First page of a Memory Box (WP-6.3): the processing poll. Fresh items
+     * are patched into the box's infinite list.
+     */
+    memoryMediaHead: build.query<Page<MediaItem>, MemoryHeadArgs>({
+      query: ({ memoryAlbumId, limit }) => ({ url: `${memoryPath(memoryAlbumId)}/media`, params: { limit } }),
+      providesTags: (_result, _error, { memoryAlbumId }) => [memoryMediaTag(memoryAlbumId)],
+      async onQueryStarted({ memoryAlbumId }, { dispatch, queryFulfilled }) {
+        try {
+          const { data } = await queryFulfilled;
+          dispatch(upsertIntoMemory(memoryAlbumId, data.items));
+        } catch {
+          // The query's own error state reports the failure.
+        }
+      }
+    }),
+
     /** Step 1 of an upload: the server returns a presigned PUT bound to type and length. */
     createUpload: build.mutation<CreateUploadResponse, { year: number; body: CreateUploadRequest }>({
       query: ({ year, body }) => ({ url: `/cuencadas/${year}/media/uploads`, method: "POST", body }),
@@ -284,6 +370,15 @@ export const galleryApi = galleryListApi.injectEndpoints({
      */
     createAlbumUpload: build.mutation<CreateUploadResponse, AlbumArgs & { body: CreateUploadRequest }>({
       query: ({ eventId, albumId, body }) => ({ url: `${albumPath({ eventId, albumId })}/uploads`, method: "POST", body }),
+      transformResponse: (raw: unknown) => parseUploadIntent(raw)
+    }),
+
+    /**
+     * Step 1 for a Memory Box (WP-6.3): same intent, same validation of the
+     * presigned URL's origin [SEC]; the server derives `memories/{id}`.
+     */
+    createMemoryUpload: build.mutation<CreateUploadResponse, { memoryAlbumId: string; body: CreateUploadRequest }>({
+      query: ({ memoryAlbumId, body }) => ({ url: `${memoryPath(memoryAlbumId)}/uploads`, method: "POST", body }),
       transformResponse: (raw: unknown) => parseUploadIntent(raw)
     }),
 
@@ -302,52 +397,64 @@ export const galleryApi = galleryListApi.injectEndpoints({
         if (error) return [];
         // An album's media count and cover thumbnail live on the event (WP-5.4).
         if (scope.kind === "album") return [albumMediaTag(scope.albumId), ADMIN_LIST_TAG, { type: "Event", id: scope.eventId }];
+        // A box's count and cover live on its card and page (WP-6.3).
+        if (scope.kind === "memory") return [memoryMediaTag(scope.memoryAlbumId), ADMIN_LIST_TAG, memoryAlbumTag(scope.memoryAlbumId), ...MEMORY_LISTS_TAGS];
         return [mediaHeadTag(scope.year), YEARS_TAG, ADMIN_LIST_TAG];
       }
     }),
 
     /** Uploader or admin edits the caption (optimistic; rolled back on failure). */
-    updateMediaCaption: build.mutation<MediaItem, { id: string; year: number | null; album?: ItemAlbum; caption: string | null }>({
+    updateMediaCaption: build.mutation<MediaItem, { id: string; year: number | null; album?: ItemAlbum; memoryAlbumId?: string; caption: string | null }>({
       query: ({ id, caption }) => ({ url: `/media/${id}`, method: "PATCH", body: { caption } }),
-      async onQueryStarted({ id, year, album, caption }, { dispatch, queryFulfilled }) {
-        // `year` is null for event-album media (WP-5.2): their copy lives in the album list (WP-5.4).
-        const change = patchItem(year, album, id, (item) => {
-          item.caption = caption;
-        });
+      async onQueryStarted({ id, year, album, memoryAlbumId, caption }, { dispatch, queryFulfilled }) {
+        // `year` is null for event-album and box media (WP-5.2/6.3): their copy lives in the album or box list.
+        const change = patchItem(
+          year,
+          album,
+          id,
+          (item) => {
+            item.caption = caption;
+          },
+          memoryAlbumId
+        );
         const patch = change === null ? null : dispatch(change);
         try {
           const { data } = await queryFulfilled;
           if (album !== undefined) dispatch(upsertIntoAlbum(album, [data]));
+          else if (memoryAlbumId !== undefined) dispatch(upsertIntoMemory(memoryAlbumId, [data]));
           else if (year !== null) dispatch(upsertIntoList(year, [data]));
         } catch {
           patch?.undo();
         }
       },
-      invalidatesTags: (_result, error, { year, album }) => {
+      invalidatesTags: (_result, error, { year, album, memoryAlbumId }) => {
         if (error) return [];
         if (album !== undefined) return [albumMediaTag(album.albumId), ADMIN_LIST_TAG];
+        if (memoryAlbumId !== undefined) return [memoryMediaTag(memoryAlbumId), ADMIN_LIST_TAG];
         return year === null ? [ADMIN_LIST_TAG] : [mediaHeadTag(year), ADMIN_LIST_TAG];
       }
     }),
 
     /** Uploader or admin soft-deletes an item; it is removed from the loaded list. */
-    deleteMedia: build.mutation<void, { id: string; year: number | null; album?: ItemAlbum }>({
+    deleteMedia: build.mutation<void, { id: string; year: number | null; album?: ItemAlbum; memoryAlbumId?: string }>({
       query: ({ id }) => ({ url: `/media/${id}`, method: "DELETE" }),
-      async onQueryStarted({ id, year, album }, { dispatch, queryFulfilled }) {
+      async onQueryStarted({ id, year, album, memoryAlbumId }, { dispatch, queryFulfilled }) {
         try {
           await queryFulfilled;
           const drop = (draft: PagesDraft): void => {
             for (const page of draft.pages) page.items = page.items.filter((item) => item.id !== id);
           };
           if (album !== undefined) dispatch(galleryListApi.util.updateQueryData("listAlbumMedia", album, drop));
+          else if (memoryAlbumId !== undefined) dispatch(galleryListApi.util.updateQueryData("listMemoryMedia", memoryAlbumId, drop));
           else if (year !== null) dispatch(galleryListApi.util.updateQueryData("listMedia", year, drop));
         } catch {
           // The caller shows the error.
         }
       },
-      invalidatesTags: (_result, error, { year, album }) => {
+      invalidatesTags: (_result, error, { year, album, memoryAlbumId }) => {
         if (error) return [];
         if (album !== undefined) return [albumMediaTag(album.albumId), ADMIN_LIST_TAG, { type: "Event", id: album.eventId }];
+        if (memoryAlbumId !== undefined) return [memoryMediaTag(memoryAlbumId), ADMIN_LIST_TAG, memoryAlbumTag(memoryAlbumId), ...MEMORY_LISTS_TAGS];
         return year === null ? [ADMIN_LIST_TAG] : [mediaHeadTag(year), YEARS_TAG, ADMIN_LIST_TAG];
       }
     }),
@@ -380,7 +487,8 @@ export const galleryApi = galleryListApi.injectEndpoints({
     /** Admin approve / hide / delete. Invalidates every gallery list (rare, admin only). */
     moderateMedia: build.mutation<AdminMediaItem, { id: string; body: ModerateMediaRequest }>({
       query: ({ id, body }) => ({ url: `/admin/media/${id}/moderate`, method: "POST", body }),
-      invalidatesTags: (_result, error, { id }) => (error ? [] : ["Media", { type: "MediaReport", id }])
+      // WP-6.3: a box's count and cover can change too.
+      invalidatesTags: (_result, error, { id }) => (error ? [] : ["Media", "MemoryAlbum", { type: "MediaReport", id }])
     })
   })
 });
@@ -389,6 +497,8 @@ export const {
   useListMediaInfiniteQuery,
   useListAlbumMediaInfiniteQuery,
   useAlbumMediaHeadQuery,
+  useListMemoryMediaInfiniteQuery,
+  useMemoryMediaHeadQuery,
   useMediaHeadQuery,
   useGalleryYearsQuery,
   useUpdateMediaCaptionMutation,

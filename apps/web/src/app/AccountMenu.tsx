@@ -33,6 +33,9 @@ const MEMBER_LINKS: readonly AccountLink[] = [
  */
 const EVENTS_LINK: AccountLink = { to: "/eventos", label: "Eventos", icon: "🎉" };
 
+/** WP-6.3: the Memory Box has no room in the TopNav at any width; it lives here (and in Más on phones). */
+const MEMORIES_LINK: AccountLink = { to: "/recuerdos", label: "Baúl de recuerdos", icon: "🗃️" };
+
 /** The admin console entry. Lives only here, not in the TopNav links (no duplicate, WP-4.7). */
 const ADMIN_LINK: AccountLink = { to: "/admin", label: "Panel", icon: "⭐" };
 
@@ -48,8 +51,9 @@ export function firstName(user: Pick<CurrentUser, "displayName" | "email">): str
 /**
  * The account entry of the TopNav for members and admins (WP-4.7): the
  * user's avatar (or initials) and first name; it opens a disclosure list with
- * Mi perfil, Contacto (`/perfil#contacto`), Sesiones y seguridad, Eventos
- * (below 1000px, WP-5.4), Panel (admins) and Cerrar sesión.
+ * Mi perfil, Contacto (`/perfil#contacto`), Sesiones y seguridad, Baúl de
+ * recuerdos (WP-6.3), Eventos (below 1000px, WP-5.4), Panel (admins) and
+ * Cerrar sesión.
  *
  * Keyboard: Enter/Space toggle; ArrowDown/ArrowUp open and move between the
  * entries; Home/End jump; Escape closes and returns focus to the button.
@@ -74,7 +78,7 @@ export function AccountMenu({ user }: { user: CurrentUser }): ReactNode {
   const pressInside = useRef(false);
 
   const wideNav = useMediaQuery(`(min-width: ${TOP_NAV_WIDE_MIN_PX}px)`);
-  const memberLinks = wideNav ? MEMBER_LINKS : [...MEMBER_LINKS, EVENTS_LINK];
+  const memberLinks = wideNav ? [...MEMBER_LINKS, MEMORIES_LINK] : [...MEMBER_LINKS, MEMORIES_LINK, EVENTS_LINK];
   const links = mustChange ? [] : user.role === "admin" ? [...memberLinks, ADMIN_LINK] : memberLinks;
 
   // Any navigation (an entry, the back button, another link) closes the menu.
