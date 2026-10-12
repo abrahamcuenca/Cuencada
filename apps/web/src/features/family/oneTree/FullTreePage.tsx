@@ -87,7 +87,7 @@ export function FullTreePage(): ReactNode {
     const element = document.getElementById(`nodo-${highlight}`);
     element?.focus({ preventScroll: true });
     element?.scrollIntoView?.({ block: "center" });
-  }, [highlight, outline]);
+  }, [highlight]);
 
   /** Fetch `id`'s children when needed; returns the outline after the merge. */
   const ensureChildren = useCallback(
