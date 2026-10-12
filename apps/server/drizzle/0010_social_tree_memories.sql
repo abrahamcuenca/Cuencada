@@ -3,9 +3,11 @@
 -- settings row. EXPAND-ONLY, so the code already deployed (0009, WP-5.3)
 -- keeps working on this database during the rollout:
 --
--- * New tables only receive rows from new code: `media_tags`, `media_likes`,
---   `media_comments`, `comment_reports`, `memory_albums`, `notifications`,
---   `tree_link_proposals`, `family_settings`.
+-- * New tables only receive rows from new code: `media_tags` (pending until
+--   a linked person approves, PR #56 L1), `media_likes`, `media_comments`,
+--   `comment_reports`, `memory_albums`, `notifications`,
+--   `tree_link_proposals` (one pending proposal per proposer and pair, PR #56
+--   L2), `family_settings`.
 -- * `media_items.memory_album_id` (nullable, ON DELETE RESTRICT). The scope
 --   CHECK becomes `num_nonnulls(cuencada_id, album_id, memory_album_id) = 1`
 --   and the storage-prefix CHECK also accepts `memories/{uuid}`; both are
@@ -15,7 +17,8 @@
 --   the migration transaction (no window without a CHECK).
 -- * 0009-era reads: `mediaScopeSql` lets rows with `album_id is null` through,
 --   so the WP-6.0 code also makes it deny any row outside the known scopes
---   (no Memory Box row can exist before WP-6.3 anyway).
+--   (no Memory Box row can exist before WP-6.3 anyway). Rollback floor: once
+--   WP-6.3 writes box rows, never roll the code back below WP-6.0.
 --
 -- Data steps (end of file):
 -- 1. The single `family_settings` row (no root yet).
@@ -56,8 +59,8 @@ CREATE TABLE "notifications" (
 	"seen_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "notifications_kind_check" CHECK ("kind" in ('photo_tagged', 'photo_commented', 'photo_liked', 'event_added', 'tree_proposal_resolved')),
-	CONSTRAINT "notifications_target_check" CHECK (("kind" in ('photo_tagged', 'photo_commented', 'photo_liked') and "media_id" is not null and "event_id" is null and "proposal_id" is null) or ("kind" = 'event_added' and "event_id" is not null and "media_id" is null and "proposal_id" is null) or ("kind" = 'tree_proposal_resolved' and "proposal_id" is not null and "media_id" is null and "event_id" is null)),
+	CONSTRAINT "notifications_kind_check" CHECK ("kind" in ('photo_tag_request', 'photo_commented', 'photo_liked', 'event_added', 'tree_proposal_resolved')),
+	CONSTRAINT "notifications_target_check" CHECK (("kind" in ('photo_tag_request', 'photo_commented', 'photo_liked') and "media_id" is not null and "event_id" is null and "proposal_id" is null) or ("kind" = 'event_added' and "event_id" is not null and "media_id" is null and "proposal_id" is null) or ("kind" = 'tree_proposal_resolved' and "proposal_id" is not null and "media_id" is null and "event_id" is null)),
 	CONSTRAINT "notifications_not_self_check" CHECK ("actor_user_id" is null or "actor_user_id" <> "user_id"),
 	CONSTRAINT "notifications_count_check" CHECK ("count" >= 1),
 	CONSTRAINT "notifications_dedupe_key_check" CHECK ("dedupe_key" is null or char_length("dedupe_key") between 1 and 200)
@@ -124,9 +127,13 @@ CREATE TABLE "media_tags" (
 	"media_id" uuid NOT NULL,
 	"person_id" uuid NOT NULL,
 	"tagged_by_user_id" uuid,
+	"status" text DEFAULT 'pending' NOT NULL,
+	"approved_at" timestamp with time zone,
 	"x" numeric(5, 4),
 	"y" numeric(5, 4),
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "media_tags_status_check" CHECK ("status" in ('pending', 'approved')),
+	CONSTRAINT "media_tags_approved_check" CHECK (("status" = 'approved') = ("approved_at" is not null)),
 	CONSTRAINT "media_tags_position_check" CHECK (("x" is null) = ("y" is null) and ("x" is null or ("x" between 0 and 1 and "y" between 0 and 1)))
 );--> statement-breakpoint
 ALTER TABLE "memory_albums" ADD CONSTRAINT "memory_albums_cover_media_id_media_items_id_fk" FOREIGN KEY ("cover_media_id") REFERENCES "public"."media_items"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
@@ -165,7 +172,8 @@ CREATE INDEX "notifications_event_id_idx" ON "notifications" USING btree ("event
 CREATE INDEX "notifications_proposal_id_idx" ON "notifications" USING btree ("proposal_id");--> statement-breakpoint
 CREATE INDEX "family_settings_root_person_id_idx" ON "family_settings" USING btree ("root_person_id");--> statement-breakpoint
 CREATE INDEX "family_settings_updated_by_user_id_idx" ON "family_settings" USING btree ("updated_by_user_id");--> statement-breakpoint
-CREATE UNIQUE INDEX "tree_link_proposals_pending_pair_unique" ON "tree_link_proposals" USING btree (least("from_person_id", "to_person_id"),greatest("from_person_id", "to_person_id")) WHERE status = 'pending';--> statement-breakpoint
+CREATE UNIQUE INDEX "tree_link_proposals_pending_pair_unique" ON "tree_link_proposals" USING btree ("proposed_by_user_id",least("from_person_id", "to_person_id"),greatest("from_person_id", "to_person_id")) WHERE status = 'pending';--> statement-breakpoint
+CREATE INDEX "tree_link_proposals_pair_idx" ON "tree_link_proposals" USING btree (least("from_person_id", "to_person_id"),greatest("from_person_id", "to_person_id"),"status");--> statement-breakpoint
 CREATE INDEX "tree_link_proposals_status_created_idx" ON "tree_link_proposals" USING btree ("status","created_at");--> statement-breakpoint
 CREATE INDEX "tree_link_proposals_proposed_by_idx" ON "tree_link_proposals" USING btree ("proposed_by_user_id","created_at");--> statement-breakpoint
 CREATE INDEX "tree_link_proposals_from_person_id_idx" ON "tree_link_proposals" USING btree ("from_person_id");--> statement-breakpoint
@@ -179,7 +187,7 @@ CREATE INDEX "media_comments_deleted_by_user_id_idx" ON "media_comments" USING b
 CREATE UNIQUE INDEX "media_comments_author_client_id_unique" ON "media_comments" USING btree ("author_user_id","client_comment_id") WHERE client_comment_id is not null;--> statement-breakpoint
 CREATE INDEX "media_likes_user_id_idx" ON "media_likes" USING btree ("user_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "media_tags_media_person_unique" ON "media_tags" USING btree ("media_id","person_id");--> statement-breakpoint
-CREATE INDEX "media_tags_person_id_idx" ON "media_tags" USING btree ("person_id");--> statement-breakpoint
+CREATE INDEX "media_tags_person_id_idx" ON "media_tags" USING btree ("person_id","status");--> statement-breakpoint
 CREATE INDEX "media_tags_tagged_by_user_id_idx" ON "media_tags" USING btree ("tagged_by_user_id");--> statement-breakpoint
 -- media_items: the Memory Box scope.
 ALTER TABLE "media_items" ADD COLUMN "memory_album_id" uuid;--> statement-breakpoint

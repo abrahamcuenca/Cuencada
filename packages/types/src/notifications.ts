@@ -17,8 +17,13 @@ import { type EventRef, eventRefSchema } from "./eventRefs.js";
 
 /** What happened (DB CHECK `notifications_kind_check`). */
 export const NotificationKind = {
-  /** Someone tagged the recipient's linked person in a photo. */
-  PhotoTagged: "photo_tagged",
+  /**
+   * Someone tagged the recipient's linked person in a photo; the tag is
+   * pending until the recipient approves it ("Aprobar" / "Rechazar"). One
+   * kind for the request (not `photo_tagged` + a flag): approving marks it
+   * seen, declining or removing the tag deletes it.
+   */
+  PhotoTagRequest: "photo_tag_request",
   /** Someone commented on a photo the recipient uploaded (coalesced per photo). */
   PhotoCommented: "photo_commented",
   /** Someone gave a heart to a photo the recipient uploaded (coalesced per photo). */
@@ -33,7 +38,7 @@ export const notificationKindSchema = z.enum(NotificationKind);
 
 /** Kinds whose target is a media item. */
 export const MEDIA_NOTIFICATION_KINDS = [
-  NotificationKind.PhotoTagged,
+  NotificationKind.PhotoTagRequest,
   NotificationKind.PhotoCommented,
   NotificationKind.PhotoLiked
 ] as const satisfies readonly NotificationKind[];
@@ -42,6 +47,11 @@ export const MEDIA_NOTIFICATION_KINDS = [
 export const NOTIFICATION_RETENTION_DAYS = 180;
 /** Unread counts stop here (the badge shows "99+"). */
 export const NOTIFICATION_UNREAD_COUNT_MAX = 99;
+/**
+ * Most rows kept per recipient: writing beyond it deletes that recipient's
+ * oldest rows in the same transaction (seen ones first).
+ */
+export const NOTIFICATIONS_PER_USER_MAX = 500;
 /** Most ids in one `POST /api/notifications/read`. */
 export const NOTIFICATION_READ_IDS_MAX = 100;
 /** Longest `notifications.dedupe_key` (DB CHECK). */
@@ -61,7 +71,11 @@ export const notificationDedupeKey = {
   proposal: (proposalId: string): string => `proposal:${proposalId}`
 } as const;
 
-/** Who caused it: no account id; the avatar under the unlisted/disabled rules. */
+/**
+ * Who caused it: no account id. Resolved at **read time** from the current
+ * account, so the avatar follows the unlisted/disabled rules as they are now
+ * (an actor who became unlisted after liking shows the name only).
+ */
 export interface NotificationActor {
   /** Display name; `null` once the account is removed. */
   name: string | null;
@@ -135,7 +149,7 @@ export interface Notification {
   /** The latest actor (for coalesced likes/comments); `null` when unknown. */
   actor: NotificationActor | null;
   target: NotificationTarget;
-  /** Events coalesced into this row (≥ 1): "Ana y {count − 1} más". */
+  /** Events coalesced into this row (≥ 1): "Ana y {count − 1} más" (Ana = `actor`, the latest). */
   count: number;
   /** `null` while unread. */
   seenAt: string | null;

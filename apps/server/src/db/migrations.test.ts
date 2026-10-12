@@ -1414,7 +1414,8 @@ describe("migration 0010 (WP-6.0 social, notifications, Memory Box, tree links; 
                 ${target.event ?? null}, ${target.proposal ?? null}, ${options.key ?? null}, ${options.count ?? 1})
       `);
 
-    expect(await notify("photo_tagged", { media: mediaId })).toBeUndefined();
+    expect(await notify("photo_tag_request", { media: mediaId })).toBeUndefined();
+    expect(await notify("photo_tagged", { media: mediaId })).toBe("23514");
     expect(await notify("photo_commented", { media: mediaId })).toBeUndefined();
     expect(await notify("photo_liked", { media: mediaId }, { actor: null })).toBeUndefined();
     expect(await notify("event_added", { event: eventId }, { user: bea, actor: admin })).toBeUndefined();
@@ -1465,7 +1466,19 @@ describe("migration 0010 (WP-6.0 social, notifications, Memory Box, tree links; 
     expect(await tag(other, 1.5, 0.5)).toBe("23514");
     expect(await tag(other, 0.5, -0.1)).toBe("23514");
     expect(await tag(other, 1, 0)).toBeUndefined();
-    expect(await sql`select x::text, y::text from media_tags where person_id = ${person}`).toEqual([{ x: "0.2500", y: "0.7500" }]);
+    // A tag defaults to pending (fail closed); approved <=> approved_at.
+    expect(await sql`select x::text, y::text, status, approved_at from media_tags where person_id = ${person}`).toEqual([
+      { x: "0.2500", y: "0.7500", status: "pending", approved_at: null }
+    ]);
+    const setStatus = (status: string, approved: boolean): Promise<string | undefined> =>
+      sqlState(sql`
+        update media_tags set status = ${status}, approved_at = case when ${approved} then now() end where person_id = ${person}
+      `);
+    expect(await setStatus("approved", false)).toBe("23514");
+    expect(await setStatus("pending", true)).toBe("23514");
+    expect(await setStatus("hidden", false)).toBe("23514");
+    expect(await setStatus("approved", true)).toBeUndefined();
+    expect(await sql`select status from media_tags where person_id = ${person}`).toEqual([{ status: "approved" }]);
 
     const like = (userId: string): Promise<string | undefined> =>
       sqlState(sql`insert into media_likes (media_id, user_id) values (${mediaId}, ${userId})`);
@@ -1508,7 +1521,7 @@ describe("migration 0010 (WP-6.0 social, notifications, Memory Box, tree links; 
 
   it("enforces the tree-link proposal and family-settings CHECKs", async () => {
     await migrate(drizzle(sql), { migrationsFolder });
-    const { ana, admin } = await seed0009();
+    const { ana, bea, admin } = await seed0009();
     const abuelo = await insertId(sql`insert into people (full_name) values ('Abuelo Vega') returning id`);
     const abueloDos = await insertId(sql`insert into people (full_name) values ('Abuelo J. Vega') returning id`);
     const tia = await insertId(sql`insert into people (full_name) values ('Tía Rosa Vega') returning id`);
@@ -1517,17 +1530,22 @@ describe("migration 0010 (WP-6.0 social, notifications, Memory Box, tree links; 
       kind: string,
       from: string,
       to: string,
-      options: { relation?: string | null; status?: string; resolved?: boolean; note?: string | null } = {}
+      options: { relation?: string | null; status?: string; resolved?: boolean; note?: string | null; by?: string } = {}
     ): Promise<string | undefined> =>
       sqlState(sql`
         insert into tree_link_proposals (kind, from_person_id, to_person_id, relation, proposed_by_user_id, status, resolved_by_user_id, resolved_at, note)
-        values (${kind}, ${from}, ${to}, ${options.relation ?? null}, ${ana}, ${options.status ?? "pending"},
+        values (${kind}, ${from}, ${to}, ${options.relation ?? null}, ${options.by ?? ana}, ${options.status ?? "pending"},
                 ${options.resolved === true ? admin : null}, case when ${options.resolved === true} then now() end, ${options.note ?? null})
       `);
     expect(await propose("same_person", abuelo, abueloDos)).toBeUndefined();
-    // One pending proposal per unordered pair, whatever the kind.
+    // One pending proposal per proposer and unordered pair, whatever the kind (PR #56 L2).
     expect(await propose("same_person", abueloDos, abuelo)).toBe("23505");
     expect(await propose("relate", abuelo, abueloDos, { relation: "parent_of" })).toBe("23505");
+    // Another member's proposal for the same pair is neither blocked nor blocking.
+    expect(await propose("same_person", abueloDos, abuelo, { by: bea })).toBeUndefined();
+    expect(
+      await sql`select count(*)::int as count from tree_link_proposals where least(from_person_id, to_person_id) = least(${abuelo}::uuid, ${abueloDos}::uuid) and status = 'pending'`
+    ).toEqual([{ count: 2 }]);
     // Resolved ones do not block a new proposal.
     expect(await propose("relate", abuelo, abueloDos, { relation: "partner_of", status: "rejected", resolved: true })).toBeUndefined();
 

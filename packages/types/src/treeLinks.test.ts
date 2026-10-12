@@ -7,6 +7,7 @@ import {
   extendedFamilySchema,
   familySettingsSchema,
   resolveTreeLinkProposalInputSchema,
+  treeLinkProposalGroupSchema,
   treeLinkProposalSchema,
   treeOverviewQuerySchema,
   treeOverviewSchema,
@@ -53,8 +54,10 @@ describe("resolveTreeLinkProposalInputSchema", () => {
     });
     expect(resolveTreeLinkProposalInputSchema.parse({ decision: "reject", note: "No es la misma persona" })).toEqual({
       decision: "reject",
-      note: "No es la misma persona"
+      note: "No es la misma persona",
+      applyToPair: true
     });
+    expect(resolveTreeLinkProposalInputSchema.parse({ decision: "reject", applyToPair: false }).applyToPair).toBe(false);
     expect(resolveTreeLinkProposalInputSchema.safeParse({ decision: "reject", keepPersonId: A }).success).toBe(false);
     expect(resolveTreeLinkProposalInputSchema.safeParse({ decision: "maybe" }).success).toBe(false);
   });
@@ -79,6 +82,10 @@ describe("read models", () => {
     };
     expect(treeLinkProposalSchema.parse(proposal)).toEqual(proposal);
     expect(treeLinkProposalSchema.parse({ ...proposal, proposedByUserId: B })).not.toHaveProperty("proposedByUserId");
+    // The admin queue groups same-pair proposals (PR #56 L2).
+    const group = { pairKey: `${A}:${B}`, proposals: [proposal, { ...proposal, id: B, isMine: false }] };
+    expect(treeLinkProposalGroupSchema.parse(group).proposals).toHaveLength(2);
+    expect(treeLinkProposalGroupSchema.safeParse({ ...group, proposals: [] }).success).toBe(false);
   });
 
   it("parses settings, extended bands, the overview and a disconnected branch", () => {

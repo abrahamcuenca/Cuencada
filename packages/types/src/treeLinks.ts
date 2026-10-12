@@ -54,7 +54,12 @@ export const treeLinkProposalStatusSchema = z.enum(TreeLinkProposalStatus);
  * detail-code channel of ADR 0001 §4), sent with `path: "proposal"`.
  */
 export const TreeLinkIssueCode = {
-  /** 409 `CONFLICT`: a pending proposal for the same two people (either order, any kind) exists. */
+  /**
+   * 409 `CONFLICT`: the **caller** already has a pending proposal for the same
+   * two people (either order, any kind). Uniqueness is per proposer (Security
+   * L2, PR #56): another member's pending proposal for the pair never blocks
+   * or reveals anything; admins see same-pair proposals grouped.
+   */
   Duplicate: "PROPOSAL_DUPLICATE",
   /** 409 `CONFLICT`: resolving or withdrawing a proposal that is no longer pending. */
   NotPending: "PROPOSAL_NOT_PENDING"
@@ -65,8 +70,11 @@ const noteSchema = cleanNullableTextSchema(TREE_LINK_NOTE_MAX_LENGTH, true);
 
 /**
  * A proposal, as its proposer and admins see it (nobody else can read one).
- * `from`/`to` are `null` once that person was deleted (resolved proposals
- * keep their history; pending ones are withdrawn first).
+ * `from`/`to` are built from the **current** people rows (current names,
+ * photo rules of today) and are `null` once that person was deleted (resolved
+ * proposals keep their history; pending ones are withdrawn first); the web
+ * shows "una persona eliminada". `resolutionNote` is shown to the proposer
+ * and admins only, never in a notification.
  */
 export interface TreeLinkProposal {
   id: string;
@@ -104,6 +112,25 @@ export const treeLinkProposalSchema = z.object({
 }) satisfies z.ZodType<TreeLinkProposal>;
 
 export const treeLinkProposalPageSchema = pageSchema(treeLinkProposalSchema);
+
+/**
+ * Admin queue entry (`GET /api/admin/family/proposals`): the proposals for
+ * one unordered pair of people, grouped (Security L2, PR #56). `proposals`
+ * holds every proposal of the pair matching the query's `status` filter,
+ * newest first.
+ */
+export interface TreeLinkProposalGroup {
+  /** Stable key of the pair: `{smaller person id}:{larger person id}`. */
+  pairKey: string;
+  proposals: TreeLinkProposal[];
+}
+
+export const treeLinkProposalGroupSchema = z.object({
+  pairKey: z.string().max(80),
+  proposals: z.array(treeLinkProposalSchema).min(1).max(100)
+}) satisfies z.ZodType<TreeLinkProposalGroup>;
+
+export const treeLinkProposalGroupPageSchema = pageSchema(treeLinkProposalGroupSchema);
 
 /**
  * `POST /api/family/proposals` (any verified member; 20 per day). Any two
@@ -144,11 +171,16 @@ export type TreeLinkDecision = (typeof TreeLinkDecision)[keyof typeof TreeLinkDe
  * two stays, default `to`; `fields`: the merge's per-field choices), and a
  * `relate` one creates the edge (`createRelationshipTx`); a merge or edge
  * conflict answers its usual 409 and leaves the proposal pending.
+ * `applyToPair` (default `true`) applies the same decision and note to the
+ * other **pending** proposals of the pair with the same `kind` and
+ * `relation` (each proposer is notified); different ones stay pending (a
+ * merge re-points or withdraws them).
  */
 export const resolveTreeLinkProposalInputSchema = z
   .strictObject({
     decision: z.enum(TreeLinkDecision),
     note: noteSchema.default(null),
+    applyToPair: z.boolean().default(true),
     keepPersonId: idSchema.exactOptional(),
     fields: personMergeFieldsSchema.exactOptional()
   })
@@ -159,7 +191,11 @@ export const resolveTreeLinkProposalInputSchema = z
 export type ResolveTreeLinkProposalInput = z.infer<typeof resolveTreeLinkProposalInputSchema>;
 export type ResolveTreeLinkProposalRequest = z.input<typeof resolveTreeLinkProposalInputSchema>;
 
-/** `GET /api/family/proposals` (the caller's own) and `GET /api/admin/family/proposals` (all) query. */
+/**
+ * `GET /api/family/proposals` (the caller's own, `treeLinkProposalPageSchema`)
+ * and `GET /api/admin/family/proposals` (all, grouped by pair,
+ * `treeLinkProposalGroupPageSchema`) query.
+ */
 export const treeLinkProposalListQuerySchema = cursorQuerySchema.extend({
   status: treeLinkProposalStatusSchema.exactOptional()
 });

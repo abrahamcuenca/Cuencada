@@ -1,5 +1,5 @@
 {
-  "id": "23d80595-32dd-4c70-b76d-f8fb46bd3cc3",
+  "id": "617f0cae-25d3-4e2c-945e-cb00e1db95db",
   "prevId": "316c5eac-c252-4560-9f3e-20e2e6518185",
   "version": "7",
   "dialect": "postgresql",
@@ -4073,11 +4073,11 @@
       "checkConstraints": {
         "notifications_kind_check": {
           "name": "notifications_kind_check",
-          "value": "\"kind\" in ('photo_tagged', 'photo_commented', 'photo_liked', 'event_added', 'tree_proposal_resolved')"
+          "value": "\"kind\" in ('photo_tag_request', 'photo_commented', 'photo_liked', 'event_added', 'tree_proposal_resolved')"
         },
         "notifications_target_check": {
           "name": "notifications_target_check",
-          "value": "(\"kind\" in ('photo_tagged', 'photo_commented', 'photo_liked') and \"media_id\" is not null and \"event_id\" is null and \"proposal_id\" is null) or (\"kind\" = 'event_added' and \"event_id\" is not null and \"media_id\" is null and \"proposal_id\" is null) or (\"kind\" = 'tree_proposal_resolved' and \"proposal_id\" is not null and \"media_id\" is null and \"event_id\" is null)"
+          "value": "(\"kind\" in ('photo_tag_request', 'photo_commented', 'photo_liked') and \"media_id\" is not null and \"event_id\" is null and \"proposal_id\" is null) or (\"kind\" = 'event_added' and \"event_id\" is not null and \"media_id\" is null and \"proposal_id\" is null) or (\"kind\" = 'tree_proposal_resolved' and \"proposal_id\" is not null and \"media_id\" is null and \"event_id\" is null)"
         },
         "notifications_not_self_check": {
           "name": "notifications_not_self_check",
@@ -5095,6 +5095,12 @@
           "name": "tree_link_proposals_pending_pair_unique",
           "columns": [
             {
+              "expression": "proposed_by_user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
               "expression": "least(\"from_person_id\", \"to_person_id\")",
               "asc": true,
               "isExpression": true,
@@ -5109,6 +5115,33 @@
           ],
           "isUnique": true,
           "where": "status = 'pending'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tree_link_proposals_pair_idx": {
+          "name": "tree_link_proposals_pair_idx",
+          "columns": [
+            {
+              "expression": "least(\"from_person_id\", \"to_person_id\")",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "greatest(\"from_person_id\", \"to_person_id\")",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -6399,6 +6432,19 @@
           "primaryKey": false,
           "notNull": false
         },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "approved_at": {
+          "name": "approved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "x": {
           "name": "x",
           "type": "numeric(5, 4)",
@@ -6446,6 +6492,12 @@
           "columns": [
             {
               "expression": "person_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -6517,6 +6569,14 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
+        "media_tags_status_check": {
+          "name": "media_tags_status_check",
+          "value": "\"status\" in ('pending', 'approved')"
+        },
+        "media_tags_approved_check": {
+          "name": "media_tags_approved_check",
+          "value": "(\"status\" = 'approved') = (\"approved_at\" is not null)"
+        },
         "media_tags_position_check": {
           "name": "media_tags_position_check",
           "value": "(\"x\" is null) = (\"y\" is null) and (\"x\" is null or (\"x\" between 0 and 1 and \"y\" between 0 and 1))"

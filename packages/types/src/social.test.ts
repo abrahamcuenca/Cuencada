@@ -10,6 +10,9 @@ import {
   mediaCommentSchema,
   mediaCommentsQuerySchema,
   mediaDetailSchema,
+  mediaLikerPageSchema,
+  mediaLikersQuerySchema,
+  mediaTagIdParamsSchema,
   mediaTagSchema,
   tagCandidatesQuerySchema
 } from "./social.js";
@@ -82,10 +85,20 @@ describe("createMediaTagInputSchema", () => {
 
 describe("mediaTagSchema", () => {
   it("strips unknown keys, so an account id never leaks through a tag", () => {
-    const tag = { id: ID, person: { id: PERSON, name: "Ana Morales Vega", avatarUrl: null, userId: ID }, isMe: false, canRemove: true };
+    const tag = {
+      id: ID,
+      person: { id: PERSON, name: "Ana Morales Vega", avatarUrl: null, userId: ID },
+      status: "pending",
+      isMe: false,
+      canRemove: true,
+      canApprove: false
+    };
     const parsed = mediaTagSchema.parse(tag);
     expect(parsed.person).not.toHaveProperty("userId");
     expect(parsed).not.toHaveProperty("x");
+    expect(parsed.status).toBe("pending");
+    expect(mediaTagSchema.safeParse({ ...tag, status: "hidden" }).success).toBe(false);
+    expect(mediaTagSchema.safeParse({ ...tag, canApprove: undefined }).success).toBe(false);
   });
 });
 
@@ -117,7 +130,14 @@ describe("comments", () => {
 
 describe("mediaDetailSchema", () => {
   it("parses a detail and caps the tag list", () => {
-    const tag = { id: ID, person: { id: PERSON, name: "Ana Morales Vega", avatarUrl: null }, isMe: true, canRemove: true };
+    const tag = {
+      id: ID,
+      person: { id: PERSON, name: "Ana Morales Vega", avatarUrl: null },
+      status: "approved",
+      isMe: true,
+      canRemove: true,
+      canApprove: false
+    };
     const detail = {
       item,
       tags: [tag],
@@ -129,6 +149,20 @@ describe("mediaDetailSchema", () => {
     expect(mediaDetailSchema.parse(detail)).toEqual(detail);
     const tooMany = { ...detail, tags: Array.from({ length: MEDIA_TAGS_MAX + 1 }, () => tag) };
     expect(mediaDetailSchema.safeParse(tooMany).success).toBe(false);
+  });
+});
+
+describe("likers", () => {
+  it("lists names and listed avatars without account ids, 20 per page by default", () => {
+    const liker = { name: "Ana Morales Vega", avatarUrl: null, isMe: false, userId: ID };
+    expect(mediaLikerPageSchema.parse({ items: [liker], nextCursor: null }).items[0]).not.toHaveProperty("userId");
+    expect(mediaLikersQuerySchema.parse({})).toEqual({ limit: 20 });
+    expect(mediaLikersQuerySchema.safeParse({ limit: 51 }).success).toBe(false);
+  });
+
+  it("approves a tag by id only (no body fields)", () => {
+    expect(mediaTagIdParamsSchema.parse({ id: ID })).toEqual({ id: ID });
+    expect(mediaTagIdParamsSchema.safeParse({ id: "x" }).success).toBe(false);
   });
 });
 

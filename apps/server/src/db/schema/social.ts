@@ -4,7 +4,7 @@
  * media item and inherits its scope: routes load the item through the media
  * scope first (ADR 0001 §8). WP-6.2 implements the routes.
  */
-import { MEDIA_COMMENT_MAX_LENGTH, MediaReportReason } from "@cuencada/types";
+import { MEDIA_COMMENT_MAX_LENGTH, MediaReportReason, MediaTagStatus } from "@cuencada/types";
 import { sql } from "drizzle-orm";
 import { check, index, numeric, pgTable, primaryKey, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { users } from "./auth.js";
@@ -16,7 +16,13 @@ import { people } from "./people.js";
  * A person (tree node, with or without an account) tagged in a media item.
  * One tag per person per item. `x`/`y` are an optional position (fractions
  * of the image, both or neither). A person delete removes their tags; a
- * person merge moves them first (WP-6.2).
+ * person merge moves them first (`moveMediaTagsTx`, WP-6.2, called by 6.4).
+ *
+ * Consent (owner decision, PR #56 Security L1): a tag of a person linked to
+ * an account is `pending` until that user approves it (`approved_at` set);
+ * tags of people without accounts and self-tags are inserted `approved`. The
+ * column defaults to `pending` so a write that forgets the rule fails closed
+ * (hidden), never open. Counts and "Fotos de X" read approved tags only.
  */
 export const mediaTags = pgTable(
   "media_tags",
@@ -30,14 +36,18 @@ export const mediaTags = pgTable(
       .references(() => people.id, { onDelete: "cascade" }),
     /** Who tagged; `null` once that account is removed. */
     taggedByUserId: uuid("tagged_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    status: text("status").$type<MediaTagStatus>().notNull().default("pending"),
+    approvedAt: timestamptz("approved_at"),
     x: numeric("x", { precision: 5, scale: 4 }),
     y: numeric("y", { precision: 5, scale: 4 }),
     createdAt: createdAt()
   },
   (table) => [
     uniqueIndex("media_tags_media_person_unique").on(table.mediaId, table.personId),
-    // "Fotos de {persona}" and person merge/delete.
-    index("media_tags_person_id_idx").on(table.personId),
+    // "Fotos de {persona}" (approved only) and person merge/delete.
+    index("media_tags_person_id_idx").on(table.personId, table.status),
+    checkIn("media_tags_status_check", "status", MediaTagStatus),
+    check("media_tags_approved_check", sql`("status" = 'approved') = ("approved_at" is not null)`),
     index("media_tags_tagged_by_user_id_idx").on(table.taggedByUserId),
     check(
       "media_tags_position_check",

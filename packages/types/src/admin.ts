@@ -184,9 +184,14 @@ export const AuditAction = {
    * WP-6.0 (ADR 0001 §8). Metadata holds ids, enums, field names and counts
    * only: never comment bodies, box titles, notes or names.
    */
-  /** `entityType: media`; a person was tagged (metadata: `tagId`, `personId`, `placed`). */
+  /** `entityType: media`; a person was tagged (metadata: `tagId`, `personId`, `placed`, `status`). */
   MediaTagged: "media.tagged",
-  /** `entityType: media`; a tag was removed (metadata: `tagId`, `personId`, `by`: `tagger` | `uploader` | `self` | `admin`). */
+  /** `entityType: media`; the tagged person's user approved a pending tag (metadata: `tagId`, `personId`). */
+  MediaTagApproved: "media.tag_approved",
+  /**
+   * `entityType: media`; a tag was removed or a pending one declined (metadata:
+   * `tagId`, `personId`, `status`, `by`: `tagger` | `uploader` | `self` | `admin`).
+   */
   MediaUntagged: "media.untagged",
   /** `entityType: media_comment`; an admin deleted a comment (metadata: `mediaId`, `authorUserId`). */
   MediaCommentDeleted: "media_comment.deleted",

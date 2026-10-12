@@ -218,7 +218,9 @@ export const personRelationships = pgTable(
 /**
  * WP-6.0 (migration 0010): a member's proposal to connect two people
  * ("Es la misma persona" / "Conectar con…"); admins approve (merge or edge)
- * or reject. At most one **pending** proposal per unordered pair.
+ * or reject. At most one **pending** proposal per proposer and unordered
+ * pair (PR #56 Security L2: per proposer, so another member's proposal never
+ * blocks or reveals anything); the admin queue groups same-pair proposals.
  *
  * The person FKs are ON DELETE **SET NULL**, not CASCADE: approving a
  * `same_person` proposal merges (deletes) one of its own people, and the
@@ -246,8 +248,18 @@ export const treeLinkProposals = pgTable(
   },
   (table) => [
     uniqueIndex("tree_link_proposals_pending_pair_unique")
-      .on(sql`least(${table.fromPersonId}, ${table.toPersonId})`, sql`greatest(${table.fromPersonId}, ${table.toPersonId})`)
+      .on(
+        table.proposedByUserId,
+        sql`least(${table.fromPersonId}, ${table.toPersonId})`,
+        sql`greatest(${table.fromPersonId}, ${table.toPersonId})`
+      )
       .where(sql`status = 'pending'`),
+    // Admin queue grouped by pair, and "the other pending proposals of this pair" on resolve.
+    index("tree_link_proposals_pair_idx").on(
+      sql`least(${table.fromPersonId}, ${table.toPersonId})`,
+      sql`greatest(${table.fromPersonId}, ${table.toPersonId})`,
+      table.status
+    ),
     // Admin queue (pending first, oldest first) and the per-member daily count.
     index("tree_link_proposals_status_created_idx").on(table.status, table.createdAt),
     index("tree_link_proposals_proposed_by_idx").on(table.proposedByUserId, table.createdAt),

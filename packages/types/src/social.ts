@@ -6,7 +6,14 @@
  * Every route here first loads the media item through the media scope
  * (`mediaScopeSql` + member visibility): a photo the caller cannot see is
  * 404 `NOT_FOUND` on every route, before any other check. Tags, likes and
- * comments therefore always inherit the photo's scope.
+ * comments therefore always inherit the photo's scope (Memory Box photos
+ * become social exactly when WP-6.3 opens the published-box branch).
+ *
+ * Tag consent (owner decision, Security L1 of PR #56): a tag of a person
+ * linked to an account is **pending** until that person approves it; only
+ * the tagger, the tagged user and admins see a pending tag. Tags of people
+ * without accounts (and self-tags) are approved at once. Counts and "Fotos de
+ * {persona}" use approved tags only.
  *
  * Re-exported by `chat.ts` (the barrel is frozen).
  */
@@ -43,6 +50,9 @@ export const MEDIA_COMMENTS_PAGE_DEFAULT = 20;
 export const MEDIA_COMMENTS_PAGE_MAX = 50;
 /** Most results of the tag person picker. */
 export const TAG_CANDIDATES_MAX = 20;
+/** Default and maximum likers per page (`GET /api/media/:id/likes`). */
+export const MEDIA_LIKERS_PAGE_DEFAULT = 20;
+export const MEDIA_LIKERS_PAGE_MAX = 50;
 
 /**
  * Stable reasons on social errors (`error.details[0].code`, the open
@@ -50,10 +60,10 @@ export const TAG_CANDIDATES_MAX = 20;
  */
 export const SocialIssueCode = {
   /**
-   * 400 `VALIDATION` (`path: "personId"`): the person cannot be tagged by the
-   * caller. Deliberately generic: the same answer for a person that does not
-   * exist and for a member linked to an **unlisted** or disabled account
-   * tagged by someone else, so it reveals neither.
+   * 400 `VALIDATION` (`path: "personId"`): the person does not exist (or was
+   * deleted). Every existing person is taggable, unlisted members included
+   * (their tag stays pending until they approve it), so this code reveals
+   * nothing about accounts.
    */
   TagNotAllowed: "TAG_NOT_ALLOWED",
   /** 409 `CONFLICT`: the item already has {@link MEDIA_TAGS_MAX} tags. */
@@ -70,15 +80,31 @@ export type SocialIssueCode = (typeof SocialIssueCode)[keyof typeof SocialIssueC
 /* Tags                                                                        */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * `pending`: the tagged person is linked to an account and has not approved
+ * yet (visible only to the tagger, that user and admins). `approved`: shown
+ * to every viewer of the photo (DB CHECK `media_tags_status_check`).
+ */
+export const MediaTagStatus = {
+  Pending: "pending",
+  Approved: "approved"
+} as const;
+export type MediaTagStatus = (typeof MediaTagStatus)[keyof typeof MediaTagStatus];
+export const mediaTagStatusSchema = z.enum(MediaTagStatus);
+
 /** A tag position, as a fraction of the displayed image (0 = left/top, 1 = right/bottom). */
 const tagCoordinateSchema = z.number().min(0).max(1);
 
-/** The tagged person, names only plus the photo under the unlisted/disabled rules. */
+/** The tagged person: the name, plus the photo under the unlisted/disabled rules. */
 export interface MediaTagPerson {
   id: string;
   /** The person's full name. */
   name: string;
-  /** Resolved photo (64 px) under the `Person.avatarUrl` rules, else `null`. */
+  /**
+   * Resolved photo (64 px) under the `Person.avatarUrl` rules; always `null`
+   * for a member hidden from the directory (unlisted) or disabled, whose tag
+   * shows the name only.
+   */
   avatarUrl: string | null;
 }
 
@@ -95,10 +121,13 @@ export interface MediaTag {
   /** Position (both or neither); absent when the tag was not placed on the image. */
   x?: number;
   y?: number;
+  status: MediaTagStatus;
   /** The tagged person is the caller's own linked person ("Quitar mi etiqueta"). */
   isMe: boolean;
   /** Server-computed: the tagger, the uploader, the tagged person's linked user or an admin. */
   canRemove: boolean;
+  /** Server-computed: a pending tag of the caller's own linked person ("Aprobar"). */
+  canApprove: boolean;
 }
 
 export const mediaTagSchema = z.object({
@@ -106,13 +135,18 @@ export const mediaTagSchema = z.object({
   person: mediaTagPersonSchema,
   x: tagCoordinateSchema.exactOptional(),
   y: tagCoordinateSchema.exactOptional(),
+  status: mediaTagStatusSchema,
   isMe: z.boolean(),
-  canRemove: z.boolean()
+  canRemove: z.boolean(),
+  canApprove: z.boolean()
 }) satisfies z.ZodType<MediaTag>;
 
 /**
- * `POST /api/media/:id/tags`. Tagging a person already tagged in the item
- * answers the existing tag (idempotent, nothing re-notified).
+ * `POST /api/media/:id/tags`. The new tag is `approved` for a person without
+ * an account and for a self-tag, else `pending` (the tagged user gets a
+ * `photo_tag_request` notification). Tagging a person already tagged in the
+ * item answers the existing tag (idempotent, nothing re-notified); after a
+ * decline (which deletes the tag) the person can be tagged again.
  */
 export const createMediaTagInputSchema = z
   .strictObject({
@@ -127,13 +161,25 @@ export const createMediaTagInputSchema = z
 export type CreateMediaTagInput = z.infer<typeof createMediaTagInputSchema>;
 export type CreateMediaTagRequest = z.input<typeof createMediaTagInputSchema>;
 
-/** `DELETE /api/media/:id/tags/:tagId` params. */
+/**
+ * `DELETE /api/media/:id/tags/:tagId` params: remove a tag, or **decline** a
+ * pending one (the tagged user), which deletes it.
+ */
 export const mediaTagParamsSchema = z.object({ id: idSchema, tagId: idSchema });
 export type MediaTagParams = z.infer<typeof mediaTagParamsSchema>;
 
 /**
- * A person the caller may tag (`GET /api/media/:id/tag-candidates`). Members
- * linked to an unlisted or disabled account are never candidates for others.
+ * `POST /api/media/tags/:id/approve` params (no body): the tagged person's
+ * linked user approves a pending tag; answers the approved `MediaTag`
+ * (idempotent on an approved one). Anyone else: 404.
+ */
+export const mediaTagIdParamsSchema = z.object({ id: idSchema });
+export type MediaTagIdParams = z.infer<typeof mediaTagIdParamsSchema>;
+
+/**
+ * A person the caller may tag (`GET /api/media/:id/tag-candidates`): any
+ * person in the tree. `avatarUrl` is `null` for unlisted or disabled members
+ * (name only).
  */
 export interface TagCandidate {
   id: string;
@@ -169,7 +215,10 @@ export type TagCandidateList = z.infer<typeof tagCandidateListSchema>;
 /* Likes                                                                       */
 /* -------------------------------------------------------------------------- */
 
-/** Hearts on an item; `PUT|DELETE /api/media/:id/like` answer it (both idempotent, no body). */
+/**
+ * Hearts on an item; `PUT|DELETE /api/media/:id/like` answer it (both
+ * idempotent, no body). Who liked: `GET /api/media/:id/likes`.
+ */
 export interface MediaLikeState {
   likeCount: number;
   likedByMe: boolean;
@@ -179,6 +228,38 @@ export const mediaLikeStateSchema = z.object({
   likeCount: z.number().int().min(0),
   likedByMe: z.boolean()
 }) satisfies z.ZodType<MediaLikeState>;
+
+/**
+ * Who gave a heart (`GET /api/media/:id/likes`, newest first, Instagram
+ * style). Name only, no account id; the avatar only for members listed in
+ * the directory and active.
+ */
+export interface MediaLiker {
+  name: string;
+  avatarUrl: string | null;
+  isMe: boolean;
+}
+
+export const mediaLikerSchema = z.object({
+  name: z.string().max(80),
+  avatarUrl: z.string().max(4096).nullable(),
+  isMe: z.boolean()
+}) satisfies z.ZodType<MediaLiker>;
+
+/** `GET /api/media/:id/likes` query (keyset on `created_at desc, user_id`). */
+export const mediaLikersQuerySchema = z.object({
+  cursor: cursorSchema.exactOptional(),
+  limit: z.coerce
+    .number<number | string>()
+    .int()
+    .min(1)
+    .max(MEDIA_LIKERS_PAGE_MAX)
+    .default(MEDIA_LIKERS_PAGE_DEFAULT)
+});
+export type MediaLikersQuery = z.infer<typeof mediaLikersQuerySchema>;
+export type MediaLikersQueryRequest = z.input<typeof mediaLikersQuerySchema>;
+
+export const mediaLikerPageSchema = pageSchema(mediaLikerSchema);
 
 /* -------------------------------------------------------------------------- */
 /* Comments                                                                    */
@@ -295,7 +376,7 @@ export type ReportMediaCommentRequest = z.input<typeof reportMediaCommentInputSc
  */
 export interface MediaDetail {
   item: MediaItem;
-  /** Ordered by creation. */
+  /** Ordered by creation; pending tags only for the tagger, the tagged user and admins. */
   tags: MediaTag[];
   likes: MediaLikeState;
   /** Live comments only. */
