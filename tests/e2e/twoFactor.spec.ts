@@ -8,7 +8,7 @@
  *   email), then an admin resets her two-step verification: her session
  *   ends and she logs in with the password alone.
  */
-import { E2E_RECOVERY_CODES, ProjectKey } from "./harness/people.js";
+import { E2E_RECOVERY_CODES } from "./harness/people.js";
 import { answerTwoFactor, CastRole, expect, journeyShot, login, test } from "./support/fixtures.js";
 import { waitForMail } from "./support/mail.js";
 import { enrollInWizard, logoutFromMenu } from "./support/twoFactor.js";
@@ -65,12 +65,8 @@ test.describe("two-step verification", () => {
   test("19b · recovery-code login, then an admin resets the member's two-step verification @desktop", async ({
     page,
     cast,
-    project,
     newPhone
   }, testInfo) => {
-    // The phone projects' admins already log in about 10 times per 15 minutes (the per-account login
-    // and 2FA limiters); the desktop admin has room, so this journey runs there only.
-    test.skip(project !== ProjectKey.Desktop, "one project runs the admin reset");
     test.setTimeout(180_000);
     const ines = cast(CastRole.Recovery);
     const [recoveryCode] = E2E_RECOVERY_CODES;
@@ -89,12 +85,13 @@ test.describe("two-step verification", () => {
 
     // An admin resets her 2FA (lost phone and codes).
     const adminPhone = await newPhone();
-    await login(adminPhone, cast(CastRole.Admin));
+    // A separate pre-enrolled admin: the ready admin is already near the per-account login limit.
+    await login(adminPhone, cast(CastRole.ResetAdmin));
     await adminPhone.goto("/admin/usuarios");
     await adminPhone.getByRole("searchbox").fill(ines.email);
     await adminPhone.getByRole("button", { name: new RegExp(ines.displayName) }).click();
     const sheet = adminPhone.getByRole("dialog", { name: ines.displayName });
-    await expect(sheet.getByText("Verificación en dos pasos")).toBeVisible();
+    await expect(sheet.getByText("Verificación en dos pasos", { exact: true })).toBeVisible();
     const resetSince = new Date();
     await sheet.getByRole("button", { name: "Restablecer verificación en dos pasos" }).click();
     const confirm = adminPhone.getByRole("alertdialog", { name: /Restablecer la verificación en dos pasos/ });

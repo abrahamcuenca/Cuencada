@@ -64,7 +64,12 @@ export const CastRole = {
   /** Member (WP-7): turns two-step verification on, trusts a device, then removes it. */
   TwoFactor: "twofa",
   /** Member (WP-7): pre-enrolled; logs in with a recovery code, then an admin resets her 2FA. */
-  Recovery: "recovery"
+  Recovery: "recovery",
+  /**
+   * Admin (WP-7), pre-enrolled: resets {@link CastRole.Recovery}'s 2FA. A separate admin keeps
+   * the ready admin under the per-account login and code limits (10 per 15 minutes).
+   */
+  ResetAdmin: "resetadmin"
 } as const;
 export type CastRole = (typeof CastRole)[keyof typeof CastRole];
 
@@ -92,7 +97,8 @@ const FIRST_NAMES: Record<CastRole, string> = {
   fede: "Fede",
   primo: "Gael",
   twofa: "Hugo",
-  recovery: "Inés"
+  recovery: "Inés",
+  resetadmin: "Rosa"
 };
 
 /**
@@ -103,7 +109,7 @@ const FIRST_NAMES: Record<CastRole, string> = {
  */
 export function castMember(project: ProjectKey, role: CastRole): CastMember {
   const firstName = FIRST_NAMES[role];
-  const admin = role === CastRole.FirstLoginAdmin || role === CastRole.Admin;
+  const admin = role === CastRole.FirstLoginAdmin || role === CastRole.Admin || role === CastRole.ResetAdmin;
   return {
     email: `${role}.${project}@e2e.example.test`,
     password: role === CastRole.FirstLoginAdmin ? TEMP_ADMIN_PASSWORD : MEMBER_PASSWORD,
@@ -112,7 +118,9 @@ export function castMember(project: ProjectKey, role: CastRole): CastMember {
     role: admin ? "admin" : "member",
     mustChangePassword: role === CastRole.FirstLoginAdmin,
     city: "Pueblo Ejemplo",
-    ...(role === CastRole.Admin || role === CastRole.Recovery ? { twoFactorSecret: E2E_TOTP_SECRET } : {})
+    ...(role === CastRole.Admin || role === CastRole.ResetAdmin || role === CastRole.Recovery
+      ? { twoFactorSecret: E2E_TOTP_SECRET }
+      : {})
   };
 }
 
