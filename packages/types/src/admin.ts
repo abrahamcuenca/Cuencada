@@ -10,6 +10,8 @@ import { type UserRole, type UserStatus, userRoleSchema, userStatusSchema } from
 // live in their own file; re-exported here because the barrel is frozen and
 // `family.ts` cannot re-export a module that imports it.
 export * from "./treeLinks.js";
+// WP-7: two-step verification contracts (re-exported here, after `auth.js`, because the barrel is frozen).
+export * from "./twoFactor.js";
 
 /** Entity types that appear in the audit log. */
 export const AuditEntityType = {
@@ -216,7 +218,30 @@ export const AuditAction = {
   /** Metadata: `reason`: `proposer` | `person_deleted` | `person_merged`. */
   TreeProposalWithdrawn: "tree_proposal.withdrawn",
   /** Metadata: `rootPersonId` (or `null`). */
-  FamilySettingsUpdated: "family_settings.updated"
+  FamilySettingsUpdated: "family_settings.updated",
+  /*
+   * WP-7 two-step verification (ADR 0001 §9). Metadata holds ids, enums and
+   * counts only: never secrets, codes, otpauth URIs or tokens.
+   */
+  /** A login challenge was answered (`entityType: session`; metadata: `method`, `factor`: `totp` | `recovery_code`, `trustedDevice`). */
+  TwoFactorVerified: "auth.2fa_verified",
+  /** A wrong code on a login challenge, or on enable/disable/regenerate (metadata: `context`, `attempts`, `burned`). */
+  TwoFactorFailed: "auth.2fa_failed",
+  /** A pending secret was created (setup started). */
+  TwoFactorSetupStarted: "auth.2fa_setup_started",
+  /** Metadata: `revokedSessions`, `revokedTrustedDevices`. */
+  TwoFactorEnabled: "auth.2fa_enabled",
+  /** Metadata: `factor`, `revokedSessions`, `revokedTrustedDevices`. */
+  TwoFactorDisabled: "auth.2fa_disabled",
+  TwoFactorRecoveryCodesRegenerated: "auth.2fa_recovery_codes_regenerated",
+  /** Metadata: `remaining`. */
+  TwoFactorRecoveryCodeUsed: "auth.2fa_recovery_code_used",
+  /** A member trusted this device for 30 days (metadata: `deviceId`). */
+  TwoFactorTrustedDeviceAdded: "auth.2fa_trusted_device_added",
+  /** Metadata: `deviceId` or `scope: "all"`, `count`. */
+  TwoFactorTrustedDeviceRevoked: "auth.2fa_trusted_device_revoked",
+  /** An admin reset another account's 2FA (metadata: `revokedSessions`, `revokedTrustedDevices`, alert counts). */
+  UserTwoFactorReset: "user.2fa_reset"
 } as const;
 export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
 
@@ -225,7 +250,8 @@ export const auditActionSchema = z
   .string()
   .trim()
   .max(100)
-  .regex(/^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/, { error: "Acción inválida." });
+  // Later segments may start with a digit (WP-7: `auth.2fa_verified`).
+  .regex(/^[a-z][a-z0-9_]*(\.[a-z0-9][a-z0-9_]*)+$/, { error: "Acción inválida." });
 
 /* -------------------------------------------------------------------------- */
 /* Users                                                                       */
@@ -244,6 +270,8 @@ export interface AdminUserListItem {
   lastLoginAt: string | null;
   activeSessionCount: number;
   createdAt: string;
+  /** WP-7: two-step verification is on. Optional on the wire (older servers). */
+  twoFactorEnabled?: boolean;
 }
 
 export const adminUserListItemSchema = z.object({
@@ -257,7 +285,8 @@ export const adminUserListItemSchema = z.object({
   personId: idSchema.nullable(),
   lastLoginAt: dateTimeSchema.nullable(),
   activeSessionCount: z.number().int(),
-  createdAt: dateTimeSchema
+  createdAt: dateTimeSchema,
+  twoFactorEnabled: z.boolean().exactOptional()
 }) satisfies z.ZodType<AdminUserListItem>;
 
 /** `GET /api/admin/users` query. */

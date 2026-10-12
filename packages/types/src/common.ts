@@ -53,7 +53,15 @@ export const ErrorCode = {
   /** A dependency (DB, storage, mail) is not configured or not reachable (503). */
   SERVICE_UNAVAILABLE: "SERVICE_UNAVAILABLE",
   /** Unexpected failure. The message never contains internals (500). */
-  INTERNAL: "INTERNAL"
+  INTERNAL: "INTERNAL",
+  /**
+   * WP-7: an administrator whose session was not verified with a two-step
+   * code (403). Every route except `/me`, the 2FA status/setup/enable routes,
+   * logout and refresh answers this; the client routes to the enrollment page.
+   */
+  TWO_FACTOR_SETUP_REQUIRED: "TWO_FACTOR_SETUP_REQUIRED",
+  /** WP-7: the two-step code or recovery code is wrong. Deliberately generic (400). */
+  TWO_FACTOR_INVALID: "TWO_FACTOR_INVALID"
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
@@ -78,7 +86,9 @@ export const errorHttpStatus = {
   PAYLOAD_TOO_LARGE: 413,
   RATE_LIMITED: 429,
   SERVICE_UNAVAILABLE: 503,
-  INTERNAL: 500
+  INTERNAL: 500,
+  TWO_FACTOR_SETUP_REQUIRED: 403,
+  TWO_FACTOR_INVALID: 400
 } as const satisfies Record<ErrorCode, number>;
 
 /**

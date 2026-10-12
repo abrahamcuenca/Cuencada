@@ -126,6 +126,14 @@ export interface CurrentUser {
   personId: string | null;
   /** Presigned avatar URL (1h) or `null`. */
   avatarUrl: string | null;
+  /** WP-7: two-step verification is on. Optional on the wire (older servers). */
+  twoFactorEnabled?: boolean;
+  /**
+   * WP-7: an administrator whose session was not verified with a code: every
+   * route except `/me`, the 2FA setup routes, logout and refresh answers 403
+   * `TWO_FACTOR_SETUP_REQUIRED` until they enroll. Optional on the wire.
+   */
+  twoFactorSetupRequired?: boolean;
 }
 
 export const currentUserSchema = z.object({
@@ -137,7 +145,9 @@ export const currentUserSchema = z.object({
   mustChangePassword: z.boolean(),
   emailVerified: z.boolean(),
   personId: idSchema.nullable(),
-  avatarUrl: z.string().max(4096).nullable()
+  avatarUrl: z.string().max(4096).nullable(),
+  twoFactorEnabled: z.boolean().exactOptional(),
+  twoFactorSetupRequired: z.boolean().exactOptional()
 }) satisfies z.ZodType<CurrentUser>;
 
 /**

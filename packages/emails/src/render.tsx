@@ -35,6 +35,10 @@ import {
   buildPasswordResetContent,
 } from "./templates/PasswordResetEmail.js";
 import {
+  type TwoFactorNoticeEmailProps,
+  buildTwoFactorNoticeContent,
+} from "./templates/TwoFactorNoticeEmail.js";
+import {
   type VerifyEmailProps,
   buildVerifyContent,
 } from "./templates/VerifyEmail.js";
@@ -49,6 +53,8 @@ export const EmailKind = {
   AdminAccountChanged: "admin-account-changed",
   AdminAlertLimit: "admin-alert-limit",
   AdminInviteAccepted: "admin-invite-accepted",
+  /** WP-7: two-step verification enabled, disabled, reset by an admin, recovery code used. */
+  TwoFactorNotice: "two-factor-notice",
 } as const;
 
 export type EmailKind = (typeof EmailKind)[keyof typeof EmailKind];
@@ -68,7 +74,8 @@ export type EmailTemplate =
   | {
       kind: typeof EmailKind.AdminInviteAccepted;
       props: AdminInviteAcceptedEmailProps;
-    };
+    }
+  | { kind: typeof EmailKind.TwoFactorNotice; props: TwoFactorNoticeEmailProps };
 
 /** A rendered email, ready for the Mailer (Resend `subject`/`html`/`text`). */
 export interface RenderedEmail {
@@ -98,6 +105,8 @@ function buildContent(
       return buildAdminAlertLimitContent(template.props, options);
     case EmailKind.AdminInviteAccepted:
       return buildAdminInviteAcceptedContent(template.props, options);
+    case EmailKind.TwoFactorNotice:
+      return buildTwoFactorNoticeContent(template.props, options);
     default: {
       // Compile-time exhaustiveness check; reached at runtime only with untyped input.
       // The props are never echoed: they carry single-use tokens.

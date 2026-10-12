@@ -70,6 +70,12 @@ export {
   type PasswordResetEmailProps,
 } from "./templates/PasswordResetEmail.js";
 export {
+  buildTwoFactorNoticeContent,
+  TwoFactorNotice,
+  TwoFactorNoticeEmail,
+  type TwoFactorNoticeEmailProps,
+} from "./templates/TwoFactorNoticeEmail.js";
+export {
   buildVerifyContent,
   VerifyEmail,
   type VerifyEmailProps,

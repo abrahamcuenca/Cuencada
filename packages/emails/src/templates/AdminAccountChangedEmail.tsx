@@ -26,6 +26,8 @@ export const AdminAccountChange = {
   PasswordChangeRequired: "password_change_required",
   /** An administrator forced a password reset (sessions closed, reset link sent). */
   PasswordResetForced: "password_reset_forced",
+  /** WP-7: an administrator reset the account's two-step verification (sessions closed). */
+  TwoFactorReset: "two_factor_reset",
 } as const;
 export type AdminAccountChange =
   (typeof AdminAccountChange)[keyof typeof AdminAccountChange];
@@ -39,6 +41,8 @@ const CHANGE_TEXT: Record<AdminAccountChange, string> = {
     "Le pidió cambiar la contraseña en su próximo acceso.",
   password_reset_forced:
     "Forzó el restablecimiento de la contraseña y cerró todas sus sesiones.",
+  two_factor_reset:
+    "Restableció su verificación en dos pasos y cerró todas sus sesiones.",
 };
 
 /** Props of the security notice sent to the other administrators. */
