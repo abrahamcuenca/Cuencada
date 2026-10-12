@@ -398,7 +398,12 @@ export interface ResolveOutcome {
   photoKeys: string[];
 }
 
-/** The pair's other pending proposals with the same kind and relation, locked. */
+/**
+ * The pair's other pending proposals with the same kind and relation, locked.
+ * `parent_of` is directional (Security L2, PR #60): only the same direction
+ * counts as "the same proposal"; the opposite claim stays pending.
+ * `partner_of` and `same_person` are symmetric, so either order matches.
+ */
 async function lockSamePairPending(tx: Transaction, proposal: ProposalRow): Promise<ProposalRow[]> {
   const from = proposal.fromPersonId;
   const to = proposal.toPersonId;
@@ -412,10 +417,12 @@ async function lockSamePairPending(tx: Transaction, proposal: ProposalRow): Prom
         eq(treeLinkProposals.status, TreeLinkProposalStatus.Pending),
         eq(treeLinkProposals.kind, proposal.kind),
         proposal.relation === null ? sql`${treeLinkProposals.relation} is null` : eq(treeLinkProposals.relation, proposal.relation),
-        or(
-          and(eq(treeLinkProposals.fromPersonId, from), eq(treeLinkProposals.toPersonId, to)),
-          and(eq(treeLinkProposals.fromPersonId, to), eq(treeLinkProposals.toPersonId, from))
-        )
+        proposal.relation === RelationshipKind.ParentOf
+          ? and(eq(treeLinkProposals.fromPersonId, from), eq(treeLinkProposals.toPersonId, to))
+          : or(
+              and(eq(treeLinkProposals.fromPersonId, from), eq(treeLinkProposals.toPersonId, to)),
+              and(eq(treeLinkProposals.fromPersonId, to), eq(treeLinkProposals.toPersonId, from))
+            )
       )
     )
     .orderBy(treeLinkProposals.id)

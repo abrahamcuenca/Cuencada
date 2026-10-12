@@ -56,7 +56,8 @@ describe("Propuestas del árbol", { timeout: 20_000 }, () => {
     await user.click(within(card).getByRole("button", { name: "Aprobar…" }));
 
     const dialog = await screen.findByRole("dialog", { name: "Aprobar propuesta" });
-    expect(within(dialog).getByText(/Otra propuesta igual de este par/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Otra propuesta igual de este par/)).toHaveTextContent("tu nota llegará a cada persona que la propuso");
+    expect(within(dialog).getByText("La ven todas las personas que propusieron esto.")).toBeInTheDocument();
     // The oldest pending one (Diego's: Raúl → copy) is the target, so the copy stays by default.
     expect(await within(dialog).findByText(/Se queda/)).toHaveTextContent("Se queda Raúl Herrera M.; Raúl Herrera Morales se fusiona");
     await user.click(within(dialog).getByRole("button", { name: "Cambiar cuál se queda" }));

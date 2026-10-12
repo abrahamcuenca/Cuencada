@@ -375,6 +375,26 @@ describe("POST /api/admin/family/proposals/:id/resolve", () => {
     expect(await proposalRow(relate.id)).toMatchObject({ status: "withdrawn" });
   });
 
+  it("applyToPair takes only the same direction for parent_of (the opposite claim stays pending), both for partner_of", async () => {
+    const a = await insertPerson({ fullName: "Abuela Rosa Muestra" });
+    const b = await insertPerson({ fullName: "Tía Carmen Muestra" });
+    const third = await createUser({ emailVerified: true });
+    const thirdAuth = await loginAs(app, third);
+    const forward = (await propose({ kind: "relate", relation: "parent_of", fromPersonId: a.id, toPersonId: b.id })).json<TreeLinkProposal>();
+    const sameWay = (await propose({ kind: "relate", relation: "parent_of", fromPersonId: a.id, toPersonId: b.id }, otherAuth)).json<TreeLinkProposal>();
+    const opposite = (await propose({ kind: "relate", relation: "parent_of", fromPersonId: b.id, toPersonId: a.id }, thirdAuth)).json<TreeLinkProposal>();
+    expect((await resolve(forward.id, { decision: "reject", note: "No." })).statusCode).toBe(200);
+    expect((await proposalRow(sameWay.id))?.status).toBe("rejected");
+    expect(await proposalRow(opposite.id)).toMatchObject({ status: "pending", resolutionNote: null });
+
+    const c = await insertPerson();
+    const d = await insertPerson();
+    const p1 = (await propose({ kind: "relate", relation: "partner_of", fromPersonId: c.id, toPersonId: d.id })).json<TreeLinkProposal>();
+    const p2 = (await propose({ kind: "relate", relation: "partner_of", fromPersonId: d.id, toPersonId: c.id }, otherAuth)).json<TreeLinkProposal>();
+    expect((await resolve(p1.id, { decision: "reject" })).statusCode).toBe(200);
+    expect((await proposalRow(p2.id))?.status).toBe("rejected");
+  });
+
   it("answers 404 for an unknown proposal", async () => {
     expect((await resolve(MISSING_ID, { decision: "reject" })).statusCode).toBe(404);
   });

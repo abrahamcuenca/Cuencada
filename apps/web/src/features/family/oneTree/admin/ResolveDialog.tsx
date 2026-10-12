@@ -85,10 +85,11 @@ export function ResolveDialog({ proposal, decision, sameCount, onClose }: Resolv
         ) : null}
         {sameCount > 0 ? (
           <p className={styles.muted}>
-            {sameCount === 1 ? "Otra propuesta igual" : `Otras ${sameCount} propuestas iguales`} de este par recibirán la misma respuesta.
+            {sameCount === 1 ? "Otra propuesta igual" : `Otras ${sameCount} propuestas iguales`} de este par recibirán la misma respuesta, y tu nota
+            llegará a cada persona que la propuso.
           </p>
         ) : null}
-        <Field label="Nota para quien propuso" hint="Solo la ve quien hizo la propuesta." showOptional>
+        <Field label="Nota para quien propuso" hint={sameCount > 0 ? "La ven todas las personas que propusieron esto." : "Solo la ve quien hizo la propuesta."} showOptional>
           {(control) => <TextArea {...control} rows={3} maxLength={TREE_LINK_NOTE_MAX_LENGTH} value={note} onChange={(event) => setNote(event.target.value)} />}
         </Field>
         {errorLines.length > 0 ? (

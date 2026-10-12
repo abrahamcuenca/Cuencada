@@ -179,7 +179,16 @@ function ProposalGroupCard({ group, onResolve }: { group: TreeLinkProposalGroup;
   // Act on the oldest pending one; the same kind and relation follow it (`applyToPair`).
   const target = pending.at(-1);
   const sameCount =
-    target === undefined ? 0 : pending.filter((proposal) => proposal.id !== target.id && proposal.kind === target.kind && proposal.relation === target.relation).length;
+    target === undefined
+      ? 0
+      : pending.filter(
+          (proposal) =>
+            proposal.id !== target.id &&
+            proposal.kind === target.kind &&
+            proposal.relation === target.relation &&
+            // `parent_of` is directional: only the same direction follows (server rule).
+            (target.relation !== "parent_of" || (proposal.from?.id === target.from?.id && proposal.to?.id === target.to?.id))
+        ).length;
   return (
     <article className={styles.item} aria-label={describeProposal(target ?? first)}>
       <h2 className={styles.itemTitle}>{describeProposal(target ?? first)}</h2>
