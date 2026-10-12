@@ -17,6 +17,7 @@ import type { App } from "../../app.js";
 const notify = vi.hoisted(() => ({
   recordNotification: vi.fn(async () => "00000000-0000-4000-8000-000000000001"),
   retractNotification: vi.fn(async () => undefined),
+  markNotificationSeen: vi.fn(async () => undefined),
   pushNotifications: vi.fn(async () => undefined)
 }));
 
@@ -67,6 +68,19 @@ describe("social notifications", () => {
     expect((await call(tagged, "DELETE", `/api/media/${mediaId}/tags/${tag.id}`)).statusCode).toBe(204);
     await app.jobs.onIdle();
     expect(notify.retractNotification).toHaveBeenCalledWith(expect.anything(), tagged.user.id, `tag:${mediaId}`);
+  });
+
+  it("marks the tag request seen when the tagged user approves", async () => {
+    const uploader = await eventActor();
+    const tagger = await eventActor();
+    const tagged = await eventActor();
+    const mediaId = await photoOf(uploader, 2045);
+    const personId = (await insertPerson({ userId: tagged.user.id })).id;
+    const tag = (await call(tagger, "POST", `/api/media/${mediaId}/tags`, { personId })).json() as MediaTag; // schema-validated
+    expect((await call(tagged, "POST", `/api/media/tags/${tag.id}/approve`)).statusCode).toBe(200);
+    expect(notify.markNotificationSeen).toHaveBeenCalledWith(expect.anything(), tagged.user.id, `tag:${mediaId}`);
+    expect((await call(tagged, "POST", `/api/media/tags/${tag.id}/approve`)).statusCode).toBe(200);
+    expect(notify.markNotificationSeen).toHaveBeenCalledTimes(1);
   });
 
   it("notifies nobody for people without accounts and self-tags", async () => {

@@ -32,8 +32,9 @@ Registered by the media module (`media/index.ts`), so photos and their social da
 3. **Residual oracles accepted** (ADR §8, A15): a decline makes the tag vanish for the tagger; re-tagging a person already pending-tagged by someone else returns that tag mapped as approved, which the caller then does not see; `TAG_LIMIT` at the boundary counts hidden pending tags (`canTag` counts visible ones).
 4. **Uploader removal** covers approved tags only (a pending tag of someone else is invisible to the uploader: 404).
 5. **Avatars** of comment authors and likers: own always; others only when listed in the directory and active (a missing profile counts as unlisted, fail closed). Tags and candidates use the family rules (`presignPersonAvatars`, 64 px).
-6. **Approve marks the request seen** with a direct update on `notifications` (`notify.ts` has no "mark seen" helper).
-7. **Social module registered by the media module**, so `app.ts` is untouched (fewer conflicts with 6.1/6.3).
+6. **Approve marks the request seen** through `markNotificationSeen(tx, userId, dedupeKey)`, the helper WP-6.1 announced: WP-6.2 adds it to the `notify.ts` stub (no-op, same signature) so WP-6.1's implementation replaces it on merge.
+7. **Deep links** (`usePhotoParam`, `?foto=<uuid>`, anything else ignored): `/galeria/{year}?foto=`, `/eventos/{y}/{slug}?vista=fotos&foto=` (a bare `?foto=` also opens the Fotos tab; a photo of another album loads through `/detail`), and the person "Fotos" tab. WP-6.3's `/recuerdos/{boxId}?foto=` only needs to use `usePhotoParam()` instead of `useState` for the open id; `GalleryLightbox` is unchanged. Missing and invisible photos show the same "No encontramos esa foto".
+8. **Social module registered by the media module**, so `app.ts` is untouched (fewer conflicts with 6.1/6.3).
 
 ## Security
 ADR 0001 §8 requirements 1, 3, 4, 8, 9, 10 for 6.2: scope first on every route (matrix probes), one locked decision for tags, remove rights, author-only delete with scrubbed bodies, rate limits, PII additions, audit ids only.

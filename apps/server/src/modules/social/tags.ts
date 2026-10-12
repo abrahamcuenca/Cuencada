@@ -31,7 +31,7 @@ import {
 } from "@cuencada/types";
 import { and, asc, eq, ilike, inArray, or, type SQL, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
-import { mediaTags, notifications, people, profiles, users } from "../../db/schema/index.js";
+import { mediaTags, people, profiles, users } from "../../db/schema/index.js";
 import { type DbOrTx, recordAudit, type Transaction } from "../../lib/audit.js";
 import { AppError, isAppError } from "../../lib/errors.js";
 import {
@@ -44,7 +44,7 @@ import {
 } from "../family/repository.js";
 import type { Viewer } from "../media/service.js";
 import { tagVisibleSql } from "../media/socialSql.js";
-import { pushNotifications, recordNotification, retractNotification } from "../notifications/notify.js";
+import { markNotificationSeen, pushNotifications, recordNotification, retractNotification } from "../notifications/notify.js";
 import { AvatarSize } from "../profile/index.js";
 import { type LockedMedia, lockViewableMedia } from "./shared.js";
 
@@ -305,16 +305,7 @@ export async function approveTag(app: FastifyInstance, tagId: string, viewer: Vi
       .returning({ personId: mediaTags.personId });
     const changed = approved[0];
     if (changed !== undefined) {
-      await tx
-        .update(notifications)
-        .set({ seenAt: app.clock.now() })
-        .where(
-          and(
-            eq(notifications.userId, viewer.id),
-            eq(notifications.dedupeKey, notificationDedupeKey.tag(media.id)),
-            sql`${notifications.seenAt} is null`
-          )
-        );
+      await markNotificationSeen(tx, viewer.id, notificationDedupeKey.tag(media.id));
       await recordAudit(tx, {
         actorUserId: viewer.id,
         action: AuditAction.MediaTagApproved,

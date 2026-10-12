@@ -9,6 +9,7 @@
  *   self-notification (returns `null`), and trims the recipient to
  *   `NOTIFICATIONS_PER_USER_MAX` rows.
  * - {@link retractNotification} deletes one row (a removed or declined tag).
+ * - {@link markNotificationSeen} marks one row seen (an approved tag request).
  * - {@link pushNotifications} runs **after the commit**: it rebuilds each
  *   notification through the feed's read model (visibility re-checked for the
  *   recipient) and sends the `notification` frame to that recipient's own
@@ -16,7 +17,7 @@
  *   sends nothing; failures are logged with ids only and never fail the
  *   request.
  *
- * TODO(WP-6.1): implement all three; until then they are no-ops.
+ * TODO(WP-6.1): implement all four; until then they are no-ops.
  */
 import type { NotificationKind } from "@cuencada/types";
 import type { FastifyInstance } from "fastify";
@@ -49,6 +50,17 @@ export async function recordNotification(tx: Transaction, input: RecordNotificat
 export async function retractNotification(tx: Transaction, recipientUserId: string, dedupeKey: string): Promise<void> {
   void tx;
   void recipientUserId;
+  void dedupeKey;
+}
+
+/**
+ * Marks the recipient's notification with `dedupeKey` seen inside `tx` (no-op
+ * when absent or already seen). Added by WP-6.2 with the signature WP-6.1
+ * announced (approving a tag request marks it seen).
+ */
+export async function markNotificationSeen(tx: Transaction, userId: string, dedupeKey: string): Promise<void> {
+  void tx;
+  void userId;
   void dedupeKey;
 }
 
