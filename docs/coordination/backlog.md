@@ -225,3 +225,6 @@ WP-2.4 prepared every item below; **the owner applies them** following
 - [ ] WP-6.0: drop `event_participants.notice_seen_at` (contract migration) once no shipped web build calls `GET /api/events/notices` / `DELETE /api/events/:id/notice`.
 - [ ] WP-6.0: a person-merge undo does not restore tags or pending proposals moved to keep (ADR 0001 §8); revisit if admins need it.
 - [ ] WP-6.0: the notification push uses the single-process chat hub (`sendToUser`), like event rooms; a second API process needs the shared bus too.
+- [ ] WP-6.3: the panel's cover picker offers the box's first 30 photos (one gallery page); add "Cargar más" there, or "Usar como portada" in the lightbox for admins, if boxes grow large.
+- [ ] WP-6.3: reorder boxes by drag and drop (today ↑/↓, saved at once); fine for the expected handful of boxes.
+- [ ] WP-6.3: a member's photos in a box that is later hidden stay invisible to that member too (same as event albums); if owners want "my uploads" across hidden boxes, add it to the profile.
