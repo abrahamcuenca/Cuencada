@@ -18,11 +18,12 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { App } from "../../app.js";
 import { eq } from "drizzle-orm";
-import { cuencadaAttendance, MagicLinkPurpose, personRelationships, profiles } from "../../db/schema/index.js";
+import { cuencadaAttendance, cuencadas, MagicLinkPurpose, personRelationships, profiles } from "../../db/schema/index.js";
 import { systemClock } from "../../lib/clock.js";
 import { S3Storage } from "../../lib/storage/s3.js";
 import { createEmailToken } from "../../modules/auth/emailTokens.js";
 import { mailQueue } from "../../modules/auth/mailQueue.js";
+import { pushNotifications, recordNotification } from "../../modules/notifications/notify.js";
 import { createTestApp, createTestConfig } from "../../../test/helpers/app.js";
 import { linkToken, refreshCookie } from "../../../test/helpers/auth.js";
 import { type ChatTestClient, connectMember, frameOf, insertGlobalRoom, insertMessage } from "../../../test/helpers/chat.js";
@@ -561,6 +562,45 @@ describe("member-facing reads never leak PII", () => {
       problems.push("event detail: the unlisted participant's avatar or id");
     }
     expect(problems).toEqual([]);
+  });
+
+  it("notifications (WP-6.1): an actor who became unlisted carries no id or avatar; an invisible event's title never reaches the feed or a push", async () => {
+    const editionId = (await getTestDb().select({ id: cuencadas.id }).from(cuencadas).where(eq(cuencadas.year, YEAR)))[0]?.id;
+    if (editionId === undefined) throw new Error("no edition");
+    const photo = await insertMedia({ cuencadaId: editionId, uploadedByUserId: viewer.user.id, bucket: BUCKET });
+    await getTestDb()
+      .update(profiles)
+      .set({ avatarKey: `avatars/${unlisted.id}/${randomUUID()}-256.webp` })
+      .where(eq(profiles.userId, unlisted.id));
+    const organizer = await member({ displayName: "Organizadora W61" });
+    const secret = await insertEvent({ title: "Viaje secreto W61", visibility: "participants", organizerId: organizer.user.id });
+    const ids = await getTestDb().transaction(async (tx) => [
+      await recordNotification(tx, { recipientUserId: viewer.user.id, actorUserId: unlisted.id, kind: "photo_liked", target: { mediaId: photo.id } }),
+      await recordNotification(tx, { recipientUserId: viewer.user.id, actorUserId: organizer.user.id, kind: "event_added", target: { eventId: secret.event.id } })
+    ]);
+    const session = await createSession(viewer.user.id);
+    const reader = await connectMember(app, { user: viewer.user, sessionId: session.id, auth: await bearerFor(viewer.user, session) });
+    try {
+      await pushNotifications(app, ids.filter((id): id is string => id !== null));
+      const frame = await reader.waitFor(frameOf("notification"));
+      const bodies: Array<[string, unknown]> = [
+        ["GET /api/notifications", await get("/api/notifications", viewer.auth)],
+        ["GET /api/notifications/unread-count", await get("/api/notifications/unread-count", viewer.auth)],
+        ["ws notification frame", frame]
+      ];
+      const problems = bodies.flatMap(([label, body]) => scan(label, body));
+      for (const [label, body] of bodies) {
+        const text = JSON.stringify(body);
+        if (text.includes("Viaje secreto W61")) problems.push(`${label}: an invisible event's title`);
+        if (text.includes(unlisted.id)) problems.push(`${label}: the unlisted actor's id`);
+        if (text.includes("avatars/")) problems.push(`${label}: the unlisted actor's avatar`);
+      }
+      expect(problems).toEqual([]);
+      expect(frame.notification.actor).toEqual({ name: UNLISTED_NAME, avatarUrl: null });
+      expect(reader.ofType("notification")).toHaveLength(1);
+    } finally {
+      reader.ws.terminate();
+    }
   });
 
   it("own profile, /me and own sessions show the caller's own data only", async () => {

@@ -52,6 +52,16 @@ describe("notificationSchema", () => {
     ).toBe(false);
   });
 
+  it("carries where a photo lives (edition, event album or Memory Box) and requires it (WP-6.1)", () => {
+    const event = { id: OTHER, year: 2026, slug: "viaje-k7q2", title: "Viaje" };
+    for (const place of [{ kind: "album", event }, { kind: "memory", memoryAlbumId: OTHER }]) {
+      const item = { ...liked, target: { ...liked.target, place } };
+      expect(notificationSchema.parse(item)).toEqual(item);
+    }
+    expect(notificationSchema.safeParse({ ...liked, target: { kind: "media", mediaId: OTHER, thumbUrl: null } }).success).toBe(false);
+    expect(notificationSchema.safeParse({ ...liked, target: { ...liked.target, place: { kind: "edition" } } }).success).toBe(false);
+  });
+
   it("maps every kind to one target kind", () => {
     expect(Object.values(NotificationKind).map(notificationTargetKindOf)).toEqual(["media", "media", "media", "event", "proposal"]);
   });
