@@ -20,6 +20,7 @@ import { type AlbumMediaScope, mediaScopeKey } from "../../gallery/lib/mediaScop
 import { LARGE_PHOTO_NOTE } from "../../gallery/lib/resizeImage";
 import { uploadsConfigured } from "../../gallery/lib/uploadOrigin";
 import { useExpiredUrlRefetch } from "../../gallery/lib/useExpiredUrlRefetch";
+import { usePhotoParam } from "../../gallery/lib/usePhotoParam";
 import { UPLOAD_LOCATION_NOTE, UPLOAD_RULES_TEXT } from "../../gallery/lib/validateFile";
 import { PROCESSING_POLL_MS } from "../../gallery/upload/uploadManager";
 import { useUploadManager } from "../../gallery/upload/useUploadManager";
@@ -81,7 +82,8 @@ export function EventPhotosTab({ event, onJoin, joining }: EventPhotosTabProps):
 
 function AlbumGallery({ event, album }: { event: EventDetail; album: EventAlbum }): ReactNode {
   const uploader = useRef<UploaderHandle>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
+  // WP-6.2: `?foto=<id>` opens a photo (a deep link to another album's photo loads on its own).
+  const [openId, setOpenId] = usePhotoParam();
   const { uploads } = useUploadManager();
   const args = { eventId: event.id, albumId: album.id };
   const scope = useMemo<AlbumMediaScope>(

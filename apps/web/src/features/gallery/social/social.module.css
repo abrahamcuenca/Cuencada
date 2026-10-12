@@ -1,0 +1,327 @@
+/* WP-6.2 photo social UI. The footer and overlay sit on the dark lightbox; the sheets are light Dialogs. */
+
+.footer {
+  display: grid;
+  gap: var(--space-2);
+  color: #ffffff;
+}
+
+.actionsRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.heart,
+.countButton,
+.socialButton,
+.chipAction,
+.chipRemove {
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: rgb(255 255 255 / 0.12);
+  color: #ffffff;
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.heart {
+  min-width: 44px;
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.heart[aria-pressed="true"] {
+  color: #ff8fa3;
+}
+
+.countButton,
+.socialButton {
+  padding: 0 var(--space-3);
+}
+
+.countButton {
+  background: transparent;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.countButton:disabled {
+  text-decoration: none;
+  cursor: default;
+  opacity: 0.75;
+}
+
+.heart:focus-visible,
+.countButton:focus-visible,
+.socialButton:focus-visible,
+.chipAction:focus-visible,
+.chipRemove:focus-visible,
+.placeTarget:focus-visible {
+  outline: 3px solid var(--color-focus-halo);
+  outline-offset: 2px;
+}
+
+.skeleton {
+  opacity: 0.3;
+}
+
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-soft);
+  color: var(--color-text);
+}
+
+.bannerText {
+  font-weight: var(--weight-semibold);
+}
+
+.bannerActions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.chips {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding-bottom: var(--space-1);
+  list-style: none;
+  margin: 0;
+  padding-left: 0;
+}
+
+.chip {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-1);
+  border-radius: var(--radius-pill);
+  background: rgb(255 255 255 / 0.12);
+  font-size: var(--text-sm);
+}
+
+.chip[data-pending] {
+  outline: 1px dashed rgb(255 255 255 / 0.6);
+}
+
+.chipName {
+  white-space: nowrap;
+  padding-right: var(--space-1);
+}
+
+.chipPending {
+  color: var(--brand-gold-300);
+}
+
+.chipAction {
+  padding: 0 var(--space-3);
+  background: rgb(255 255 255 / 0.2);
+}
+
+.chipRemove {
+  min-width: 44px;
+  background: transparent;
+}
+
+.placingBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: rgb(255 255 255 / 0.12);
+  color: #ffffff;
+}
+
+/* Overlay: children of the image box, positioned in percentages. */
+.markers {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.marker {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background: rgb(7 26 23 / 0.5);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.4);
+}
+
+.markerLabel {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
+  background: rgb(7 26 23 / 0.75);
+  color: #ffffff;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.placeTarget {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 2px dashed var(--brand-gold-300);
+  background: rgb(255 255 255 / 0.08);
+  cursor: crosshair;
+}
+
+/* Sheets (light). */
+.muted {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.error {
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+.people {
+  display: grid;
+  gap: var(--space-1);
+  margin: var(--space-3) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.person {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 44px;
+}
+
+.placeRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.searchStatus {
+  min-height: 1.25rem;
+  margin-top: var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.candidate {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: 48px;
+  padding: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.candidate:hover,
+.candidate:focus-visible {
+  background: var(--color-surface-sunken);
+}
+
+.candidateText {
+  display: grid;
+}
+
+.composer {
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.counter {
+  justify-self: end;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.comments {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.comment {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+.tombstone {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-style: italic;
+}
+
+.commentBody {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  flex: 1;
+}
+
+.commentMeta {
+  font-size: var(--text-sm);
+}
+
+.commentText {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.commentActions,
+.reportForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.linkButton {
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* The drawer is tall on phones so the list has room above the composer. */
+.commentsDialog {
+  max-height: 90dvh;
+}

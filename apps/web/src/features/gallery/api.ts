@@ -222,6 +222,21 @@ export function albumOf(item: Pick<MediaItem, "album">): ItemAlbum | undefined {
   return album === null ? undefined : { eventId: album.eventId, albumId: album.id };
 }
 
+/**
+ * WP-6.2: applies `change` to the loaded copy of `item` in its year or album
+ * list (social counts after a heart or a comment), without refetching pages.
+ *
+ * @param item - The item (its `year`/`album` locate the list).
+ * @param change - Mutates the cached copy.
+ * @returns The thunk to dispatch, or `null` when no list holds it.
+ */
+export function patchLoadedMedia(
+  item: Pick<MediaItem, "id" | "year" | "album">,
+  change: (item: MediaItem) => void
+): ReturnType<typeof galleryListApi.util.updateQueryData> | null {
+  return patchItem(item.year, albumOf(item), item.id, change);
+}
+
 export const galleryApi = galleryListApi.injectEndpoints({
   endpoints: (build) => ({
     /**
