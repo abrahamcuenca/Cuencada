@@ -32,7 +32,7 @@ const MODERATION_STATUS_BY_ACTION = {
 
 /** Admin moderation routes. */
 const adminMediaRoutes: FastifyPluginAsyncZod = async (app) => {
-  /** GET /api/admin/media — moderation queue of edition and album media (filters: moderationStatus, uploadStatus, cuencadaId, eventId, reported). */
+  /** GET /api/admin/media — moderation queue of edition, album and Memory Box media (filters: moderationStatus, uploadStatus, cuencadaId, eventId, memoryAlbumId, reported). */
   app.get(
     "/admin/media",
     {
@@ -53,6 +53,7 @@ const adminMediaRoutes: FastifyPluginAsyncZod = async (app) => {
         uploadStatus: query.uploadStatus,
         cuencadaId: query.cuencadaId,
         eventId: query.eventId,
+        memoryAlbumId: query.memoryAlbumId,
         reported: query.reported
       });
       const items = await Promise.all(page.records.map((record) => toAdminMediaItem(app.storage, record, viewer)));
