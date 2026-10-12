@@ -188,6 +188,8 @@ Still open:
 First production deploy and seed: 2026-10-07 (WP-3.2 recorded the lessons in
 the runbook). Owner = **O**, agent = **A**.
 
+- [x] **A — WP-7.1:** stable deploy `verify` on the owner's slow NTFS checkout (4 app-boot timeouts at 8 workers). `mise run test`, and so `verify`/`build-bundle`, now defaults `VITEST_MAX_WORKERS=4` (a caller's value wins); the server project's timeouts went from 15 s / 30 s to 30 s / 60 s. CI is unchanged. Runbook § 4 / § 11 cover the knob and when `--skip-verify` is acceptable.
+
 - [ ] **O:** rotate the WhatsApp and OneDrive links (runbook § 2), then update them in Panel → edit the 2026 edition. Closes accepted risk A10.
 - [ ] **O:** adopt `cuencada_app` for the runtime: run `infra/db/roles.sql` with `-v owner_role=<admin role>`, set its password, allow it in `pg_hba`, switch `vault_cuencada_database_url`, redeploy, check `/health/ready` (runbook § 3). Closes accepted risk A11.
 - [ ] **O:** install the systemd hardening and memory drop-in and run the M1 secrets check (runbook § 4), if not done yet.

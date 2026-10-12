@@ -360,7 +360,11 @@ What runs, in order:
 1. `deploy-preflight` (strict) fails fast on config drift, or on a platform
    checkout without support.
 2. `build-bundle.sh` runs:
-   - `mise run verify`;
+   - `mise run verify`. Its tests run with `VITEST_MAX_WORKERS=4` by default
+     (set in the `test` task). On a busy machine lower it:
+     `VITEST_MAX_WORKERS=2 mise run deploy`. Timeouts (not assertion
+     failures) in server files that create the app mean the machine is
+     starved: lower the workers and re-run, don't skip;
    - `pnpm turbo build` with `build_env`;
    - **migrate**: `server.migrate_command`, i.e.
      `pnpm --filter @cuencada/server db:migrate` (= `node apps/server/dist/db/migrate.js`),
@@ -667,6 +671,11 @@ Pino levels are numeric: 50 = error, 60 = fatal.
 ## 11. Release checklist (every later deploy)
 
 1. `main` is green in CI. `mise run verify` and `mise run deploy-check` pass.
+   - `verify` runs tests with `VITEST_MAX_WORKERS=4` unless you set it; use
+     `2` when the machine is busy (§ 4).
+   - `build-bundle.sh --skip-verify` is acceptable **only** when the exact
+     commit being bundled (`git rev-parse HEAD`, clean tree) is green in CI.
+     Never for a commit CI hasn't checked, or one with local changes.
 2. Every new migration is **expand/contract**: migrations run before the new
    code, so the live code must work on the new schema.
 3. New config key?
