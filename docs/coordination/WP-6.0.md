@@ -156,3 +156,4 @@ Migration 0010 ships with this change and is inert for 0009-era code (see "Why i
 - Scope test `apps/server/src/modules/media/memoryScope.test.ts`: a box row is 404 to members (uploader included) on GET/PATCH/DELETE/report and untouched; admins reach it.
 - Contract tests: `packages/types/src/{social,notifications,memories,treeLinks}.test.ts`.
 - `pnpm lint` clean; `pnpm turbo run typecheck --force` 6/6; `pnpm test` 204 files / 2680 tests passed; `pnpm build` ok. Merged `origin/main` (already up to date at 7f402ee).
+- After the PR #56 amendment and merging `origin/main` @ 60045c4 (WP-5.4, PR #55): `pnpm lint` clean; `typecheck --force` 6/6; `pnpm test` 211 files / 2753 tests passed; `pnpm build` ok; `drizzle-kit generate`: no schema changes.
