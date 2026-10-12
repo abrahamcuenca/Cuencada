@@ -12,11 +12,14 @@ import { E2E_SEED_ADMIN_TEMP_PASSWORD, e2eSeedEnv } from "./seedEnv.js";
 import { createDatabase, type Database } from "../../../apps/server/dist/db/client.js";
 import { runMigrations } from "../../../apps/server/dist/db/migrate.js";
 import { hashPassword } from "../../../apps/server/dist/lib/passwords.js";
+import { DEV_TOTP_ENCRYPTION_KEY } from "../../../apps/server/dist/config.js";
+import { encryptSecret, hashRecoveryCode, totpKey } from "../../../apps/server/dist/lib/totp.js";
 import { resolveSeedOptions, runSeed } from "../../../apps/server/dist/seed.js";
 import {
   ANNOUNCED_YEAR,
   CastRole,
   castMember,
+  E2E_RECOVERY_CODES,
   FUTURE_YEAR,
   cousinBranchNames,
   familyNames,
@@ -67,7 +70,24 @@ async function insertUser(
   await sql`
     insert into profiles (user_id, full_name, city, family_branch, show_city, listed_in_directory)
     values (${row.id}, ${cast.displayName}, ${cast.city}, 'Norte', true, true)`;
+  if (cast.twoFactorSecret !== undefined) await enrollTwoFactor(sql, row.id, cast.twoFactorSecret, role === CastRole.Recovery);
   return row.id;
+}
+
+/**
+ * WP-7: enroll a cast account in two-step verification with the test-only
+ * secret, encrypted with the harness API's key (the dev/test default: the
+ * harness config is `NODE_ENV=test` without `TOTP_ENCRYPTION_KEY`).
+ */
+async function enrollTwoFactor(sql: Sql, userId: string, secret: string, withRecoveryCodes: boolean): Promise<void> {
+  const encrypted = encryptSecret(totpKey({ TOTP_ENCRYPTION_KEY: DEV_TOTP_ENCRYPTION_KEY }), userId, secret);
+  await sql`
+    insert into user_totp (user_id, secret_ciphertext, secret_iv, secret_tag, enabled_at)
+    values (${userId}, ${encrypted.ciphertext}, ${encrypted.iv}, ${encrypted.tag}, now())`;
+  if (!withRecoveryCodes) return;
+  for (const code of E2E_RECOVERY_CODES) {
+    await sql`insert into user_recovery_codes (user_id, code_hash) values (${userId}, ${hashRecoveryCode(code.replaceAll("-", ""))})`;
+  }
 }
 
 /** The fictional 2027 edition: published, in the future, RSVP open, a hotel and a short programa. */

@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { type BrowserContext, test as base, expect, type Locator, type Page, type TestInfo } from "@playwright/test";
 import { type CastMember, CastRole, castMember, PROJECT_KEYS, type ProjectKey } from "../harness/people.js";
 import { REPO_ROOT, SCREENSHOT_DIR, STORAGE_ORIGIN, WEB_ORIGIN } from "../harness/settings.js";
+import { nextTotpCode } from "./totp.js";
 
 const ALLOWED_ORIGINS = new Set([new URL(WEB_ORIGIN).origin, STORAGE_ORIGIN]);
 
@@ -93,15 +94,31 @@ export { expect };
 
 /**
  * Log in with email + password through the real form and wait for the app
- * to leave `/entrar`.
+ * to leave `/entrar`. WP-7: accounts with a known test-only TOTP secret (the
+ * ready admin) answer the code step with a fresh code.
  */
-export async function login(page: Page, member: Pick<CastMember, "email" | "password">): Promise<void> {
+export async function login(page: Page, member: Pick<CastMember, "email" | "password" | "twoFactorSecret">): Promise<void> {
   await page.goto("/entrar");
   await page.getByRole("textbox", { name: "Correo electrónico" }).fill(member.email);
   await page.getByRole("textbox", { name: "Contraseña", exact: true }).fill(member.password);
   await page.getByRole("button", { name: "Entrar", exact: true }).click();
+  if (member.twoFactorSecret !== undefined) await answerTwoFactor(page, member.email, member.twoFactorSecret);
   await expect(page).not.toHaveURL(/\/entrar/);
   await expect(page.getByRole("button", { name: /^Mi cuenta/ })).toBeVisible();
+}
+
+/**
+ * Answer the login code step with the next unused code of `secret` (WP-7).
+ *
+ * @param page - On the code step.
+ * @param account - Key for the per-account replay tracker (the email).
+ * @param secret - The account's test-only TOTP secret.
+ */
+export async function answerTwoFactor(page: Page, account: string, secret: string): Promise<void> {
+  const field = page.getByRole("textbox", { name: /Código de 6 números/ });
+  await expect(field).toBeVisible();
+  await field.fill(await nextTotpCode(account, secret));
+  await page.getByRole("button", { name: "Verificar", exact: true }).click();
 }
 
 /**
