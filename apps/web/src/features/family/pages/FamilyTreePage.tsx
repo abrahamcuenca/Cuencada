@@ -16,6 +16,7 @@ import { useDeleteFamilyPersonMutation, useGetFamilyTreeQuery, useGetPersonQuery
 import { ADD_RELATIVE_LABELS, type RelativeRole } from "../components/addRelative";
 import { PersonDetailsSection } from "../components/PersonDetailsSection";
 import { PersonSearch } from "../components/PersonSearch";
+import type { ProposeMode } from "../oneTree/ProposeDialog";
 import { Breadcrumbs, FocusCard, type OpenPerson, RelativeBand, SiblingStrip } from "../components/TreeParts";
 import styles from "../family.module.css";
 import { useCachedPersonNames, usePrefersReducedMotion } from "../lib/hooks";
@@ -31,6 +32,10 @@ const EditPersonDialog = lazy(async () => ({
 const AddRelativeDialog = lazy(async () => ({
   default: (await import("../components/AddRelativeDialog")).AddRelativeDialog
 }));
+// WP-6.4: the one-tree parts (bands, proposals, CTA) load after the core tree.
+const ExtendedBands = lazy(async () => ({ default: (await import("../oneTree/ExtendedBands")).ExtendedBands }));
+const ProposeDialog = lazy(async () => ({ default: (await import("../oneTree/ProposeDialog")).ProposeDialog }));
+const ConnectCta = lazy(async () => ({ default: (await import("../oneTree/ConnectCta")).ConnectCta }));
 
 /** Depth of the expanded view: up to great-great-grandparents (WP-4.1). */
 const EXPANDED_DEPTH = 4;
@@ -74,6 +79,14 @@ export function FamilyTreePage(): ReactNode {
     <div className={cx("cu-container", styles.page)}>
       <header className={styles.header}>
         <h1 className={styles.title}>Árbol familiar</h1>
+        <nav aria-label="Más vistas del árbol" className={styles.headerLinks}>
+          <Button variant="secondary" size="sm" icon="🌳" to="/arbol/completo">
+            Árbol completo
+          </Button>
+          <Button variant="ghost" size="sm" to="/arbol/propuestas">
+            Mis propuestas
+          </Button>
+        </nav>
         <PersonSearch label="Buscar a un familiar" onPick={open} className={styles.headerSearch} />
       </header>
       {!validId ? (
@@ -112,6 +125,7 @@ function TreeView({ view, busy, trail, expanded, onToggleExpanded, onOpen }: Tre
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState<RelativeRole | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [proposing, setProposing] = useState<ProposeMode | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const shownFocus = useRef<string | null>(null);
   const { focus } = view;
@@ -191,6 +205,17 @@ function TreeView({ view, busy, trail, expanded, onToggleExpanded, onOpen }: Tre
         {isAdmin ? <InvitePersonButton personId={focus.id} /> : null}
       </>
     ) : null;
+  // WP-6.4: any member may propose; an admin approves (nothing changes until then).
+  const proposeActions = (
+    <>
+      <Button variant="ghost" size="sm" onClick={() => setProposing("same_person")}>
+        Es la misma persona…
+      </Button>
+      <Button variant="ghost" size="sm" onClick={() => setProposing("relate")}>
+        Conectar con…
+      </Button>
+    </>
+  );
 
   return (
     <>
@@ -257,7 +282,12 @@ function TreeView({ view, busy, trail, expanded, onToggleExpanded, onOpen }: Tre
           <FocusCard
             person={focus}
             headingRef={headingRef}
-            actions={actions}
+            actions={
+              <>
+                {actions}
+                {proposeActions}
+              </>
+            }
             details={details === undefined ? null : <PersonDetailsSection person={details} photoEditor={photoEditor} />}
           />
           <RelativeBand
@@ -290,7 +320,20 @@ function TreeView({ view, busy, trail, expanded, onToggleExpanded, onOpen }: Tre
           />
         ) : null}
         <SiblingStrip people={view.siblings} onOpen={onOpen} headingId="arbol-hermanos" />
+        <Suspense fallback={null}>
+          <ExtendedBands personId={focus.id} onOpen={onOpen} />
+        </Suspense>
       </div>
+      {isMine ? (
+        <Suspense fallback={null}>
+          <ConnectCta onPropose={() => setProposing("relate")} />
+        </Suspense>
+      ) : null}
+      {proposing !== null ? (
+        <Suspense fallback={null}>
+          <ProposeDialog focus={{ id: focus.id, fullName: focus.fullName }} mode={proposing} onClose={() => setProposing(null)} />
+        </Suspense>
+      ) : null}
       {editing && details !== undefined ? (
         <Suspense fallback={null}>
           <EditPersonDialog

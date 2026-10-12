@@ -14,6 +14,7 @@ import type {
 } from "@cuencada/types";
 import { type HttpHandler, HttpResponse, http } from "msw";
 import { apiUrl, errorBody } from "../../../../test/auth";
+import { type OneTreeState, oneTreeHandlers } from "./oneTreeFixtures";
 
 /** Permission flags of `PersonDetails` a test can override per person. */
 export type DetailFlags = Partial<Pick<PersonDetails, "canEdit" | "canEditPhoto" | "canAddRelative" | "canDelete" | "contacts" | "photoUrl" | "photoSource">>;
@@ -65,7 +66,7 @@ export function makePerson(id: string, fullName: string, overrides: Partial<Pers
 }
 
 /** The in-memory graph the handlers serve. Tests mutate it freely. */
-export interface FamilyDb {
+export interface FamilyDb extends OneTreeState {
   people: Map<string, Person>;
   relationships: Relationship[];
   /** Accounts behind `GET /admin/users?q=` (name or email contains `q`). */
@@ -447,6 +448,8 @@ export function familyHandlers(db: FamilyDb, { mePersonId = IDS.jose }: FamilyHa
       const q = new URL(request.url).searchParams.get("q")?.toLocaleLowerCase("es-MX") ?? "";
       const items = db.accounts.filter((user) => `${user.displayName} ${user.email}`.toLocaleLowerCase("es-MX").includes(q));
       return HttpResponse.json({ items, nextCursor: null });
-    })
+    }),
+    // WP-6.4: bands, "Árbol completo", root, proposals and branches.
+    ...oneTreeHandlers(db, mePersonId)
   ];
 }

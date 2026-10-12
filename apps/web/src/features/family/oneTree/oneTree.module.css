@@ -1,0 +1,353 @@
+/*
+ * One family tree (WP-6.4). Mobile-first (375 → 320 safe), `min-width`
+ * queries only; nothing may push the page wider than the viewport.
+ */
+
+/* ---------- Extended bands (Tíos, Primos, Tíos abuelos) ---------- */
+.bands {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  margin-top: var(--space-3);
+}
+
+.bandGroup {
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.bandSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: var(--tap-min);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-kicker);
+  text-transform: uppercase;
+  list-style: none;
+}
+
+.bandSummary::-webkit-details-marker {
+  display: none;
+}
+
+.bandSummary::after {
+  content: "▾";
+  transition: transform var(--duration-fast) ease;
+}
+
+.bandGroup:not([open]) > .bandSummary::after {
+  transform: rotate(-90deg);
+}
+
+.bandSummary:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+.bandPeople {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0 var(--space-2) var(--space-2);
+  list-style: none;
+}
+
+@media (min-width: 600px) {
+  .bandPeople {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.bandNote {
+  margin: 0;
+  padding: 0 var(--space-3) var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+/* ---------- CTA ---------- */
+.cta {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-primary-soft);
+}
+
+.ctaTitle {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-bold);
+}
+
+.ctaText {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+/* ---------- Propose dialog ---------- */
+.form {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.picked {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.pickedName {
+  min-width: 0;
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.radios {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.radios legend {
+  margin-bottom: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.radio {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--tap-min);
+}
+
+.error {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+/* ---------- Lists (Mis propuestas, admin queue, branches) ---------- */
+.page {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+  padding-block: var(--space-6) var(--space-section);
+}
+
+.pageTitle {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  line-height: var(--leading-tight);
+}
+
+.muted {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.itemHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.itemTitle {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.note {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--color-border-strong);
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.sides {
+  display: grid;
+  gap: var(--space-2);
+}
+
+@media (min-width: 600px) {
+  .sides {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.side {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-sunken);
+}
+
+.sideName {
+  min-width: 0;
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.conflicts {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-4);
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+}
+
+/* ---------- "Árbol completo" outline ---------- */
+.outline {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+
+.outline .outline {
+  margin-left: var(--space-3);
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--color-border);
+}
+
+@media (min-width: 600px) {
+  .outline .outline {
+    margin-left: var(--space-5);
+  }
+}
+
+.node {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-width: 0;
+  padding-block: var(--space-1);
+}
+
+.toggle {
+  flex: none;
+  width: var(--tap-min);
+  height: var(--tap-min);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--text-lg);
+  cursor: pointer;
+}
+
+.toggle:focus-visible,
+.nodeLink:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+.toggle:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.nodeBody {
+  display: grid;
+  min-width: 0;
+  padding-top: var(--space-2);
+}
+
+.nodeLink {
+  color: var(--color-text);
+  font-weight: var(--weight-semibold);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.nodeLink:hover {
+  text-decoration: underline;
+}
+
+.nodeMeta {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.highlight {
+  border-radius: var(--radius-md);
+  background: var(--color-accent-soft);
+  box-shadow: 0 0 0 2px var(--color-accent);
+}
+
+.toolbar {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+@media (min-width: 700px) {
+  .toolbar {
+    grid-template-columns: 1fr auto;
+    align-items: end;
+  }
+}
