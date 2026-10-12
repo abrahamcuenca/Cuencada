@@ -26,6 +26,12 @@
  *   edition). `person_revisions` rows keep pointing at the duplicate's id
  *   through their snapshots (the FK nulls `person_id`); a merge undo re-points
  *   them.
+ * - **WP-6.4:** first (before the account link moves, as WP-6.2 requires
+ *   for tags), the duplicate's pending tree-link proposals are re-pointed to keep (or withdrawn when they collapse or
+ *   collide, `proposalCleanup.ts`), its photo tags move to keep (WP-6.2's
+ *   `moveMediaTagsTx`) and a root ancestor setting naming it moves to keep.
+ *   A merge undo restores none of these (WP-6.0 decision 16): they stay on
+ *   keep, the same human.
  * - **Delete** the duplicate with `deletePersonTx` (no per-edge revisions:
  *   the merge revision records everything).
  * - **History:** one `person.merge` revision (`before` = both snapshots and
@@ -60,6 +66,10 @@ import { recordAudit, type Transaction } from "../../lib/audit.js";
 import { AppError, isAppError } from "../../lib/errors.js";
 import { invitePendingSql } from "../invites/service.js";
 import { losingPhotoKeys } from "./mergePhoto.js";
+// WP-6.2: called before the account link moves (a moved tag re-pends only against keep's own pre-merge link).
+import { moveMediaTagsTx } from "../social/index.js";
+import { repointPendingProposalsTx } from "./proposalCleanup.js";
+import { moveRootTx } from "./settings.js";
 import { MAX_PARENTS, insertRelationship, isAncestorOrSelf, lockFamilyTree } from "./relationships.js";
 import { type PersonRow, personColumns } from "./repository.js";
 import { insertRevision, personSnapshot, revisionsAboutPerson } from "./revisions.js";
@@ -393,6 +403,13 @@ async function applyMerge(
   // Everything of the duplicate's tree photo except a photo that moves to keep (read before the delete).
   const photoKeys = await losingPhotoKeys(tx, duplicate.id, plan.photo.moved ? duplicateInternals.photoKey : null);
 
+  // WP-6.4 (ADR 0001 §8): photo tags, pending proposals and the root follow the duplicate to keep.
+  // Tags move **before** the account link does (WP-6.2): a tag moved onto a person linked to another
+  // account goes back to pending, so keep must still carry its own (pre-merge) link here.
+  const tags = await moveMediaTagsTx(tx, duplicate.id, keep.id);
+  const proposals = await repointPendingProposalsTx(tx, duplicate.id, keep.id, actor);
+  const rootMoved = await moveRootTx(tx, duplicate.id, keep.id);
+
   if (plan.linkMoves) {
     await tx.update(people).set({ userId: null, updatedByUserId: actor.id }).where(eq(people.id, duplicate.id));
     await recordAudit(tx, {
@@ -495,7 +512,12 @@ async function applyMerge(
       invitesMoved: plan.invites.move.length,
       invitesRevoked: plan.invites.revoke.length,
       attendanceMoved: plan.attendance.move.length,
-      attendanceDropped: plan.attendance.droppedCuencadaIds.length
+      attendanceDropped: plan.attendance.droppedCuencadaIds.length,
+      proposalsRepointed: proposals.repointed,
+      proposalsWithdrawn: proposals.withdrawn,
+      tagsMoved: tags.moved,
+      tagsDropped: tags.dropped,
+      rootMoved
     },
     ip: actor.ip
   });

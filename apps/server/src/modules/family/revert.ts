@@ -31,6 +31,7 @@ import { AppError, isAppError } from "../../lib/errors.js";
 import { undoMergeTx } from "./merge.js";
 import { lockFamilyTree } from "./relationships.js";
 import { personPhotoObjectKeys } from "./personPhoto.js";
+import { withdrawPendingProposalsTx } from "./proposalCleanup.js";
 import { type PersonRow, personColumns, relationshipColumns, toRelationship } from "./repository.js";
 import { insertRevision, isRevertibleAction, personSnapshot, relationshipSnapshot } from "./revisions.js";
 import {
@@ -330,6 +331,8 @@ export async function revertRevisionTx(tx: Transaction, revisionId: string, acto
     // objects collected for deletion after the commit.
     photoKeys = await personPhotoObjectKeys(tx, deleteId);
     await revokePendingInvites(tx, deleteId, actor);
+    // WP-6.4 (ADR 0001 §8): pending proposals naming the person are withdrawn first.
+    await withdrawPendingProposalsTx(tx, deleteId, actor);
     await tx.delete(people).where(eq(people.id, deleteId));
   }
   await recordAudit(tx, {

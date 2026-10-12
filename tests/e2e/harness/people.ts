@@ -48,7 +48,9 @@ export const CastRole = {
   /** Member: logout everywhere. */
   Elena: "elena",
   /** Member: gallery upload. */
-  Fede: "fede"
+  Fede: "fede",
+  /** Member (WP-6.4): a cousin whose branch was built apart from the root's tree. */
+  Primo: "primo"
 } as const;
 export type CastRole = (typeof CastRole)[keyof typeof CastRole];
 
@@ -71,7 +73,8 @@ const FIRST_NAMES: Record<CastRole, string> = {
   carla: "Carla",
   dario: "Darío",
   elena: "Elena",
-  fede: "Fede"
+  fede: "Fede",
+  primo: "Gael"
 };
 
 /**
@@ -112,6 +115,19 @@ export function familyNames(project: ProjectKey): { parent: string; partner: str
     // WP-4.3: a deceased line above the parent (the tree-photo journey frames a photo for the great-grandparent).
     grandparent: `Lucía ${SURNAMES[project]}`,
     greatGrandparent: `Tomás ${SURNAMES[project]}`
+  };
+}
+
+/**
+ * WP-6.4: the cousin's branch, built apart from the root's tree: a copy of
+ * the grandparent, her son (the cousin's father) and the cousin (linked to
+ * {@link CastRole.Primo}). Nothing connects it to the seeded family.
+ */
+export function cousinBranchNames(project: ProjectKey): { grandparentCopy: string; father: string; cousin: string } {
+  return {
+    grandparentCopy: familyNames(project).grandparent,
+    father: `Mario ${SURNAMES[project]}`,
+    cousin: castMember(project, CastRole.Primo).displayName
   };
 }
 

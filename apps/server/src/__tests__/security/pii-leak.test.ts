@@ -486,6 +486,57 @@ describe("member-facing reads never leak PII", () => {
     }
   });
 
+  it("one tree (WP-6.4): overview names only, living years outside the circle hidden, others' proposals and notes never shown", async () => {
+    const [unlistedPerson] = await getTestDb().select({ id: people.id }).from(people).where(eq(people.userId, unlisted.id));
+    if (unlistedPerson === undefined) throw new Error("no unlisted person");
+    // The unlisted member is a child of the hidden one; the hidden person is the root.
+    await getTestDb().insert(personRelationships).values({ kind: "parent_of", fromPersonId: personId, toPersonId: unlistedPerson.id });
+    const root = await app.inject({ method: "PUT", url: "/api/admin/family/settings", remoteAddress: "203.0.113.51", payload: { rootPersonId: personId }, ...admin.auth });
+    expect(root.statusCode).toBe(200);
+    const hiddenAuth = await bearerAuth(hidden);
+    const proposed = await app.inject({
+      method: "POST",
+      url: "/api/family/proposals",
+      remoteAddress: "203.0.113.52",
+      payload: { kind: "same_person", fromPersonId: relativeId, toPersonId: unlistedPerson.id, note: "nota-propuesta-w64" },
+      ...hiddenAuth
+    });
+    expect(proposed.statusCode, proposed.body).toBe(201);
+
+    const overview = (await get("/api/family/overview?depth=3", viewer.auth)) as { nodes: Array<Record<string, unknown>> };
+    const extended = await get(`/api/family/tree/extended?personId=${unlistedPerson.id}`, viewer.auth);
+    const settings = await get("/api/family/settings", viewer.auth);
+    const path = await get(`/api/family/overview/path?personId=${unlistedPerson.id}`, viewer.auth);
+    const mine = await get("/api/family/proposals", viewer.auth);
+    const bodies: Array<[string, unknown]> = [
+      ["GET /api/family/overview", overview],
+      ["GET /api/family/tree/extended", extended],
+      ["GET /api/family/settings", settings],
+      ["GET /api/family/overview/path", path],
+      ["GET /api/family/proposals", mine]
+    ];
+    expect(bodies.flatMap(([label, body]) => scan(label, body))).toEqual([]);
+    // Names only: no photo, no account id; the hidden living person's year stays hidden from the viewer.
+    expect(overview.nodes.map((node) => node.id)).toEqual(expect.arrayContaining([personId, unlistedPerson.id]));
+    for (const node of overview.nodes) {
+      expect(node).not.toHaveProperty("avatarUrl");
+      expect(node).not.toHaveProperty("userId");
+    }
+    expect(overview.nodes.find((node) => node.id === personId)?.birthYear).toBeNull();
+    expect(JSON.stringify(overview)).not.toContain(unlisted.id);
+    // Another member's proposal (and its note) never reaches the viewer.
+    expect(JSON.stringify(mine)).not.toContain("nota-propuesta-w64");
+    const others = await app.inject({ method: "GET", url: "/api/admin/family/proposals", remoteAddress: "203.0.113.50", ...viewer.auth });
+    expect(others.statusCode).toBe(403);
+    expect(others.body).not.toContain("nota-propuesta-w64");
+    const branches = await app.inject({ method: "GET", url: "/api/admin/family/branches", remoteAddress: "203.0.113.50", ...viewer.auth });
+    expect(branches.statusCode).toBe(403);
+    // Admin report: no account ids, linked accounts as a count.
+    const report = await get("/api/admin/family/branches?includeSingles=true", admin.auth);
+    for (const user of [hidden, unlisted, viewer.user, open]) expect(JSON.stringify(report)).not.toContain(user.id);
+    expect(scan("GET /api/admin/family/branches", report, { admin: true })).toEqual([]);
+  });
+
   it("attendees and RSVP summary: names only, no notes, emails or keys", async () => {
     const attendees = await get(`/api/cuencadas/${YEAR}/attendees`, viewer.auth);
     const summary = await get(`/api/cuencadas/${YEAR}/rsvp/summary`, viewer.auth);

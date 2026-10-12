@@ -146,7 +146,7 @@ Still open:
 ### WP-4.0 follow-ups
 - Backfill `profiles.phone` to E.164 with `normalizePhoneE164` (contract from WP-4.0); until then every non-E.164 phone is left out of the `ContactCard` (no `tel:` guess at read time, Security L1); unreadable values stay as-is for an admin to fix. Then add a CHECK. Supersedes the two T5 E.164 items above.
 - [x] `person_revisions` 1-year retention job (done in WP-4.1: `purgeExpiredRevisions`, family module timer).
-- Future (Security M1 follow-up): "member proposes a link between two existing people, an admin approves" (a pending-proposal table and an admin queue). Until then only admins relate existing people.
+- ~~Future (Security M1 follow-up): "member proposes a link between two existing people, an admin approves" (a pending-proposal table and an admin queue).~~ Done in WP-6.4 (tree-link proposals, "Propuestas del árbol").
 - Avatars have 256/64 px derivatives only; consider a 512 px derivative so `PersonDetails.photoUrl` is sharp on large screens. WP-4.3 added 512 px for **tree photos** only (avatars at 512 fall back to 256).
 - [x] Remove the deprecated `createPersonInputSchema`/`updatePersonInputSchema` (done in WP-4.1).
 
@@ -224,6 +224,11 @@ WP-2.4 prepared every item below; **the owner applies them** following
 - [ ] WP-6.0: a merge-undo does not restore re-pointed or withdrawn tree-link proposals (documented in ADR 0001 §8, not refused).
 - [ ] WP-6.0: drop `event_participants.notice_seen_at` (contract migration) once no shipped web build calls `GET /api/events/notices` / `DELETE /api/events/:id/notice`.
 - [ ] WP-6.0: a person-merge undo does not restore tags or pending proposals moved to keep (ADR 0001 §8); revisit if admins need it.
+- [x] WP-6.4 ↔ WP-6.2 (done at integration, `mergeTags.test.ts`): `family/merge.ts` called a no-op placeholder `modules/social/moveMediaTagsPlaceholder.ts`; whichever of 6.2/6.4 merges second imports the real `moveMediaTagsTx` from `modules/social/index.ts`, deletes the placeholder and adds a merge test with tags (the call already runs before the account link moves, as 6.2 requires).
+- [ ] WP-6.4: the proposal queue approves with the merge's default field choices (the API takes `fields`); add the per-field choices to "Aprobar…" if admins need them (today: reject, then "Fusionar" by hand).
+- [ ] WP-6.4: "Posibles duplicados" (WP-4.5) still matches names only; the richer `scoreMatch` (nickname, partner, children) feeds only "Ramas sin conectar". Share it once the duplicate contract can carry the new reasons.
+- [ ] WP-6.4: the one-tree reads (bands, overview, path, branches) load every edge per request (family scale); add caching or SQL walks if the tree grows past ~10k people.
+- [ ] WP-6.4: proposals withdrawn by a person delete or merge do not notify the proposer (no notification kind for it); they see "Retirada" in "Mis propuestas".
 - [ ] WP-6.0: the notification push uses the single-process chat hub (`sendToUser`), like event rooms; a second API process needs the shared bus too.
 - [ ] WP-6.2: the `photo_tag_request` notification is written by an after-commit job (the tagger-blind rule, ADR 0001 §8), not in the tag's transaction; the in-process job queue drops it on a crash. A durable outbox would close that gap (the tag itself is still found pending in the detail and in "Fotos").
 - [ ] WP-6.2: a person-merge (WP-6.4) should call `moveMediaTagsTx` **before** moving the duplicate's account link to keep; afterwards the duplicate reads as unlinked and its approved tags fail closed to `pending`.

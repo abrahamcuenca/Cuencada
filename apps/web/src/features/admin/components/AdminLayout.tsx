@@ -27,6 +27,8 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
   { to: "/admin/recuerdos", icon: "🗃️", label: "Baúl de recuerdos", hint: "Crear, ordenar, publicar u ocultar baúles" },
   { to: "/admin/familia", icon: "🌳", label: "Personas y árbol", hint: "Familia, parentescos y cuentas" },
   { to: "/admin/familia/actividad", icon: "🕰️", label: "Actividad del árbol", hint: "Cambios de todos, con «Deshacer»" },
+  { to: "/admin/familia/propuestas", icon: "🔗", label: "Propuestas del árbol", hint: "«Es la misma persona» y «Conectar con…»" },
+  { to: "/admin/familia/ramas", icon: "🌿", label: "Ramas sin conectar", hint: "Raíz del árbol y ramas separadas" },
   { to: "/admin/invitaciones", icon: "💌", label: "Invitaciones", hint: "Invitar por correo o enlace" },
   { to: "/admin/usuarios", icon: "👥", label: "Usuarios", hint: "Roles, acceso y sesiones" },
   { to: "/admin/bitacora", icon: "📜", label: "Bitácora", hint: "Quién cambió qué y cuándo" }

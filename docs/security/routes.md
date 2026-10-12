@@ -11,7 +11,7 @@ same guard config. `401`/`403` cells are guard denials (`UNAUTHENTICATED`,
 `PASSWORD_CHANGE_REQUIRED`, `FORBIDDEN`, `EMAIL_UNVERIFIED`); other non-2xx
 cells are handler answers for that principal's own data.
 
-Total: 165 routes (14 public, 85 user, 64 admin, 2 cookie).
+Total: 178 routes (14 public, 92 user, 70 admin, 2 cookie).
 
 | Method | Path | auth | Verified email | Pending pw allowed | Anon | Member | Unverified | Pending pw | Disabled | Revoked | Admin | Other member (IDOR) | Scope / notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -43,7 +43,13 @@ Total: 165 routes (14 public, 85 user, 64 admin, 2 cookie).
 | POST | `/api/admin/events` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | optional typed slug (409 EVENT_SLUG_TAKEN) |
 | PATCH | `/api/admin/events/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | every field, hidden and the slug |
 | GET | `/api/admin/family/activity` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | PII snapshots |
+| GET | `/api/admin/family/branches` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | PII (no account ids; linked accounts as a count) |
 | GET | `/api/admin/family/duplicates` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | PII pairs (no account ids) |
+| GET | `/api/admin/family/proposals` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | notes and resolution notes (proposer and admins only) |
+| GET | `/api/admin/family/proposals/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
+| POST | `/api/admin/family/proposals/:id/resolve` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
+| GET | `/api/admin/family/settings` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
+| PUT | `/api/admin/family/settings` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | GET | `/api/admin/invites` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | POST | `/api/admin/invites` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | POST | `/api/admin/invites/:id/resend` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
@@ -134,6 +140,8 @@ Total: 165 routes (14 public, 85 user, 64 admin, 2 cookie).
 | GET | `/api/events/:year/:slug` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | per visibility (404 when the caller cannot see it) |
 | GET | `/api/events/notices` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | the caller's own participations only, in events they can see |
 | PATCH | `/api/family/me` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | self-scoped (the caller's linked person); mass assignment: extra keys (userId/deceased/deathYear/deathDate/id) → 2xx |
+| GET | `/api/family/overview` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | names only (no photos, no account ids) |
+| GET | `/api/family/overview/path` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | GET | `/api/family/people` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | POST | `/api/family/people` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | qualifying own-family circle (relateTo must be in it; ADR 0001 §6); probe: circle widened through a member edge whose creator made no endpoint (planted) → 403; mass assignment: userId / createdByUserId keys → 400; probe: existing-to-existing edge → 400 |
 | DELETE | `/api/family/people/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | creator only (unlinked, no other edges); probe: own addition with another edge → 409; probe: own addition linked to an account → 403 |
@@ -144,7 +152,12 @@ Total: 165 routes (14 public, 85 user, 64 admin, 2 cookie).
 | POST | `/api/family/people/:id/photo/uploads/:uploadId/confirm` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | uploader only (404 for another user's uploadId or another person's path) |
 | GET | `/api/family/people/:id/photos` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | approved tags (plus the caller's own pending ones) on photos the caller can see; published editions only |
 | PATCH | `/api/family/people/me` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | self-scoped alias of /api/family/me; mass assignment: extra keys (userId/deceased/deathYear/deathDate/id) → 2xx |
+| GET | `/api/family/proposals` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | self-scoped (the caller's own proposals only) |
+| POST | `/api/family/proposals` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | the caller is the proposer (20/day DB count; one pending per proposer and pair); mass assignment: mass assignment of status/proposer (strict body) → 400 |
+| DELETE | `/api/family/proposals/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | proposer only (404 for anyone else) |
+| GET | `/api/family/settings` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | GET | `/api/family/tree` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
+| GET | `/api/family/tree/extended` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | POST | `/api/invites/accept` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  | probe: invite naming another member's linked person (falls back, never relinks) → 2xx; probe: open link naming an unlinked person (legacy row; falls back, never links) → 2xx |
 | POST | `/api/invites/inspect` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
 | GET | `/api/me` | user |  | yes | 401 | 2xx | 2xx | 2xx | 401 | 401 | 2xx |  |  |

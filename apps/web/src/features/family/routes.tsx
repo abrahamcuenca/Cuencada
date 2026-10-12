@@ -8,6 +8,19 @@ import type { FeatureRoutes } from "../../shared/lib/featureRoutes";
 export const familyRoutes: FeatureRoutes = {
   member: [
     {
+      // WP-6.4: static segments rank above `:personId`.
+      path: "/arbol/completo",
+      lazy: async () => ({
+        Component: (await import("./oneTree/FullTreePage")).FullTreePage
+      })
+    },
+    {
+      path: "/arbol/propuestas",
+      lazy: async () => ({
+        Component: (await import("./oneTree/MyProposalsPage")).MyProposalsPage
+      })
+    },
+    {
       path: "/arbol/:personId?",
       lazy: async () => ({
         Component: (await import("./pages/FamilyTreePage")).FamilyTreePage
@@ -26,6 +39,18 @@ export const familyRoutes: FeatureRoutes = {
       path: "/admin/familia/actividad",
       lazy: async () => ({
         Component: (await import("./admin/pages/FamilyActivityPage")).FamilyActivityPage
+      })
+    },
+    {
+      path: "/admin/familia/propuestas",
+      lazy: async () => ({
+        Component: (await import("./oneTree/admin/TreeProposalsPage")).TreeProposalsPage
+      })
+    },
+    {
+      path: "/admin/familia/ramas",
+      lazy: async () => ({
+        Component: (await import("./oneTree/admin/BranchesPage")).BranchesPage
       })
     },
     {

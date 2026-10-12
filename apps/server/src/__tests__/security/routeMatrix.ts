@@ -29,6 +29,7 @@ import {
   personRevisions,
   profiles,
   sessions,
+  treeLinkProposals,
   users
 } from "../../db/schema/index.js";
 import { createOpaqueToken, hashToken } from "../../lib/tokens.js";
@@ -476,6 +477,23 @@ async function mergePair(): Promise<{ keep: string; duplicate: string }> {
   const duplicate = await insertPerson({ fullName: "Lucía Ejemplo" });
   await insertParentOf((await insertPerson()).id, duplicate.id);
   return { keep: keep.id, duplicate: duplicate.id };
+}
+
+/** A pending tree-link proposal by `owner` about two new people (WP-6.4). */
+async function proposalOf(owner: Actor | null): Promise<string> {
+  const from = await insertPerson({ fullName: "Abuelo Ramiro Ejemplo" });
+  const to = await insertPerson({ fullName: "Abuelo Ramiro Ejemplo" });
+  const [row] = await getTestDb()
+    .insert(treeLinkProposals)
+    .values({ kind: "same_person", fromPersonId: from.id, toPersonId: to.id, proposedByUserId: owner?.user.id ?? null, note: "Nota privada" })
+    .returning({ id: treeLinkProposals.id });
+  if (row === undefined) throw new Error("proposalOf: no row");
+  return row.id;
+}
+
+/** A proposal row (compared before/after probes). */
+function proposalState(id: string): () => Promise<unknown> {
+  return async () => getTestDb().select().from(treeLinkProposals).where(eq(treeLinkProposals.id, id));
 }
 
 /** What a refused merge must not touch: the people rows and every edge touching them. */
@@ -1720,6 +1738,139 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     build: async () => {
       await mergePair();
       return json("/api/admin/family/duplicates");
+    }
+  },
+  {
+    method: "POST",
+    url: "/api/family/proposals",
+    auth: "user",
+    requireVerifiedEmail: true,
+    owner: "the caller is the proposer (20/day DB count; one pending per proposer and pair)",
+    build: async () => {
+      const from = await insertPerson();
+      const to = await insertPerson();
+      return json("/api/family/proposals", { kind: "same_person", fromPersonId: from.id, toPersonId: to.id });
+    },
+    probes: [
+      {
+        label: "mass assignment of status/proposer (strict body)",
+        kind: "mass-assignment",
+        build: async (ctx) => {
+          const from = await insertPerson();
+          const to = await insertPerson();
+          return json("/api/family/proposals", {
+            kind: "same_person",
+            fromPersonId: from.id,
+            toPersonId: to.id,
+            status: "approved",
+            proposedByUserId: ctx.other.user.id
+          });
+        },
+        expect: { status: 400, code: "VALIDATION" }
+      }
+    ]
+  },
+  {
+    method: "GET",
+    url: "/api/family/proposals",
+    auth: "user",
+    requireVerifiedEmail: true,
+    owner: "self-scoped (the caller's own proposals only)",
+    build: async (ctx) => {
+      await proposalOf(ctx.other);
+      return json("/api/family/proposals");
+    }
+  },
+  {
+    method: "DELETE",
+    url: "/api/family/proposals/:id",
+    auth: "user",
+    requireVerifiedEmail: true,
+    owner: "proposer only (404 for anyone else)",
+    build: async (ctx) => json(`/api/family/proposals/${await proposalOf(ctx.actor)}`),
+    probes: [
+      {
+        label: "withdraw another member's proposal (no change)",
+        kind: "idor",
+        build: async (ctx) => {
+          const id = await proposalOf(ctx.other);
+          return { ...json(`/api/family/proposals/${id}`), state: proposalState(id) };
+        },
+        expect: NOT_FOUND
+      }
+    ]
+  },
+  {
+    method: "GET",
+    url: "/api/admin/family/proposals",
+    auth: "admin",
+    note: "notes and resolution notes (proposer and admins only)",
+    build: async (ctx) => {
+      await proposalOf(ctx.other);
+      return json("/api/admin/family/proposals");
+    }
+  },
+  {
+    method: "GET",
+    url: "/api/admin/family/proposals/:id",
+    auth: "admin",
+    build: async (ctx) => json(`/api/admin/family/proposals/${await proposalOf(ctx.other)}`)
+  },
+  {
+    method: "POST",
+    url: "/api/admin/family/proposals/:id/resolve",
+    auth: "admin",
+    build: async (ctx) => json(`/api/admin/family/proposals/${await proposalOf(ctx.other)}/resolve`, { decision: "reject" })
+  },
+  {
+    method: "GET",
+    url: "/api/family/settings",
+    auth: "user",
+    requireVerifiedEmail: true,
+    build: async () => json("/api/family/settings")
+  },
+  {
+    method: "GET",
+    url: "/api/admin/family/settings",
+    auth: "admin",
+    build: async () => json("/api/admin/family/settings")
+  },
+  {
+    method: "PUT",
+    url: "/api/admin/family/settings",
+    auth: "admin",
+    build: async () => json("/api/admin/family/settings", { rootPersonId: (await insertPerson()).id })
+  },
+  {
+    method: "GET",
+    url: "/api/family/tree/extended",
+    auth: "user",
+    requireVerifiedEmail: true,
+    build: async () => json(`/api/family/tree/extended?personId=${(await insertPerson()).id}`)
+  },
+  {
+    method: "GET",
+    url: "/api/family/overview",
+    auth: "user",
+    requireVerifiedEmail: true,
+    note: "names only (no photos, no account ids)",
+    build: async () => json(`/api/family/overview?personId=${(await insertPerson()).id}`)
+  },
+  {
+    method: "GET",
+    url: "/api/family/overview/path",
+    auth: "user",
+    requireVerifiedEmail: true,
+    build: async () => json(`/api/family/overview/path?personId=${(await insertPerson()).id}`)
+  },
+  {
+    method: "GET",
+    url: "/api/admin/family/branches",
+    auth: "admin",
+    note: "PII (no account ids; linked accounts as a count)",
+    build: async () => {
+      await mergePair();
+      return json("/api/admin/family/branches");
     }
   },
 

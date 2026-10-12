@@ -28,6 +28,7 @@ import { invites, people, personRelationships, users } from "../../db/schema/ind
 import { recordAudit, type Transaction } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
 import { PgErrorCode, pgErrorInfo } from "./db-errors.js";
+import { withdrawPendingProposalsTx } from "./proposalCleanup.js";
 import { insertRelationship, lockFamilyTree } from "./relationships.js";
 import { type PersonRow, personColumns, relationshipColumns, toRelationship } from "./repository.js";
 import { insertRevision, personSnapshot, relationshipSnapshot } from "./revisions.js";
@@ -370,6 +371,8 @@ export async function deletePersonTx(
     });
   }
   await revokePendingInvites(tx, person.id, actor);
+  // WP-6.4 (ADR 0001 §8): a pending proposal must name two people; withdraw them first.
+  await withdrawPendingProposalsTx(tx, person.id, actor);
   const [deleted] = await tx.delete(people).where(eq(people.id, person.id)).returning({ id: people.id });
   if (deleted === undefined) throw new AppError("NOT_FOUND", PERSON_NOT_FOUND);
   await recordAudit(tx, {

@@ -18,6 +18,7 @@ import {
   CastRole,
   castMember,
   FUTURE_YEAR,
+  cousinBranchNames,
   familyNames,
   HIDDEN_MEMORY_BOX_ID,
   invitedPerson,
@@ -152,6 +153,27 @@ async function seedFamily(sql: Sql, project: ProjectKey, anaUserId: string, beto
 }
 
 /**
+ * WP-6.4: a cousin's branch built apart from the seeded family (journey
+ * "one tree"): a copy of the grandparent (same name and years), her son and
+ * the cousin, linked to the Primo account. Nothing connects it to the root.
+ */
+async function seedCousinBranch(sql: Sql, project: ProjectKey, primoUserId: string): Promise<void> {
+  const names = cousinBranchNames(project);
+  const [copy] = await sql<{ id: string }[]>`
+    insert into people (user_id, full_name, family_branch, birth_year, death_year, deceased)
+    values (null, ${names.grandparentCopy}, 'Sur', 1935, 2010, true) returning id`;
+  const [father] = await sql<{ id: string }[]>`
+    insert into people (user_id, full_name, family_branch, birth_year) values (null, ${names.father}, 'Sur', 1958) returning id`;
+  const [cousin] = await sql<{ id: string }[]>`
+    insert into people (user_id, full_name, family_branch, birth_year) values (${primoUserId}, ${names.cousin}, 'Sur', 1991) returning id`;
+  if (copy === undefined || father === undefined || cousin === undefined) throw new Error("e2e seed: cousin branch missing");
+  await sql`
+    insert into person_relationships (kind, from_person_id, to_person_id)
+    values ('parent_of', ${copy.id}, ${father.id}),
+           ('parent_of', ${father.id}, ${cousin.id})`;
+}
+
+/**
  * A scrollable history in the family room from one sender, so other members
  * open a log that overflows and holds none of their own (focusable) messages.
  */
@@ -222,6 +244,9 @@ export async function prepareE2eDatabase(target: E2eDatabaseTarget): Promise<voi
       const betoId = ids.get(CastRole.Beto);
       if (anaId === undefined || betoId === undefined) throw new Error("e2e seed: cast incomplete");
       await seedFamily(sql, project, anaId, betoId);
+      const primoId = ids.get(CastRole.Primo);
+      if (primoId === undefined) throw new Error("e2e seed: cast incomplete");
+      await seedCousinBranch(sql, project, primoId);
       // Beto is going, so the attendees block is never empty.
       await sql`insert into cuencada_rsvps (cuencada_id, user_id, status, guest_count) values (${editionId}, ${betoId}, 'yes', 1)`;
       if (project === ProjectKey.Desktop) {
