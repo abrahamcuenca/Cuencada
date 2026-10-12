@@ -224,7 +224,7 @@ WP-2.4 prepared every item below; **the owner applies them** following
 - [ ] WP-6.0: a merge-undo does not restore re-pointed or withdrawn tree-link proposals (documented in ADR 0001 §8, not refused).
 - [ ] WP-6.0: drop `event_participants.notice_seen_at` (contract migration) once no shipped web build calls `GET /api/events/notices` / `DELETE /api/events/:id/notice`.
 - [ ] WP-6.0: a person-merge undo does not restore tags or pending proposals moved to keep (ADR 0001 §8); revisit if admins need it.
-- [ ] WP-6.4 ↔ WP-6.2: `family/merge.ts` calls a no-op placeholder `modules/social/moveMediaTagsPlaceholder.ts`; whichever of 6.2/6.4 merges second points the import at 6.2's `moveMediaTagsTx`, deletes the placeholder and adds a merge test with tags.
+- [ ] WP-6.4 ↔ WP-6.2: `family/merge.ts` calls a no-op placeholder `modules/social/moveMediaTagsPlaceholder.ts`; whichever of 6.2/6.4 merges second imports the real `moveMediaTagsTx` from `modules/social/index.ts`, deletes the placeholder and adds a merge test with tags (the call already runs before the account link moves, as 6.2 requires).
 - [ ] WP-6.4: the proposal queue approves with the merge's default field choices (the API takes `fields`); add the per-field choices to "Aprobar…" if admins need them (today: reject, then "Fusionar" by hand).
 - [ ] WP-6.4: "Posibles duplicados" (WP-4.5) still matches names only; the richer `scoreMatch` (nickname, partner, children) feeds only "Ramas sin conectar". Share it once the duplicate contract can carry the new reasons.
 - [ ] WP-6.4: the one-tree reads (bands, overview, path, branches) load every edge per request (family scale); add caching or SQL walks if the tree grows past ~10k people.
