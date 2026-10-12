@@ -134,7 +134,15 @@ After #54's M1, an admin who is **not a participant** gets no event room in the 
 Taken with headless Chromium against the Vite dev server, `/api/**` stubbed by `page.route` and the socket by `page.routeWebSocket` (fictional data, generated SVG covers); 0 px horizontal overflow on every shot.
 
 ## Bundle
-Initial JS: **180.57 kB gzip** (budget 190). The events pages, the Home strip and notices (`HomeEvents`, about 0.6 kB plus the shared events chunks), the admin page and the cropper are all lazy chunks.
+Initial JS: **180.58 kB gzip** (budget 190). The events pages, the Home strip and notices (`HomeEvents`, about 0.6 kB plus the shared events chunks), the admin page and the cropper are all lazy chunks.
+
+## Verification (after merging #54)
+- `pnpm lint` clean; `pnpm turbo run typecheck --force` 6/6; `pnpm test` 206 files / 2713 tests; `pnpm build` ok; bundle 180.58 kB.
+- Full `pnpm e2e` on isolated ports and DB (`E2E_API_PORT=3954`, `E2E_STORAGE_PORT=3955`, `E2E_WEB_PORT=4954`, `cuencada_w54_e2e`, 2 workers): journeys on iphone-13, pixel-7 and desktop-1280, the 320/375 + axe gates and Lighthouse: **83 passed + Lighthouse 1 passed**, including `events.spec.ts` on all three devices and the event-page gates.
+- Fixes the first full runs found:
+  - card title links are now 44 px rows (the touch-target gate measured the stretched link's own text box)
+  - the event-page gate waits for the new event's URL (the list's "Eventos" h1 satisfied a bare heading check)
+  - `events.spec.ts` organizes as Carla (Ana's account hit the per-account login limit of 10 per 15 min across the journeys, which also broke `offline.spec.ts`), runs the admin step on desktop only (the iPhone admin also serves the gates), picks people by exact display name (several "Beto"s in the directory) and taps labels instead of forcing clicks on the native radios/checkboxes in the scrolling sheet
 
 ## Follow-ups
 - WP-6: replace `notices/` with the notifications bell.
