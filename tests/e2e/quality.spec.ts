@@ -59,6 +59,8 @@ const MEMBER_ROUTES: RouteCheck[] = [
   { name: "mas", open: "/mas" },
   // WP-5.4: the events list.
   { name: "eventos", open: "/eventos", ready: "Eventos", readyExact: true },
+  // WP-6.1: the notifications feed.
+  { name: "notificaciones", open: "/notificaciones", ready: "Notificaciones", readyExact: true },
   // WP-4.7: the profile's Contacto section from a link, and the open account menu.
   { name: "perfil-contacto", open: "/perfil#contacto", ready: "Contacto" },
   {
