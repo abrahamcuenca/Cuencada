@@ -53,8 +53,8 @@ describe("purgeSpentAuthRows", () => {
     const first = await purgeSpentAuthRows(db, now);
     const second = await purgeSpentAuthRows(db, now);
 
-    expect(first).toEqual({ magicLinks: 1, sessions: 1, refreshTokens: 1 });
-    expect(second).toEqual({ magicLinks: 0, sessions: 0, refreshTokens: 0 });
+    expect(first).toEqual({ magicLinks: 1, sessions: 1, refreshTokens: 1, twoFactorChallenges: 0, trustedDevices: 0 });
+    expect(second).toEqual({ magicLinks: 0, sessions: 0, refreshTokens: 0, twoFactorChallenges: 0, trustedDevices: 0 });
     const remainingSessions = (await db.select().from(sessions)).map((row) => row.id).sort();
     expect(remainingSessions).toEqual([live.id, deadRecent.id].sort());
     const remainingTokens = (await db.select().from(refreshTokens)).map((row) => row.sessionId);

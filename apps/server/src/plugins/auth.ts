@@ -16,6 +16,12 @@
  *   answers 403 `PASSWORD_CHANGE_REQUIRED` for them.
  * - `requireVerifiedEmail: true` (directory, family tree, other PII) answers
  *   403 `EMAIL_UNVERIFIED` while `users.email_verified_at` is null.
+ * - `allowPendingTwoFactor: true` (WP-7: `/me`, the 2FA status/setup/enable
+ *   routes) lets an **administrator** whose session was not verified with a
+ *   two-step code through. Everything else answers 403
+ *   `TWO_FACTOR_SETUP_REQUIRED` for them, so an admin must enroll (or log in
+ *   with a code) before using any admin or member route. The password gate
+ *   comes first: while a temporary password is pending, only its routes work.
  *
  * Role, status and must-change-password always come from the database, never
  * from token claims, so revocation, disabling and demotion apply immediately.
@@ -53,6 +59,8 @@ export interface AuthUser {
   emailVerified: boolean;
   /** `sessions.id` of the access token (the `sid` claim). */
   sessionId: string;
+  /** WP-7: this session proved a two-step code (`sessions.two_factor_verified_at`). */
+  twoFactorVerified: boolean;
 }
 
 declare module "fastify" {
@@ -63,6 +71,8 @@ declare module "fastify" {
     allowPendingPasswordChange?: boolean;
     /** Require a verified email (directory, family tree, PII). */
     requireVerifiedEmail?: boolean;
+    /** WP-7: let an admin without a two-step-verified session through (`/me`, 2FA enrollment). */
+    allowPendingTwoFactor?: boolean;
   }
 
   interface FastifyRequest {
@@ -126,9 +136,14 @@ export function registerAuthGuard(app: FastifyInstance): void {
       throw new Error(`Route ${route.method} ${route.url}: invalid config.auth`);
     }
     const userLevel = level === AuthLevel.User || level === AuthLevel.Admin;
-    if (!userLevel && (config?.allowPendingPasswordChange === true || config?.requireVerifiedEmail === true)) {
+    if (
+      !userLevel &&
+      (config?.allowPendingPasswordChange === true ||
+        config?.requireVerifiedEmail === true ||
+        config?.allowPendingTwoFactor === true)
+    ) {
       throw new Error(
-        `Route ${route.method} ${route.url}: allowPendingPasswordChange/requireVerifiedEmail need auth "user" or "admin"`
+        `Route ${route.method} ${route.url}: allowPendingPasswordChange/requireVerifiedEmail/allowPendingTwoFactor need auth "user" or "admin"`
       );
     }
   });
@@ -161,6 +176,7 @@ export function registerAuthGuard(app: FastifyInstance): void {
         idleExpiresAt: sessions.idleExpiresAt,
         absoluteExpiresAt: sessions.absoluteExpiresAt,
         revokedAt: sessions.revokedAt,
+        twoFactorVerifiedAt: sessions.twoFactorVerifiedAt,
         email: users.email,
         displayName: users.displayName,
         role: users.role,
@@ -184,8 +200,12 @@ export function registerAuthGuard(app: FastifyInstance): void {
       throw new AppError("UNAUTHENTICATED");
     }
 
-    if (row.mustChangePassword && config.allowPendingPasswordChange !== true) {
-      throw new AppError("PASSWORD_CHANGE_REQUIRED");
+    if (row.mustChangePassword) {
+      if (config.allowPendingPasswordChange !== true) throw new AppError("PASSWORD_CHANGE_REQUIRED");
+    } else if (row.role === "admin" && row.twoFactorVerifiedAt === null && config.allowPendingTwoFactor !== true) {
+      // [SEC] WP-7: administrators must use two-step verification. Role and the
+      // session's verification come from the database, never from claims.
+      throw new AppError("TWO_FACTOR_SETUP_REQUIRED");
     }
     if (level === AuthLevel.Admin && row.role !== "admin") {
       throw new AppError("FORBIDDEN");
@@ -210,7 +230,8 @@ export function registerAuthGuard(app: FastifyInstance): void {
       status: row.status,
       mustChangePassword: row.mustChangePassword,
       emailVerified: row.emailVerifiedAt !== null,
-      sessionId: claims.sessionId
+      sessionId: claims.sessionId,
+      twoFactorVerified: row.twoFactorVerifiedAt !== null
     };
   });
 }

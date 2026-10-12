@@ -1,6 +1,7 @@
 /**
  * Admin user management [SEC]: list, role/status changes, session
- * revocation, forced password reset and manual email verification.
+ * revocation, forced password reset, manual email verification and (WP-7)
+ * two-step verification reset.
  *
  * Every mutation runs in one transaction that first takes the admin-users
  * advisory lock ({@link lockAdminUserChanges}), re-checks that the caller is
@@ -25,7 +26,7 @@ import { eq } from "drizzle-orm";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { CreatedEmailToken } from "../auth/emailTokens.js";
 import type { LockedUser } from "./users.js";
-import type { AdminAccountChange } from "@cuencada/emails";
+import { AdminAccountChange, TwoFactorNotice } from "@cuencada/emails";
 import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { users } from "../../db/schema/index.js";
@@ -43,6 +44,7 @@ import {
 import { closeChatSockets as closeUserChatSockets } from "../auth/chatSockets.js";
 import { chatUserRoleChanged } from "../chat/index.js";
 import { revokeSessions } from "../auth/sessions.js";
+import { isTwoFactorEnabled, queueTwoFactorNotice, removeTwoFactor, revokeTrustedDevices } from "../auth/twoFactor.js";
 import { adminAlertMetadata, type AdminAlert, type AdminAlertPlan, planAdminAlert, queueAdminAlerts } from "./adminAlerts.js";
 import {
   AdminUserMessages,
@@ -186,6 +188,7 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
       const targetId = request.params.id;
       const now = app.clock.now();
 
+      let promotedWithTwoFactor = false;
       const outcome = await app.db.transaction(async (tx): Promise<PatchOutcome> => {
         await lockAdminUserChanges(tx);
         const target = await lockTargetUser(tx, admin.id, targetId);
@@ -236,6 +239,18 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
         const disabling = statusChanged && nextStatus === "disabled";
         const metadata: Record<string, unknown> = { fields };
         if (roleChanged) metadata.role = { from: target.role, to: nextRole };
+        // [SEC] WP-7: a promoted member must prove a code before using admin
+        // access. Without 2FA the guard's enrollment gate stops their current
+        // sessions; with 2FA, their sessions (perhaps from a trusted device,
+        // without a code) are closed and trusted devices revoked, so the next
+        // login asks for a code.
+        if (roleChanged && nextRole === "admin" && !disabling && (await isTwoFactorEnabled(tx, target.id))) {
+          const revoked = await revokeSessions(tx, { userId: target.id }, "admin_revoked", now);
+          const devices = await revokeTrustedDevices(tx, target.id, now);
+          metadata.revokedSessions = revoked.length;
+          metadata.revokedTrustedDevices = devices.length;
+          promotedWithTwoFactor = true;
+        }
         // Metadata keys containing "token" are redacted by recordAudit, hence "EmailLinks".
         if (disabling) {
           const revoked = await revokeSessions(tx, { userId: target.id }, "user_disabled", now);
@@ -273,7 +288,7 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
       });
 
       if (outcome.alert !== null) queueAdminAlerts(app, outcome.alert.plan, outcome.alert.alert);
-      if (outcome.disabled) closeChatSockets(app, targetId);
+      if (outcome.disabled || promotedWithTwoFactor) closeChatSockets(app, targetId);
       if (outcome.newRole !== null) chatUserRoleChanged(app, targetId, outcome.newRole);
       return getAdminUser(app.db, targetId, app.clock.now());
     }
@@ -408,6 +423,70 @@ const adminUserRoutes: FastifyPluginAsyncZod = async (app) => {
       }
       closeChatSockets(app, targetId);
       return { user: await getAdminUser(app.db, targetId, app.clock.now()), emailQueued: token !== null };
+    }
+  );
+
+  /**
+   * `POST /api/admin/users/:id/2fa/reset` (WP-7): for a lost phone and lost
+   * recovery codes. Never on yourself (403; another admin must do it). Deletes
+   * the secret and recovery codes, revokes trusted devices and every session,
+   * audits `user.2fa_reset`, alerts the other admins when the target is an
+   * admin (cap-exempt, like a forced reset) and emails the target. 409 when
+   * the account has no two-step verification.
+   */
+  app.post(
+    "/admin/users/:id/2fa/reset",
+    {
+      config: mutationConfig,
+      preHandler: adminLimit,
+      schema: { params: idParamSchema, response: { 200: adminUserListItemSchema, ...errorResponses, 409: apiErrorSchema } }
+    },
+    async (request): Promise<AdminUserListItem> => {
+      const admin = authUser(request);
+      const targetId = request.params.id;
+      if (targetId === admin.id) throw new AppError("FORBIDDEN", AdminUserMessages.SelfTwoFactorReset);
+      const now = app.clock.now();
+      const outcome = await app.db.transaction(async (tx) => {
+        await lockAdminUserChanges(tx);
+        const target = await lockTargetUser(tx, admin.id, targetId);
+        const removed = await removeTwoFactor(tx, target.id, now);
+        if (!removed.hadTwoFactor) throw new AppError("CONFLICT", AdminUserMessages.NoTwoFactor);
+        const revoked = await revokeSessions(tx, { userId: target.id }, "admin_revoked", now);
+        const changes = [AdminAccountChange.TwoFactorReset];
+        const plan =
+          target.role === "admin"
+            ? await planAdminAlert(app, tx, { actorId: admin.id, target, changes, now, capExempt: true })
+            : null;
+        const auditId = await recordAudit(tx, {
+          actorUserId: admin.id,
+          action: AuditAction.UserTwoFactorReset,
+          entityType: "user",
+          entityId: target.id,
+          metadata: {
+            revokedSessions: revoked.length,
+            revokedTrustedDevices: removed.revokedTrustedDevices,
+            ...(plan === null ? {} : adminAlertMetadata(plan))
+          },
+          ip: request.ip
+        });
+        const alert: PendingAlert | null =
+          plan === null
+            ? null
+            : { plan, alert: { auditId, actorName: admin.displayName, targetName: target.displayName, changes, changedAt: now } };
+        return { target, auditId, alert };
+      });
+      if (outcome.alert !== null) queueAdminAlerts(app, outcome.alert.plan, outcome.alert.alert);
+      closeChatSockets(app, targetId);
+      if (outcome.target.status === "active") {
+        await queueTwoFactorNotice(app, {
+          to: outcome.target.email,
+          displayName: outcome.target.displayName,
+          notice: TwoFactorNotice.ResetByAdmin,
+          at: now,
+          operationId: outcome.auditId
+        });
+      }
+      return getAdminUser(app.db, targetId, app.clock.now());
     }
   );
 

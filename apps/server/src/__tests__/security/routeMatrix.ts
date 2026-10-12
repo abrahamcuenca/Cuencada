@@ -30,9 +30,14 @@ import {
   profiles,
   sessions,
   treeLinkProposals,
-  users
+  trustedDevices,
+  users,
+  userTotp
 } from "../../db/schema/index.js";
 import { createOpaqueToken, hashToken } from "../../lib/tokens.js";
+import { DEV_TOTP_ENCRYPTION_KEY } from "../../config.js";
+import { encryptSecret, totpCodeAt, totpKey } from "../../lib/totp.js";
+import { challengeTokenOf, enrollTwoFactor, freshTotpCode, TEST_TOTP_SECRET } from "../../../test/helpers/twoFactor.js";
 import { createEmailToken } from "../../modules/auth/emailTokens.js";
 import { CSRF_HEADERS, refreshCookie, TEST_REFRESH_COOKIE } from "../../../test/helpers/auth.js";
 import { insertEditionRoom, insertGlobalRoom, insertMessage } from "../../../test/helpers/chat.js";
@@ -61,7 +66,9 @@ export const Principal = {
   PendingPasswordChange: "pending",
   Disabled: "disabled",
   RevokedSession: "revoked",
-  Admin: "admin"
+  Admin: "admin",
+  /** WP-7: an administrator who has not enrolled two-step verification yet (session not verified). */
+  AdminWithoutTwoFactor: "admin-no-2fa"
 } as const;
 export type Principal = (typeof Principal)[keyof typeof Principal];
 
@@ -115,6 +122,8 @@ export interface RouteSpec {
   auth: AuthLevel;
   requireVerifiedEmail?: true;
   allowPendingPasswordChange?: true;
+  /** WP-7: open to an administrator who still has to enroll two-step verification. */
+  allowPendingTwoFactor?: true;
   /** Owner-scoped/self-scoped resource (documented in routes.md). */
   owner?: string;
   /** Free-text note for the inventory. */
@@ -170,12 +179,22 @@ async function png(): Promise<Buffer> {
 
 /** Real login through the route, returning the refresh token (cookie routes). */
 async function refreshTokenFor(ctx: MatrixContext, user: TestUser): Promise<{ token: string; sessionId: string }> {
-  const response = await ctx.app.inject({
+  let response = await ctx.app.inject({
     method: "POST",
     url: "/api/auth/login",
     remoteAddress: ctx.nextIp(),
     payload: { email: user.email, password: user.password }
   });
+  // WP-7: an enrolled admin answers the challenge with a fresh test code.
+  const challengeToken = challengeTokenOf(response);
+  if (challengeToken !== null) {
+    response = await ctx.app.inject({
+      method: "POST",
+      url: "/api/auth/2fa/verify",
+      remoteAddress: ctx.nextIp(),
+      payload: { challengeToken, code: await freshTotpCode(ctx.app, user.id) }
+    });
+  }
   const cookie = refreshCookie(response);
   if (response.statusCode !== 200 || cookie === undefined) {
     throw new Error(`refreshTokenFor: login failed with ${response.statusCode}`);
@@ -214,6 +233,51 @@ async function emailToken(user: TestUser, purpose: MagicLinkPurpose): Promise<st
     createEmailToken(tx, { userId: user.id, email: user.email, purpose, requestIp: "203.0.113.1", now: new Date() })
   );
   return created.token;
+}
+
+/** Make `user` enrolled in 2FA with the test secret (replacing any previous state). */
+async function ensureEnrolled(user: TestUser): Promise<void> {
+  await getTestDb().delete(userTotp).where(eq(userTotp.userId, user.id));
+  await enrollTwoFactor(user.id);
+}
+
+/** Give `user` a pending (setup started, not enabled) secret; returns a valid first code. */
+async function pendingTwoFactor(ctx: MatrixContext, user: TestUser): Promise<string> {
+  await getTestDb().delete(userTotp).where(eq(userTotp.userId, user.id));
+  const encrypted = encryptSecret(totpKey({ TOTP_ENCRYPTION_KEY: DEV_TOTP_ENCRYPTION_KEY }), user.id, TEST_TOTP_SECRET);
+  await getTestDb()
+    .insert(userTotp)
+    .values({ userId: user.id, secretCiphertext: encrypted.ciphertext, secretIv: encrypted.iv, secretTag: encrypted.tag });
+  return totpCodeAt(TEST_TOTP_SECRET, ctx.app.clock.now());
+}
+
+/** A live trusted device of `user`; returns its id. */
+async function trustedDevice(user: TestUser): Promise<string> {
+  const [row] = await getTestDb()
+    .insert(trustedDevices)
+    .values({
+      userId: user.id,
+      tokenHash: hashToken(createOpaqueToken()),
+      userAgentLabel: "iPhone · Safari",
+      expiresAt: new Date(Date.now() + 86_400_000)
+    })
+    .returning({ id: trustedDevices.id });
+  if (row === undefined) throw new Error("trustedDevice: insert returned no row");
+  return row.id;
+}
+
+/** A login challenge of a fresh enrolled member; returns the verify body. */
+async function loginChallenge(ctx: MatrixContext): Promise<BuiltRequest> {
+  const user = await createUser({ emailVerified: true, twoFactor: true });
+  const login = await ctx.app.inject({
+    method: "POST",
+    url: "/api/auth/login",
+    remoteAddress: ctx.nextIp(),
+    payload: { email: user.email, password: user.password }
+  });
+  const challengeToken = challengeTokenOf(login);
+  if (challengeToken === null) throw new Error(`loginChallenge: no challenge (${login.statusCode})`);
+  return json("/api/auth/2fa/verify", { challengeToken, code: await freshTotpCode(ctx.app, user.id) });
 }
 
 /** A pending open member invite; returns the raw token. */
@@ -591,7 +655,14 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     expect: { disabled: "2xx" }
   },
   { method: "POST", url: "/api/auth/logout-all", auth: "user", build: async () => json("/api/auth/logout-all") },
-  { method: "GET", url: "/api/me", auth: "user", allowPendingPasswordChange: true, build: async () => json("/api/me") },
+  {
+    method: "GET",
+    url: "/api/me",
+    auth: "user",
+    allowPendingPasswordChange: true,
+    allowPendingTwoFactor: true,
+    build: async () => json("/api/me")
+  },
   { method: "GET", url: "/api/auth/sessions", auth: "user", build: async () => json("/api/auth/sessions") },
   {
     method: "DELETE",
@@ -673,6 +744,94 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
     build: async (ctx) =>
       json("/api/auth/email/verify", { token: await emailToken(ctx.actor.user, MagicLinkPurpose.EmailVerify) }),
     expect: { disabled: { status: 400, code: "TOKEN_INVALID" } }
+  },
+
+  // ---------------------------------------------------------------- auth: two-step verification (WP-7)
+  {
+    method: "POST",
+    url: "/api/auth/2fa/verify",
+    auth: "public",
+    owner: "the challenge token from the caller's own login",
+    build: loginChallenge
+  },
+  {
+    method: "GET",
+    url: "/api/auth/2fa/status",
+    auth: "user",
+    allowPendingTwoFactor: true,
+    build: async () => json("/api/auth/2fa/status")
+  },
+  {
+    method: "POST",
+    url: "/api/auth/2fa/setup",
+    auth: "user",
+    allowPendingTwoFactor: true,
+    owner: "the caller's own secret",
+    build: async (ctx) => {
+      await getTestDb().delete(userTotp).where(eq(userTotp.userId, ctx.actor.user.id));
+      return json("/api/auth/2fa/setup", { currentPassword: ctx.actor.user.password });
+    }
+  },
+  {
+    method: "POST",
+    url: "/api/auth/2fa/enable",
+    auth: "user",
+    allowPendingTwoFactor: true,
+    owner: "the caller's own pending secret",
+    build: async (ctx) => json("/api/auth/2fa/enable", { code: await pendingTwoFactor(ctx, ctx.actor.user) })
+  },
+  {
+    method: "POST",
+    url: "/api/auth/2fa/recovery-codes",
+    auth: "user",
+    build: async (ctx) => {
+      await ensureEnrolled(ctx.actor.user);
+      return json("/api/auth/2fa/recovery-codes", {
+        currentPassword: ctx.actor.user.password,
+        code: await freshTotpCode(ctx.app, ctx.actor.user.id)
+      });
+    }
+  },
+  {
+    method: "POST",
+    url: "/api/auth/2fa/disable",
+    auth: "user",
+    note: "members only: 403 for administrators",
+    build: async (ctx) => {
+      await ensureEnrolled(ctx.actor.user);
+      return json("/api/auth/2fa/disable", {
+        currentPassword: ctx.actor.user.password,
+        code: await freshTotpCode(ctx.app, ctx.actor.user.id)
+      });
+    },
+    expect: { admin: { status: 403, code: "FORBIDDEN" } }
+  },
+  {
+    method: "GET",
+    url: "/api/auth/2fa/trusted-devices",
+    auth: "user",
+    build: async () => json("/api/auth/2fa/trusted-devices")
+  },
+  {
+    method: "DELETE",
+    url: "/api/auth/2fa/trusted-devices/:id",
+    auth: "user",
+    owner: "own trusted devices only (404 for anyone else's)",
+    build: async (ctx) => json(`/api/auth/2fa/trusted-devices/${await trustedDevice(ctx.actor.user)}`),
+    probes: [
+      {
+        label: "another member's trusted device",
+        kind: "idor",
+        build: async (ctx) => {
+          const id = await trustedDevice(ctx.other.user);
+          return {
+            ...json(`/api/auth/2fa/trusted-devices/${id}`),
+            state: async () => getTestDb().select().from(trustedDevices).where(eq(trustedDevices.id, id))
+          };
+        },
+        expect: NOT_FOUND
+      }
+    ]
   },
 
   // ---------------------------------------------------------------- invites
@@ -2044,6 +2203,16 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
       return json(`/api/admin/users/${target.id}/verify-email`);
     }
   },
+  {
+    method: "POST",
+    url: "/api/admin/users/:id/2fa/reset",
+    auth: "admin",
+    note: "403 on the caller's own account (another admin must do it)",
+    build: async () => {
+      const target = await createUser({ emailVerified: true, twoFactor: true });
+      return json(`/api/admin/users/${target.id}/2fa/reset`);
+    }
+  },
   { method: "GET", url: "/api/admin/audit-logs", auth: "admin", build: async () => json("/api/admin/audit-logs") },
   { method: "GET", url: "/api/admin/summary", auth: "admin", build: async () => json("/api/admin/summary") },
   // ------------------------------------------------------------- events (WP-5.3)
@@ -2068,6 +2237,14 @@ export function routeKey(route: { method: string; url: string }): string {
 export function expectationFor(spec: RouteSpec, principal: Principal): Expectation {
   const override = spec.expect?.[principal];
   if (override !== undefined) return override;
+  if (principal === Principal.AdminWithoutTwoFactor) {
+    // WP-7: the enrollment gate comes after the password and session checks and
+    // before the role check; allowlisted routes behave as for an admin.
+    if ((spec.auth === "user" || spec.auth === "admin") && spec.allowPendingTwoFactor !== true) {
+      return { status: 403, code: "TWO_FACTOR_SETUP_REQUIRED" };
+    }
+    return expectationFor(spec, Principal.Admin);
+  }
   const success = spec.success ?? "2xx";
   const unauthenticated = { status: 401, code: "UNAUTHENTICATED" };
   switch (spec.auth) {
@@ -2099,12 +2276,17 @@ export function expectationFor(spec: RouteSpec, principal: Principal): Expectati
  * the state the principal describes.
  */
 export async function createActor(principal: Principal): Promise<Actor> {
+  const noTwoFactor = principal === Principal.AdminWithoutTwoFactor;
   const user = await createUser({
     emailVerified: principal !== Principal.Unverified,
-    role: principal === Principal.Admin ? "admin" : "member",
-    mustChangePassword: principal === Principal.PendingPasswordChange
+    role: principal === Principal.Admin || noTwoFactor ? "admin" : "member",
+    mustChangePassword: principal === Principal.PendingPasswordChange,
+    ...(noTwoFactor ? { twoFactor: false } : {})
   });
-  const session = await createSession(user.id, { revoked: principal === Principal.RevokedSession });
+  const session = await createSession(user.id, {
+    revoked: principal === Principal.RevokedSession,
+    twoFactorVerified: !noTwoFactor
+  });
   const auth = await bearerFor(user, session);
   if (principal === Principal.Disabled) {
     // Disabled after the token was issued: the old token must stop working at once.

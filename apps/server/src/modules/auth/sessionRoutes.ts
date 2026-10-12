@@ -7,6 +7,7 @@ import {
   currentUserSchema,
   idParamSchema,
   loginInputSchema,
+  loginResponseSchema,
   refreshResponseSchema,
   type SessionListItem,
   sessionListItemSchema
@@ -24,6 +25,7 @@ import { closeChatSockets } from "./chatSockets.js";
 import { clearRefreshCookie, readRefreshCookie } from "./cookies.js";
 import { issueAuthResponse, loadCurrentUser } from "./currentUser.js";
 import { AuthAuditAction } from "./emailTokens.js";
+import { gateLogin } from "./twoFactor.js";
 import {
   findCookieSession,
   revokeSessions,
@@ -49,13 +51,17 @@ const errorResponses = {
 const sessionRoutes: FastifyPluginAsyncZod = async (app) => {
   const loginLimits = credentialRateLimits(app);
 
-  /** `POST /api/auth/login`: email + password → access token + refresh cookie. */
+  /**
+   * `POST /api/auth/login`: email + password → access token + refresh cookie,
+   * or (WP-7) a two-step challenge without any session for users with 2FA,
+   * unless a member presents a valid trusted-device cookie.
+   */
   app.post(
     "/auth/login",
     {
       config: { auth: "public", rateLimit: loginLimits.rateLimit },
       preHandler: loginLimits.preHandler,
-      schema: { body: loginInputSchema, response: { 200: authTokenResponseSchema, ...errorResponses } }
+      schema: { body: loginInputSchema, response: { 200: loginResponseSchema, ...errorResponses } }
     },
     async (request, reply) => {
       const { email, password } = request.body;
@@ -63,7 +69,8 @@ const sessionRoutes: FastifyPluginAsyncZod = async (app) => {
         .select({
           id: users.id,
           passwordHash: users.passwordHash,
-          status: users.status
+          status: users.status,
+          role: users.role
         })
         .from(users)
         .where(sql`lower(${users.email}) = ${email}`)
@@ -89,23 +96,28 @@ const sessionRoutes: FastifyPluginAsyncZod = async (app) => {
 
       const now = app.clock.now();
       const rehash = needsRehash(user.passwordHash) ? await hashPassword(password) : null;
-      const issued = await app.db.transaction(async (tx) => {
-        await tx
-          .update(users)
-          .set({ lastLoginAt: now, ...(rehash === null ? {} : { passwordHash: rehash }) })
-          .where(eq(users.id, user.id));
+      const outcome = await app.db.transaction(async (tx) => {
+        if (rehash !== null) await tx.update(users).set({ passwordHash: rehash }).where(eq(users.id, user.id));
+        // [SEC] WP-7: a user with 2FA gets a challenge, not a session.
+        const gate = await gateLogin(tx, request, app.config, user, "password", now);
+        if (gate.kind === "challenge") return gate;
+        await tx.update(users).set({ lastLoginAt: now }).where(eq(users.id, user.id));
         const started = await startSession(tx, app.config, user.id, sessionOrigin(request), now);
         await recordAudit(tx, {
           actorUserId: user.id,
           action: AuthAuditAction.LoggedIn,
           entityType: "session",
           entityId: started.sessionId,
-          metadata: { method: "password" },
+          metadata:
+            gate.kind === "trusted_device"
+              ? { method: "password", factor: "trusted_device", deviceId: gate.deviceId }
+              : { method: "password" },
           ip: request.ip
         });
-        return started;
+        return { kind: "session" as const, started };
       });
-      return issueAuthResponse(app, reply, issued, user.id, now);
+      if (outcome.kind === "challenge") return outcome.body;
+      return issueAuthResponse(app, reply, outcome.started, user.id, now);
     }
   );
 
@@ -236,11 +248,12 @@ const sessionRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/me",
     {
-      config: { auth: "user", allowPendingPasswordChange: true },
+      config: { auth: "user", allowPendingPasswordChange: true, allowPendingTwoFactor: true },
       schema: { response: { 200: currentUserSchema, ...errorResponses } }
     },
     async (request) => {
-      const user = await loadCurrentUser(app, authUser(request).id);
+      const caller = authUser(request);
+      const user = await loadCurrentUser(app, caller.id, caller.sessionId);
       if (user === null) throw new AppError("UNAUTHENTICATED");
       return user;
     }

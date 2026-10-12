@@ -74,6 +74,15 @@ async function insertRefreshToken(
   return { id: row.id, refreshToken };
 }
 
+/** Extra facts about how a new session was authenticated. */
+export interface StartSessionOptions {
+  /**
+   * WP-7: when the login proved a two-step code (or, for change-password, the
+   * replaced session's value). `null`/omitted: no second factor.
+   */
+  twoFactorVerifiedAt?: Date | null;
+}
+
 /**
  * Create a session plus its first refresh token.
  *
@@ -82,13 +91,15 @@ async function insertRefreshToken(
  * @param userId - Owner.
  * @param origin - User-Agent and IP.
  * @param now - Current time.
+ * @param options - Two-step state of the new session.
  */
 export async function startSession(
   tx: Transaction,
   config: SessionConfig,
   userId: string,
   origin: SessionOrigin,
-  now: Date
+  now: Date,
+  options: StartSessionOptions = {}
 ): Promise<IssuedRefresh> {
   const absoluteExpiresAt = new Date(now.getTime() + config.REFRESH_ABSOLUTE_DAYS * DAY_MS);
   const idleExpiresAt = idleExpiry(config, now, absoluteExpiresAt);
@@ -100,7 +111,8 @@ export async function startSession(
       ipAddress: origin.ip,
       lastUsedAt: now,
       idleExpiresAt,
-      absoluteExpiresAt
+      absoluteExpiresAt,
+      twoFactorVerifiedAt: options.twoFactorVerifiedAt ?? null
     })
     .returning({ id: sessions.id });
   if (!session) throw new Error("startSession: session insert returned no row");

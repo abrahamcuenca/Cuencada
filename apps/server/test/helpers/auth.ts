@@ -3,6 +3,8 @@ import type { LightMyRequestResponse } from "fastify";
 import type { App } from "../../src/app.js";
 import type { Clock } from "../../src/lib/clock.js";
 import type { SentMail } from "./fakes.js";
+import { userIdByEmail } from "./factories.js";
+import { answerChallenge, challengeTokenOf } from "./twoFactor.js";
 
 /** The dev/test refresh-cookie name (`COOKIE_SECURE=false`). */
 export const TEST_REFRESH_COOKIE = "cuencada_rt";
@@ -59,12 +61,15 @@ export async function loginFull(
   user: { email: string; password: string },
   headers: Record<string, string> = {}
 ): Promise<FullLogin> {
-  const response = await app.inject({
+  let response = await app.inject({
     method: "POST",
     url: "/api/auth/login",
     headers,
     payload: { email: user.email, password: user.password }
   });
+  // WP-7: users with 2FA (every admin fixture) answer the challenge with a fresh test code.
+  const challenge = challengeTokenOf(response);
+  if (challenge !== null) response = await answerChallenge(app, await userIdByEmail(user.email), challenge, headers);
   if (response.statusCode !== 200) throw new Error(`loginFull: ${response.statusCode} ${response.body}`);
   const cookie = refreshCookie(response);
   if (cookie === undefined) throw new Error("loginFull: no refresh cookie");

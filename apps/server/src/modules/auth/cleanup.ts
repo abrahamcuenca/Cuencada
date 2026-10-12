@@ -10,6 +10,9 @@
  *   They are bounded by the session's 90-day lifetime and go with it.
  * - `sessions` revoked or expired more than {@link DEAD_SESSION_RETENTION_DAYS}
  *   ago (their refresh tokens cascade).
+ * - WP-7: `two_factor_challenges` expired more than {@link SPENT_TOKEN_RETENTION_DAYS}
+ *   ago (used or burned ones expire 5 minutes after creation anyway), and
+ *   `trusted_devices` revoked or expired more than {@link DEAD_SESSION_RETENTION_DAYS} ago.
  */
 import { sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
@@ -31,6 +34,8 @@ export interface AuthCleanupResult {
   magicLinks: number;
   refreshTokens: number;
   sessions: number;
+  twoFactorChallenges: number;
+  trustedDevices: number;
 }
 
 async function deleteInBatches(run: () => Promise<number>): Promise<number> {
@@ -89,7 +94,27 @@ export async function purgeSpentAuthRows(db: Database, now: Date): Promise<AuthC
     return rows.length;
   });
 
-  return { magicLinks, refreshTokens, sessions };
+  const twoFactorChallenges = await deleteInBatches(async () => {
+    const rows = await db.execute(sql`
+      delete from two_factor_challenges where id in (
+        select id from two_factor_challenges
+        where expires_at < ${tokenCutoff}::timestamptz
+        limit ${AUTH_CLEANUP_BATCH}
+      ) returning id`);
+    return rows.length;
+  });
+
+  const trustedDevices = await deleteInBatches(async () => {
+    const rows = await db.execute(sql`
+      delete from trusted_devices where id in (
+        select id from trusted_devices
+        where revoked_at < ${sessionCutoff}::timestamptz or expires_at < ${sessionCutoff}::timestamptz
+        limit ${AUTH_CLEANUP_BATCH}
+      ) returning id`);
+    return rows.length;
+  });
+
+  return { magicLinks, refreshTokens, sessions, twoFactorChallenges, trustedDevices };
 }
 
 /**

@@ -4,7 +4,7 @@
  * Builds the real app with an `onRoute` recorder and fails when:
  * - a registered route is not classified in `ROUTE_MATRIX` (or vice versa),
  * - a route's `config.auth` / `requireVerifiedEmail` /
- *   `allowPendingPasswordChange` differs from its classification,
+ *   `allowPendingPasswordChange` / `allowPendingTwoFactor` differs from its classification,
  * - a route omits `config.auth` (only the CORS preflight may),
  * - a HEAD route does not mirror its GET twin's guard config,
  * - `docs/security/routes.md` is stale. Regenerate it with
@@ -48,11 +48,14 @@ function primaryRoutes(): RouteRecord[] {
   return routes.filter((route) => route.method !== "HEAD");
 }
 
-function classification(route: Pick<RouteRecord, "auth" | "requireVerifiedEmail" | "allowPendingPasswordChange">) {
+function classification(
+  route: Pick<RouteRecord, "auth" | "requireVerifiedEmail" | "allowPendingPasswordChange" | "allowPendingTwoFactor">
+) {
   return {
     auth: route.auth ?? "user",
     requireVerifiedEmail: route.requireVerifiedEmail,
-    allowPendingPasswordChange: route.allowPendingPasswordChange
+    allowPendingPasswordChange: route.allowPendingPasswordChange,
+    allowPendingTwoFactor: route.allowPendingTwoFactor
   };
 }
 
@@ -60,7 +63,8 @@ function specClassification(spec: RouteSpec) {
   return {
     auth: spec.auth,
     requireVerifiedEmail: spec.requireVerifiedEmail === true,
-    allowPendingPasswordChange: spec.allowPendingPasswordChange === true
+    allowPendingPasswordChange: spec.allowPendingPasswordChange === true,
+    allowPendingTwoFactor: spec.allowPendingTwoFactor === true
   };
 }
 
@@ -71,7 +75,8 @@ const PRINCIPAL_HEADERS: Record<(typeof PRINCIPALS)[number], string> = {
   pending: "Pending pw",
   disabled: "Disabled",
   revoked: "Revoked",
-  admin: "Admin"
+  admin: "Admin",
+  "admin-no-2fa": "Admin no 2FA"
 };
 
 function cell(spec: RouteSpec, principal: (typeof PRINCIPALS)[number]): string {
@@ -96,6 +101,7 @@ function renderRoutesDoc(): string {
     "auth",
     "Verified email",
     "Pending pw allowed",
+    "Pending 2FA allowed",
     ...PRINCIPALS.map((principal) => PRINCIPAL_HEADERS[principal]),
     "Other member (IDOR)",
     "Scope / notes"
@@ -107,12 +113,14 @@ function renderRoutesDoc(): string {
     "<!-- Regenerate: UPDATE_SECURITY_DOCS=1 pnpm --filter @cuencada/server test -- inventory -->",
     "",
     "Every route the API registers, with the guard configuration it declares",
-    "(`config.auth`, `requireVerifiedEmail`, `allowPendingPasswordChange`) and the",
-    "status class each principal gets in `authz-matrix.test.ts`. Fastify's automatic",
-    "HEAD twins of GET routes are omitted; the inventory test checks they carry the",
-    "same guard config. `401`/`403` cells are guard denials (`UNAUTHENTICATED`,",
-    "`PASSWORD_CHANGE_REQUIRED`, `FORBIDDEN`, `EMAIL_UNVERIFIED`); other non-2xx",
-    "cells are handler answers for that principal's own data.",
+    "(`config.auth`, `requireVerifiedEmail`, `allowPendingPasswordChange`,",
+    "`allowPendingTwoFactor`) and the status class each principal gets in",
+    "`authz-matrix.test.ts`. Fastify's automatic HEAD twins of GET routes are",
+    "omitted; the inventory test checks they carry the same guard config. `401`/`403`",
+    "cells are guard denials (`UNAUTHENTICATED`, `PASSWORD_CHANGE_REQUIRED`,",
+    "`FORBIDDEN`, `EMAIL_UNVERIFIED`, and for \"Admin no 2FA\" — an administrator who",
+    "has not enrolled two-step verification yet, WP-7 — `TWO_FACTOR_SETUP_REQUIRED`);",
+    "other non-2xx cells are handler answers for that principal's own data.",
     "",
     `Total: ${rows.length} routes (${rows.filter((row) => row.route.auth === "public").length} public, ` +
       `${rows.filter((row) => (row.route.auth ?? "user") === "user").length} user, ` +
@@ -138,6 +146,7 @@ function renderRoutesDoc(): string {
         route.auth ?? "(default user)",
         route.requireVerifiedEmail ? "yes" : "",
         route.allowPendingPasswordChange ? "yes" : "",
+        route.allowPendingTwoFactor ? "yes" : "",
         ...PRINCIPALS.map((principal) => cell(spec, principal)),
         idor,
         escapeCell(notes)

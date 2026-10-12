@@ -35,6 +35,8 @@ import {
 } from "./emailTokens.js";
 import { MailTier, withinGlobalMailCap } from "./mailBudget.js";
 import { revokeSessions, sessionOrigin, startSession } from "./sessions.js";
+import { revokeTrustedDevices } from "./twoFactor.js";
+import { sessionTwoFactorVerifiedAt } from "./currentUser.js";
 
 const noContent = z.null().describe("No content");
 
@@ -126,6 +128,9 @@ const passwordRoutes: FastifyPluginAsyncZod = async (app) => {
 
       const passwordHash = await hashPassword(request.body.newPassword);
       const now = app.clock.now();
+      // WP-7: the new session keeps this session's two-step state (an admin
+      // who proved a code does not have to prove it again for a new password).
+      const twoFactorVerifiedAt = await sessionTwoFactorVerifiedAt(app, current.sessionId);
       const issued = await app.db.transaction(async (tx) => {
         await tx
           .update(users)
@@ -133,13 +138,18 @@ const passwordRoutes: FastifyPluginAsyncZod = async (app) => {
           .where(eq(users.id, current.id));
         const revoked = await revokeSessions(tx, { userId: current.id }, "password_changed", now);
         await burnPendingEmailTokens(tx, current.id, now);
-        const started = await startSession(tx, app.config, current.id, sessionOrigin(request), now);
+        const revokedDevices = await revokeTrustedDevices(tx, current.id, now);
+        const started = await startSession(tx, app.config, current.id, sessionOrigin(request), now, { twoFactorVerifiedAt });
         await recordAudit(tx, {
           actorUserId: current.id,
           action: AuthAuditAction.PasswordChanged,
           entityType: "user",
           entityId: current.id,
-          metadata: { revokedSessions: revoked.length, newSessionId: started.sessionId },
+          metadata: {
+            revokedSessions: revoked.length,
+            newSessionId: started.sessionId,
+            ...(revokedDevices.length > 0 ? { revokedTrustedDevices: revokedDevices.length } : {})
+          },
           ip: request.ip
         });
         return started;
@@ -238,12 +248,17 @@ const passwordRoutes: FastifyPluginAsyncZod = async (app) => {
         await markEmailVerified(tx, consumed, now);
         const revoked = await revokeSessions(tx, { userId: consumed.userId }, "password_reset", now);
         await burnPendingEmailTokens(tx, consumed.userId, now);
+        // WP-7: a reset also stops trusting this member's devices (2FA itself stays on).
+        const revokedDevices = await revokeTrustedDevices(tx, consumed.userId, now);
         await recordAudit(tx, {
           actorUserId: consumed.userId,
           action: AuthAuditAction.PasswordReset,
           entityType: "user",
           entityId: consumed.userId,
-          metadata: { revokedSessions: revoked.length },
+          metadata: {
+            revokedSessions: revoked.length,
+            ...(revokedDevices.length > 0 ? { revokedTrustedDevices: revokedDevices.length } : {})
+          },
           ip: request.ip
         });
         return { ...user, userId: consumed.userId, operationId: consumed.tokenId };
