@@ -48,6 +48,7 @@ import type { FakeMailer, FakeStorage } from "../../../test/helpers/fakes.js";
 import { insertParentOf, insertPerson } from "../../../test/helpers/family.js";
 import { insertMedia, makePng } from "../../../test/helpers/media.js";
 import { EVENT_ROUTE_SPECS } from "./eventRouteMatrix.js";
+import { MEMORY_ROUTE_SPECS, memoryMediaProbes } from "./memoryRouteMatrix.js";
 
 /** Who calls a route in the matrix. */
 export const Principal = {
@@ -1165,7 +1166,8 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
           return { ...json(`/api/media/${id}/confirm`), state: mediaState(id) };
         },
         expect: NOT_FOUND
-      }
+      },
+      ...memoryMediaProbes((id) => json(`/api/media/${id}/confirm`), true)
     ]
   },
   {
@@ -1204,7 +1206,8 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
           build: async (ctx) => json(`/api/media/${await mediaIn(ctx, ctx.other, { uploadStatus, moderationStatus: "approved" })}`),
           expect: NOT_FOUND
         })
-      )
+      ),
+      ...memoryMediaProbes((id) => json(`/api/media/${id}`))
     ]
   },
   {
@@ -1225,7 +1228,8 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
           },
           expect: NOT_FOUND
         })
-      )
+      ),
+      ...memoryMediaProbes((id) => json(`/api/media/${id}`, { caption: "Mía" }))
     ]
   },
   {
@@ -1246,7 +1250,8 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
           },
           expect: NOT_FOUND
         })
-      )
+      ),
+      ...memoryMediaProbes((id) => json(`/api/media/${id}`))
     ]
   },
   {
@@ -1280,7 +1285,8 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
           };
         },
         expect: NOT_FOUND
-      }
+      },
+      ...memoryMediaProbes((id) => json(`/api/media/${id}/report`, { reason: "other" }))
     ]
   },
   { method: "GET", url: "/api/admin/media", auth: "admin", build: async () => json("/api/admin/media") },
@@ -1888,7 +1894,9 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
   { method: "GET", url: "/api/admin/audit-logs", auth: "admin", build: async () => json("/api/admin/audit-logs") },
   { method: "GET", url: "/api/admin/summary", auth: "admin", build: async () => json("/api/admin/summary") },
   // ------------------------------------------------------------- events (WP-5.3)
-  ...EVENT_ROUTE_SPECS
+  ...EVENT_ROUTE_SPECS,
+  // -------------------------------------------------------- Memory Box (WP-6.3)
+  ...MEMORY_ROUTE_SPECS
 ];
 
 /** `METHOD url` key used by the inventory. */

@@ -153,7 +153,7 @@ export async function updateMemoryAlbum(
       .set({ ...input, updatedAt: app.clock.now() })
       .where(eq(memoryAlbums.id, albumId));
     const audit = boxAudit(tx, user, albumId, ip);
-    await audit(AuditAction.MemoryAlbumUpdated, { fields: Object.keys(input) });
+    await audit(AuditAction.MemoryAlbumUpdated, { fields: Object.keys(input).sort() });
     if (input.status !== undefined && input.status !== box.status) {
       if (input.status === "published") await audit(AuditAction.MemoryAlbumPublished, { previousStatus: box.status });
       if (input.status === "hidden") await audit(AuditAction.MemoryAlbumHidden, { previousStatus: box.status });
