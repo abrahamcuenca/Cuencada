@@ -20,14 +20,17 @@ real Postgres:
 - **`inventory.test.ts`**: records every route through an `onRoute` hook. It
   **fails when a route is added without being classified** in
   `routeMatrix.ts`. It also fails when a route's `config.auth`,
-  `requireVerifiedEmail` or `allowPendingPasswordChange` changes, when a
+  `requireVerifiedEmail`, `allowPendingPasswordChange` or (WP-7)
+  `allowPendingTwoFactor` changes, when a
   route omits `config.auth`, when HEAD twins drift from their GET, and when
   `routes.md` is stale. Regenerate `routes.md` with
   `UPDATE_SECURITY_DOCS=1 pnpm --filter @cuencada/server test -- inventory`.
 - **`authz-matrix.test.ts`**:
-  - Every route is called by 7 principals with a minimal **valid** request:
+  - Every route is called by 8 principals with a minimal **valid** request:
     anonymous, verified member, unverified member, member pending a password
-    change, disabled user with an old token, revoked session, and admin.
+    change, disabled user with an old token, revoked session, admin, and
+    (WP-7) an admin who has not enrolled two-step verification (403
+    `TWO_FACTOR_SETUP_REQUIRED` except on `/me` and the enrollment routes).
     Because the request is valid, a denial proves the guard decided, not
     validation.
   - 27 extra probes as a verified member. A probe re-reads the rows it must
@@ -98,3 +101,10 @@ These results were judgment calls, all accepted:
 | L6 | Low | Stored photos and avatars carried `private, max-age=31536000, immutable`, so they stayed in a shared browser's disk cache for a year after logout. | **Fixed:** `private, max-age=3600`, no longer than the presigned GET (`cache-lifetimes.test.ts`). The residual hour is accepted (threat model A9). |
 
 No High was found.
+
+WP-7 (two-step verification) adds `apps/server/src/lib/totp.test.ts` and
+`apps/server/src/modules/auth/twoFactorRoutes.test.ts`: the TOTP window and
+replay, challenge expiry and attempts, rate limits, magic-link gating,
+trusted devices, recovery codes, the admin gate and reset, the encryption key
+(fail closed), and a scan of logs, audit rows, emails and responses for
+secrets, codes, otpauth URIs and tokens.
