@@ -1,7 +1,8 @@
 /**
  * WP-5.4 Eventos, the combined pass of the plan (WP-5 "Sequencing" 4):
  * - a member creates a participants-only trip and adds two relatives from the
- *   directory; they get the consent notice, chat and upload to the album;
+ *   directory; they get the consent notice (the WP-6.1 notifications bell),
+ *   chat and upload to the album;
  * - a non-participant can't see it (list, URL → the same 404 screen);
  * - an admin opens it;
  * - an all-members event: "Me apunto" → its chat room appears.
@@ -63,11 +64,20 @@ test.describe("eventos", () => {
     await expect(page.getByText("Agregaste a 2 personas.")).toBeVisible();
     await sheet.getByRole("button", { name: "Cerrar" }).click();
 
-    // Beto gets the consent notice, opens the event and chats.
+    // Beto gets the consent notice in the notifications bell (WP-6.1), opens the event from it and chats.
     const betoPhone = await newPhone();
     await login(betoPhone, beto);
-    await betoPhone.goto("/eventos");
-    await expect(betoPhone.getByText(new RegExp(`te agregó a «${title.replace(/[()]/g, "\\$&")}»`))).toBeVisible();
+    const bell = betoPhone.getByRole("banner").getByRole("link", { name: /^Notificaciones: \d+ notificaci/ });
+    await expect(bell).toBeVisible();
+    await bell.click();
+    await expect(betoPhone.getByRole("heading", { level: 1, name: "Notificaciones" })).toBeVisible();
+    const notice = betoPhone.getByRole("main").getByRole("link", { name: new RegExp(`te agregó a «${title.replace(/[()]/g, "\\$&")}»`) });
+    await expect(notice).toBeVisible();
+    await expect(betoPhone.getByRole("button", { name: `Salir de ${title}` })).toBeVisible();
+    await docShot(betoPhone, testInfo, "notificaciones", "notificaciones", notice);
+    await notice.click();
+    await expect(betoPhone.getByRole("heading", { level: 1, name: title })).toBeVisible();
+    await expect(betoPhone).toHaveURL(new RegExp(`${path}$`));
     await betoPhone.goto(`${path}?vista=chat`);
     const hello = `¿A qué hora salimos? (${Date.now() % 100_000})`;
     await betoPhone.getByRole("textbox", { name: "Mensaje" }).fill(hello);

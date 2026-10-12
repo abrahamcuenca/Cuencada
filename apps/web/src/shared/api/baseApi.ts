@@ -48,7 +48,9 @@ export const API_TAG_TYPES = [
   // WP-5.4 events (one tag: `LIST`, `ADMIN-LIST`, `UPCOMING` and one id per event)
   "Event",
   // WP-6.3 Memory Box (`LIST`, `ADMIN-LIST` and one id per box)
-  "MemoryAlbum"
+  "MemoryAlbum",
+  // WP-6.1 notifications (`FEED` and `UNREAD`)
+  "Notification"
 ] as const;
 
 /** Union of every declared cache tag. */

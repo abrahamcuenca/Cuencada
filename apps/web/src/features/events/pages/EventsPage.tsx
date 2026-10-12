@@ -20,7 +20,6 @@ import { AccessDeniedState } from "../../auth/components/AccessDeniedState";
 import { type EventListFilter, useListEventsInfiniteQuery } from "../api";
 import { EventCard } from "../components/EventCard";
 import { EventFormSheet } from "../components/EventFormSheet";
-import { EventNotices } from "../notices/AddedToEventNotice";
 import styles from "../events.module.css";
 import { currentEventYear } from "../lib/form";
 
@@ -72,7 +71,6 @@ export function EventsPage(): ReactNode {
           Crear evento
         </Button>
       </header>
-      <EventNotices />
       <div className={styles.filters}>
         <div className={styles.yearFilter}>
           <label htmlFor={yearId} className={styles.albumLabel}>

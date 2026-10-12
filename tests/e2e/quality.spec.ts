@@ -63,6 +63,8 @@ const MEMBER_ROUTES: RouteCheck[] = [
   { name: "recuerdos", open: "/recuerdos", ready: "Baúl de recuerdos", readyExact: true },
   { name: "recuerdos-baul", open: `/recuerdos/${MEMORY_BOX_ID}`, ready: MEMORY_BOX_TITLE, readyExact: true },
   { name: "recuerdos-no-encontrado", open: `/recuerdos/${HIDDEN_MEMORY_BOX_ID}`, ready: "No encontramos ese baúl" },
+  // WP-6.1: the notifications feed.
+  { name: "notificaciones", open: "/notificaciones", ready: "Notificaciones", readyExact: true },
   // WP-4.7: the profile's Contacto section from a link, and the open account menu.
   { name: "perfil-contacto", open: "/perfil#contacto", ready: "Contacto" },
   {
