@@ -225,3 +225,6 @@ WP-2.4 prepared every item below; **the owner applies them** following
 - [ ] WP-6.0: drop `event_participants.notice_seen_at` (contract migration) once no shipped web build calls `GET /api/events/notices` / `DELETE /api/events/:id/notice`.
 - [ ] WP-6.0: a person-merge undo does not restore tags or pending proposals moved to keep (ADR 0001 §8); revisit if admins need it.
 - [ ] WP-6.0: the notification push uses the single-process chat hub (`sendToUser`), like event rooms; a second API process needs the shared bus too.
+- [ ] WP-6.2: the `photo_tag_request` notification is written by an after-commit job (the tagger-blind rule, ADR 0001 §8), not in the tag's transaction; the in-process job queue drops it on a crash. A durable outbox would close that gap (the tag itself is still found pending in the detail and in "Fotos").
+- [ ] WP-6.2: a person-merge (WP-6.4) should call `moveMediaTagsTx` **before** moving the duplicate's account link to keep; afterwards the duplicate reads as unlinked and its approved tags fail closed to `pending`.
+- [ ] WP-6.2: no `photo_tag_request` is written for tags that a merge returns to `pending` (the user sees them in the detail and "Fotos"); add one if admins ask.
