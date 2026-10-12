@@ -60,7 +60,7 @@ All routes: `auth: "user"` + `config.requireVerifiedEmail: true` (admin routes `
 |---|---|---|---|
 | `GET /api/notifications` | member | `notificationListQuerySchema` (`cursor`, `limit`, `unread?`) | `notificationPageSchema` (newest first; invisible targets filtered out) |
 | `POST /api/notifications/read` | member | `markNotificationsReadInputSchema` (`{ ids }` ≤ 100 or `{ all: true }`) | `unreadCountSchema` |
-| `GET /api/notifications/unread-count` | member | — | `unreadCountSchema` (capped at 99) |
+| `GET /api/notifications/unread-count` | member | — | `unreadCountSchema` (capped at `NOTIFICATION_UNREAD_COUNT_MAX` = 999) |
 | `GET /api/events/notices` | member | — | deprecated shim: unseen visible `event_added` notifications as `eventNoticeListSchema` |
 | `DELETE /api/events/:id/notice` | member | — | deprecated shim: marks `event:{id}` seen (and sets `notice_seen_at`), 204; 404 when invisible |
 

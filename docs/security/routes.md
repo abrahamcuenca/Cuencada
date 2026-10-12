@@ -11,7 +11,7 @@ same guard config. `401`/`403` cells are guard denials (`UNAUTHENTICATED`,
 `PASSWORD_CHANGE_REQUIRED`, `FORBIDDEN`, `EMAIL_UNVERIFIED`); other non-2xx
 cells are handler answers for that principal's own data.
 
-Total: 150 routes (14 public, 72 user, 62 admin, 2 cookie).
+Total: 165 routes (14 public, 85 user, 64 admin, 2 cookie).
 
 | Method | Path | auth | Verified email | Pending pw allowed | Anon | Member | Unverified | Pending pw | Disabled | Revoked | Admin | Other member (IDOR) | Scope / notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -57,6 +57,8 @@ Total: 150 routes (14 public, 72 user, 62 admin, 2 cookie).
 | GET | `/api/admin/media` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | POST | `/api/admin/media/:id/moderate` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
 | GET | `/api/admin/media/:id/reports` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
+| GET | `/api/admin/media/comment-reports` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
+| DELETE | `/api/admin/media/comments/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | audited media_comment.deleted (ids only); the body is scrubbed |
 | GET | `/api/admin/memory-albums` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | every box, drafts and hidden included |
 | POST | `/api/admin/memory-albums` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | draft by default; audited |
 | DELETE | `/api/admin/memory-albums/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | 409 MEMORY_ALBUM_NOT_EMPTY with live media; purges soft-deleted rows |
@@ -140,6 +142,7 @@ Total: 150 routes (14 public, 72 user, 62 admin, 2 cookie).
 | DELETE | `/api/family/people/:id/photo` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | same rule as the upload intent (WP-4.3); probe: a person who is not a close relative → 403 |
 | POST | `/api/family/people/:id/photo/uploads` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | admins, the linked person, close relatives of a person without account (WP-4.3); probe: a person who is not a close relative → 403 |
 | POST | `/api/family/people/:id/photo/uploads/:uploadId/confirm` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | uploader only (404 for another user's uploadId or another person's path) |
+| GET | `/api/family/people/:id/photos` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | approved tags (plus the caller's own pending ones) on photos the caller can see; published editions only |
 | PATCH | `/api/family/people/me` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | self-scoped alias of /api/family/me; mass assignment: extra keys (userId/deceased/deathYear/deathDate/id) → 2xx |
 | GET | `/api/family/tree` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
 | POST | `/api/invites/accept` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  | probe: invite naming another member's linked person (falls back, never relinks) → 2xx; probe: open link naming an unlinked person (legacy row; falls back, never links) → 2xx |
@@ -148,8 +151,20 @@ Total: 150 routes (14 public, 72 user, 62 admin, 2 cookie).
 | DELETE | `/api/media/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | uploader or admin (404 for other members) |
 | GET | `/api/media/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | hidden/pending items only for the uploader and admins (404 otherwise) |
 | PATCH | `/api/media/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | uploader or admin (404 for other members) |
+| GET | `/api/media/:id/comments` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | deleted comments are tombstones (no body, no author) |
+| POST | `/api/media/:id/comments` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 |  |
 | POST | `/api/media/:id/confirm` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | uploader only (404 for others) |
+| GET | `/api/media/:id/detail` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | pending tags only for the tagger, the tagged user and admins |
+| DELETE | `/api/media/:id/like` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 |  |
+| PUT | `/api/media/:id/like` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 |  |
+| GET | `/api/media/:id/likes` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | names; avatars only for listed active members; no account ids |
 | POST | `/api/media/:id/report` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | any member except the uploader (403 on own items); probe: report own item → 403 |
+| GET | `/api/media/:id/tag-candidates` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | any person; name only for unlisted/disabled members |
+| POST | `/api/media/:id/tags` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | pending for linked people (the tagger sees it as approved); 30 per photo |
+| DELETE | `/api/media/:id/tags/:tagId` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | the tagger, the uploader, the tagged person's user, admins; probe: uploader on someone else's pending tag (invisible to them) → 404 |
+| DELETE | `/api/media/comments/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | the author only (admins moderate on the admin route) |
+| POST | `/api/media/comments/:id/report` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | any viewer except the author (403 on own comments); probe: report own comment → 403 |
+| POST | `/api/media/tags/:id/approve` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | the tagged person's linked user only |
 | GET | `/api/memories` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | published boxes only (drafts and hidden boxes never listed) |
 | GET | `/api/memories/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | published boxes for members; admins any (404 MEMORY_ALBUM_NOT_FOUND) |
 | GET | `/api/memories/:id/media` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | published boxes for members; admins any (404 MEMORY_ALBUM_NOT_FOUND) |

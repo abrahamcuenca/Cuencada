@@ -1,7 +1,8 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { authenticatedState, makeUser } from "../../../../test/auth";
+import { HttpResponse, http } from "msw";
+import { apiUrl, authenticatedState, makeUser } from "../../../../test/auth";
 import { createTestServer } from "../../../../test/msw";
 import { renderApp, warmRoutes } from "../../../../test/renderApp";
 import { galleryApi } from "../../gallery/api";
@@ -83,6 +84,30 @@ describe("MemoryAlbumPage (/recuerdos/:id)", { timeout: 20_000 }, () => {
     await user.click(within(viewer).getByRole("button", { name: "Cerrar visor" }));
     await waitFor(() => expect(router.state.location.search).toBe(""));
     expect(screen.queryByRole("dialog", { name: "Visor de fotos" })).not.toBeInTheDocument();
+  });
+
+  it("opens a ?foto=<id> photo that is beyond the first loaded page through the per-item detail (WP-6.2)", async () => {
+    const box = makeBox(1, { mediaCount: 31 });
+    db.boxes = [box];
+    db.media.set(box.id, [makeBoxMedia(1, box)]);
+    const later = { ...makeBoxMedia(31, box), caption: "Foto de la página dos" };
+    server.use(
+      http.get(apiUrl("/media/:id/detail"), ({ params }) =>
+        params.id === later.id
+          ? HttpResponse.json({
+              item: later,
+              tags: [],
+              likes: { likeCount: 0, likedByMe: false },
+              commentCount: 0,
+              comments: { items: [], nextCursor: null },
+              canTag: true
+            })
+          : HttpResponse.json({ error: { code: "NOT_FOUND", message: "No encontramos esa foto o video." } }, { status: 404 })
+      )
+    );
+    renderApp(`/recuerdos/${box.id}?foto=${later.id}`, authenticatedState());
+    const viewer = await screen.findByRole("dialog", { name: "Visor de fotos" }, { timeout: 5000 });
+    expect(await within(viewer).findByRole("img", { name: "Foto de la página dos" })).toBeInTheDocument();
   });
 
   it("shows the same not-found state for a hidden, a draft and a missing box (no request leaks the difference)", async () => {

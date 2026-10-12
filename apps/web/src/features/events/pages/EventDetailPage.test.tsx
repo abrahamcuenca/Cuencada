@@ -279,6 +279,37 @@ describe("EventDetailPage", { timeout: 20_000 }, () => {
     expect(await screen.findByRole("heading", { name: "Aún no hay fotos en este álbum" })).toBeInTheDocument();
   });
 
+  it.each([
+    ["the notification link (?vista=fotos&foto=)", "?vista=fotos&foto="],
+    ["a bare ?foto= link", "?foto="]
+  ])("opens the photo in the lightbox from %s, including a photo of another album (WP-6.2)", async (_label, query) => {
+    const albums = [makeAlbum(1, { mediaCount: 1 }), makeAlbum(2, { title: "Comida", mediaCount: 1 })];
+    const event = asOrganizer(makeDetail({ albums }));
+    putDetail(db, event);
+    const inFirst = makeAlbumMedia(1, event, albums[0] ?? makeAlbum(1));
+    const inSecond = makeAlbumMedia(2, event, albums[1] ?? makeAlbum(2));
+    db.media.set(albums[0]?.id ?? "", [inFirst]);
+    db.media.set(albums[1]?.id ?? "", [inSecond]);
+    server.use(
+      http.get(apiUrl("/media/:id/detail"), ({ params }) =>
+        params.id === inSecond.id
+          ? HttpResponse.json({
+              item: inSecond,
+              tags: [],
+              likes: { likeCount: 0, likedByMe: false },
+              commentCount: 0,
+              comments: { items: [], nextCursor: null },
+              canTag: true
+            })
+          : HttpResponse.json({ error: { code: "NOT_FOUND", message: "No encontramos esa foto o video." } }, { status: 404 })
+      )
+    );
+    renderApp(`${PATH}${query}${inSecond.id}`, authenticatedState());
+    const viewer = await screen.findByRole("dialog", { name: "Visor de fotos" }, { timeout: 5000 });
+    expect(await within(viewer).findByRole("img", { name: "Foto del paseo 2" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Fotos" })).toHaveAttribute("aria-selected", "true");
+  });
+
   it("asks a non-participant to join instead of showing photos or chat", async () => {
     putDetail(db, makeDetail());
     const user = userEvent.setup();

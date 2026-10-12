@@ -100,7 +100,21 @@ function MediaTile({ item, onOpen, onMediaError }: { item: MediaItem; onOpen: (i
           ▶
         </span>
       ) : null}
+      <SocialBadge item={item} />
     </button>
+  );
+}
+
+/** WP-6.2: hearts and comments on the tile (decorative; the lightbox has the accessible controls). */
+function SocialBadge({ item }: { item: MediaItem }): React.ReactNode {
+  const likes = item.likeCount ?? 0;
+  const comments = item.commentCount ?? 0;
+  if (likes === 0 && comments === 0) return null;
+  return (
+    <span aria-hidden="true" className={styles.socialBadge} data-testid="tile-social">
+      {likes > 0 ? <span>♥ {likes}</span> : null}
+      {comments > 0 ? <span>💬 {comments}</span> : null}
+    </span>
   );
 }
 

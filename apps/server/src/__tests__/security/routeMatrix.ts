@@ -50,6 +50,7 @@ import { insertMedia, makePng } from "../../../test/helpers/media.js";
 import { EVENT_ROUTE_SPECS } from "./eventRouteMatrix.js";
 import { MEMORY_ROUTE_SPECS, memoryMediaProbes } from "./memoryRouteMatrix.js";
 import { NOTIFICATION_ROUTE_SPECS } from "./notificationRouteMatrix.js";
+import { SOCIAL_ROUTE_SPECS } from "./socialRouteMatrix.js";
 
 /** Who calls a route in the matrix. */
 export const Principal = {
@@ -1899,7 +1900,9 @@ export const ROUTE_MATRIX: readonly RouteSpec[] = [
   // -------------------------------------------------------- Memory Box (WP-6.3)
   ...MEMORY_ROUTE_SPECS,
   // ------------------------------------------------------- notifications (WP-6.1)
-  ...NOTIFICATION_ROUTE_SPECS
+  ...NOTIFICATION_ROUTE_SPECS,
+  // ------------------------------------------------------- photo social (WP-6.2)
+  ...SOCIAL_ROUTE_SPECS
 ];
 
 /** `METHOD url` key used by the inventory. */

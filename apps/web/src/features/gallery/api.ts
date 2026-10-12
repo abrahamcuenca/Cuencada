@@ -291,6 +291,22 @@ export function memoryAlbumOf(item: Pick<MediaItem, "memoryAlbum">): { memoryAlb
   return box === null ? {} : { memoryAlbumId: box.id };
 }
 
+/**
+ * WP-6.2: applies `change` to the loaded copy of `item` in its year, album or
+ * Memory Box list (social counts after a heart or a comment), without
+ * refetching pages.
+ *
+ * @param item - The item (its `year`/`album`/`memoryAlbum` locate the list).
+ * @param change - Mutates the cached copy.
+ * @returns The thunk to dispatch, or `null` when no list holds it.
+ */
+export function patchLoadedMedia(
+  item: Pick<MediaItem, "id" | "year" | "album" | "memoryAlbum">,
+  change: (item: MediaItem) => void
+): ReturnType<typeof galleryListApi.util.updateQueryData> | null {
+  return patchItem(item.year, albumOf(item), item.id, change, memoryAlbumOf(item).memoryAlbumId);
+}
+
 export const galleryApi = galleryListApi.injectEndpoints({
   endpoints: (build) => ({
     /**
