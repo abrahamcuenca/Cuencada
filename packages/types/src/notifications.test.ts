@@ -20,7 +20,7 @@ const liked = {
   id: ID,
   kind: "photo_liked",
   actor: { name: "Ana Morales Vega", avatarUrl: null },
-  target: { kind: "media", mediaId: OTHER, thumbUrl: null },
+  target: { kind: "media", mediaId: OTHER, thumbUrl: null, place: { kind: "edition", year: 2026 } },
   count: 3,
   seenAt: null,
   createdAt: "2026-10-11T10:00:00.000Z"
@@ -33,7 +33,7 @@ describe("notificationSchema", () => {
       ...liked,
       kind: "event_added",
       count: 1,
-      target: { kind: "event", event: { id: OTHER, year: 2026, slug: "viaje-k7q2", title: "Viaje" } }
+      target: { kind: "event", event: { id: OTHER, year: 2026, slug: "viaje-k7q2", title: "Viaje" }, canLeave: true }
     };
     expect(notificationSchema.parse(added)).toEqual(added);
     const resolved = { ...liked, kind: "tree_proposal_resolved", count: 1, target: { kind: "proposal", proposalId: OTHER, status: "approved" } };
@@ -50,6 +50,16 @@ describe("notificationSchema", () => {
       notificationSchema.safeParse({ ...liked, kind: "tree_proposal_resolved", target: { kind: "proposal", proposalId: OTHER, status: "pending" } })
         .success
     ).toBe(false);
+  });
+
+  it("carries where a photo lives (edition, event album or Memory Box) and requires it (WP-6.1)", () => {
+    const event = { id: OTHER, year: 2026, slug: "viaje-k7q2", title: "Viaje" };
+    for (const place of [{ kind: "album", event }, { kind: "memory", memoryAlbumId: OTHER }]) {
+      const item = { ...liked, target: { ...liked.target, place } };
+      expect(notificationSchema.parse(item)).toEqual(item);
+    }
+    expect(notificationSchema.safeParse({ ...liked, target: { kind: "media", mediaId: OTHER, thumbUrl: null } }).success).toBe(false);
+    expect(notificationSchema.safeParse({ ...liked, target: { ...liked.target, place: { kind: "edition" } } }).success).toBe(false);
   });
 
   it("maps every kind to one target kind", () => {

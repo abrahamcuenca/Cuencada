@@ -11,6 +11,7 @@ import {
 import { type ChatUnreadBadge, useChatUnreadBadge } from "../features/chat/unread";
 import { useGetCuencadaHomeQuery } from "../features/cuencadas/api";
 import { programaYear } from "../features/cuencadas/lib/programa";
+import { NotificationBell } from "../features/notifications/NotificationBell";
 import { PwaStatusMount } from "../features/pwa";
 import { wantsMinimalChrome } from "../shared/lib/featureRoutes";
 import { reportUnexpected } from "../shared/lib/reportUnexpected";
@@ -164,7 +165,13 @@ function SessionAction({ audience }: { audience: SessionAudience }): ReactNode {
       </Button>
     );
   }
-  return <AccountMenu user={user} />;
+  // WP-6.1: the bell sits beside the account menu at every width.
+  return (
+    <>
+      <NotificationBell />
+      <AccountMenu user={user} />
+    </>
+  );
 }
 
 function StatusBanner(): ReactNode {
@@ -182,7 +189,7 @@ function selectNeedsEmailVerification(state: WithAuthState): boolean {
 
 /**
  * App shell built on the WP-0.7 primitives: `TopNav` (brand, links at
- * ≥900px, "Entrar" or the {@link AccountMenu}), the routed page inside `PageShell`'s `<main>`, and
+ * ≥900px, "Entrar" or the notifications bell plus the {@link AccountMenu}), the routed page inside `PageShell`'s `<main>`, and
  * the mobile `BottomNav`.
  *
  * The destinations depend on the session ({@link topNavItems},

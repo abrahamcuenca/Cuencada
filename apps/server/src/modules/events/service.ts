@@ -29,6 +29,8 @@ import {
   eventDatesIssue,
   eventYearOf,
   memberEventSlug,
+  NotificationKind,
+  notificationDedupeKey,
   randomEventSlugSuffix
 } from "@cuencada/types";
 import { and, count, eq, gt, inArray, isNull, sql } from "drizzle-orm";
@@ -46,6 +48,7 @@ import { AppError } from "../../lib/errors.js";
 import type { AuthUser } from "../../plugins/auth.js";
 import { PgErrorCode, pgErrorInfo } from "../family/db-errors.js";
 import { allObjectKeys } from "../media/service.js";
+import { pushNotifications, recordNotification, retractNotification } from "../notifications/notify.js";
 import { deleteObjectsQuietly } from "../profile/uploadPipeline.js";
 import { type EventViewer, isEventAdmin } from "./access.js";
 import { AdminViewSurface, auditAdminEventView } from "./adminView.js";
@@ -291,7 +294,7 @@ export async function createEvent(
   const dates = checkedDates({ year: input.year ?? null, startsAt: input.startsAt, endsAt: input.endsAt, timezone: input.timezone });
   const publish = input.publish;
 
-  const eventId = await app.db.transaction(async (tx) => {
+  const { eventId, notificationIds } = await app.db.transaction(async (tx) => {
     await enforceCreateCaps(tx, user, now);
     const others = input.participantUserIds.filter((id) => id !== user.id);
     const added = await newEligibleParticipants(tx, null, others, viewer);
@@ -329,9 +332,27 @@ export async function createEvent(
     });
     if (added.length > 0) await audit(AuditAction.EventParticipantAdded, { userIds: added, role: EventRole.Participant });
     if (publish) await audit(AuditAction.EventPublished, {});
-    return row.id;
+    // WP-6.1: each member added by the creator gets `event_added` (shown once the event is visible to them).
+    const ids = await notifyAdded(tx, user.id, row.id, added);
+    return { eventId: row.id, notificationIds: ids };
   });
+  await pushNotifications(app, notificationIds);
   return eventId;
+}
+
+/** Records an `event_added` notification for each added member (never the actor). */
+async function notifyAdded(tx: Transaction, actorUserId: string, eventId: string, userIds: readonly string[]): Promise<string[]> {
+  const ids: string[] = [];
+  for (const userId of userIds) {
+    const id = await recordNotification(tx, {
+      recipientUserId: userId,
+      actorUserId,
+      kind: NotificationKind.EventAdded,
+      target: { eventId }
+    });
+    if (id !== null) ids.push(id);
+  }
+  return ids;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -549,6 +570,8 @@ export async function leaveEvent(app: FastifyInstance, user: AuthUser, eventId: 
     await tx
       .delete(eventParticipants)
       .where(and(eq(eventParticipants.eventId, eventId), eq(eventParticipants.userId, user.id)));
+    // WP-6.1: "Te agregaron a…" no longer applies once you left.
+    await retractNotification(tx, user.id, notificationDedupeKey.event(eventId));
     await participantAudit(tx, user, eventId, ip)(AuditAction.EventLeft, { userId: user.id, role: event.viewerRole });
     return snapshot;
   });
@@ -559,7 +582,8 @@ export async function leaveEvent(app: FastifyInstance, user: AuthUser, eventId: 
  * `POST /api/events/:id/participants` (organizers, admins): add listed,
  * active, verified members (admins: any active, verified member), up to
  * {@link EVENT_PARTICIPANTS_MAX}. Existing participants are left as they
- * are. Each new participant sees a consent notice (`GET /api/events/notices`).
+ * are. Each new participant gets an `event_added` notification (WP-6.1;
+ * the consent notice), pushed to their sockets after the commit.
  */
 export async function addParticipants(
   app: FastifyInstance,
@@ -569,21 +593,26 @@ export async function addParticipants(
   ip: string
 ): Promise<void> {
   const viewer = eventViewerOf(user);
-  const before = await app.db.transaction(async (tx): Promise<RoomSnapshot> => {
-    const event = await lockVisibleEvent(tx, viewer, eventId);
-    requireManager(event, viewer);
-    // Only after visibility and permission passed (PR #54 L1).
-    const snapshot = await snapshotEventRoom(tx, eventId);
-    const added = await newEligibleParticipants(tx, eventId, input.userIds, viewer);
-    if (added.length === 0) return snapshot;
-    if (event.participantCount + added.length > EVENT_PARTICIPANTS_MAX) throw new AppError("CONFLICT", TOO_MANY_PARTICIPANTS);
-    await tx
-      .insert(eventParticipants)
-      .values(added.map((userId) => ({ eventId, userId, role: input.role, addedByUserId: user.id })));
-    await participantAudit(tx, user, eventId, ip)(AuditAction.EventParticipantAdded, { userIds: added, role: input.role });
-    return snapshot;
-  });
+  const { before, notificationIds } = await app.db.transaction(
+    async (tx): Promise<{ before: RoomSnapshot; notificationIds: string[] }> => {
+      const event = await lockVisibleEvent(tx, viewer, eventId);
+      requireManager(event, viewer);
+      // Only after visibility and permission passed (PR #54 L1).
+      const snapshot = await snapshotEventRoom(tx, eventId);
+      const added = await newEligibleParticipants(tx, eventId, input.userIds, viewer);
+      if (added.length === 0) return { before: snapshot, notificationIds: [] };
+      if (event.participantCount + added.length > EVENT_PARTICIPANTS_MAX) throw new AppError("CONFLICT", TOO_MANY_PARTICIPANTS);
+      await tx
+        .insert(eventParticipants)
+        .values(added.map((userId) => ({ eventId, userId, role: input.role, addedByUserId: user.id })));
+      await participantAudit(tx, user, eventId, ip)(AuditAction.EventParticipantAdded, { userIds: added, role: input.role });
+      // WP-6.1: the consent notice is an `event_added` notification, in this transaction (none for yourself).
+      return { before: snapshot, notificationIds: await notifyAdded(tx, user.id, eventId, added) };
+    }
+  );
   await syncEventRoom(app, eventId, before);
+  // After the commit and the audience refresh; best effort, never fails the request.
+  await pushNotifications(app, notificationIds);
 }
 
 /** The target participant's role, or 404. */
@@ -650,6 +679,7 @@ export async function removeParticipant(
     await tx
       .delete(eventParticipants)
       .where(and(eq(eventParticipants.eventId, eventId), eq(eventParticipants.userId, targetUserId)));
+    await retractNotification(tx, targetUserId, notificationDedupeKey.event(eventId));
     await participantAudit(tx, user, eventId, ip)(AuditAction.EventParticipantRemoved, { userId: targetUserId, role: current });
     return snapshot;
   });
