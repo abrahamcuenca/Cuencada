@@ -1,13 +1,14 @@
 import type { AdminUserListItem } from "@cuencada/types";
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
-import { isAbortError } from "../../../shared/api/errors";
+import { getApiErrorCode, isAbortError, parseApiError } from "../../../shared/api/errors";
 import { Badge } from "../../../shared/ui/Badge";
 import { Button } from "../../../shared/ui/Button";
 import { Dialog } from "../../../shared/ui/Dialog";
 import styles from "../admin.module.css";
 import {
   useForceAdminPasswordResetMutation,
+  useResetAdminUserTwoFactorMutation,
   useRevokeAdminUserSessionsMutation,
   useUpdateAdminUserMutation,
   useVerifyAdminUserEmailMutation
@@ -18,7 +19,7 @@ import { userActionErrorMessage } from "../lib/userErrors";
 import { ConfirmDialog, Notice } from "./common";
 
 /** Actions that ask for confirmation first. */
-type ConfirmableAction = "promote" | "demote" | "disable" | "enable" | "revoke" | "forceReset";
+type ConfirmableAction = "promote" | "demote" | "disable" | "enable" | "revoke" | "forceReset" | "resetTwoFactor";
 
 interface ActionCopy {
   title: string;
@@ -87,6 +88,16 @@ function baseActionCopy(action: ConfirmableAction, user: AdminUserListItem): Act
         confirmLabel: "Forzar cambio",
         tone: "danger"
       };
+    case "resetTwoFactor":
+      return {
+        title: `¿Restablecer la verificación en dos pasos de ${name}?`,
+        description:
+          user.role === "admin"
+            ? "Úsalo solo si perdió su teléfono y sus códigos de recuperación. Se cerrarán todas sus sesiones, le avisaremos por correo y tendrá que activarla otra vez al entrar."
+            : "Úsalo solo si perdió su teléfono y sus códigos de recuperación. Se cerrarán todas sus sesiones y le avisaremos por correo; podrá entrar solo con su contraseña.",
+        confirmLabel: "Restablecer",
+        tone: "danger"
+      };
   }
 }
 
@@ -113,7 +124,9 @@ export function UserSheet({ user, isSelf, onClose, onUpdated }: UserSheetProps):
   const [revoke, revokeState] = useRevokeAdminUserSessionsMutation();
   const [forceReset, forceState] = useForceAdminPasswordResetMutation();
   const [verify, verifyState] = useVerifyAdminUserEmailMutation();
-  const busy = updateState.isLoading || revokeState.isLoading || forceState.isLoading || verifyState.isLoading;
+  const [resetTwoFactor, resetTwoFactorState] = useResetAdminUserTwoFactorMutation();
+  const busy =
+    updateState.isLoading || revokeState.isLoading || forceState.isLoading || verifyState.isLoading || resetTwoFactorState.isLoading;
 
   const run = async (action: () => Promise<{ tone: "success" | "info"; message: string }>): Promise<void> => {
     setError(null);
@@ -122,7 +135,12 @@ export function UserSheet({ user, isSelf, onClose, onUpdated }: UserSheetProps):
       setResult(await action());
     } catch (caught) {
       if (isAbortError(caught)) return;
-      setError(userActionErrorMessage(caught));
+      // WP-7: the 2FA reset's 409 ("no tiene activada…") is not the last-admin guardrail.
+      setError(
+        pending === "resetTwoFactor" && getApiErrorCode(caught) === "CONFLICT"
+          ? (parseApiError(caught)?.error.message ?? userActionErrorMessage(caught))
+          : userActionErrorMessage(caught)
+      );
     } finally {
       setPending(null);
     }
@@ -161,6 +179,10 @@ export function UserSheet({ user, isSelf, onClose, onUpdated }: UserSheetProps):
                   "Cerramos sus sesiones y tendrá que cambiar su contraseña, pero no se envió el correo (la cuenta está deshabilitada o se alcanzó el límite de correos). Avísale por otro medio."
               };
         }
+        case "resetTwoFactor": {
+          onUpdated(await resetTwoFactor(user.id).unwrap());
+          return { tone: "success", message: "Restablecimos su verificación en dos pasos y cerramos sus sesiones. Le avisamos por correo." };
+        }
       }
     });
 
@@ -184,6 +206,8 @@ export function UserSheet({ user, isSelf, onClose, onUpdated }: UserSheetProps):
             <Badge tone={isActive ? "success" : "danger"}>{USER_STATUS_LABEL[user.status]}</Badge>
             {user.emailVerified ? null : <Badge tone="accent">Correo sin verificar</Badge>}
             {user.mustChangePassword ? <Badge tone="accent">Debe cambiar su contraseña</Badge> : null}
+            {user.twoFactorEnabled === true ? <Badge tone="success">Verificación en dos pasos</Badge> : null}
+            {isAdmin && user.twoFactorEnabled === false ? <Badge tone="accent">Debe activar la verificación en dos pasos</Badge> : null}
           </div>
           <dl className={styles.facts}>
             <dt>Último acceso</dt>
@@ -200,7 +224,8 @@ export function UserSheet({ user, isSelf, onClose, onUpdated }: UserSheetProps):
 
           {isSelf ? (
             <p className={styles.selfNote}>
-              Esta es tu cuenta: no puedes cambiar tu propio rol, deshabilitarte, forzar tu contraseña ni verificar tu correo desde aquí. Para
+              Esta es tu cuenta: no puedes cambiar tu propio rol, deshabilitarte, forzar tu contraseña, verificar tu correo ni restablecer tu
+              verificación en dos pasos desde aquí (otro administrador puede hacerlo). Para
               cerrar tus sesiones o cambiar tu contraseña ve a <Link to="/perfil/sesiones">Mis sesiones</Link>.
             </p>
           ) : null}
@@ -215,6 +240,11 @@ export function UserSheet({ user, isSelf, onClose, onUpdated }: UserSheetProps):
             <Button variant="secondary" fullWidth disabled={isSelf || busy} onClick={() => setPending("forceReset")}>
               Forzar cambio de contraseña
             </Button>
+            {user.twoFactorEnabled === true && !isSelf ? (
+              <Button variant="secondary" fullWidth disabled={busy} onClick={() => setPending("resetTwoFactor")}>
+                Restablecer verificación en dos pasos
+              </Button>
+            ) : null}
             {user.emailVerified ? null : (
               <Button variant="secondary" fullWidth disabled={isSelf || busy} loading={verifyState.isLoading} onClick={() => void markVerified()}>
                 Marcar correo como verificado

@@ -49,7 +49,8 @@ export function authenticatedState(user: CurrentUser = makeUser(), accessToken =
     accessToken,
     user,
     status: "authenticated",
-    passwordChangeRequired: user.mustChangePassword
+    passwordChangeRequired: user.mustChangePassword,
+    twoFactorSetupRequired: user.twoFactorSetupRequired === true
   };
   return { auth };
 }

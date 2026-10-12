@@ -118,7 +118,17 @@ const ACTION_LABELS: Record<AuditAction, string> = {
   [AuditAction.TreeProposalApproved]: "Aprobó una propuesta del árbol",
   [AuditAction.TreeProposalRejected]: "Rechazó una propuesta del árbol",
   [AuditAction.TreeProposalWithdrawn]: "Retiró una propuesta del árbol",
-  [AuditAction.FamilySettingsUpdated]: "Cambió la raíz del árbol"
+  [AuditAction.FamilySettingsUpdated]: "Cambió la raíz del árbol",
+  [AuditAction.TwoFactorVerified]: "Entró con su código de verificación",
+  [AuditAction.TwoFactorFailed]: "Código de verificación incorrecto",
+  [AuditAction.TwoFactorSetupStarted]: "Empezó a activar la verificación en dos pasos",
+  [AuditAction.TwoFactorEnabled]: "Activó la verificación en dos pasos",
+  [AuditAction.TwoFactorDisabled]: "Desactivó la verificación en dos pasos",
+  [AuditAction.TwoFactorRecoveryCodesRegenerated]: "Generó códigos de recuperación nuevos",
+  [AuditAction.TwoFactorRecoveryCodeUsed]: "Usó un código de recuperación",
+  [AuditAction.TwoFactorTrustedDeviceAdded]: "Confió en un dispositivo",
+  [AuditAction.TwoFactorTrustedDeviceRevoked]: "Quitó un dispositivo de confianza",
+  [AuditAction.UserTwoFactorReset]: "Restableció la verificación en dos pasos de una cuenta"
 };
 
 const ENTITY_LABELS: Record<AuditEntityType, string> = {

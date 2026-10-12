@@ -14,7 +14,13 @@ export const authRoutes: FeatureRoutes = {
     { path: "/verificar", handle: MINIMAL_CHROME, lazy: async () => ({ Component: (await import("./pages/VerifyEmailPage")).VerifyEmailPage }) }
   ],
   session: [
-    { path: "/cambiar-contrasena", handle: MINIMAL_CHROME, lazy: async () => ({ Component: (await import("./pages/ChangePasswordPage")).ChangePasswordPage }) }
+    { path: "/cambiar-contrasena", handle: MINIMAL_CHROME, lazy: async () => ({ Component: (await import("./pages/ChangePasswordPage")).ChangePasswordPage }) },
+    // WP-7: administrators enroll two-step verification here (session level: reachable behind the gate).
+    {
+      path: "/activar-verificacion",
+      handle: MINIMAL_CHROME,
+      lazy: async () => ({ Component: (await import("./twoFactor/EnrollTwoFactorPage")).EnrollTwoFactorPage })
+    }
   ],
   member: [
     { path: "/perfil/sesiones", lazy: async () => ({ Component: (await import("./pages/SessionsPage")).SessionsPage }) }

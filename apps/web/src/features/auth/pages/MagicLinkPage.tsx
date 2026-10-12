@@ -1,4 +1,5 @@
-import { type ReactNode, useRef, useState } from "react";
+import { type AuthTokenResponse, isTwoFactorChallenge, type TwoFactorChallenge } from "@cuencada/types";
+import { lazy, type ReactNode, Suspense, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppDispatch } from "../../../app/hooks";
 import { Button } from "../../../shared/ui/Button";
@@ -14,7 +15,17 @@ import { CHANGE_PASSWORD_PATH } from "../guards";
 import { DEFAULT_AFTER_LOGIN_PATH } from "../redirect";
 import { useConsumableFragmentToken } from "../useFragmentToken";
 
-type LinkState = { kind: "ready" } | { kind: "consuming" } | { kind: "success" } | { kind: "failed"; message: string };
+type LinkState =
+  | { kind: "ready" }
+  | { kind: "consuming" }
+  | { kind: "success" }
+  | { kind: "failed"; message: string }
+  /** WP-7: the account has two-step verification; the link is spent, the code follows. */
+  | { kind: "code"; challenge: TwoFactorChallenge };
+
+const TwoFactorChallengeStep = lazy(() =>
+  import("../twoFactor/TwoFactorChallengeStep").then((module) => ({ default: module.TwoFactorChallengeStep }))
+);
 
 /** Heading of the confirm step. */
 export const MAGIC_LINK_TITLE = "Entrar a la Cuencada";
@@ -38,6 +49,12 @@ export function MagicLinkPage(): ReactNode {
   const started = useRef(false);
   const [state, setState] = useState<LinkState>(() => (token === null ? { kind: "failed", message: LINK_MISSING_MESSAGE } : { kind: "ready" }));
 
+  const signedIn = (response: AuthTokenResponse): void => {
+    setState({ kind: "success" });
+    dispatch(credentialsReceived({ accessToken: response.accessToken, user: response.user }));
+    void navigate(response.user.mustChangePassword ? CHANGE_PASSWORD_PATH : DEFAULT_AFTER_LOGIN_PATH, { replace: true });
+  };
+
   const consume = (): void => {
     if (token === null || started.current) return;
     started.current = true;
@@ -47,9 +64,11 @@ export function MagicLinkPage(): ReactNode {
       try {
         const response = await dispatch(authApi.endpoints.consumeMagicLink.initiate({ token }, { track: false })).unwrap();
         discard();
-        setState({ kind: "success" });
-        dispatch(credentialsReceived({ accessToken: response.accessToken, user: response.user }));
-        void navigate(response.user.mustChangePassword ? CHANGE_PASSWORD_PATH : DEFAULT_AFTER_LOGIN_PATH, { replace: true });
+        if (isTwoFactorChallenge(response)) {
+          setState({ kind: "code", challenge: response });
+          return;
+        }
+        signedIn(response);
       } catch (error) {
         discard();
         const message = describeAuthError(error, { TOKEN_INVALID: LINK_INVALID_MESSAGE, VALIDATION: LINK_INVALID_MESSAGE });
@@ -58,6 +77,20 @@ export function MagicLinkPage(): ReactNode {
     };
     void run();
   };
+
+  if (state.kind === "code") {
+    return (
+      <AuthLayout title="Verificación en dos pasos" icon="🔐">
+        <Suspense fallback={<Spinner size="lg" label="Cargando…" />}>
+          <TwoFactorChallengeStep
+            challenge={state.challenge}
+            onVerified={signedIn}
+            onRestart={() => void navigate("/entrar", { replace: true })}
+          />
+        </Suspense>
+      </AuthLayout>
+    );
+  }
 
   if (state.kind === "failed") {
     return (

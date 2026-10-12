@@ -1,9 +1,16 @@
-import { loginInputSchema, magicLinkRequestInputSchema } from "@cuencada/types";
-import { type FormEvent, type ReactNode, useRef, useState } from "react";
+import {
+  type AuthTokenResponse,
+  isTwoFactorChallenge,
+  loginInputSchema,
+  magicLinkRequestInputSchema,
+  type TwoFactorChallenge
+} from "@cuencada/types";
+import { type FormEvent, lazy, type ReactNode, Suspense, useRef, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAppDispatch, useAppSelector } from "../../../app/hooks";
 import { Button } from "../../../shared/ui/Button";
 import { Field } from "../../../shared/ui/Field";
+import { Spinner } from "../../../shared/ui/Spinner";
 import { TextInput } from "../../../shared/ui/TextInput";
 import { authApi } from "../api";
 import styles from "../auth.module.css";
@@ -24,6 +31,14 @@ import { CHANGE_PASSWORD_PATH } from "../guards";
 import { redirectPathFromState } from "../redirect";
 
 type LoginField = "email" | "password";
+
+// WP-7: the code step loads only when the account has two-step verification.
+const TwoFactorChallengeStep = lazy(() =>
+  import("../twoFactor/TwoFactorChallengeStep").then((module) => ({ default: module.TwoFactorChallengeStep }))
+);
+
+/** Title of the code step after the password or the magic link. */
+export const TWO_FACTOR_STEP_TITLE = "Verificación en dos pasos";
 
 /** Shown after a magic-link request, whatever the server knows about the email. */
 function MagicLinkSent({ email, onReset }: { email: string; onReset: () => void }): ReactNode {
@@ -52,6 +67,9 @@ function MagicLinkSent({ email, onReset }: { email: string; onReset: () => void 
  *   the validated `state.from` (`redirectPathFromState`), or to
  *   `/cambiar-contrasena` when the password is temporary.
  * - The password is sent with an untracked mutation, so it never sits in the store.
+ * - WP-7: an account with two-step verification answers a challenge instead
+ *   of a session; the code step asks for the 6-digit code (or a recovery
+ *   code). The challenge token lives in this component's state only.
  */
 export function LoginPage(): ReactNode {
   const dispatch = useAppDispatch();
@@ -67,6 +85,7 @@ export function LoginPage(): ReactNode {
   const [errors, setErrors] = useState<FieldErrors<LoginField>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [sentTo, setSentTo] = useState<string | null>(null);
+  const [challenge, setChallenge] = useState<TwoFactorChallenge | null>(null);
   const loginAction = usePendingAction();
   const linkAction = usePendingAction();
   const busy = loginAction.pending || linkAction.pending;
@@ -92,12 +111,20 @@ export function LoginPage(): ReactNode {
       try {
         const response = await dispatch(authApi.endpoints.login.initiate(validation.data, { track: false })).unwrap();
         setPassword("");
-        dispatch(credentialsReceived({ accessToken: response.accessToken, user: response.user }));
-        void navigate(response.user.mustChangePassword ? CHANGE_PASSWORD_PATH : target, { replace: true });
+        if (isTwoFactorChallenge(response)) {
+          setChallenge(response);
+          return;
+        }
+        signedIn(response);
       } catch (error) {
         setFormError(describeAuthError(error, { INVALID_CREDENTIALS: INVALID_CREDENTIALS_MESSAGE }));
       }
     });
+  };
+
+  const signedIn = (response: AuthTokenResponse): void => {
+    dispatch(credentialsReceived({ accessToken: response.accessToken, user: response.user }));
+    void navigate(response.user.mustChangePassword ? CHANGE_PASSWORD_PATH : target, { replace: true });
   };
 
   const onRequestLink = (): void => {
@@ -120,6 +147,23 @@ export function LoginPage(): ReactNode {
       }
     });
   };
+
+  if (challenge !== null) {
+    return (
+      <AuthLayout title={TWO_FACTOR_STEP_TITLE} icon="🔐">
+        <Suspense fallback={<Spinner size="lg" label="Cargando…" />}>
+          <TwoFactorChallengeStep
+            challenge={challenge}
+            onVerified={(response) => {
+              setChallenge(null);
+              signedIn(response);
+            }}
+            onRestart={() => setChallenge(null)}
+          />
+        </Suspense>
+      </AuthLayout>
+    );
+  }
 
   if (sentTo !== null) {
     return (

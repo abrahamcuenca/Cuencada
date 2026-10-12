@@ -17,6 +17,8 @@ export const API_TAG_TYPES = [
   "CurrentUser",
   "Session",
   "Invite",
+  // WP-7 two-step verification (status, trusted devices)
+  "TwoFactor",
   // T2 cuencadas
   "Cuencada",
   "CuencadaHome",

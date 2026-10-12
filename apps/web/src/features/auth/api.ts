@@ -11,6 +11,7 @@
  */
 import type {
   AuthTokenResponse,
+  LoginResponse,
   ChangePasswordRequest,
   CurrentUser,
   EmailVerifyConfirmRequest,
@@ -36,8 +37,11 @@ export interface SessionIdArg {
 
 export const authApi = baseApi.injectEndpoints({
   endpoints: (build) => ({
-    /** `POST /auth/login` → `AuthTokenResponse` (generic 401 `INVALID_CREDENTIALS`). */
-    login: build.mutation<AuthTokenResponse, LoginRequest>({
+    /**
+     * `POST /auth/login` → `AuthTokenResponse`, or (WP-7) a `TwoFactorChallenge`
+     * for users with two-step verification (generic 401 `INVALID_CREDENTIALS`).
+     */
+    login: build.mutation<LoginResponse, LoginRequest>({
       query: (body) => ({ url: "/auth/login", method: "POST", body })
     }),
     /** `GET /me`. Keeps the in-memory user in sync (e.g. after verifying the email). */
@@ -62,8 +66,8 @@ export const authApi = baseApi.injectEndpoints({
     requestMagicLink: build.mutation<OkResponse, MagicLinkRequestRequest>({
       query: (body) => ({ url: "/auth/magic-link/request", method: "POST", body })
     }),
-    /** `POST /auth/magic-link/consume` → `AuthTokenResponse` · 400 `TOKEN_INVALID`. */
-    consumeMagicLink: build.mutation<AuthTokenResponse, MagicLinkConsumeRequest>({
+    /** `POST /auth/magic-link/consume` → `AuthTokenResponse` or a `TwoFactorChallenge` (WP-7) · 400 `TOKEN_INVALID`. */
+    consumeMagicLink: build.mutation<LoginResponse, MagicLinkConsumeRequest>({
       query: (body) => ({ url: "/auth/magic-link/consume", method: "POST", body })
     }),
     /** `POST /auth/password-reset/request` → always 202 `OkResponse`. */

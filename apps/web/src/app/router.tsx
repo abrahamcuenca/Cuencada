@@ -5,7 +5,7 @@
  */
 import { createBrowserRouter, type RouteObject } from "react-router-dom";
 import { adminRoutes } from "../features/admin/routes";
-import { RequireAdmin, RequireAuth, RequirePasswordChanged } from "../features/auth/guards";
+import { RequireAdmin, RequireAuth, RequirePasswordChanged, RequireTwoFactorEnrolled } from "../features/auth/guards";
 import { authRoutes } from "../features/auth/routes";
 import { chatRoutes } from "../features/chat/routes";
 import { cuencadasRoutes } from "../features/cuencadas/routes";
@@ -50,7 +50,8 @@ const devRoutes: RouteObject[] = import.meta.env.DEV
 
 /**
  * The full route tree:
- * `AppLayout` > public | RequireAuth > (session | RequirePasswordChanged > (member | RequireAdmin > admin)).
+ * `AppLayout` > public | RequireAuth > (session | RequirePasswordChanged > RequireTwoFactorEnrolled >
+ * (member | RequireAdmin > admin)).
  *
  * Exported for tests (`createMemoryRouter(appRoutes)`).
  */
@@ -70,7 +71,12 @@ export const appRoutes: RouteObject[] = [
           { path: "/mas", lazy: async () => ({ Component: (await import("./MorePage")).MorePage }) },
           {
             Component: RequirePasswordChanged,
-            children: [...collect("member"), { Component: RequireAdmin, children: collect("admin") }]
+            children: [
+              {
+                Component: RequireTwoFactorEnrolled,
+                children: [...collect("member"), { Component: RequireAdmin, children: collect("admin") }]
+              }
+            ]
           }
         ]
       },
