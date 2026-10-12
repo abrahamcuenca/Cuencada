@@ -69,7 +69,8 @@ describe("runPreflight", () => {
       "vault_cuencada_jwt_secret",
       "vault_cuencada_resend_api_key",
       "vault_cuencada_s3_access_key_id",
-      "vault_cuencada_s3_secret_access_key"
+      "vault_cuencada_s3_secret_access_key",
+      "vault_cuencada_totp_encryption_key"
     ]);
   });
 

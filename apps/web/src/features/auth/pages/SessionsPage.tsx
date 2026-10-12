@@ -1,5 +1,5 @@
 import type { SessionListItem } from "@cuencada/types";
-import { type ReactNode, useState } from "react";
+import { lazy, type ReactNode, Suspense, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppDispatch } from "../../../app/hooks";
 import { isAbortError } from "../../../shared/api/errors";
@@ -19,6 +19,9 @@ import { finishLogoutEverywhere } from "../session";
 import { formatRelativeTime, PORTAL_TIME_ZONE, summarizeUserAgent } from "../sessionDisplay";
 
 type Confirming = "others" | "everywhere" | null;
+
+// WP-7: the two-step verification section has its own chunk (wizard, QR, codes).
+const TwoFactorSettings = lazy(() => import("../twoFactor/TwoFactorSettings").then((module) => ({ default: module.TwoFactorSettings })));
 
 /**
  * One session row: device/browser summary, last use, current badge, revoke.
@@ -163,6 +166,10 @@ export function SessionsPage(): ReactNode {
           Cambiar contraseña
         </Button>
       </div>
+
+      <Suspense fallback={<Skeleton shape="block" height={120} />}>
+        <TwoFactorSettings />
+      </Suspense>
 
       <Dialog
         open={confirming === "others"}

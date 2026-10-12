@@ -166,3 +166,30 @@ export function credentialRateLimits(
     ]
   };
 }
+
+/** A limiter checked from a handler with a key only known there (e.g. the user behind a token). */
+export type KeyedRateLimit = (request: FastifyRequest, key: string) => Promise<void>;
+
+/**
+ * A limiter whose key is computed inside the handler (WP-7: the user behind a
+ * 2FA challenge, known only after a lookup). Throws 429 `RATE_LIMITED` with
+ * `Retry-After` when exceeded. Counts every call, success or not.
+ *
+ * @param factory - The Fastify instance (`createRateLimit`).
+ * @param prefix - Key prefix unique to this cap.
+ * @param window - Max calls per time window per key.
+ */
+export function keyedRateLimit(factory: RateLimitFactory, prefix: string, window: RateLimitWindow): KeyedRateLimit {
+  const keys = new WeakMap<FastifyRequest, string>();
+  const check = factory.createRateLimit({
+    ...window,
+    keyGenerator: (request) => `${prefix}:${keys.get(request) ?? ipKey(request)}`
+  });
+  return async (request, key) => {
+    keys.set(request, key);
+    const result = await check(request);
+    if (!result.isAllowed && result.isExceeded) {
+      throw new AppError("RATE_LIMITED", undefined, { headers: { "retry-after": String(result.ttlInSeconds) } });
+    }
+  };
+}

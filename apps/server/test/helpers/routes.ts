@@ -23,6 +23,8 @@ export interface RouteRecord {
   auth: string | null;
   requireVerifiedEmail: boolean;
   allowPendingPasswordChange: boolean;
+  /** WP-7: `config.allowPendingTwoFactor`. */
+  allowPendingTwoFactor: boolean;
   websocket: boolean;
 }
 
@@ -34,6 +36,7 @@ interface GuardConfig {
   auth?: unknown;
   requireVerifiedEmail?: unknown;
   allowPendingPasswordChange?: unknown;
+  allowPendingTwoFactor?: unknown;
 }
 
 /**
@@ -52,6 +55,7 @@ export function recordRoute(route: RouteOptions): void {
       auth: typeof config.auth === "string" ? config.auth : null,
       requireVerifiedEmail: config.requireVerifiedEmail === true,
       allowPendingPasswordChange: config.allowPendingPasswordChange === true,
+      allowPendingTwoFactor: config.allowPendingTwoFactor === true,
       websocket: (route as { websocket?: unknown }).websocket === true
     });
   }

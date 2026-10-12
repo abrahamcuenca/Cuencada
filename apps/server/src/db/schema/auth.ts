@@ -85,6 +85,13 @@ export const sessions = pgTable(
     absoluteExpiresAt: timestamptz("absolute_expires_at").notNull(),
     revokedAt: timestamptz("revoked_at"),
     revokedReason: text("revoked_reason").$type<SessionRevokedReason>(),
+    /**
+     * WP-7: when this session proved a two-step code (login challenge or
+     * enable). The admin gate reads it (`amr` includes `otp`); `null` for
+     * sessions without a code (members without 2FA, trusted devices, logins
+     * before WP-7).
+     */
+    twoFactorVerifiedAt: timestamptz("two_factor_verified_at"),
     createdAt: createdAt()
   },
   (table) => [

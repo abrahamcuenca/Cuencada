@@ -12,7 +12,13 @@ import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import { Button } from "../../shared/ui/Button";
 import { reportUnexpected } from "../../shared/lib/reportUnexpected";
 import { Spinner } from "../../shared/ui/Spinner";
-import { selectAuthStatus, selectCurrentUser, selectIsOffline, selectPasswordChangeRequired } from "./authSlice";
+import {
+  selectAuthStatus,
+  selectCurrentUser,
+  selectIsOffline,
+  selectPasswordChangeRequired,
+  selectTwoFactorSetupRequired
+} from "./authSlice";
 import type { LoginRedirectState } from "./redirect";
 import { restoreSession } from "./session";
 
@@ -20,6 +26,8 @@ import { restoreSession } from "./session";
 export const LOGIN_PATH = "/entrar";
 /** Path of the forced password-change page. */
 export const CHANGE_PASSWORD_PATH = "/cambiar-contrasena";
+/** Path of the administrators' two-step enrollment page (WP-7). */
+export const ENROLL_TWO_FACTOR_PATH = "/activar-verificacion";
 
 /** Shown while the boot refresh decides whether there is a session. */
 export function SessionPending(): ReactNode {
@@ -82,6 +90,18 @@ export function RequireAuth(): ReactNode {
 export function RequirePasswordChanged(): ReactNode {
   const mustChange = useAppSelector(selectPasswordChangeRequired);
   if (mustChange) return <Navigate to={CHANGE_PASSWORD_PATH} replace />;
+  return <Outlet />;
+}
+
+/**
+ * Sends an administrator who still has to enroll two-step verification to
+ * `/activar-verificacion` (WP-7). Nest it inside {@link RequirePasswordChanged}.
+ *
+ * UX only: the server answers 403 `TWO_FACTOR_SETUP_REQUIRED` regardless.
+ */
+export function RequireTwoFactorEnrolled(): ReactNode {
+  const setupRequired = useAppSelector(selectTwoFactorSetupRequired);
+  if (setupRequired) return <Navigate to={ENROLL_TWO_FACTOR_PATH} replace />;
   return <Outlet />;
 }
 

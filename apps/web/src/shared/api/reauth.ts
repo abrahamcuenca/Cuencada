@@ -22,6 +22,7 @@ import {
 import {
   loggedOut,
   passwordChangeRequired,
+  twoFactorSetupRequired,
   refreshDeferredOffline,
   selectAccessToken,
   selectSessionEpoch,
@@ -312,6 +313,8 @@ export const baseQueryWithReauth: ApiBaseQuery = async (args, api, extraOptions)
     const code = getApiErrorCode(result.error);
     if (result.error.status === 403 && code === ErrorCode.PASSWORD_CHANGE_REQUIRED) {
       api.dispatch(passwordChangeRequired());
+    } else if (result.error.status === 403 && code === ErrorCode.TWO_FACTOR_SETUP_REQUIRED) {
+      api.dispatch(twoFactorSetupRequired());
     } else if (
       result.error.status === 401 &&
       code === ErrorCode.UNAUTHENTICATED &&

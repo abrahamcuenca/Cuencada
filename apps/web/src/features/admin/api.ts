@@ -131,6 +131,11 @@ export const adminApi = baseApi.injectEndpoints({
       query: (id) => ({ url: `/admin/users/${encodeURIComponent(id)}/force-password-reset`, method: "POST" }),
       invalidatesTags: (_result, error) => (error ? [] : [USER_LIST, AUDIT_LIST])
     }),
+    /** `POST /admin/users/:id/2fa/reset` (WP-7): never on yourself; 409 when the account has no 2FA. */
+    resetAdminUserTwoFactor: build.mutation<AdminUserListItem, string>({
+      query: (id) => ({ url: `/admin/users/${encodeURIComponent(id)}/2fa/reset`, method: "POST" }),
+      invalidatesTags: (_result, error) => (error ? [] : [USER_LIST, AUDIT_LIST])
+    }),
     /** `POST /admin/users/:id/verify-email` (idempotent). */
     verifyAdminUserEmail: build.mutation<AdminUserListItem, string>({
       query: (id) => ({ url: `/admin/users/${encodeURIComponent(id)}/verify-email`, method: "POST" }),
@@ -159,5 +164,6 @@ export const {
   useRevokeAdminUserSessionsMutation,
   useForceAdminPasswordResetMutation,
   useVerifyAdminUserEmailMutation,
+  useResetAdminUserTwoFactorMutation,
   useListAuditLogsInfiniteQuery
 } = adminApi;

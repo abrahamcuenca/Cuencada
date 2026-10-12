@@ -17,3 +17,4 @@ export * from "./profiles.js";
 export * from "./relations.js";
 export * from "./rsvp.js";
 export * from "./social.js";
+export * from "./twoFactor.js";

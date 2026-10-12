@@ -31,6 +31,16 @@ export const TEMP_ADMIN_PASSWORD = "Temporal-e2e-admin-2027";
 /** The new password the first-login journey sets. */
 export const NEW_ADMIN_PASSWORD = "Nueva-e2e-admin-segura-2027";
 
+/**
+ * WP-7: the TOTP secret of the pre-enrolled cast accounts (the ready admin
+ * and {@link CastRole.Recovery}). **Test-only and public**: it exists in this
+ * repository, so it must never protect anything real.
+ */
+export const E2E_TOTP_SECRET = "KRSXG5CTMVRXEZLUIVZWK3TUMVZXIMBR";
+
+/** WP-7: the recovery codes seeded for {@link CastRole.Recovery} (test-only, public). */
+export const E2E_RECOVERY_CODES = ["aaaa-bbbb-cccc-dddd", "eeee-ffff-gggg-hhhh", "jjjj-kkkk-llll-mmmm"] as const;
+
 /** Roles in a project's cast. */
 export const CastRole = {
   /** Admin with `must_change_password` (journey 1). */
@@ -50,7 +60,16 @@ export const CastRole = {
   /** Member: gallery upload. */
   Fede: "fede",
   /** Member (WP-6.4): a cousin whose branch was built apart from the root's tree. */
-  Primo: "primo"
+  Primo: "primo",
+  /** Member (WP-7): turns two-step verification on, trusts a device, then removes it. */
+  TwoFactor: "twofa",
+  /** Member (WP-7): pre-enrolled; logs in with a recovery code, then an admin resets her 2FA. */
+  Recovery: "recovery",
+  /**
+   * Admin (WP-7), pre-enrolled: resets {@link CastRole.Recovery}'s 2FA. A separate admin keeps
+   * the ready admin under the per-account login and code limits (10 per 15 minutes).
+   */
+  ResetAdmin: "resetadmin"
 } as const;
 export type CastRole = (typeof CastRole)[keyof typeof CastRole];
 
@@ -63,6 +82,8 @@ export interface CastMember {
   role: "admin" | "member";
   mustChangePassword: boolean;
   city: string;
+  /** WP-7: the TOTP secret of a pre-enrolled account (test-only), so the login helper can answer the code step. */
+  twoFactorSecret?: string;
 }
 
 const FIRST_NAMES: Record<CastRole, string> = {
@@ -74,7 +95,10 @@ const FIRST_NAMES: Record<CastRole, string> = {
   dario: "Darío",
   elena: "Elena",
   fede: "Fede",
-  primo: "Gael"
+  primo: "Gael",
+  twofa: "Hugo",
+  recovery: "Inés",
+  resetadmin: "Rosa"
 };
 
 /**
@@ -85,7 +109,7 @@ const FIRST_NAMES: Record<CastRole, string> = {
  */
 export function castMember(project: ProjectKey, role: CastRole): CastMember {
   const firstName = FIRST_NAMES[role];
-  const admin = role === CastRole.FirstLoginAdmin || role === CastRole.Admin;
+  const admin = role === CastRole.FirstLoginAdmin || role === CastRole.Admin || role === CastRole.ResetAdmin;
   return {
     email: `${role}.${project}@e2e.example.test`,
     password: role === CastRole.FirstLoginAdmin ? TEMP_ADMIN_PASSWORD : MEMBER_PASSWORD,
@@ -93,7 +117,10 @@ export function castMember(project: ProjectKey, role: CastRole): CastMember {
     firstName,
     role: admin ? "admin" : "member",
     mustChangePassword: role === CastRole.FirstLoginAdmin,
-    city: "Pueblo Ejemplo"
+    city: "Pueblo Ejemplo",
+    ...(role === CastRole.Admin || role === CastRole.ResetAdmin || role === CastRole.Recovery
+      ? { twoFactorSecret: E2E_TOTP_SECRET }
+      : {})
   };
 }
 

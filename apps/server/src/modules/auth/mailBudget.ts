@@ -9,7 +9,8 @@
  *   24 hours. Over budget, no token is created and nothing is sent, but the
  *   route still answers its generic 202 (no enumeration).
  * - **Global per UTC day:** today's `magic_links` rows + invites sent today
- *   (`invites.last_sent_at`) + password-changed notices (their audit rows).
+ *   (`invites.last_sent_at`) + password-changed and two-step verification
+ *   notices (their audit rows).
  *   User-triggered emails stop at {@link GLOBAL_DAILY_MAIL_CAP}; admin invites
  *   and password-changed notices keep a reserve of
  *   {@link RESERVED_DAILY_MAIL_EXTRA} on top. Reaching a cap logs
@@ -62,7 +63,15 @@ function utcDayStart(now: Date): Date {
  */
 export async function dailyMailCount(db: DbOrTx, now: Date): Promise<number> {
   const dayStart = utcDayStart(now).toISOString();
-  const notices = [AuditAction.PasswordChanged, AuditAction.PasswordReset];
+  // Security notices, one email per audit row (WP-7 adds the two-step verification notices).
+  const notices = [
+    AuditAction.PasswordChanged,
+    AuditAction.PasswordReset,
+    AuditAction.TwoFactorEnabled,
+    AuditAction.TwoFactorDisabled,
+    AuditAction.TwoFactorRecoveryCodeUsed,
+    AuditAction.UserTwoFactorReset
+  ];
   const result = await db.execute<{ total: number }>(sql`
     select
       (select count(*) from magic_links where created_at >= ${dayStart}::timestamptz)::int

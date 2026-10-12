@@ -31,6 +31,12 @@ export interface AuthState {
    */
   passwordChangeRequired: boolean;
   /**
+   * WP-7: an administrator whose session was not verified with a two-step
+   * code (the user payload's `twoFactorSetupRequired`, or a 403
+   * `TWO_FACTOR_SETUP_REQUIRED`). The router sends them to the enrollment page.
+   */
+  twoFactorSetupRequired: boolean;
+  /**
    * The last refresh could not reach the server (network error or 5xx). The
    * session is kept as it was and the refresh is retried on the `online`
    * event; only an HTTP 4xx answer logs the user out.
@@ -58,6 +64,7 @@ export const initialAuthState: AuthState = {
   user: null,
   status: "idle",
   passwordChangeRequired: false,
+  twoFactorSetupRequired: false,
   isOffline: false,
   sessionEpoch: 0,
   logoutPending: false
@@ -72,6 +79,7 @@ function applyCredentials(state: AuthState, action: PayloadAction<Credentials>):
   state.user = action.payload.user;
   state.status = "authenticated";
   state.passwordChangeRequired = action.payload.user.mustChangePassword;
+  state.twoFactorSetupRequired = action.payload.user.twoFactorSetupRequired === true;
   state.isOffline = false;
   // A successful login replaced the refresh cookie, so the old unconfirmed logout no longer matters.
   state.logoutPending = false;
@@ -103,10 +111,15 @@ const authSlice = createSlice({
       if (state.status !== "authenticated" || state.user?.id !== action.payload.id) return;
       state.user = action.payload;
       state.passwordChangeRequired = action.payload.mustChangePassword;
+      state.twoFactorSetupRequired = action.payload.twoFactorSetupRequired === true;
     },
     /** The server answered 403 `PASSWORD_CHANGE_REQUIRED`. */
     passwordChangeRequired(state) {
       state.passwordChangeRequired = true;
+    },
+    /** WP-7: the server answered 403 `TWO_FACTOR_SETUP_REQUIRED`. */
+    twoFactorSetupRequired(state) {
+      if (state.status === "authenticated") state.twoFactorSetupRequired = true;
     },
     /**
      * Clears the session: explicit logout, another tab's logout, or a refused
@@ -138,6 +151,7 @@ export const {
   currentUserLoaded,
   refreshDeferredOffline,
   passwordChangeRequired,
+  twoFactorSetupRequired,
   loggedOut,
   logoutUnconfirmed,
   logoutConfirmed
@@ -174,6 +188,8 @@ export const selectSessionEpoch = (state: WithAuthState): number => state.auth.s
 export const selectLogoutPending = (state: WithAuthState): boolean => state.auth.logoutPending;
 /** @returns Whether the router must force `/cambiar-contrasena`. */
 export const selectPasswordChangeRequired = (state: WithAuthState): boolean => state.auth.passwordChangeRequired;
+/** @returns Whether the router must force the two-step enrollment page (WP-7, administrators). */
+export const selectTwoFactorSetupRequired = (state: WithAuthState): boolean => state.auth.twoFactorSetupRequired;
 /**
  * UX hint only (e.g. show the Admin link). **Never** a security decision: the
  * server enforces roles on every `/api/admin/*` request.

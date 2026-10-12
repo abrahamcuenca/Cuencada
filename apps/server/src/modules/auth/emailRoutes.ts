@@ -4,8 +4,8 @@
  */
 import {
   apiErrorSchema,
-  authTokenResponseSchema,
   emailVerifyConfirmInputSchema,
+  loginResponseSchema,
   magicLinkConsumeInputSchema,
   magicLinkRequestInputSchema,
   okResponseSchema
@@ -30,6 +30,7 @@ import {
   simulateBudgetedEmailToken
 } from "./emailTokens.js";
 import { sessionOrigin, startSession } from "./sessions.js";
+import { gateLogin } from "./twoFactor.js";
 
 const noContent = z.null().describe("No content");
 
@@ -102,19 +103,27 @@ const emailRoutes: FastifyPluginAsyncZod = async (app) => {
     }
   );
 
-  /** `POST /api/auth/magic-link/consume`: single-use token → session like login. */
+  /**
+   * `POST /api/auth/magic-link/consume`: single-use token → session like
+   * login, or (WP-7) a two-step challenge for users with 2FA: the link proves
+   * the mailbox (and is spent), the code still has to follow.
+   */
   app.post(
     "/auth/magic-link/consume",
     {
       config: { auth: "public", rateLimit: rateLimitByIp({ max: 20, timeWindow: "15 minutes" }) },
-      schema: { body: magicLinkConsumeInputSchema, response: { 200: authTokenResponseSchema, ...errorResponses } }
+      schema: { body: magicLinkConsumeInputSchema, response: { 200: loginResponseSchema, ...errorResponses } }
     },
     async (request, reply) => {
       const now = app.clock.now();
-      const issued = await app.db.transaction(async (tx) => {
+      const outcome = await app.db.transaction(async (tx) => {
         const consumed = await consumeEmailToken(tx, request.body.token, "login", now);
         if (consumed === null) return null;
         await markEmailVerified(tx, consumed, now);
+        const [owner] = await tx.select({ role: users.role }).from(users).where(eq(users.id, consumed.userId)).limit(1);
+        if (owner === undefined) return null;
+        const gate = await gateLogin(tx, request, app.config, { id: consumed.userId, role: owner.role }, "magic_link", now);
+        if (gate.kind === "challenge") return gate;
         await tx.update(users).set({ lastLoginAt: now }).where(eq(users.id, consumed.userId));
         const started = await startSession(tx, app.config, consumed.userId, sessionOrigin(request), now);
         await recordAudit(tx, {
@@ -122,13 +131,17 @@ const emailRoutes: FastifyPluginAsyncZod = async (app) => {
           action: AuthAuditAction.LoggedIn,
           entityType: "session",
           entityId: started.sessionId,
-          metadata: { method: "magic_link" },
+          metadata:
+            gate.kind === "trusted_device"
+              ? { method: "magic_link", factor: "trusted_device", deviceId: gate.deviceId }
+              : { method: "magic_link" },
           ip: request.ip
         });
-        return { started, userId: consumed.userId };
+        return { kind: "session" as const, started, userId: consumed.userId };
       });
-      if (issued === null) throw new AppError("TOKEN_INVALID");
-      return issueAuthResponse(app, reply, issued.started, issued.userId, now);
+      if (outcome === null) throw new AppError("TOKEN_INVALID");
+      if (outcome.kind === "challenge") return outcome.body;
+      return issueAuthResponse(app, reply, outcome.started, outcome.userId, now);
     }
   );
 

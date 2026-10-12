@@ -11,6 +11,7 @@
  * missing, misspelled or invalid variable fails here instead of crash-looping
  * the systemd unit. Exit code 1 when any problem is found.
  */
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -60,7 +61,9 @@ export const SECRET_ENV_KEYS = [
   "JWT_SECRET",
   "RESEND_API_KEY",
   "S3_ACCESS_KEY_ID",
-  "S3_SECRET_ACCESS_KEY"
+  "S3_SECRET_ACCESS_KEY",
+  /** WP-7: encrypts TOTP secrets at rest. */
+  "TOTP_ENCRYPTION_KEY"
 ] as const;
 
 /** Config keys that may stay unmapped: ignored in production. */
@@ -88,6 +91,8 @@ const BUCKET_NAME = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
 function dummyFor(key: string): string {
   if (key === "DATABASE_URL") return "postgresql://preflight:preflight@127.0.0.1:5432/preflight";
   if (key === "JWT_SECRET") return "preflight-".repeat(5);
+  // A well-formed, non-placeholder 32-byte key, so the production rules accept it.
+  if (key === "TOTP_ENCRYPTION_KEY") return createHash("sha256").update("cuencada-preflight-dummy").digest("hex");
   return "preflight-placeholder";
 }
 

@@ -2,7 +2,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { allowedOrigins, CONFIG_ENV_KEYS, ConfigError, loadConfig, readCredentials } from "./config.js";
+import {
+  allowedOrigins,
+  CONFIG_ENV_KEYS,
+  ConfigError,
+  DEV_TOTP_ENCRYPTION_KEY,
+  decodeTotpKey,
+  loadConfig,
+  readCredentials
+} from "./config.js";
 
 const DEV_ENV = {
   NODE_ENV: "development",
@@ -11,6 +19,8 @@ const DEV_ENV = {
 };
 
 const STRONG_SECRET = "a-production-secret-with-at-least-32-chars";
+/** Fictional test-only TOTP key: bytes 0x00..0x1f as hex (32 distinct bytes). */
+const TEST_TOTP_KEY = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
 
 const PROD_ENV = {
   NODE_ENV: "production",
@@ -18,7 +28,8 @@ const PROD_ENV = {
   JWT_SECRET: STRONG_SECRET,
   APP_BASE_URL: "https://cuencada.com",
   RESEND_API_KEY: "re_test_key",
-  MAIL_FROM: "Cuencada <no-reply@cuencada.com>"
+  MAIL_FROM: "Cuencada <no-reply@cuencada.com>",
+  TOTP_ENCRYPTION_KEY: TEST_TOTP_KEY
 };
 
 function problemsOf(env: NodeJS.ProcessEnv): string[] {
@@ -77,6 +88,41 @@ describe("loadConfig", () => {
     expect(problemsOf({ ...PROD_ENV, JWT_SECRET: "only-twenty-chars-xx" })).toEqual([
       "JWT_SECRET: must be at least 32 characters in production"
     ]);
+  });
+
+  describe("TOTP_ENCRYPTION_KEY (WP-7)", () => {
+    it("refuses a missing key in production", () => {
+      const { TOTP_ENCRYPTION_KEY: _key, ...withoutKey } = PROD_ENV;
+      expect(problemsOf(withoutKey)).toEqual(["TOTP_ENCRYPTION_KEY: is required in production"]);
+    });
+
+    it("refuses the public dev placeholder and low-entropy keys in production", () => {
+      for (const key of [DEV_TOTP_ENCRYPTION_KEY, "a".repeat(64), Buffer.alloc(32, 7).toString("base64")]) {
+        expect(problemsOf({ ...PROD_ENV, TOTP_ENCRYPTION_KEY: key })).toEqual([
+          "TOTP_ENCRYPTION_KEY: is too weak for production (use openssl rand -base64 32)"
+        ]);
+      }
+    });
+
+    it("refuses a key that is not 32 bytes in any environment, naming only the key", () => {
+      const short = Buffer.alloc(16, 1).toString("base64");
+      for (const env of [PROD_ENV, DEV_ENV]) {
+        const problems = problemsOf({ ...env, TOTP_ENCRYPTION_KEY: short });
+        expect(problems).toEqual([
+          "TOTP_ENCRYPTION_KEY: must be 32 bytes, as base64 (openssl rand -base64 32) or 64 hex characters"
+        ]);
+        expect(problems.join()).not.toContain(short);
+      }
+    });
+
+    it("accepts base64, base64url and hex keys, and defaults to the placeholder outside production", () => {
+      const bytes = decodeTotpKey(TEST_TOTP_KEY);
+      expect(bytes?.length).toBe(32);
+      expect(decodeTotpKey(bytes?.toString("base64") ?? "")?.equals(bytes ?? Buffer.alloc(0))).toBe(true);
+      expect(decodeTotpKey(bytes?.toString("base64url") ?? "")?.equals(bytes ?? Buffer.alloc(0))).toBe(true);
+      expect(loadConfig(PROD_ENV).TOTP_ENCRYPTION_KEY).toBe(TEST_TOTP_KEY);
+      expect(loadConfig(DEV_ENV).TOTP_ENCRYPTION_KEY).toBe(DEV_TOTP_ENCRYPTION_KEY);
+    });
   });
 
   it("requires RESEND_API_KEY, MAIL_FROM and APP_BASE_URL in production", () => {
@@ -200,6 +246,12 @@ describe("loadConfig with systemd credentials (CREDENTIALS_DIRECTORY)", () => {
     expect(config.DATABASE_URL).toBe("postgresql://app:from-credential@10.0.0.1:5432/db");
     expect(config.JWT_SECRET).toBe(STRONG_SECRET);
     expect(config.RESEND_API_KEY).toBe("re_from_credential");
+  });
+
+  it("reads TOTP_ENCRYPTION_KEY from a credential file (WP-7)", () => {
+    const { TOTP_ENCRYPTION_KEY: _key, ...withoutKey } = PROD_ENV;
+    const dir = credentialDir({ TOTP_ENCRYPTION_KEY: `${TEST_TOTP_KEY}\n` });
+    expect(loadConfig({ ...withoutKey, CREDENTIALS_DIRECTORY: dir }).TOTP_ENCRYPTION_KEY).toBe(TEST_TOTP_KEY);
   });
 
   it("falls back to the environment when CREDENTIALS_DIRECTORY is unset or empty (development)", () => {

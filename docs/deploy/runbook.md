@@ -110,7 +110,7 @@ Launched on 2026-10-07 with every gate below closed or explicitly deferred by O.
    - Record the new `total` and `available` in WP-2.4.md.
 5. **O:** vault values in `~/.acleron/vault-server_1.yml` (`ansible-vault edit`).
    - Generate every secret as hex: `openssl rand -hex 32`.
-   - The five VPS secrets go to `server.credentials`, so they become root-only
+   - The six VPS secrets go to `server.credentials`, so they become root-only
      files. They never become `Environment=` lines.
 
    | Vault key | Used by | Value |
@@ -119,6 +119,7 @@ Launched on 2026-10-07 with every gate below closed or explicitly deferred by O.
    | `vault_cuencada_jwt_secret` | VPS credential | `openssl rand -hex 48` (at least 32 chars) |
    | `vault_cuencada_resend_api_key` | VPS credential | Resend API key: **sending access, cuencada.com domain only** |
    | `vault_cuencada_s3_access_key_id` / `vault_cuencada_s3_secret_access_key` | VPS credentials | Linode **limited** key: read/write on this bucket only (§ Bucket) |
+   | `vault_cuencada_totp_encryption_key` | VPS credential `TOTP_ENCRYPTION_KEY` (WP-7) | `openssl rand -hex 32` (exactly 32 bytes: 64 hex chars, or base64 of 32 bytes). Encrypts every two-step verification secret (AES-256-GCM). The API refuses to boot in production without it, with a malformed or low-entropy key, or with the public dev placeholder. **Back it up with the vault: losing or changing it locks every enrolled user out of the code step** (see "Rotating `TOTP_ENCRYPTION_KEY`" in § 11) |
    | `vault_cuencada_migrate_database_url` | operator only | `postgresql://<owner role>:<owner pw>@127.0.0.1:${TUNNEL_PORT}/cuencada`: the production `cuencada` database through the tunnel, as `cuencada_owner` or an existing admin role (§ 3). Always `127.0.0.1`, never `localhost` (§ 4) |
    | `vault_cuencada_seed_admin_temp_password` | operator only | at least 16 chars, passes the password policy |
    | `vault_cuencada_seed_whatsapp_url`, `…_external_album_url`, `…_lyrics_url`, `…_program_url` | operator only | the links the seed writes. Meant to be the **new** links from § 2; at launch O used the existing ones (§ 2) |
@@ -494,7 +495,17 @@ unset DB_URL SEED_PW WA ALBUM LYRICS PROGRAM; kill $TUNNEL
 1. Log in at `https://cuencada.com/entrar` as `admin@cuencada.com`.
 2. You are forced to change the password. Keep the new one in a password
    manager.
-3. **Verify the email.** Logging in and changing the password do **not**
+3. **Turn on two-step verification (WP-7, mandatory for admins).** Right
+   after the password change the app opens "Activa la verificación en dos
+   pasos": confirm the password, scan the QR code with an authenticator app
+   (or type the key), enter the 6-digit code, then **save the 10 recovery
+   codes** (copy or "Descargar como texto") and press "Ya los guardé". Every
+   other page answers 403 `TWO_FACTOR_SETUP_REQUIRED` until this is done.
+   From then on every admin login asks for a code (admins cannot trust a
+   device). If the phone and the codes are lost, **another admin** resets it
+   (Panel → Usuarios → "Restablecer verificación en dos pasos"); with a single
+   admin there is nobody to do that, so promote a second admin early.
+4. **Verify the email.** Logging in and changing the password do **not**
    send the verification email by themselves. Press **"Reenviar enlace"** on
    the verify banner, then click the link in the email. Chat and the gallery
    stay at 403 `EMAIL_UNVERIFIED` until then, so `admin@cuencada.com` must be
@@ -532,9 +543,18 @@ If the verification email (or any other) doesn't arrive:
 
 ```sh
 printf 'admin password: '; read -rs SMOKE_PASSWORD; echo; export SMOKE_PASSWORD
+# WP-7: admins have two-step verification. Type the current code from the app right before running.
+printf 'código 2FA: '; read -rs SMOKE_TOTP_CODE; echo; export SMOKE_TOTP_CODE
 SMOKE_BASE_URL=https://cuencada.com SMOKE_EMAIL=admin@cuencada.com node scripts/deploy-smoke.mjs
-unset SMOKE_PASSWORD
+unset SMOKE_PASSWORD SMOKE_TOTP_CODE
 ```
+
+- The code is valid for about a minute and only once: if the login step
+  reports `TWO_FACTOR_INVALID`, wait for the next code and rerun.
+- An admin who has not enrolled yet makes the smoke test stop with "the admin
+  must enable two-step verification first…": enroll in the browser
+  (`/entrar` → "Activa la verificación en dos pasos"), then rerun.
+- The script never prints the code, the challenge token or any other secret.
 
 The smoke test checks:
 
@@ -543,7 +563,8 @@ The smoke test checks:
 - `no-cache` and `immutable` caching;
 - the SPA fallback, and a 404 for a missing asset;
 - the legacy redirect;
-- login, `/api/me` (`no-store`) and `/api/cuencadas/2026`;
+- login (with the two-step code when the account has it), `/api/me`
+  (`no-store`) and `/api/cuencadas/2026`;
 - a chat ticket plus a **WebSocket through nginx**.
 
 It prints no secret. Then, by hand:
@@ -666,9 +687,50 @@ Pino levels are numeric: 50 = error, 60 = fatal.
 7. Record the release (commit, time, migrations) in the PR or the release
    notes.
 
+### Rotating `TOTP_ENCRYPTION_KEY` (WP-7)
+
+The key encrypts every enrolled TOTP secret (`user_totp`, AES-256-GCM, the
+user id as associated data). There is no key id and no second key slot yet,
+so **never replace the vault value on its own**: every secret would stop
+decrypting, and enrolled users (all admins) could no longer log in with a
+code (it fails closed; recovery codes still work, and admins can reset
+members). Options:
+
+- **Planned rotation (re-encrypt):** stop the API, decrypt every
+  `user_totp` row with the old key and re-encrypt it with the new one in one
+  transaction (an operator script over the tunnel; backlog item "TOTP key
+  rotation script"), put the new key in the vault, redeploy.
+- **Suspected key leak without the database:** the key alone is useless
+  without the ciphertexts; rotate with the procedure above at the next
+  window.
+- **Database and key both exposed:** treat every secret as compromised:
+  delete `user_totp`, `user_recovery_codes` and `trusted_devices` rows (or
+  reset each user in the Panel), rotate the key, redeploy. Admins re-enroll
+  at their next login (the gate) and members are told to turn it on again.
+
 ### Next deploy notes
 
 Clear these items once the release that carries them is live.
+
+- **0011 `two_factor`** (WP-7): expand-only (four new tables and a nullable
+  `sessions.two_factor_verified_at`; no data step). **New secret:** add
+  `vault_cuencada_totp_encryption_key` to the vault **before** the deploy
+  (`openssl rand -hex 32`); the preflight maps it and the API refuses to
+  start in production without it. **Existing production admins must enroll
+  on their next request**: every existing session reads as "not verified",
+  so admins land on "Activa la verificación en dos pasos" (members are
+  unaffected; it is opt-in for them). Tell the admins before the release,
+  and make sure at least two admins exist so one can reset the other.
+  **At the first WP-7 deploy, enroll the admin in the browser first** (log
+  in at `/entrar`; the admin is sent to "Activa la verificación en dos pasos";
+  save the recovery codes), **then** run the § 7 smoke test with a fresh code
+  (`SMOKE_TOTP_CODE`): before enrollment the smoke login stops with
+  `TWO_FACTOR_SETUP_REQUIRED`. Check by hand: log out and in again → the code
+  step appears. **Tell the family:** "Si al entrar ves un error genérico,
+  toca «Actualizar» (o recarga la página) para usar la versión nueva";
+  admins must update the app before logging in, because an older cached app
+  does not know the code step or the enrollment page (there is no minimum
+  client version yet, backlog).
 
 - **0010 `social_tree_memories`** (WP-6.0): expand-only (new tables, a
   nullable `media_items.memory_album_id`, wider scope/prefix CHECKs validated

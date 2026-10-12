@@ -181,6 +181,8 @@ function UserRow({ user, isSelf, onOpen }: UserRowProps): ReactNode {
           {user.status === "disabled" ? <Badge tone="danger">Deshabilitada</Badge> : null}
           {user.emailVerified ? null : <Badge tone="accent">Sin verificar</Badge>}
           {user.mustChangePassword ? <Badge tone="accent">Cambio de contraseña</Badge> : null}
+          {user.twoFactorEnabled === true ? <Badge tone="success">2 pasos</Badge> : null}
+          {user.role === "admin" && user.twoFactorEnabled === false ? <Badge tone="accent">Sin 2 pasos</Badge> : null}
         </span>
       </span>
       <span aria-hidden="true" className={styles.chevron}>

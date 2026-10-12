@@ -3,9 +3,11 @@
  * comparison, and the short-lived HS256 access JWT.
  *
  * Access-token claims: `sub` (user id), `sid` (session id), `role`, `mcp`
- * (must change password), plus `iss`/`aud`/`iat`/`exp`. The claims are a
- * hint for the client only: the auth guard re-reads role and
- * must-change-password from the database on every request.
+ * (must change password), `amr` (WP-7: authentication methods, `["otp"]` when
+ * the session proved a two-step code), plus `iss`/`aud`/`iat`/`exp`. The
+ * claims are a hint for the client only: the auth guard re-reads role,
+ * must-change-password and the session's two-step state from the database
+ * on every request.
  */
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { type UserRole, userRoleSchema } from "@cuencada/types";
@@ -61,7 +63,12 @@ export interface AccessTokenClaims {
   role: UserRole;
   /** `mcp`: the user must change their password. */
   mustChangePassword: boolean;
+  /** `amr` (RFC 8176): `["otp"]` when the session was verified with a two-step code (WP-7). */
+  amr?: readonly AuthMethodReference[];
 }
+
+/** Authentication method references used in `amr` (RFC 8176 values). */
+export type AuthMethodReference = "otp";
 
 /** A signed access token and its expiry. */
 export interface SignedAccessToken {
@@ -84,7 +91,9 @@ const claimsSchema = z.object({
   sub: z.uuid(),
   sid: z.uuid(),
   role: userRoleSchema,
-  mcp: z.boolean()
+  mcp: z.boolean(),
+  // Optional: tokens issued before WP-7 have none (read as no second factor).
+  amr: z.array(z.literal("otp")).max(4).optional()
 });
 
 /**
@@ -112,7 +121,12 @@ export async function signAccessToken(
 ): Promise<SignedAccessToken> {
   const issuedAt = Math.floor(now.getTime() / 1000);
   const expiresAtSeconds = issuedAt + settings.ttlSeconds;
-  const token = await new SignJWT({ sid: claims.sessionId, role: claims.role, mcp: claims.mustChangePassword })
+  const token = await new SignJWT({
+    sid: claims.sessionId,
+    role: claims.role,
+    mcp: claims.mustChangePassword,
+    amr: [...(claims.amr ?? [])]
+  })
     .setProtectedHeader({ alg: ACCESS_TOKEN_ALGORITHM, typ: "JWT" })
     .setSubject(claims.userId)
     .setIssuer(ACCESS_TOKEN_ISSUER)
@@ -153,7 +167,8 @@ export async function verifyAccessToken(
         userId: parsed.data.sub,
         sessionId: parsed.data.sid,
         role: parsed.data.role,
-        mustChangePassword: parsed.data.mcp
+        mustChangePassword: parsed.data.mcp,
+        amr: parsed.data.amr ?? []
       }
     };
   } catch (error) {

@@ -1,0 +1,145 @@
+/* WP-7 two-step verification. Mobile-first: the 375px design is the base; min-width queries only. */
+
+.section {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.sectionTitle {
+  margin: var(--space-4) 0 0;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  line-height: 1.25;
+}
+
+.statusRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.muted {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.steps {
+  display: flex;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.stepCurrent {
+  color: var(--color-text);
+  font-weight: var(--weight-bold);
+}
+
+/* The QR code: large enough to scan from another phone, never wider than the screen. */
+.qr {
+  display: block;
+  width: min(15rem, 100%);
+  height: auto;
+  aspect-ratio: 1;
+  margin-inline: auto;
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.secret {
+  display: block;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: var(--text-md);
+  letter-spacing: 0.06em;
+  text-align: center;
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+/* Six big digits: easy to type on a phone, autofilled from SMS-like OTP suggestions. */
+.codeInput {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: var(--text-2xl);
+  letter-spacing: 0.4em;
+  text-align: center;
+}
+
+.codes {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunken);
+  list-style: none;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: var(--text-md);
+  text-align: center;
+}
+
+.warning {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-soft);
+  line-height: 1.5;
+}
+
+.linkButton {
+  justify-self: start;
+  padding: var(--space-2) 0;
+  min-height: 44px;
+  border: 0;
+  background: none;
+  color: var(--color-primary);
+  font: inherit;
+  font-weight: var(--weight-semibold);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.deviceList {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.device {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.deviceText {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.deviceName {
+  margin: 0;
+  font-weight: var(--weight-bold);
+  overflow-wrap: anywhere;
+}
+
+@media (min-width: 600px) {
+  .codes {
+    grid-template-columns: 1fr 1fr;
+  }
+}

@@ -20,7 +20,8 @@ const claims = {
   userId: "11111111-1111-4111-8111-111111111111",
   sessionId: "22222222-2222-4222-8222-222222222222",
   role: "member",
-  mustChangePassword: false
+  mustChangePassword: false,
+  amr: []
 } as const;
 
 describe("createOpaqueToken", () => {
@@ -61,6 +62,26 @@ describe("signAccessToken / verifyAccessToken", () => {
 
     expect(signed.expiresAt.toISOString()).toBe("2026-10-06T12:15:00.000Z");
     await expect(verifyAccessToken(settings, signed.token, now)).resolves.toEqual({ ok: true, claims });
+  });
+
+  it("carries the amr claim (WP-7) and reads a token without one as no second factor", async () => {
+    const now = new Date("2026-10-06T12:00:00Z");
+    const verified = await signAccessToken(settings, { ...claims, amr: ["otp"] }, now);
+    await expect(verifyAccessToken(settings, verified.token, now)).resolves.toEqual({
+      ok: true,
+      claims: { ...claims, amr: ["otp"] }
+    });
+
+    // A token signed before WP-7 has no amr claim at all.
+    const legacy = await new SignJWT({ sid: claims.sessionId, role: claims.role, mcp: false })
+      .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+      .setSubject(claims.userId)
+      .setIssuer(ACCESS_TOKEN_ISSUER)
+      .setAudience(ACCESS_TOKEN_AUDIENCE)
+      .setIssuedAt(Math.floor(now.getTime() / 1000))
+      .setExpirationTime(Math.floor(now.getTime() / 1000) + 900)
+      .sign(settings.secret);
+    await expect(verifyAccessToken(settings, legacy, now)).resolves.toEqual({ ok: true, claims: { ...claims, amr: [] } });
   });
 
   it("reports expired tokens as expired, at exactly exp", async () => {

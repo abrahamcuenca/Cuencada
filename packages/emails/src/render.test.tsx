@@ -253,6 +253,48 @@ describe("renderEmail", () => {
     });
   });
 
+  describe("two-factor-notice (WP-7)", () => {
+    const base = {
+      kind: EmailKind.TwoFactorNotice,
+      props: {
+        displayName: "Ana Morales Vega",
+        notice: "enabled",
+        at: EXPIRES,
+        supportContact: "admin@cuencada.com",
+      },
+    } satisfies EmailTemplate;
+
+    it.each([
+      ["enabled", "Activaste la verificación en dos pasos"],
+      ["disabled", "Desactivaste la verificación en dos pasos"],
+      ["reset_by_admin", "Restablecieron tu verificación en dos pasos"],
+      ["recovery_code_used", "Usaste un código de recuperación"],
+    ] as const)("renders the %s notice as a security notice without a button", async (notice, subject) => {
+      const email = await renderEmail({ ...base, props: { ...base.props, notice } });
+      expect(email.subject).toBe(subject);
+      expect(email.text).toContain("IMPORTANTE: Si no fuiste tú");
+      expect(email.text).toMatch(/lunes 14 de septiembre ·\s7:40/);
+      expect(email.html).not.toContain("<a ");
+      expect(email.text).not.toContain("ignorarlo");
+    });
+
+    it("says how many recovery codes are left", async () => {
+      const email = await renderEmail({
+        ...base,
+        props: { ...base.props, notice: "recovery_code_used", remainingCodes: 1 },
+      });
+      expect(email.text).toContain("Te queda 1 código sin usar.");
+    });
+
+    it("rejects an impossible remaining count and escapes names", async () => {
+      await expect(
+        renderEmail({ ...base, props: { ...base.props, notice: "recovery_code_used", remainingCodes: 11 } }),
+      ).rejects.toMatchObject({ field: "remainingCodes" });
+      const email = await renderEmail({ ...base, props: { ...base.props, displayName: XSS } });
+      expect(email.html).not.toContain("<script");
+    });
+  });
+
   describe("admin-account-changed", () => {
     const template: EmailTemplate = {
       kind: EmailKind.AdminAccountChanged,

@@ -24,7 +24,9 @@ export const defaultErrorMessages = {
   PAYLOAD_TOO_LARGE: "La solicitud es demasiado grande.",
   RATE_LIMITED: "Demasiados intentos. Espera un momento y vuelve a intentarlo.",
   SERVICE_UNAVAILABLE: "El servicio no está disponible en este momento.",
-  INTERNAL: "Ocurrió un error inesperado. Intenta de nuevo más tarde."
+  INTERNAL: "Ocurrió un error inesperado. Intenta de nuevo más tarde.",
+  TWO_FACTOR_SETUP_REQUIRED: "Por seguridad, los administradores deben activar la verificación en dos pasos.",
+  TWO_FACTOR_INVALID: "El código no es válido. Revisa tu app e inténtalo de nuevo."
 } as const satisfies Record<ErrorCode, string>;
 
 /** Options for {@link AppError}. */

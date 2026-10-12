@@ -12,6 +12,33 @@ loadDotEnv({ path: [resolve(repoRoot, ".env"), resolve(serverRoot, ".env")], qui
 /** Minimum `JWT_SECRET` length in production (HS256 wants >= 256 bits of key material). */
 export const PRODUCTION_JWT_SECRET_MIN_LENGTH = 32;
 
+/**
+ * Development/test placeholder for `TOTP_ENCRYPTION_KEY` (base64 of
+ * "dev-only-totp-key-not-for-prod!!", 32 bytes). Public on purpose: it is the
+ * default outside production and production refuses it.
+ */
+export const DEV_TOTP_ENCRYPTION_KEY = "ZGV2LW9ubHktdG90cC1rZXktbm90LWZvci1wcm9kISE=";
+
+/** Bytes of an AES-256 key. */
+export const TOTP_ENCRYPTION_KEY_BYTES = 32;
+/** A production key must have at least this many distinct byte values (rejects `aaaa…`, `0000…`). */
+const TOTP_KEY_MIN_DISTINCT_BYTES = 16;
+
+/**
+ * Decode `TOTP_ENCRYPTION_KEY`: 64 hex characters, or base64/base64url of
+ * exactly 32 bytes (`openssl rand -base64 32`).
+ *
+ * @param value - The configured string.
+ * @returns The key bytes, or `null` when it is not a 32-byte key.
+ */
+export function decodeTotpKey(value: string): Buffer | null {
+  const trimmed = value.trim();
+  if (/^[0-9a-fA-F]{64}$/.test(trimmed)) return Buffer.from(trimmed, "hex");
+  if (!/^[A-Za-z0-9+/_-]{43}=?$/.test(trimmed)) return null;
+  const bytes = Buffer.from(trimmed.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+  return bytes.length === TOTP_ENCRYPTION_KEY_BYTES ? bytes : null;
+}
+
 /** The Vite dev server origin, allowed for CORS/CSRF outside production. */
 export const VITE_DEV_ORIGIN = "http://localhost:5173";
 
@@ -71,6 +98,19 @@ const trustProxy = z
       .filter((entry) => entry.length > 0);
   });
 
+/**
+ * A decodable key that must not protect production secrets: the public dev
+ * placeholder, or too few distinct byte values (`aaaa…`, `0000…`).
+ *
+ * @param value - The configured `TOTP_ENCRYPTION_KEY`.
+ */
+function isWeakTotpKey(value: string): boolean {
+  const key = decodeTotpKey(value);
+  if (key === null) return false; // the format refine already reports it
+  const placeholder = decodeTotpKey(DEV_TOTP_ENCRYPTION_KEY);
+  return (placeholder !== null && key.equals(placeholder)) || new Set(key).size < TOTP_KEY_MIN_DISTINCT_BYTES;
+}
+
 /** Every environment variable the server reads, before production rules and defaults. */
 const configObject = z.object({
   /** Required, no default: a missing value must not fail open into development behaviour. */
@@ -117,6 +157,22 @@ const configObject = z.object({
   ),
   /** Reject a password seen in at least this many breaches (ASVS 2.1.7 default: 1). */
   PASSWORD_BREACH_MIN_COUNT: z.preprocess(blankAsUndefined, z.coerce.number().int().min(1).max(1_000_000).optional()).default(1),
+  /**
+   * WP-7: AES-256-GCM key for TOTP secrets at rest (32 bytes, base64 or hex;
+   * `openssl rand -base64 32`). Required in production (a credential, never
+   * an `Environment=` line); defaults to {@link DEV_TOTP_ENCRYPTION_KEY}
+   * elsewhere. Losing or changing it makes every enrolled secret unreadable
+   * (fail closed): see the runbook's rotation notes.
+   */
+  TOTP_ENCRYPTION_KEY: z.preprocess(
+    blankAsUndefined,
+    z
+      .string()
+      .refine((value) => decodeTotpKey(value) !== null, {
+        error: "must be 32 bytes, as base64 (openssl rand -base64 32) or 64 hex characters"
+      })
+      .optional()
+  ),
   S3_ENDPOINT: z.string().optional().default(""),
   S3_REGION: z.string().optional().default("us-east-1"),
   S3_BUCKET: z.string().optional().default(""),
@@ -155,6 +211,15 @@ const configSchema = configObject
         ctx.addIssue({ code: "custom", path: [key], message: "is required in production" });
       }
     }
+    if (env.TOTP_ENCRYPTION_KEY === undefined) {
+      ctx.addIssue({ code: "custom", path: ["TOTP_ENCRYPTION_KEY"], message: "is required in production" });
+    } else if (isWeakTotpKey(env.TOTP_ENCRYPTION_KEY)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["TOTP_ENCRYPTION_KEY"],
+        message: "is too weak for production (use openssl rand -base64 32)"
+      });
+    }
     if (env.APP_BASE_URL !== undefined && !env.APP_BASE_URL.startsWith("https://")) {
       ctx.addIssue({ code: "custom", path: ["APP_BASE_URL"], message: "must be https:// in production" });
     }
@@ -176,7 +241,8 @@ const configSchema = configObject
       DEV_ALLOWED_ORIGINS: production ? [] : env.DEV_ALLOWED_ORIGINS,
       TRUST_PROXY: env.TRUST_PROXY ?? (production ? ["loopback"] : false),
       COOKIE_SECURE: env.COOKIE_SECURE ?? production,
-      PASSWORD_BREACH_CHECK: env.PASSWORD_BREACH_CHECK ?? (env.NODE_ENV === "test" ? "off" : "on")
+      PASSWORD_BREACH_CHECK: env.PASSWORD_BREACH_CHECK ?? (env.NODE_ENV === "test" ? "off" : "on"),
+      TOTP_ENCRYPTION_KEY: env.TOTP_ENCRYPTION_KEY ?? DEV_TOTP_ENCRYPTION_KEY
     };
   });
 

@@ -4,192 +4,203 @@
 <!-- Regenerate: UPDATE_SECURITY_DOCS=1 pnpm --filter @cuencada/server test -- inventory -->
 
 Every route the API registers, with the guard configuration it declares
-(`config.auth`, `requireVerifiedEmail`, `allowPendingPasswordChange`) and the
-status class each principal gets in `authz-matrix.test.ts`. Fastify's automatic
-HEAD twins of GET routes are omitted; the inventory test checks they carry the
-same guard config. `401`/`403` cells are guard denials (`UNAUTHENTICATED`,
-`PASSWORD_CHANGE_REQUIRED`, `FORBIDDEN`, `EMAIL_UNVERIFIED`); other non-2xx
-cells are handler answers for that principal's own data.
+(`config.auth`, `requireVerifiedEmail`, `allowPendingPasswordChange`,
+`allowPendingTwoFactor`) and the status class each principal gets in
+`authz-matrix.test.ts`. Fastify's automatic HEAD twins of GET routes are
+omitted; the inventory test checks they carry the same guard config. `401`/`403`
+cells are guard denials (`UNAUTHENTICATED`, `PASSWORD_CHANGE_REQUIRED`,
+`FORBIDDEN`, `EMAIL_UNVERIFIED`, and for "Admin no 2FA" — an administrator who
+has not enrolled two-step verification yet, WP-7 — `TWO_FACTOR_SETUP_REQUIRED`);
+other non-2xx cells are handler answers for that principal's own data.
 
-Total: 178 routes (14 public, 92 user, 70 admin, 2 cookie).
+Total: 187 routes (15 public, 99 user, 71 admin, 2 cookie).
 
-| Method | Path | auth | Verified email | Pending pw allowed | Anon | Member | Unverified | Pending pw | Disabled | Revoked | Admin | Other member (IDOR) | Scope / notes |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| OPTIONS | `*` | (default user) |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  | @fastify/cors preflight; answered by the CORS onRequest hook before the guard |
-| GET | `/api/admin/announcements` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/admin/announcements` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| DELETE | `/api/admin/announcements/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| PATCH | `/api/admin/announcements/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/admin/audit-logs` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/admin/cuencadas` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/admin/cuencadas` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| DELETE | `/api/admin/cuencadas/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/admin/cuencadas/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| PATCH | `/api/admin/cuencadas/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/admin/cuencadas/:id/attendance` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/admin/cuencadas/:id/attendance` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| PUT | `/api/admin/cuencadas/:id/attendance` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/admin/cuencadas/:id/daily-messages` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| DELETE | `/api/admin/cuencadas/:id/daily-messages/:date` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| PUT | `/api/admin/cuencadas/:id/daily-messages/:date` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/admin/cuencadas/:id/daily-messages/import` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/admin/cuencadas/:id/itinerary` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| PUT | `/api/admin/cuencadas/:id/itinerary/order` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/admin/cuencadas/:id/locations` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| PUT | `/api/admin/cuencadas/:id/locations/order` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/admin/cuencadas/:id/rsvps` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/admin/cuencadas/:id/rsvps.csv` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/admin/events` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | every event, hidden and drafts included |
-| POST | `/api/admin/events` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | optional typed slug (409 EVENT_SLUG_TAKEN) |
-| PATCH | `/api/admin/events/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | every field, hidden and the slug |
-| GET | `/api/admin/family/activity` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | PII snapshots |
-| GET | `/api/admin/family/branches` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | PII (no account ids; linked accounts as a count) |
-| GET | `/api/admin/family/duplicates` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | PII pairs (no account ids) |
-| GET | `/api/admin/family/proposals` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | notes and resolution notes (proposer and admins only) |
-| GET | `/api/admin/family/proposals/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/admin/family/proposals/:id/resolve` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/admin/family/settings` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| PUT | `/api/admin/family/settings` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/admin/invites` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/admin/invites` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/admin/invites/:id/resend` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/admin/invites/:id/revoke` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/admin/invites/people` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | WP-4.2 picker: living people without an account; no account ids |
-| GET | `/api/admin/invites/people/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |
-| DELETE | `/api/admin/itinerary/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| PATCH | `/api/admin/itinerary/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| DELETE | `/api/admin/locations/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| PATCH | `/api/admin/locations/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/admin/media` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/admin/media/:id/moderate` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/admin/media/:id/reports` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/admin/media/comment-reports` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| DELETE | `/api/admin/media/comments/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | audited media_comment.deleted (ids only); the body is scrubbed |
-| GET | `/api/admin/memory-albums` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | every box, drafts and hidden included |
-| POST | `/api/admin/memory-albums` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | draft by default; audited |
-| DELETE | `/api/admin/memory-albums/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | 409 MEMORY_ALBUM_NOT_EMPTY with live media; purges soft-deleted rows |
-| PATCH | `/api/admin/memory-albums/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | cover must be a photo of this box (400); publish/hide audited |
-| PUT | `/api/admin/memory-albums/order` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | every box id (409 when the set changed) |
-| POST | `/api/admin/people` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| DELETE | `/api/admin/people/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| PATCH | `/api/admin/people/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/admin/people/:id/merge` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 | probe: merge a relative into own linked person (before/after) → 403; mass assignment: mass assignment of userId/fields beyond the choices (before/after) → 403 |
-| GET | `/api/admin/people/:id/merge-preview` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 | PII preview; dry run in a rolled-back transaction |
-| GET | `/api/admin/people/:id/revisions` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | PII snapshots |
-| POST | `/api/admin/people/:id/revisions/purge` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/admin/relationships` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| DELETE | `/api/admin/relationships/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/admin/revisions/:revisionId/revert` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/admin/summary` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/admin/users` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  |  |
-| PATCH | `/api/admin/users/:id` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | 403 on the caller's own account |
-| POST | `/api/admin/users/:id/force-password-reset` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | 403 on the caller's own account |
-| POST | `/api/admin/users/:id/revoke-sessions` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | 403 on the caller's own account |
-| POST | `/api/admin/users/:id/verify-email` | admin |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx |  | 403 on the caller's own account |
-| GET | `/api/announcements` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/auth/change-password` | user |  | yes | 401 | 2xx | 2xx | 2xx | 401 | 401 | 2xx |  |  |
-| POST | `/api/auth/email/verify` | public |  |  | 2xx | 2xx | 2xx | 2xx | 400 | 2xx | 2xx |  |  |
-| POST | `/api/auth/email/verify-request` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/auth/login` | public |  |  | 2xx | 2xx | 2xx | 2xx | 401 | 2xx | 2xx |  |  |
-| POST | `/api/auth/logout` | cookie |  |  | 401 | 2xx | 2xx | 2xx | 2xx | 401 | 2xx |  | refresh cookie of the caller's session; a disabled user's cookie may still log out (it only revokes that session) |
-| POST | `/api/auth/logout-all` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/auth/magic-link/consume` | public |  |  | 2xx | 2xx | 2xx | 2xx | 400 | 2xx | 2xx |  |  |
-| POST | `/api/auth/magic-link/request` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
-| POST | `/api/auth/password-reset/confirm` | public |  |  | 2xx | 2xx | 2xx | 2xx | 400 | 2xx | 2xx |  |  |
-| POST | `/api/auth/password-reset/request` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
-| POST | `/api/auth/refresh` | cookie |  |  | 401 | 2xx | 2xx | 2xx | 401 | 401 | 2xx |  | refresh cookie of the caller's session |
-| GET | `/api/auth/sessions` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
-| DELETE | `/api/auth/sessions/:id` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 404 | own sessions only (404 for anyone else's) |
-| POST | `/api/auth/sessions/revoke-others` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
-| DELETE | `/api/chat/messages/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | sender or admin (404 for other members); probe: own message in a hidden room → 404 |
-| GET | `/api/chat/rooms` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/chat/rooms/:id/messages` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | probe: history of a hidden room → 404 |
-| POST | `/api/chat/rooms/:id/read` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | probe: read state in a hidden room → 404; probe: message of another room → 404 |
-| POST | `/api/chat/ticket` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/chat/ws` | public |  |  | ticket | ticket | ticket | ticket | ticket | ticket | ticket |  | authenticated by the single-use ticket + Origin check in the handler (see the WebSocket tests) |
-| GET | `/api/cuencadas` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
-| GET | `/api/cuencadas/:year` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
-| GET | `/api/cuencadas/:year/attendees` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/cuencadas/:year/media` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | presigned GET URLs (1 h); verified members only (WP-2.3 L2 owner decision) |
-| POST | `/api/cuencadas/:year/media/uploads` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/cuencadas/:year/members` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/cuencadas/:year/rsvp/me` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  | self-scoped (the caller's RSVP; no id in the path) |
-| PUT | `/api/cuencadas/:year/rsvp/me` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  | self-scoped; mass assignment: RSVP body naming another member (userId/cuencadaId/createdByUserId) → 2xx |
-| GET | `/api/cuencadas/:year/rsvp/summary` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  | counts only, no names |
-| GET | `/api/cuencadas/home` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
-| GET | `/api/directory` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/directory/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | listed members only (404 for unlisted) |
-| GET | `/api/events` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | only events the caller may see (ADR 0001 §7); hidden never |
-| POST | `/api/events` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | the caller becomes organizer; 10/day and 20 open drafts per member; mass assignment: a member-typed slug (Security M1) → 400 |
-| DELETE | `/api/events/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | admins; organizers only for a draft without media; probe: a joined members event the caller does not organize → 403; probe: an organizer deleting a published event → 403; probe: an organizer deleting a draft with (soft-deleted) media → 403 |
-| PATCH | `/api/events/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | organizers and admins; hidden admin-only; probe: a joined members event the caller does not organize → 403; probe: an organizer hiding their own event → 403; mass assignment: a member-typed slug (Security M1) → 400 |
-| POST | `/api/events/:id/albums` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | organizers and admins (≤ 20 albums); probe: a joined members event the caller does not organize → 403 |
-| DELETE | `/api/events/:id/albums/:albumId` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | organizers and admins; 409 while live media remain; probe: a joined members event the caller does not organize → 403; probe: an album with live media → 409 |
-| PATCH | `/api/events/:id/albums/:albumId` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | organizers and admins; the album must belong to the event; probe: a joined members event the caller does not organize → 403 |
-| GET | `/api/events/:id/albums/:albumId/media` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | participants and admins (admins on participants events audited); probe: a members event the caller has not joined → 403 |
-| POST | `/api/events/:id/albums/:albumId/uploads` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | participants and admins; shared daily upload budget; probe: a members event the caller has not joined (no media row created) → 403 |
-| DELETE | `/api/events/:id/cover` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | organizers and admins; probe: a joined members event the caller does not organize → 403 |
-| POST | `/api/events/:id/cover/uploads` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | organizers and admins; probe: a joined members event the caller does not organize → 403 |
-| POST | `/api/events/:id/cover/uploads/:uploadId/confirm` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | the uploader, still an organizer or admin (404 for another user's upload); probe: an own intent after being demoted to participant → 403 |
-| POST | `/api/events/:id/join` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | published members events only (403 otherwise, admins included); probe: joining a participants-only event the caller already sees → 403 |
-| DELETE | `/api/events/:id/notice` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | the caller's own notice only |
-| POST | `/api/events/:id/participants` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | organizers (listed, active, verified members) and admins; probe: a joined members event the caller does not organize → 403; probe: an organizer adding a member hidden from the directory → 400; probe: an organizer adding a disabled member → 400 |
-| DELETE | `/api/events/:id/participants/:userId` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | organizers and admins; never removes the last organizer; probe: a joined members event the caller does not organize → 403; probe: removing the last organizer → 409 |
-| PATCH | `/api/events/:id/participants/:userId` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | organizers and admins; never demotes the last organizer; probe: a joined members event the caller does not organize → 403; probe: demoting the last organizer → 409 |
-| DELETE | `/api/events/:id/participants/me` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | the caller's own participation (not the last organizer); probe: a members event the caller has not joined → 403; probe: the last organizer leaving → 409 |
-| GET | `/api/events/:year/:slug` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | per visibility (404 when the caller cannot see it) |
-| GET | `/api/events/notices` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | the caller's own participations only, in events they can see |
-| PATCH | `/api/family/me` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | self-scoped (the caller's linked person); mass assignment: extra keys (userId/deceased/deathYear/deathDate/id) → 2xx |
-| GET | `/api/family/overview` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | names only (no photos, no account ids) |
-| GET | `/api/family/overview/path` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/family/people` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/family/people` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | qualifying own-family circle (relateTo must be in it; ADR 0001 §6); probe: circle widened through a member edge whose creator made no endpoint (planted) → 403; mass assignment: userId / createdByUserId keys → 400; probe: existing-to-existing edge → 400 |
-| DELETE | `/api/family/people/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | creator only (unlinked, no other edges); probe: own addition with another edge → 409; probe: own addition linked to an account → 403 |
-| GET | `/api/family/people/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
-| PATCH | `/api/family/people/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | self, or the qualifying circle minus people linked to another account; mass assignment: userId key → 400; probe: death data on the caller's own linked node (ADMIN_ONLY_FIELD) → 403 |
-| DELETE | `/api/family/people/:id/photo` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | same rule as the upload intent (WP-4.3); probe: a person who is not a close relative → 403 |
-| POST | `/api/family/people/:id/photo/uploads` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | admins, the linked person, close relatives of a person without account (WP-4.3); probe: a person who is not a close relative → 403 |
-| POST | `/api/family/people/:id/photo/uploads/:uploadId/confirm` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | uploader only (404 for another user's uploadId or another person's path) |
-| GET | `/api/family/people/:id/photos` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | approved tags (plus the caller's own pending ones) on photos the caller can see; published editions only |
-| PATCH | `/api/family/people/me` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | self-scoped alias of /api/family/me; mass assignment: extra keys (userId/deceased/deathYear/deathDate/id) → 2xx |
-| GET | `/api/family/proposals` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | self-scoped (the caller's own proposals only) |
-| POST | `/api/family/proposals` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | the caller is the proposer (20/day DB count; one pending per proposer and pair); mass assignment: mass assignment of status/proposer (strict body) → 400 |
-| DELETE | `/api/family/proposals/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | proposer only (404 for anyone else) |
-| GET | `/api/family/settings` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/family/tree` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
-| GET | `/api/family/tree/extended` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/invites/accept` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  | probe: invite naming another member's linked person (falls back, never relinks) → 2xx; probe: open link naming an unlinked person (legacy row; falls back, never links) → 2xx |
-| POST | `/api/invites/inspect` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
-| GET | `/api/me` | user |  | yes | 401 | 2xx | 2xx | 2xx | 401 | 401 | 2xx |  |  |
-| DELETE | `/api/media/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | uploader or admin (404 for other members) |
-| GET | `/api/media/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | hidden/pending items only for the uploader and admins (404 otherwise) |
-| PATCH | `/api/media/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | uploader or admin (404 for other members) |
-| GET | `/api/media/:id/comments` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | deleted comments are tombstones (no body, no author) |
-| POST | `/api/media/:id/comments` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 |  |
-| POST | `/api/media/:id/confirm` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | uploader only (404 for others) |
-| GET | `/api/media/:id/detail` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | pending tags only for the tagger, the tagged user and admins |
-| DELETE | `/api/media/:id/like` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 |  |
-| PUT | `/api/media/:id/like` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 |  |
-| GET | `/api/media/:id/likes` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | names; avatars only for listed active members; no account ids |
-| POST | `/api/media/:id/report` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | any member except the uploader (403 on own items); probe: report own item → 403 |
-| GET | `/api/media/:id/tag-candidates` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | any person; name only for unlisted/disabled members |
-| POST | `/api/media/:id/tags` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | pending for linked people (the tagger sees it as approved); 30 per photo |
-| DELETE | `/api/media/:id/tags/:tagId` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | the tagger, the uploader, the tagged person's user, admins; probe: uploader on someone else's pending tag (invisible to them) → 404 |
-| DELETE | `/api/media/comments/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | the author only (admins moderate on the admin route) |
-| POST | `/api/media/comments/:id/report` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | any viewer except the author (403 on own comments); probe: report own comment → 403 |
-| POST | `/api/media/tags/:id/approve` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | the tagged person's linked user only |
-| GET | `/api/memories` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | published boxes only (drafts and hidden boxes never listed) |
-| GET | `/api/memories/:id` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | published boxes for members; admins any (404 MEMORY_ALBUM_NOT_FOUND) |
-| GET | `/api/memories/:id/media` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | published boxes for members; admins any (404 MEMORY_ALBUM_NOT_FOUND) |
-| POST | `/api/memories/:id/uploads` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 404 | any verified member to a published box; admins any; shared daily upload budget |
-| GET | `/api/notifications` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | the caller's own notifications, targets re-checked for visibility |
-| POST | `/api/notifications/read` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 2xx | the caller's own notifications; other ids are ignored |
-| GET | `/api/notifications/unread-count` | user | yes |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx |  | the caller's own unread count |
-| GET | `/api/profile/me` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
-| PATCH | `/api/profile/me` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
-| DELETE | `/api/profile/me/avatar` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
-| POST | `/api/profile/me/avatar/confirm` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 404 | own upload intents only (404 for another user's uploadId) |
-| POST | `/api/profile/me/avatar/uploads` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx |  |  |
-| PATCH | `/api/profile/me/contacts` | user |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 2xx | self only (no id in path or body; another member's contacts never change); mass assignment: extra keys (userId/showCity/listedInDirectory/email) → 400 |
-| GET | `/health` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
-| GET | `/health/ready` | public |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
+| Method | Path | auth | Verified email | Pending pw allowed | Pending 2FA allowed | Anon | Member | Unverified | Pending pw | Disabled | Revoked | Admin | Admin no 2FA | Other member (IDOR) | Scope / notes |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| OPTIONS | `*` | (default user) |  |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  | @fastify/cors preflight; answered by the CORS onRequest hook before the guard |
+| GET | `/api/admin/announcements` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/admin/announcements` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| DELETE | `/api/admin/announcements/:id` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| PATCH | `/api/admin/announcements/:id` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/admin/audit-logs` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/admin/cuencadas` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/admin/cuencadas` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| DELETE | `/api/admin/cuencadas/:id` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/admin/cuencadas/:id` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| PATCH | `/api/admin/cuencadas/:id` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/admin/cuencadas/:id/attendance` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/admin/cuencadas/:id/attendance` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| PUT | `/api/admin/cuencadas/:id/attendance` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/admin/cuencadas/:id/daily-messages` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| DELETE | `/api/admin/cuencadas/:id/daily-messages/:date` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| PUT | `/api/admin/cuencadas/:id/daily-messages/:date` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/admin/cuencadas/:id/daily-messages/import` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/admin/cuencadas/:id/itinerary` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| PUT | `/api/admin/cuencadas/:id/itinerary/order` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/admin/cuencadas/:id/locations` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| PUT | `/api/admin/cuencadas/:id/locations/order` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/admin/cuencadas/:id/rsvps` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/admin/cuencadas/:id/rsvps.csv` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/admin/events` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  | every event, hidden and drafts included |
+| POST | `/api/admin/events` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  | optional typed slug (409 EVENT_SLUG_TAKEN) |
+| PATCH | `/api/admin/events/:id` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  | every field, hidden and the slug |
+| GET | `/api/admin/family/activity` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  | PII snapshots |
+| GET | `/api/admin/family/branches` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  | PII (no account ids; linked accounts as a count) |
+| GET | `/api/admin/family/duplicates` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  | PII pairs (no account ids) |
+| GET | `/api/admin/family/proposals` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  | notes and resolution notes (proposer and admins only) |
+| GET | `/api/admin/family/proposals/:id` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/admin/family/proposals/:id/resolve` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/admin/family/settings` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| PUT | `/api/admin/family/settings` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/admin/invites` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/admin/invites` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/admin/invites/:id/resend` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/admin/invites/:id/revoke` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/admin/invites/people` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  | WP-4.2 picker: living people without an account; no account ids |
+| GET | `/api/admin/invites/people/:id` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 | 403 |  |
+| DELETE | `/api/admin/itinerary/:id` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| PATCH | `/api/admin/itinerary/:id` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| DELETE | `/api/admin/locations/:id` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| PATCH | `/api/admin/locations/:id` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/admin/media` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/admin/media/:id/moderate` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/admin/media/:id/reports` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/admin/media/comment-reports` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| DELETE | `/api/admin/media/comments/:id` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  | audited media_comment.deleted (ids only); the body is scrubbed |
+| GET | `/api/admin/memory-albums` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  | every box, drafts and hidden included |
+| POST | `/api/admin/memory-albums` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  | draft by default; audited |
+| DELETE | `/api/admin/memory-albums/:id` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  | 409 MEMORY_ALBUM_NOT_EMPTY with live media; purges soft-deleted rows |
+| PATCH | `/api/admin/memory-albums/:id` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  | cover must be a photo of this box (400); publish/hide audited |
+| PUT | `/api/admin/memory-albums/order` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  | every box id (409 when the set changed) |
+| POST | `/api/admin/people` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| DELETE | `/api/admin/people/:id` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| PATCH | `/api/admin/people/:id` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/admin/people/:id/merge` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 | 403 | probe: merge a relative into own linked person (before/after) → 403; mass assignment: mass assignment of userId/fields beyond the choices (before/after) → 403 |
+| GET | `/api/admin/people/:id/merge-preview` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 | 403 | PII preview; dry run in a rolled-back transaction |
+| GET | `/api/admin/people/:id/revisions` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  | PII snapshots |
+| POST | `/api/admin/people/:id/revisions/purge` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/admin/relationships` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| DELETE | `/api/admin/relationships/:id` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/admin/revisions/:revisionId/revert` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/admin/summary` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/admin/users` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| PATCH | `/api/admin/users/:id` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  | 403 on the caller's own account |
+| POST | `/api/admin/users/:id/2fa/reset` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  | 403 on the caller's own account (another admin must do it) |
+| POST | `/api/admin/users/:id/force-password-reset` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  | 403 on the caller's own account |
+| POST | `/api/admin/users/:id/revoke-sessions` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  | 403 on the caller's own account |
+| POST | `/api/admin/users/:id/verify-email` | admin |  |  |  | 401 | 403 | 403 | 403 | 401 | 401 | 2xx | 403 |  | 403 on the caller's own account |
+| GET | `/api/announcements` | user |  |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/auth/2fa/disable` | user |  |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 403 | 403 |  | members only: 403 for administrators |
+| POST | `/api/auth/2fa/enable` | user |  |  | yes | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 2xx |  | the caller's own pending secret |
+| POST | `/api/auth/2fa/recovery-codes` | user |  |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/auth/2fa/setup` | user |  |  | yes | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 2xx |  | the caller's own secret |
+| GET | `/api/auth/2fa/status` | user |  |  | yes | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 2xx |  |  |
+| GET | `/api/auth/2fa/trusted-devices` | user |  |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 403 |  |  |
+| DELETE | `/api/auth/2fa/trusted-devices/:id` | user |  |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 403 | 404 | own trusted devices only (404 for anyone else's) |
+| POST | `/api/auth/2fa/verify` | public |  |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  | the challenge token from the caller's own login |
+| POST | `/api/auth/change-password` | user |  | yes |  | 401 | 2xx | 2xx | 2xx | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/auth/email/verify` | public |  |  |  | 2xx | 2xx | 2xx | 2xx | 400 | 2xx | 2xx | 2xx |  |  |
+| POST | `/api/auth/email/verify-request` | user |  |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/auth/login` | public |  |  |  | 2xx | 2xx | 2xx | 2xx | 401 | 2xx | 2xx | 2xx |  |  |
+| POST | `/api/auth/logout` | cookie |  |  |  | 401 | 2xx | 2xx | 2xx | 2xx | 401 | 2xx | 2xx |  | refresh cookie of the caller's session; a disabled user's cookie may still log out (it only revokes that session) |
+| POST | `/api/auth/logout-all` | user |  |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/auth/magic-link/consume` | public |  |  |  | 2xx | 2xx | 2xx | 2xx | 400 | 2xx | 2xx | 2xx |  |  |
+| POST | `/api/auth/magic-link/request` | public |  |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
+| POST | `/api/auth/password-reset/confirm` | public |  |  |  | 2xx | 2xx | 2xx | 2xx | 400 | 2xx | 2xx | 2xx |  |  |
+| POST | `/api/auth/password-reset/request` | public |  |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
+| POST | `/api/auth/refresh` | cookie |  |  |  | 401 | 2xx | 2xx | 2xx | 401 | 401 | 2xx | 2xx |  | refresh cookie of the caller's session |
+| GET | `/api/auth/sessions` | user |  |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 403 |  |  |
+| DELETE | `/api/auth/sessions/:id` | user |  |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 403 | 404 | own sessions only (404 for anyone else's) |
+| POST | `/api/auth/sessions/revoke-others` | user |  |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 403 |  |  |
+| DELETE | `/api/chat/messages/:id` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | sender or admin (404 for other members); probe: own message in a hidden room → 404 |
+| GET | `/api/chat/rooms` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/chat/rooms/:id/messages` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  | probe: history of a hidden room → 404 |
+| POST | `/api/chat/rooms/:id/read` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  | probe: read state in a hidden room → 404; probe: message of another room → 404 |
+| POST | `/api/chat/ticket` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/chat/ws` | public |  |  |  | ticket | ticket | ticket | ticket | ticket | ticket | ticket | ticket |  | authenticated by the single-use ticket + Origin check in the handler (see the WebSocket tests) |
+| GET | `/api/cuencadas` | public |  |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
+| GET | `/api/cuencadas/:year` | public |  |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
+| GET | `/api/cuencadas/:year/attendees` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/cuencadas/:year/media` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  | presigned GET URLs (1 h); verified members only (WP-2.3 L2 owner decision) |
+| POST | `/api/cuencadas/:year/media/uploads` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/cuencadas/:year/members` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/cuencadas/:year/rsvp/me` | user |  |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 403 |  | self-scoped (the caller's RSVP; no id in the path) |
+| PUT | `/api/cuencadas/:year/rsvp/me` | user |  |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 403 |  | self-scoped; mass assignment: RSVP body naming another member (userId/cuencadaId/createdByUserId) → 2xx |
+| GET | `/api/cuencadas/:year/rsvp/summary` | user |  |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 403 |  | counts only, no names |
+| GET | `/api/cuencadas/home` | public |  |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
+| GET | `/api/directory` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/directory/:id` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | listed members only (404 for unlisted) |
+| GET | `/api/events` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  | only events the caller may see (ADR 0001 §7); hidden never |
+| POST | `/api/events` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  | the caller becomes organizer; 10/day and 20 open drafts per member; mass assignment: a member-typed slug (Security M1) → 400 |
+| DELETE | `/api/events/:id` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | admins; organizers only for a draft without media; probe: a joined members event the caller does not organize → 403; probe: an organizer deleting a published event → 403; probe: an organizer deleting a draft with (soft-deleted) media → 403 |
+| PATCH | `/api/events/:id` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | organizers and admins; hidden admin-only; probe: a joined members event the caller does not organize → 403; probe: an organizer hiding their own event → 403; mass assignment: a member-typed slug (Security M1) → 400 |
+| POST | `/api/events/:id/albums` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | organizers and admins (≤ 20 albums); probe: a joined members event the caller does not organize → 403 |
+| DELETE | `/api/events/:id/albums/:albumId` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | organizers and admins; 409 while live media remain; probe: a joined members event the caller does not organize → 403; probe: an album with live media → 409 |
+| PATCH | `/api/events/:id/albums/:albumId` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | organizers and admins; the album must belong to the event; probe: a joined members event the caller does not organize → 403 |
+| GET | `/api/events/:id/albums/:albumId/media` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | participants and admins (admins on participants events audited); probe: a members event the caller has not joined → 403 |
+| POST | `/api/events/:id/albums/:albumId/uploads` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | participants and admins; shared daily upload budget; probe: a members event the caller has not joined (no media row created) → 403 |
+| DELETE | `/api/events/:id/cover` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | organizers and admins; probe: a joined members event the caller does not organize → 403 |
+| POST | `/api/events/:id/cover/uploads` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | organizers and admins; probe: a joined members event the caller does not organize → 403 |
+| POST | `/api/events/:id/cover/uploads/:uploadId/confirm` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | the uploader, still an organizer or admin (404 for another user's upload); probe: an own intent after being demoted to participant → 403 |
+| POST | `/api/events/:id/join` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | published members events only (403 otherwise, admins included); probe: joining a participants-only event the caller already sees → 403 |
+| DELETE | `/api/events/:id/notice` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | the caller's own notice only |
+| POST | `/api/events/:id/participants` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | organizers (listed, active, verified members) and admins; probe: a joined members event the caller does not organize → 403; probe: an organizer adding a member hidden from the directory → 400; probe: an organizer adding a disabled member → 400 |
+| DELETE | `/api/events/:id/participants/:userId` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | organizers and admins; never removes the last organizer; probe: a joined members event the caller does not organize → 403; probe: removing the last organizer → 409 |
+| PATCH | `/api/events/:id/participants/:userId` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | organizers and admins; never demotes the last organizer; probe: a joined members event the caller does not organize → 403; probe: demoting the last organizer → 409 |
+| DELETE | `/api/events/:id/participants/me` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | the caller's own participation (not the last organizer); probe: a members event the caller has not joined → 403; probe: the last organizer leaving → 409 |
+| GET | `/api/events/:year/:slug` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | per visibility (404 when the caller cannot see it) |
+| GET | `/api/events/notices` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  | the caller's own participations only, in events they can see |
+| PATCH | `/api/family/me` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  | self-scoped (the caller's linked person); mass assignment: extra keys (userId/deceased/deathYear/deathDate/id) → 2xx |
+| GET | `/api/family/overview` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  | names only (no photos, no account ids) |
+| GET | `/api/family/overview/path` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/family/people` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/family/people` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 403 | qualifying own-family circle (relateTo must be in it; ADR 0001 §6); probe: circle widened through a member edge whose creator made no endpoint (planted) → 403; mass assignment: userId / createdByUserId keys → 400; probe: existing-to-existing edge → 400 |
+| DELETE | `/api/family/people/:id` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 403 | creator only (unlinked, no other edges); probe: own addition with another edge → 409; probe: own addition linked to an account → 403 |
+| GET | `/api/family/people/:id` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| PATCH | `/api/family/people/:id` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 403 | self, or the qualifying circle minus people linked to another account; mass assignment: userId key → 400; probe: death data on the caller's own linked node (ADMIN_ONLY_FIELD) → 403 |
+| DELETE | `/api/family/people/:id/photo` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  | same rule as the upload intent (WP-4.3); probe: a person who is not a close relative → 403 |
+| POST | `/api/family/people/:id/photo/uploads` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 403 | admins, the linked person, close relatives of a person without account (WP-4.3); probe: a person who is not a close relative → 403 |
+| POST | `/api/family/people/:id/photo/uploads/:uploadId/confirm` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | uploader only (404 for another user's uploadId or another person's path) |
+| GET | `/api/family/people/:id/photos` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  | approved tags (plus the caller's own pending ones) on photos the caller can see; published editions only |
+| PATCH | `/api/family/people/me` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  | self-scoped alias of /api/family/me; mass assignment: extra keys (userId/deceased/deathYear/deathDate/id) → 2xx |
+| GET | `/api/family/proposals` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  | self-scoped (the caller's own proposals only) |
+| POST | `/api/family/proposals` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  | the caller is the proposer (20/day DB count; one pending per proposer and pair); mass assignment: mass assignment of status/proposer (strict body) → 400 |
+| DELETE | `/api/family/proposals/:id` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | proposer only (404 for anyone else) |
+| GET | `/api/family/settings` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/family/tree` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| GET | `/api/family/tree/extended` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/invites/accept` | public |  |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  | probe: invite naming another member's linked person (falls back, never relinks) → 2xx; probe: open link naming an unlinked person (legacy row; falls back, never links) → 2xx |
+| POST | `/api/invites/inspect` | public |  |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
+| GET | `/api/me` | user |  | yes | yes | 401 | 2xx | 2xx | 2xx | 401 | 401 | 2xx | 2xx |  |  |
+| DELETE | `/api/media/:id` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | uploader or admin (404 for other members) |
+| GET | `/api/media/:id` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | hidden/pending items only for the uploader and admins (404 otherwise) |
+| PATCH | `/api/media/:id` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | uploader or admin (404 for other members) |
+| GET | `/api/media/:id/comments` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | deleted comments are tombstones (no body, no author) |
+| POST | `/api/media/:id/comments` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 |  |
+| POST | `/api/media/:id/confirm` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | uploader only (404 for others) |
+| GET | `/api/media/:id/detail` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | pending tags only for the tagger, the tagged user and admins |
+| DELETE | `/api/media/:id/like` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 |  |
+| PUT | `/api/media/:id/like` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 |  |
+| GET | `/api/media/:id/likes` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | names; avatars only for listed active members; no account ids |
+| POST | `/api/media/:id/report` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | any member except the uploader (403 on own items); probe: report own item → 403 |
+| GET | `/api/media/:id/tag-candidates` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | any person; name only for unlisted/disabled members |
+| POST | `/api/media/:id/tags` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | pending for linked people (the tagger sees it as approved); 30 per photo |
+| DELETE | `/api/media/:id/tags/:tagId` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | the tagger, the uploader, the tagged person's user, admins; probe: uploader on someone else's pending tag (invisible to them) → 404 |
+| DELETE | `/api/media/comments/:id` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | the author only (admins moderate on the admin route) |
+| POST | `/api/media/comments/:id/report` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | any viewer except the author (403 on own comments); probe: report own comment → 403 |
+| POST | `/api/media/tags/:id/approve` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | the tagged person's linked user only |
+| GET | `/api/memories` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  | published boxes only (drafts and hidden boxes never listed) |
+| GET | `/api/memories/:id` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | published boxes for members; admins any (404 MEMORY_ALBUM_NOT_FOUND) |
+| GET | `/api/memories/:id/media` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | published boxes for members; admins any (404 MEMORY_ALBUM_NOT_FOUND) |
+| POST | `/api/memories/:id/uploads` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 404 | any verified member to a published box; admins any; shared daily upload budget |
+| GET | `/api/notifications` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  | the caller's own notifications, targets re-checked for visibility |
+| POST | `/api/notifications/read` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 | 2xx | the caller's own notifications; other ids are ignored |
+| GET | `/api/notifications/unread-count` | user | yes |  |  | 401 | 2xx | 403 | 403 | 401 | 401 | 2xx | 403 |  | the caller's own unread count |
+| GET | `/api/profile/me` | user |  |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 403 |  |  |
+| PATCH | `/api/profile/me` | user |  |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 403 |  |  |
+| DELETE | `/api/profile/me/avatar` | user |  |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 403 |  |  |
+| POST | `/api/profile/me/avatar/confirm` | user |  |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 403 | 404 | own upload intents only (404 for another user's uploadId) |
+| POST | `/api/profile/me/avatar/uploads` | user |  |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 403 |  |  |
+| PATCH | `/api/profile/me/contacts` | user |  |  |  | 401 | 2xx | 2xx | 403 | 401 | 401 | 2xx | 403 | 2xx | self only (no id in path or body; another member's contacts never change); mass assignment: extra keys (userId/showCity/listedInDirectory/email) → 400 |
+| GET | `/health` | public |  |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |
+| GET | `/health/ready` | public |  |  |  | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx | 2xx |  |  |

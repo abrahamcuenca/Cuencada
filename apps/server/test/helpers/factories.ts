@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type { UserRole, UserStatus } from "@cuencada/types";
 import argon2 from "argon2";
+import { sql } from "drizzle-orm";
 import type { App } from "../../src/app.js";
 import { profiles, sessions, users } from "../../src/db/schema/index.js";
 import { accessTokenSettings, signAccessToken } from "../../src/lib/tokens.js";
 import { TEST_JWT_SECRET } from "./app.js";
 import { getTestDb } from "./db.js";
+import { answerChallenge, challengeTokenOf, enrollTwoFactor } from "./twoFactor.js";
 
 /** Default password for factory users; long enough for the change-password rule. */
 export const DEFAULT_TEST_PASSWORD = "correct-horse-battery-staple";
@@ -30,6 +32,11 @@ export interface CreateUserOptions {
   /** Sets `email_verified_at` to now; defaults to `false` (the DB default). */
   emailVerified?: boolean;
   profile?: Partial<Omit<typeof profiles.$inferInsert, "id" | "userId">>;
+  /**
+   * WP-7: enroll two-step verification with the test-only `TEST_TOTP_SECRET`.
+   * Defaults to `true` for admins (they must have it) and `false` for members.
+   */
+  twoFactor?: boolean;
 }
 
 /** A persisted user plus the plaintext password needed to log in as them. */
@@ -69,6 +76,7 @@ export async function createUser(options: CreateUserOptions = {}): Promise<TestU
     .values({ fullName: displayName, ...options.profile, userId: user.id })
     .returning();
   if (!profile) throw new Error("createUser: insert returned no profile row");
+  if (options.twoFactor ?? user.role === "admin") await enrollTwoFactor(user.id);
 
   return { ...user, password, profile };
 }
@@ -83,6 +91,12 @@ export interface CreateSessionOptions {
   absoluteExpiresAt?: Date;
   lastUsedAt?: Date;
   revoked?: boolean;
+  /**
+   * WP-7: the session proved a two-step code (`two_factor_verified_at`).
+   * Defaults to `true`, so admin fixtures pass the enrollment gate; pass
+   * `false` for an admin who still has to enroll.
+   */
+  twoFactorVerified?: boolean;
 }
 
 /**
@@ -102,6 +116,7 @@ export async function createSession(userId: string, options: CreateSessionOption
       lastUsedAt: options.lastUsedAt ?? now,
       idleExpiresAt: options.idleExpiresAt ?? new Date(now.getTime() + 30 * day),
       absoluteExpiresAt: options.absoluteExpiresAt ?? new Date(now.getTime() + 90 * day),
+      twoFactorVerifiedAt: options.twoFactorVerified === false ? null : now,
       ...(options.revoked === true ? { revokedAt: now, revokedReason: "logout" as const } : {})
     })
     .returning();
@@ -151,6 +166,18 @@ export async function bearerFor(
   return { headers: { authorization: `Bearer ${signed.token}` } };
 }
 
+/**
+ * The id of the user with `email` (test helpers that only get credentials).
+ *
+ * @param email - The login email.
+ */
+export async function userIdByEmail(email: string): Promise<string> {
+  const rows = await getTestDb().execute<{ id: string }>(sql`select id from users where lower(email) = ${email.toLowerCase()} limit 1`);
+  const id = rows[0]?.id;
+  if (id === undefined) throw new Error("userIdByEmail: no such user");
+  return id;
+}
+
 /** Request options to spread into `app.inject()` for an authenticated call. */
 export interface AuthInjectOptions {
   headers: { authorization: string };
@@ -168,11 +195,14 @@ export async function loginAs(
   app: App,
   user: Pick<TestUser, "email" | "password">
 ): Promise<AuthInjectOptions> {
-  const response = await app.inject({
+  let response = await app.inject({
     method: "POST",
     url: "/api/auth/login",
     payload: { email: user.email, password: user.password }
   });
+  // WP-7: users with 2FA (every admin fixture) answer the challenge with a fresh test code.
+  const challenge = challengeTokenOf(response);
+  if (challenge !== null) response = await answerChallenge(app, await userIdByEmail(user.email), challenge);
   if (response.statusCode !== 200) {
     throw new Error(`loginAs: login failed with ${response.statusCode}: ${response.body}`);
   }

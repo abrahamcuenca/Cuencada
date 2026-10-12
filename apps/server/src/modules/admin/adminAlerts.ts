@@ -14,7 +14,8 @@
  *   ({@link ADMIN_ALERT_DAILY_CAP}, counted from the audit rows'
  *   `adminAlertRecipients`), by the number of admins, and by the 60/min
  *   per-admin mutation limit.
- * - **Exempt:** demote, disable and force-reset of an admin always alert,
+ * - **Exempt:** demote, disable, force-reset and (WP-7) a two-step
+ *   verification reset of an admin always alert,
  *   even past the cap ({@link CAP_EXEMPT_CHANGES}); they still add to the count.
  *   A force-reset is exempt only when it actually flips `must_change_password`
  *   from false to true (the caller passes `capExempt: false` for repeats), so
@@ -49,7 +50,9 @@ export const ADMIN_ALERT_LIMIT_KEY = "adminAlertLimitNotice";
 export const CAP_EXEMPT_CHANGES: ReadonlySet<AdminAccountChange> = new Set<AdminAccountChange>([
   AdminAccountChange.Demoted,
   AdminAccountChange.Disabled,
-  AdminAccountChange.PasswordResetForced
+  AdminAccountChange.PasswordResetForced,
+  // WP-7: resetting an admin's two-step verification signs them out and opens a re-enrollment.
+  AdminAccountChange.TwoFactorReset
 ]);
 
 /** Someone to notify. */

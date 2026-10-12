@@ -50,7 +50,8 @@ function refresh(instance: App, token: string): Promise<LightMyRequestResponse> 
 describe("POST /api/auth/login", () => {
   it("returns an AuthTokenResponse, sets the HttpOnly SameSite=Strict refresh cookie and audits", async () => {
     app = await createTestApp();
-    const user = await createUser({ email: "Prima@Example.test", role: "admin", mustChangePassword: true });
+    // The seed admin's state: temporary password, no 2FA yet (enrollment comes after the password change).
+    const user = await createUser({ email: "Prima@Example.test", role: "admin", mustChangePassword: true, twoFactor: false });
 
     const response = await app.inject({
       method: "POST",
@@ -70,7 +71,10 @@ describe("POST /api/auth/login", () => {
       mustChangePassword: true,
       emailVerified: false,
       personId: null,
-      avatarUrl: null
+      avatarUrl: null,
+      twoFactorEnabled: false,
+      // The password gate comes first.
+      twoFactorSetupRequired: false
     });
     expect(body.accessToken.split(".")).toHaveLength(3);
     expect(JSON.stringify(body)).not.toContain("refresh");

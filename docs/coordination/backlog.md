@@ -176,6 +176,13 @@ Still open:
 - [x] **WP-4.4 merge:** the tree's "Detalles" accordion uses WP-4.4's `ContactList` (done in WP-4.1 after merging PR #45).
 - The "Deshacer" of a `person.update` refuses (409) when the person changed afterwards; an admin undoes newer changes first. A "restore this version" (overwrite) action could come later.
 
+### WP-7 follow-ups (two-step verification)
+- `TOTP_ENCRYPTION_KEY` rotation script (decrypt with the old key, re-encrypt with the new one in one transaction over the tunnel) and a key-id column, so the key can rotate without locking enrolled users out (runbook § 11 "Rotating `TOTP_ENCRYPTION_KEY`").
+- WebAuthn/passkeys as a phishing-resistant second factor (threat model A16).
+- Admin dashboard counter: admins and members with two-step verification on; alert on bursts of `auth.2fa_failed`.
+- A "set a password" path for magic-link-only members (no password): today they cannot pass the re-authentication of 2FA disable/regenerate, so only an admin reset helps them (ADR 0001 §9).
+- The per-user code-check limiter is in memory (like the login limits): it resets on restart and is per process.
+
 ## Post-launch (after the 2026-10-07 deploy)
 
 First production deploy and seed: 2026-10-07 (WP-3.2 recorded the lessons in
@@ -188,7 +195,7 @@ the runbook). Owner = **O**, agent = **A**.
 - [ ] **A:** retire the legacy root site: `git rm` `index.html`, `cuencada2026.html`, `images/fotos`, and `mensajes.txt` once the seed no longer needs it. `SEED_DAILY_MESSAGES_FILE` defaults to the root `mensajes.txt` (`DEFAULT_DAILY_MESSAGES_FILE` in `apps/server/src/seed.ts`), so move the file under `apps/server/` or change the default first. Update the Biome ignore list and AGENTS.md.
 - [ ] **O:** wait about a day after the deploy before publishing the first undated edition.
 - [ ] **A:** bump the dev/test Postgres from 16 to 18 to match production (`postgres:16-alpine` in `scripts/test-db.sh`, `scripts/dev-db.sh`, `.github/workflows/ci.yml` and `e2e.yml`).
-- [ ] **A:** minimum client version mechanism (force-update stale PWAs), then "bump min client version" in the release checklist (runbook § 9, § 11).
+- [ ] **A — next WP (promoted after WP-7):** minimum client version mechanism (force-update stale PWAs), then "bump min client version" in the release checklist (runbook § 9, § 11). WP-7 is the first change where it would have helped: an older cached app shows a generic error on the two-step code step and cannot open the admin enrollment page, so members must tap "Actualizar" by hand.
 
 ## Cutover checklist (WP-2.4–2.5)
 

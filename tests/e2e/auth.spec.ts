@@ -7,9 +7,14 @@ import type { Cookie, Page } from "@playwright/test";
 import { inviteeEmail, inviteeName, NEW_ADMIN_PASSWORD } from "./harness/people.js";
 import { appLinkIn, waitForMail } from "./support/mail.js";
 import { CastRole, expect, journeyShot, login, test } from "./support/fixtures.js";
+import { enrollInWizard } from "./support/twoFactor.js";
 
 test.describe("auth journeys", () => {
-  test("1 · admin first login forces a password change, then opens the console @desktop", async ({ page, cast }, testInfo) => {
+  test("1 · admin first login forces a password change and two-step enrollment, then opens the console @desktop", async ({
+    page,
+    cast
+  }, testInfo) => {
+    test.setTimeout(120_000);
     const admin = cast(CastRole.FirstLoginAdmin);
     await page.goto("/entrar");
     await page.getByRole("textbox", { name: "Correo electrónico" }).fill(admin.email);
@@ -30,6 +35,14 @@ test.describe("auth journeys", () => {
     await page.getByRole("button", { name: "Guardar y continuar" }).click();
     await expect(page.getByText("Contraseña actualizada.")).toBeVisible();
     await expect(page).not.toHaveURL(/\/cambiar-contrasena/);
+
+    // WP-7: administrators must enroll two-step verification before anything else.
+    await page.goto("/admin");
+    await expect(page).toHaveURL(/\/activar-verificacion/);
+    await expect(page.getByText(/Por seguridad, los administradores deben activar la verificación en dos pasos/)).toBeVisible();
+    await journeyShot(page, testInfo, "01-admin-2fa-gate");
+    await enrollInWizard(page, admin.email, NEW_ADMIN_PASSWORD);
+    await expect(page).toHaveURL(/\/admin$/);
 
     await page.goto("/admin");
     await expect(page.getByRole("heading", { name: "Panel de administración", level: 1 })).toBeVisible();

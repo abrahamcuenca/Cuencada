@@ -6,7 +6,7 @@
  */
 import { type AdminUserListItem, AuditAction, AuditEntityType, type UserRole, type UserStatus } from "@cuencada/types";
 import { and, desc, eq, ilike, inArray, isNotNull, isNull, or, type SQL, sql } from "drizzle-orm";
-import { auditLogs, people, sessions, users } from "../../db/schema/index.js";
+import { auditLogs, people, sessions, users, userTotp } from "../../db/schema/index.js";
 import type { DbOrTx, Transaction } from "../../lib/audit.js";
 import { AppError } from "../../lib/errors.js";
 import { escapeLike } from "../family/repository.js";
@@ -21,6 +21,9 @@ export const AdminUserMessages = {
   LastAdmin: "Debe quedar al menos un administrador activo.",
   ActorNotAdmin: "Tu cuenta ya no tiene permisos de administración.",
   SelfVerify: "No puedes verificar tu propio correo; usa el enlace de verificación que te enviamos.",
+  SelfTwoFactorReset:
+    "No puedes restablecer tu propia verificación en dos pasos. Pídeselo a otro administrador.",
+  NoTwoFactor: "Esta cuenta no tiene activada la verificación en dos pasos.",
   TargetChangeLimit:
     "Esta cuenta ya cambió de rol o de estado varias veces en la última hora. Espera un rato antes de volver a cambiarla."
 } as const;
@@ -51,6 +54,7 @@ interface AdminUserRow {
   createdAt: Date;
   personId: string | null;
   activeSessionCount: number;
+  twoFactorEnabled: boolean;
   cursorMicros: string;
 }
 
@@ -105,6 +109,7 @@ async function queryAdminUsers(db: DbOrTx, now: Date, query: AdminUserQuery): Pr
       createdAt: users.createdAt,
       personId: people.id,
       activeSessionCount: activeSessionCountSql(now),
+      twoFactorEnabled: sql<boolean>`exists (select 1 from ${userTotp} where ${userTotp.userId} = ${users.id} and ${userTotp.enabledAt} is not null)`,
       cursorMicros: cursorMicrosSql
     })
     .from(users)
@@ -126,7 +131,8 @@ function toListItem(row: AdminUserRow): AdminUserListItem {
     personId: row.personId,
     lastLoginAt: row.lastLoginAt?.toISOString() ?? null,
     activeSessionCount: row.activeSessionCount,
-    createdAt: row.createdAt.toISOString()
+    createdAt: row.createdAt.toISOString(),
+    twoFactorEnabled: row.twoFactorEnabled
   };
 }
 

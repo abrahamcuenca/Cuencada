@@ -48,6 +48,8 @@ let beforeEventsFolder: string;
 let throughEventsFolder: string;
 /** Every migration up to and including WP-5.3's notices migration (before WP-6.0's 0010). */
 let throughNoticesFolder: string;
+/** Every migration up to and including WP-6.0's 0010 (before WP-7's two-factor migration). */
+let throughSocialFolder: string;
 /** Number of migrations in the real journal (the "latest" version). */
 let latestCount: number;
 
@@ -104,6 +106,9 @@ beforeAll(async () => {
   const noticesIndex = journal.entries.findIndex((entry) => entry.tag.endsWith("_event_notices_admin_views"));
   if (noticesIndex < 1) throw new Error("event notices migration not found in the journal");
   throughNoticesFolder = await migrationsUpTo(noticesIndex + 1);
+  const socialIndex = journal.entries.findIndex((entry) => entry.tag.endsWith("_social_tree_memories"));
+  if (socialIndex < 1) throw new Error("social migration not found in the journal");
+  throughSocialFolder = await migrationsUpTo(socialIndex + 1);
 });
 
 // Every test starts from a brand-new database migrated to 0000 only.
@@ -132,6 +137,7 @@ afterAll(async () => {
   if (beforeEventsFolder) await rm(beforeEventsFolder, { recursive: true, force: true });
   if (throughEventsFolder) await rm(throughEventsFolder, { recursive: true, force: true });
   if (throughNoticesFolder) await rm(throughNoticesFolder, { recursive: true, force: true });
+  if (throughSocialFolder) await rm(throughSocialFolder, { recursive: true, force: true });
   await dropScratch();
 });
 
@@ -1650,5 +1656,48 @@ describe("migration 0010 (WP-6.0 social, notifications, Memory Box, tree links; 
     `)})`;
     await sql`delete from users where id = ${cara}`;
     expect(await sql`select count(*)::int as count from notifications`).toEqual([{ count: 0 }]);
+  });
+});
+
+describe("migration 0011 (WP-7 two-step verification, expand-only)", () => {
+  it("upgrades a 0010 database: sessions keep working and read as not verified; old-shape session writes still work", async () => {
+    await migrate(drizzle(sql), { migrationsFolder: throughSocialFolder });
+    const admin = await insertId(sql`insert into users (email, display_name, role) values ('admin@example.test', 'Admin', 'admin') returning id`);
+    const session = await insertId(sql`
+      insert into sessions (user_id, idle_expires_at, absolute_expires_at)
+      values (${admin}, now() + interval '1 day', now() + interval '2 days') returning id
+    `);
+
+    await migrate(drizzle(sql), { migrationsFolder });
+    expect(await sql`select count(*)::int as count from drizzle.__drizzle_migrations`).toEqual([{ count: latestCount }]);
+    // Existing sessions are "not verified": admins must enroll on their next request (the gate).
+    expect(await sql`select two_factor_verified_at from sessions where id = ${session}`).toEqual([{ two_factor_verified_at: null }]);
+    // 0010-era code inserts sessions without the new column.
+    await sql`insert into sessions (user_id, idle_expires_at, absolute_expires_at) values (${admin}, now() + interval '1 day', now() + interval '2 days')`;
+
+    // The new tables enforce their rules.
+    await sql`insert into user_totp (user_id, secret_ciphertext, secret_iv, secret_tag) values (${admin}, 'c', 'i', 't')`;
+    expect(await sqlState(sql`update user_totp set last_used_step = -1`)).toBe("23514");
+    const challenge = sql`
+      insert into two_factor_challenges (token_hash, user_id, method, expires_at)
+      values ('h1', ${admin}, 'password', now() + interval '5 minutes')
+    `;
+    await challenge;
+    expect(await sqlState(sql`update two_factor_challenges set attempts = 6`)).toBe("23514");
+    expect(
+      await sqlState(sql`insert into two_factor_challenges (token_hash, user_id, method, expires_at) values ('h2', ${admin}, 'sms', now())`)
+    ).toBe("23514");
+    await sql`insert into user_recovery_codes (user_id, code_hash) values (${admin}, 'r1')`;
+    expect(await sqlState(sql`insert into user_recovery_codes (user_id, code_hash) values (${admin}, 'r1')`)).toBe("23505");
+    await sql`insert into trusted_devices (user_id, token_hash, user_agent_label, expires_at) values (${admin}, 't1', 'iPhone · Safari', now())`;
+    expect(
+      await sqlState(sql`insert into trusted_devices (user_id, token_hash, user_agent_label, expires_at) values (${admin}, 't1', 'x', now())`)
+    ).toBe("23505");
+
+    // Deleting the user removes every 2FA row.
+    await sql`delete from users where id = ${admin}`;
+    for (const table of ["user_totp", "user_recovery_codes", "trusted_devices", "two_factor_challenges"]) {
+      expect(await sql.unsafe(`select count(*)::int as count from ${table}`), table).toEqual([{ count: 0 }]);
+    }
   });
 });
