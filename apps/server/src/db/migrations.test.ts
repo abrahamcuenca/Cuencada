@@ -18,7 +18,9 @@ import { migrationsFolder } from "./migrate.js";
  * from 0002, migration 0004 from 0003, migration 0005 (data only) from
  * 0004, migration 0006 (wider revision action CHECK) from 0005, migration
  * 0007 (historical editions) from 0006, and the events migration (WP-5.2,
- * 0008) from the migration just before it (found by tag). The scratch
+ * 0008) from the migration just before it (found by tag), and the WP-6.0
+ * social/tree/memories migration (0010) from WP-5.3's notices migration
+ * (also found by tag). The scratch
  * database uses a harness-style name so the global teardown also reclaims it.
  */
 
@@ -44,6 +46,8 @@ let upTo0006Folder: string;
 let beforeEventsFolder: string;
 /** Every migration up to and including the events one (before WP-5.3's 0009). */
 let throughEventsFolder: string;
+/** Every migration up to and including WP-5.3's notices migration (before WP-6.0's 0010). */
+let throughNoticesFolder: string;
 /** Number of migrations in the real journal (the "latest" version). */
 let latestCount: number;
 
@@ -97,6 +101,9 @@ beforeAll(async () => {
   if (eventsIndex < 1) throw new Error("events migration not found in the journal");
   beforeEventsFolder = await migrationsUpTo(eventsIndex);
   throughEventsFolder = await migrationsUpTo(eventsIndex + 1);
+  const noticesIndex = journal.entries.findIndex((entry) => entry.tag.endsWith("_event_notices_admin_views"));
+  if (noticesIndex < 1) throw new Error("event notices migration not found in the journal");
+  throughNoticesFolder = await migrationsUpTo(noticesIndex + 1);
 });
 
 // Every test starts from a brand-new database migrated to 0000 only.
@@ -124,6 +131,7 @@ afterAll(async () => {
   if (upTo0006Folder) await rm(upTo0006Folder, { recursive: true, force: true });
   if (beforeEventsFolder) await rm(beforeEventsFolder, { recursive: true, force: true });
   if (throughEventsFolder) await rm(throughEventsFolder, { recursive: true, force: true });
+  if (throughNoticesFolder) await rm(throughNoticesFolder, { recursive: true, force: true });
   await dropScratch();
 });
 
@@ -1212,5 +1220,435 @@ describe("migration 0009 (WP-5.3 event notices and admin-view dedupe, expand-onl
     expect(inserted).toEqual([]);
     await sql`delete from events where id = ${eventId}`;
     expect(await sql`select count(*)::int as count from event_admin_views`).toEqual([{ count: 0 }]);
+  });
+});
+
+describe("migration 0010 (WP-6.0 social, notifications, Memory Box, tree links; expand-only)", () => {
+  const selectMedia =
+    "select id, cuencada_id, album_id, storage_prefix, uploaded_by_user_id, kind, object_key, upload_status, moderation_status, " +
+    "deleted_at, created_at, updated_at from media_items order by object_key";
+
+  /** Users, an edition and an event (album + participants in every notice state) and two media rows, in the 0009 shape. */
+  async function seed0009(): Promise<{
+    admin: string;
+    ana: string;
+    bea: string;
+    cara: string;
+    cuencadaId: string;
+    eventId: string;
+    albumId: string;
+  }> {
+    const admin = await insertId(sql`insert into users (email, display_name, role) values ('admin@example.test', 'Admin', 'admin') returning id`);
+    const ana = await insertId(sql`insert into users (email, display_name) values ('ana@example.test', 'Ana') returning id`);
+    const bea = await insertId(sql`insert into users (email, display_name) values ('bea@example.test', 'Bea') returning id`);
+    const cara = await insertId(sql`insert into users (email, display_name) values ('cara@example.test', 'Cara') returning id`);
+    const cuencadaId = await insertId(sql`
+      insert into cuencadas (year, slug, title, description, is_published, first_published_at)
+      values (2026, '2026', 'Cuencada 2026', 'Reunión', true, now()) returning id
+    `);
+    const eventId = await insertId(sql`
+      insert into events (slug, year, title, visibility, status, first_published_at, created_by_user_id)
+      values ('viaje-k7q2', 2026, 'Viaje', 'participants', 'published', now(), ${admin}) returning id
+    `);
+    const albumId = await insertId(sql`insert into event_albums (event_id, title) values (${eventId}, 'Fotos') returning id`);
+    // Organizer added themself (no notice), Ana added by the admin (pending notice),
+    // Bea added but dismissed, Cara self-joined (no adder).
+    await sql`insert into event_participants (event_id, user_id, role, added_by_user_id) values (${eventId}, ${admin}, 'organizer', ${admin})`;
+    await sql`
+      insert into event_participants (event_id, user_id, added_by_user_id, joined_at)
+      values (${eventId}, ${ana}, ${admin}, '2026-10-01T12:00:00Z')
+    `;
+    await sql`insert into event_participants (event_id, user_id, added_by_user_id, notice_seen_at) values (${eventId}, ${bea}, ${admin}, now())`;
+    await sql`insert into event_participants (event_id, user_id) values (${eventId}, ${cara})`;
+    await sql`
+      insert into media_items (cuencada_id, storage_prefix, uploaded_by_user_id, kind, object_key, bucket, file_name, mime_type, byte_size, upload_status)
+      values (${cuencadaId}, 'cuencadas/2026', ${ana}, 'image', 'cuencadas/2026/originals/a.jpg', 'b', 'a.jpg', 'image/jpeg', 100, 'ready')
+    `;
+    const albumPrefix = `events/${eventId}/${albumId}`;
+    await sql`
+      insert into media_items (album_id, storage_prefix, kind, object_key, bucket, file_name, mime_type, byte_size, deleted_at)
+      values (${albumId}, ${albumPrefix}, 'image', ${`${albumPrefix}/originals/b.jpg`}, 'b', 'b.jpg', 'image/jpeg', 100, now())
+    `;
+    return { admin, ana, bea, cara, cuencadaId, eventId, albumId };
+  }
+
+  /** A Memory Box (published by default). */
+  function insertMemoryAlbum(title = "Fotos de la abuela", status = "published"): Promise<string> {
+    return insertId(sql`insert into memory_albums (title, status) values (${title}, ${status}) returning id`);
+  }
+
+  /** A media row in a box; `prefix` defaults to the box's own. */
+  function insertMemoryMedia(albumId: string, key: string, prefix: string | null = `memories/${albumId}`): Promise<{ id: string }[]> {
+    return sql<{ id: string }[]>`
+      insert into media_items (memory_album_id, storage_prefix, kind, object_key, bucket, file_name, mime_type, byte_size)
+      values (${albumId}, ${prefix}, 'image', ${key}, 'b', 'x.jpg', 'image/jpeg', 100) returning id
+    `;
+  }
+
+  /** The id of the seeded edition photo. */
+  async function editionMediaId(): Promise<string> {
+    return insertId(sql`select id from media_items where cuencada_id is not null`);
+  }
+
+  it("upgrades a seeded 0009 database: media unchanged, undismissed event notices become notifications, old-shape writes still work", async () => {
+    await migrate(drizzle(sql), { migrationsFolder: throughNoticesFolder });
+    const { admin, ana, cuencadaId, eventId, albumId } = await seed0009();
+    const mediaBefore = await sql.unsafe(selectMedia);
+    const participantsBefore = await sql`select * from event_participants order by user_id`;
+
+    await migrate(drizzle(sql), { migrationsFolder });
+    expect(await sql`select count(*)::int as count from drizzle.__drizzle_migrations`).toEqual([{ count: latestCount }]);
+
+    expect(await sql.unsafe(selectMedia)).toEqual(mediaBefore);
+    expect(await sql`select distinct memory_album_id from media_items`).toEqual([{ memory_album_id: null }]);
+    // The deprecated notice column is kept as it was.
+    expect(await sql`select * from event_participants order by user_id`).toEqual(participantsBefore);
+
+    // Exactly Ana's pending notice became a notification, dated when she was added.
+    const notifications = await sql`
+      select user_id, kind, actor_user_id, media_id, event_id, proposal_id, dedupe_key, count, seen_at,
+             (created_at = '2026-10-01T12:00:00Z'::timestamptz and updated_at = created_at) as dated_at_join
+      from notifications
+    `;
+    expect(notifications).toEqual([
+      {
+        user_id: ana,
+        kind: "event_added",
+        actor_user_id: admin,
+        media_id: null,
+        event_id: eventId,
+        proposal_id: null,
+        dedupe_key: `event:${eventId}`,
+        count: 1,
+        seen_at: null,
+        dated_at_join: true
+      }
+    ]);
+    expect(await sql`select id, root_person_id from family_settings`).toEqual([{ id: true, root_person_id: null }]);
+
+    // 0009-era writes (no memory_album_id) keep working for both scopes.
+    expect(
+      await sqlState(sql`
+        insert into media_items (cuencada_id, kind, object_key, bucket, file_name, mime_type, byte_size)
+        values (${cuencadaId}, 'image', 'cuencadas/2026/originals/c.jpg', 'b', 'c.jpg', 'image/jpeg', 100)
+      `)
+    ).toBeUndefined();
+    expect(
+      await sqlState(sql`
+        insert into media_items (album_id, storage_prefix, kind, object_key, bucket, file_name, mime_type, byte_size)
+        values (${albumId}, ${`events/${eventId}/${albumId}`}, 'image', 'k-album-2', 'b', 'd.jpg', 'image/jpeg', 100)
+      `)
+    ).toBeUndefined();
+    const dani = await insertId(sql`insert into users (email, display_name) values ('dani@example.test', 'Dani') returning id`);
+    expect(
+      await sqlState(sql`insert into event_participants (event_id, user_id, added_by_user_id) values (${eventId}, ${dani}, ${admin})`)
+    ).toBeUndefined();
+
+    const constraints = await sql`
+      select conname, convalidated from pg_constraint
+      where conname in ('media_items_scope_check', 'media_items_storage_prefix_check', 'media_items_memory_prefix_check',
+                        'media_items_memory_album_id_memory_albums_id_fk')
+    `;
+    expect(constraints).toHaveLength(4);
+    for (const constraint of constraints) expect(constraint.convalidated, String(constraint.conname)).toBe(true);
+    expect(
+      await sql`select indexdef like '%WHERE (memory_album_id IS NOT NULL)%' as partial from pg_indexes where indexname = 'media_items_memory_keyset_idx'`
+    ).toEqual([{ partial: true }]);
+  });
+
+  it("enforces the Memory Box scope: exactly one scope, a prefix pinned to its own box, and the box CHECKs", async () => {
+    await migrate(drizzle(sql), { migrationsFolder });
+    const { cuencadaId, eventId, albumId } = await seed0009();
+    const box = await insertMemoryAlbum();
+    const otherBox = await insertMemoryAlbum("Otra caja");
+
+    expect(await sqlState(insertMemoryMedia(box, "m-ok"))).toBeUndefined();
+    expect(await sqlState(insertMemoryMedia(box, "m-null", null))).toBe("23514");
+    expect(await sqlState(insertMemoryMedia(box, "m-other-box", `memories/${otherBox}`))).toBe("23514");
+    expect(await sqlState(insertMemoryMedia(box, "m-events", `events/${eventId}/${albumId}`))).toBe("23514");
+    expect(await sqlState(insertMemoryMedia(box, "m-upper", `memories/${box.toUpperCase()}`))).toBe("23514");
+    expect(await sqlState(insertMemoryMedia(box, "m-trailing", `memories/${box}/`))).toBe("23514");
+    expect(
+      await sqlState(sql`
+        insert into media_items (cuencada_id, memory_album_id, storage_prefix, kind, object_key, bucket, file_name, mime_type, byte_size)
+        values (${cuencadaId}, ${box}, ${`memories/${box}`}, 'image', 'm-two-scopes', 'b', 'x.jpg', 'image/jpeg', 100)
+      `)
+    ).toBe("23514");
+    const ghost = "00000000-0000-4000-8000-000000000000";
+    expect(await sqlState(insertMemoryMedia(ghost, "m-ghost"))).toBe("23503");
+
+    const album = (title: string, status = "draft", sortOrder = 0, description: string | null = null): Promise<string | undefined> =>
+      sqlState(sql`insert into memory_albums (title, status, sort_order, description) values (${title}, ${status}, ${sortOrder}, ${description})`);
+    expect(await album("Caja")).toBeUndefined();
+    expect(await album("")).toBe("23514");
+    expect(await album("x".repeat(121))).toBe("23514");
+    expect(await album("x".repeat(120))).toBeUndefined();
+    expect(await album("Caja", "archived")).toBe("23514");
+    expect(await album("Caja", "hidden", 1001)).toBe("23514");
+    expect(await album("Caja", "hidden", -1)).toBe("23514");
+    expect(await album("Caja", "draft", 0, "d".repeat(2001))).toBe("23514");
+    expect(await album("Caja", "draft", 0, "d".repeat(2000))).toBeUndefined();
+    expect(await sql`select status from memory_albums where title = 'Caja' and description is null`).toEqual([{ status: "draft" }]);
+    expect(await sql`select status, sort_order from memory_albums where id = ${box}`).toEqual([{ status: "published", sort_order: 0 }]);
+  });
+
+  it("enforces the notification CHECKs: kind, kind-to-target, no self-notification, count and one row per recipient and key", async () => {
+    await migrate(drizzle(sql), { migrationsFolder });
+    const { admin, ana, bea, eventId } = await seed0009();
+    const mediaId = await editionMediaId();
+    const from = await insertId(sql`insert into people (full_name) values ('Abuelo Vega') returning id`);
+    const to = await insertId(sql`insert into people (full_name) values ('Abuelo J. Vega') returning id`);
+    const proposal = await insertId(sql`
+      insert into tree_link_proposals (kind, from_person_id, to_person_id, proposed_by_user_id, status, resolved_at)
+      values ('same_person', ${from}, ${to}, ${ana}, 'approved', now()) returning id
+    `);
+
+    const notify = (
+      kind: string,
+      target: { media?: string; event?: string; proposal?: string },
+      options: { user?: string; actor?: string | null; key?: string | null; count?: number } = {}
+    ): Promise<string | undefined> =>
+      sqlState(sql`
+        insert into notifications (user_id, kind, actor_user_id, media_id, event_id, proposal_id, dedupe_key, count)
+        values (${options.user ?? ana}, ${kind}, ${options.actor === undefined ? bea : options.actor}, ${target.media ?? null},
+                ${target.event ?? null}, ${target.proposal ?? null}, ${options.key ?? null}, ${options.count ?? 1})
+      `);
+
+    expect(await notify("photo_tag_request", { media: mediaId })).toBeUndefined();
+    expect(await notify("photo_tagged", { media: mediaId })).toBe("23514");
+    expect(await notify("photo_commented", { media: mediaId })).toBeUndefined();
+    expect(await notify("photo_liked", { media: mediaId }, { actor: null })).toBeUndefined();
+    expect(await notify("event_added", { event: eventId }, { user: bea, actor: admin })).toBeUndefined();
+    expect(await notify("tree_proposal_resolved", { proposal }, { actor: admin })).toBeUndefined();
+
+    expect(await notify("photo_shared", { media: mediaId })).toBe("23514");
+    expect(await notify("photo_liked", { event: eventId })).toBe("23514");
+    expect(await notify("photo_liked", { media: mediaId, event: eventId })).toBe("23514");
+    expect(await notify("event_added", { media: mediaId })).toBe("23514");
+    expect(await notify("tree_proposal_resolved", { event: eventId })).toBe("23514");
+    expect(await notify("photo_liked", {})).toBe("23514");
+    // No self-notifications.
+    expect(await notify("photo_liked", { media: mediaId }, { user: ana, actor: ana })).toBe("23514");
+    expect(await notify("photo_liked", { media: mediaId }, { count: 0 })).toBe("23514");
+    expect(await notify("photo_liked", { media: mediaId }, { key: "" })).toBe("23514");
+    expect(await notify("photo_liked", { media: mediaId }, { key: "k".repeat(201) })).toBe("23514");
+
+    // One row per (recipient, key); the same key for another recipient, and any number of keyless rows, are fine.
+    const key = `like:${mediaId}`;
+    expect(await notify("photo_liked", { media: mediaId }, { key })).toBeUndefined();
+    expect(await notify("photo_liked", { media: mediaId }, { key })).toBe("23505");
+    expect(await notify("photo_liked", { media: mediaId }, { key, user: admin })).toBeUndefined();
+    const coalesced = await sql`
+      insert into notifications (user_id, kind, actor_user_id, media_id, dedupe_key)
+      values (${ana}, 'photo_liked', ${admin}, ${mediaId}, ${key})
+      on conflict (user_id, dedupe_key) where dedupe_key is not null
+      do update set count = notifications.count + 1, actor_user_id = excluded.actor_user_id, seen_at = null
+      returning count, actor_user_id
+    `;
+    expect(coalesced).toEqual([{ count: 2, actor_user_id: admin }]);
+    expect(
+      await sql`select indexdef like '%WHERE (seen_at IS NULL)%' as partial from pg_indexes where indexname = 'notifications_user_unseen_idx'`
+    ).toEqual([{ partial: true }]);
+  });
+
+  it("enforces the tag, like, comment and comment-report CHECKs", async () => {
+    await migrate(drizzle(sql), { migrationsFolder });
+    const { ana, bea } = await seed0009();
+    const mediaId = await editionMediaId();
+    const person = await insertId(sql`insert into people (full_name) values ('Ana Morales Vega') returning id`);
+    const other = await insertId(sql`insert into people (full_name) values ('Bea Morales Vega') returning id`);
+
+    const tag = (personId: string, x: number | null, y: number | null): Promise<string | undefined> =>
+      sqlState(sql`insert into media_tags (media_id, person_id, tagged_by_user_id, x, y) values (${mediaId}, ${personId}, ${ana}, ${x}, ${y})`);
+    expect(await tag(person, 0.25, 0.75)).toBeUndefined();
+    expect(await tag(person, null, null)).toBe("23505");
+    expect(await tag(other, 0.5, null)).toBe("23514");
+    expect(await tag(other, 1.5, 0.5)).toBe("23514");
+    expect(await tag(other, 0.5, -0.1)).toBe("23514");
+    expect(await tag(other, 1, 0)).toBeUndefined();
+    // A tag defaults to pending (fail closed); approved <=> approved_at.
+    expect(await sql`select x::text, y::text, status, approved_at from media_tags where person_id = ${person}`).toEqual([
+      { x: "0.2500", y: "0.7500", status: "pending", approved_at: null }
+    ]);
+    const setStatus = (status: string, approved: boolean): Promise<string | undefined> =>
+      sqlState(sql`
+        update media_tags set status = ${status}, approved_at = case when ${approved} then now() end where person_id = ${person}
+      `);
+    expect(await setStatus("approved", false)).toBe("23514");
+    expect(await setStatus("pending", true)).toBe("23514");
+    expect(await setStatus("hidden", false)).toBe("23514");
+    expect(await setStatus("approved", true)).toBeUndefined();
+    expect(await sql`select status from media_tags where person_id = ${person}`).toEqual([{ status: "approved" }]);
+
+    const like = (userId: string): Promise<string | undefined> =>
+      sqlState(sql`insert into media_likes (media_id, user_id) values (${mediaId}, ${userId})`);
+    expect(await like(ana)).toBeUndefined();
+    expect(await like(ana)).toBe("23505");
+    expect(await like(bea)).toBeUndefined();
+
+    const comment = (
+      body: string,
+      options: { author?: string; clientId?: string | null; deleted?: boolean; deletedBy?: string | null } = {}
+    ): Promise<string | undefined> =>
+      sqlState(sql`
+        insert into media_comments (media_id, author_user_id, body, client_comment_id, deleted_at, deleted_by_user_id)
+        values (${mediaId}, ${options.author ?? ana}, ${body}, ${options.clientId ?? null},
+                case when ${options.deleted === true} then now() end, ${options.deletedBy ?? null})
+      `);
+    expect(await comment("¡Qué bonita foto!")).toBeUndefined();
+    expect(await comment("x".repeat(1000))).toBeUndefined();
+    expect(await comment("x".repeat(1001))).toBe("23514");
+    expect(await comment("")).toBe("23514");
+    expect(await comment("   ")).toBe("23514");
+    // Tombstones: an empty body only once deleted; a deleter needs a deletion time.
+    expect(await comment("", { deleted: true, deletedBy: ana })).toBeUndefined();
+    expect(await comment("  ", { deleted: true })).toBe("23514");
+    expect(await comment("Hola", { deletedBy: ana })).toBe("23514");
+    // Idempotent sends: one client id per author.
+    const clientId = "00000000-0000-4000-8000-0000000000c1";
+    expect(await comment("Uno", { clientId })).toBeUndefined();
+    expect(await comment("Otra vez", { clientId })).toBe("23505");
+    expect(await comment("Mismo id, otra persona", { clientId, author: bea })).toBeUndefined();
+
+    const first = await insertId(sql`select id from media_comments where body = '¡Qué bonita foto!'`);
+    const report = (reporter: string, reason: string, details: string | null = null): Promise<string | undefined> =>
+      sqlState(sql`insert into comment_reports (comment_id, reporter_user_id, reason, details) values (${first}, ${reporter}, ${reason}, ${details})`);
+    expect(await report(bea, "inappropriate")).toBeUndefined();
+    expect(await report(bea, "other")).toBe("23505");
+    expect(await report(ana, "spam")).toBe("23514");
+    expect(await report(ana, "other", "d".repeat(501))).toBe("23514");
+  });
+
+  it("enforces the tree-link proposal and family-settings CHECKs", async () => {
+    await migrate(drizzle(sql), { migrationsFolder });
+    const { ana, bea, admin } = await seed0009();
+    const abuelo = await insertId(sql`insert into people (full_name) values ('Abuelo Vega') returning id`);
+    const abueloDos = await insertId(sql`insert into people (full_name) values ('Abuelo J. Vega') returning id`);
+    const tia = await insertId(sql`insert into people (full_name) values ('Tía Rosa Vega') returning id`);
+
+    const propose = (
+      kind: string,
+      from: string,
+      to: string,
+      options: { relation?: string | null; status?: string; resolved?: boolean; note?: string | null; by?: string } = {}
+    ): Promise<string | undefined> =>
+      sqlState(sql`
+        insert into tree_link_proposals (kind, from_person_id, to_person_id, relation, proposed_by_user_id, status, resolved_by_user_id, resolved_at, note)
+        values (${kind}, ${from}, ${to}, ${options.relation ?? null}, ${options.by ?? ana}, ${options.status ?? "pending"},
+                ${options.resolved === true ? admin : null}, case when ${options.resolved === true} then now() end, ${options.note ?? null})
+      `);
+    expect(await propose("same_person", abuelo, abueloDos)).toBeUndefined();
+    // One pending proposal per proposer and unordered pair, whatever the kind (PR #56 L2).
+    expect(await propose("same_person", abueloDos, abuelo)).toBe("23505");
+    expect(await propose("relate", abuelo, abueloDos, { relation: "parent_of" })).toBe("23505");
+    // Another member's proposal for the same pair is neither blocked nor blocking.
+    expect(await propose("same_person", abueloDos, abuelo, { by: bea })).toBeUndefined();
+    expect(
+      await sql`select count(*)::int as count from tree_link_proposals where least(from_person_id, to_person_id) = least(${abuelo}::uuid, ${abueloDos}::uuid) and status = 'pending'`
+    ).toEqual([{ count: 2 }]);
+    // Resolved ones do not block a new proposal.
+    expect(await propose("relate", abuelo, abueloDos, { relation: "partner_of", status: "rejected", resolved: true })).toBeUndefined();
+
+    expect(await propose("relate", abuelo, tia, { relation: "parent_of" })).toBeUndefined();
+    expect(await propose("relate", tia, abueloDos)).toBe("23514");
+    expect(await propose("same_person", tia, abueloDos, { relation: "parent_of" })).toBe("23514");
+    expect(await propose("relate", tia, abueloDos, { relation: "sibling_of" })).toBe("23514");
+    expect(await propose("cousin", tia, abueloDos)).toBe("23514");
+    expect(await propose("same_person", tia, tia)).toBe("23514");
+    expect(await propose("same_person", tia, abueloDos, { status: "maybe" })).toBe("23514");
+    // pending <=> not resolved.
+    expect(await propose("same_person", tia, abueloDos, { resolved: true })).toBe("23514");
+    expect(await propose("same_person", tia, abueloDos, { status: "approved" })).toBe("23514");
+    expect(await propose("same_person", tia, abueloDos, { note: "n".repeat(501) })).toBe("23514");
+    expect(
+      await sqlState(sql`
+        update tree_link_proposals set resolution_note = ${"n".repeat(501)}, status = 'rejected', resolved_at = now()
+        where from_person_id = ${abuelo} and to_person_id = ${tia}
+      `)
+    ).toBe("23514");
+
+    // A single settings row.
+    expect(await sqlState(sql`insert into family_settings (id) values (false)`)).toBe("23514");
+    expect(await sqlState(sql`insert into family_settings (id) values (true)`)).toBe("23505");
+    await sql`update family_settings set root_person_id = ${abuelo}, updated_by_user_id = ${admin}`;
+    expect(await sql`select root_person_id from family_settings`).toEqual([{ root_person_id: abuelo }]);
+  });
+
+  it("cascades media, event, proposal and user deletes, restricts box deletes and fails closed on a person in a pending proposal", async () => {
+    await migrate(drizzle(sql), { migrationsFolder });
+    const { admin, ana, bea, cara, eventId } = await seed0009();
+    const mediaId = await editionMediaId();
+    const tagged = await insertId(sql`insert into people (full_name) values ('Ana Morales Vega') returning id`);
+    await sql`insert into media_tags (media_id, person_id, tagged_by_user_id) values (${mediaId}, ${tagged}, ${bea})`;
+    await sql`insert into media_likes (media_id, user_id) values (${mediaId}, ${bea})`;
+    const commentId = await insertId(sql`insert into media_comments (media_id, author_user_id, body) values (${mediaId}, ${bea}, 'Hola') returning id`);
+    await sql`insert into comment_reports (comment_id, reporter_user_id, reason) values (${commentId}, ${ana}, 'other')`;
+    await sql`insert into notifications (user_id, kind, actor_user_id, media_id) values (${ana}, 'photo_liked', ${bea}, ${mediaId})`;
+
+    // A removed actor, author or tagger stays as null; their likes go.
+    await sql`delete from users where id = ${bea}`;
+    expect(await sql`select actor_user_id from notifications where media_id = ${mediaId}`).toEqual([{ actor_user_id: null }]);
+    expect(await sql`select author_user_id from media_comments`).toEqual([{ author_user_id: null }]);
+    expect(await sql`select tagged_by_user_id from media_tags`).toEqual([{ tagged_by_user_id: null }]);
+    expect(await sql`select count(*)::int as count from media_likes`).toEqual([{ count: 0 }]);
+
+    // A media delete takes its tags, likes, comments, their reports and its notifications.
+    await sql`delete from media_items where id = ${mediaId}`;
+    for (const table of ["media_tags", "media_likes", "media_comments", "comment_reports"]) {
+      expect(await sql.unsafe(`select count(*)::int as count from ${table}`), table).toEqual([{ count: 0 }]);
+    }
+    expect(await sql`select count(*)::int as count from notifications where media_id is not null`).toEqual([{ count: 0 }]);
+
+    // A person delete takes their tags.
+    const box = await insertMemoryAlbum();
+    const boxMedia = await insertId(insertMemoryMedia(box, "m-cascade"));
+    await sql`insert into media_tags (media_id, person_id) values (${boxMedia}, ${tagged})`;
+    await sql`delete from people where id = ${tagged}`;
+    expect(await sql`select count(*)::int as count from media_tags`).toEqual([{ count: 0 }]);
+
+    // Box delete: RESTRICT while any media row (even soft-deleted) points at it; the cover goes null with its media.
+    await sql`update memory_albums set cover_media_id = ${boxMedia} where id = ${box}`;
+    await sql`update media_items set deleted_at = now() where id = ${boxMedia}`;
+    expect(await sqlState(sql`delete from memory_albums where id = ${box}`)).toBe("23503");
+    await sql`delete from media_items where id = ${boxMedia}`;
+    expect(await sql`select cover_media_id from memory_albums where id = ${box}`).toEqual([{ cover_media_id: null }]);
+    expect(await sqlState(sql`delete from memory_albums where id = ${box}`)).toBeUndefined();
+
+    // An event delete takes its event_added notifications (Ana's migrated one).
+    await sql`insert into notifications (user_id, kind, actor_user_id, event_id) values (${ana}, 'event_added', ${admin}, ${eventId})`;
+    expect(await sql`select count(*)::int as count from notifications where event_id = ${eventId}`).toEqual([{ count: 1 }]);
+    await sql`delete from media_items where album_id is not null`;
+    await sql`delete from events where id = ${eventId}`;
+    expect(await sql`select count(*)::int as count from notifications`).toEqual([{ count: 0 }]);
+
+    // Proposals: a person in a pending proposal cannot be deleted (fail closed until WP-6.4 withdraws it);
+    // a resolved proposal survives the delete with the person nulled; its notification follows the proposal.
+    const from = await insertId(sql`insert into people (full_name) values ('Abuelo Vega') returning id`);
+    const to = await insertId(sql`insert into people (full_name) values ('Abuelo J. Vega') returning id`);
+    const proposal = await insertId(sql`
+      insert into tree_link_proposals (kind, from_person_id, to_person_id, proposed_by_user_id)
+      values ('same_person', ${from}, ${to}, ${ana}) returning id
+    `);
+    expect(await sqlState(sql`delete from people where id = ${from}`)).toBe("23514");
+    await sql`update tree_link_proposals set status = 'approved', resolved_by_user_id = ${admin}, resolved_at = now() where id = ${proposal}`;
+    await sql`insert into notifications (user_id, kind, actor_user_id, proposal_id) values (${ana}, 'tree_proposal_resolved', ${admin}, ${proposal})`;
+    await sql`update family_settings set root_person_id = ${from}`;
+    await sql`delete from people where id = ${from}`;
+    expect(await sql`select from_person_id, to_person_id, status from tree_link_proposals`).toEqual([
+      { from_person_id: null, to_person_id: to, status: "approved" }
+    ]);
+    expect(await sql`select root_person_id from family_settings`).toEqual([{ root_person_id: null }]);
+    await sql`delete from users where id = ${admin}`;
+    expect(await sql`select resolved_by_user_id from tree_link_proposals`).toEqual([{ resolved_by_user_id: null }]);
+    expect(await sql`select actor_user_id from notifications`).toEqual([{ actor_user_id: null }]);
+    await sql`delete from tree_link_proposals where id = ${proposal}`;
+    expect(await sql`select count(*)::int as count from notifications`).toEqual([{ count: 0 }]);
+
+    // A recipient delete takes their notifications.
+    await sql`insert into notifications (user_id, kind, event_id) values (${cara}, 'event_added', ${await insertId(sql`
+      insert into events (slug, year, title) values ('cena-a2b3', 2026, 'Cena') returning id
+    `)})`;
+    await sql`delete from users where id = ${cara}`;
+    expect(await sql`select count(*)::int as count from notifications`).toEqual([{ count: 0 }]);
   });
 });

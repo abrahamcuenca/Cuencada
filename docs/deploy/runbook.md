@@ -434,6 +434,13 @@ If `/health/ready` reports `db:false`, check, in order:
 - **Schema:** migrations are expand-only (0002 on), so the previous code runs
   on the new schema and there is no down-migration. If a migration itself is
   wrong, write a forward fix. Never edit the `drizzle` bookkeeping by hand.
+- **Rollback floor (WP-6.0, migration 0010):** once WP-6.3 has written any
+  Memory Box row (`media_items.memory_album_id` set), **never roll the code
+  back below WP-6.0**. Code before WP-6.0 lets every media row with
+  `album_id` null through its scope check, so it would show box photos
+  (drafts and hidden boxes included) to every member. Check first:
+  `select count(*) from media_items where memory_album_id is not null;`
+  (0 → a rollback below WP-6.0 is still safe).
 - **First deploy gone wrong:**
   ```sh
   sudo systemctl stop cuencada-server
@@ -657,6 +664,12 @@ Pino levels are numeric: 50 = error, 60 = fatal.
 ### Next deploy notes
 
 Clear these items once the release that carries them is live.
+
+- **0010 `social_tree_memories`** (WP-6.0): expand-only (new tables, a
+  nullable `media_items.memory_album_id`, wider scope/prefix CHECKs validated
+  in the migration). Data steps: the single `family_settings` row, and every
+  undismissed WP-5.3 event notice copied into `notifications`. Sets the
+  **rollback floor** above (§ 5) once box rows exist.
 
 - **0004 `family_people_contacts`** (WP-4.0): expand-only (new nullable columns
   and tables). No data step.

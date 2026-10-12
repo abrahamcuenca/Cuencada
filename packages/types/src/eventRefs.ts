@@ -1,6 +1,7 @@
 /**
  * Small references to events and event albums embedded in other modules'
- * read models (`ChatRoom.event`, `MediaItem.album`/`event`), WP-5.2.
+ * read models (`ChatRoom.event`, `MediaItem.album`/`event`, WP-5.2;
+ * `MediaItem.memoryAlbum`, WP-6.0).
  *
  * A leaf module on purpose: it imports only `common.ts`, so `chat.ts` and
  * `media.ts` can use it without an import cycle through `events.ts` (which
@@ -47,3 +48,21 @@ export const mediaAlbumRefSchema = z.object({
   title: z.string().max(EVENT_ALBUM_TITLE_MAX_LENGTH),
   eventId: idSchema
 }) satisfies z.ZodType<MediaAlbumRef>;
+
+/** Longest Memory Box title (WP-6.0, DB CHECK `memory_albums_title_length_check`). */
+export const MEMORY_ALBUM_TITLE_MAX_LENGTH = 120;
+
+/**
+ * The Memory Box ("Baúl de recuerdos", WP-6.0) a media item belongs to. Only
+ * sent to a viewer who may see the box (published boxes: every verified
+ * member; drafts and hidden boxes: admins).
+ */
+export interface MemoryAlbumRef {
+  id: string;
+  title: string;
+}
+
+export const memoryAlbumRefSchema = z.object({
+  id: idSchema,
+  title: z.string().max(MEMORY_ALBUM_TITLE_MAX_LENGTH)
+}) satisfies z.ZodType<MemoryAlbumRef>;

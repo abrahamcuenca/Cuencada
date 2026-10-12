@@ -1,17 +1,22 @@
 /**
  * Gallery media (member-only) and member reports. Object keys are always
  * server-generated; URLs are presigned on read. Each item belongs to exactly
- * one scope (WP-5.2): an edition (`cuencada_id`) or an event album (`album_id`).
+ * one scope: an edition (`cuencada_id`), an event album (`album_id`, WP-5.2)
+ * or a Memory Box (`memory_album_id`, WP-6.0, migration 0010).
  */
 import {
+  MEMORY_ALBUM_DESCRIPTION_MAX_LENGTH,
+  MEMORY_ALBUM_SORT_ORDER_MAX,
+  MEMORY_ALBUM_TITLE_MAX_LENGTH,
   MediaKind,
   MediaMimeType,
   MediaReportReason,
   MediaUploadStatus,
+  MemoryAlbumStatus,
   ModerationStatus
 } from "@cuencada/types";
 import { sql } from "drizzle-orm";
-import { check, index, integer, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { type AnyPgColumn, check, index, integer, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { users } from "./auth.js";
 import { cuencadas } from "./cuencadas.js";
 import { eventAlbums } from "./events.js";
@@ -24,6 +29,48 @@ import { checkIn, createdAt, timestamptz, updatedAt } from "./helpers.js";
  * literal so the schema never drifts from the migrations.
  */
 const MEDIA_MAX_BYTES = 300 * 1024 * 1024;
+
+/** Lowercase canonical uuid, as the storage-prefix CHECK matches it. */
+const UUID_RE = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+
+/**
+ * Memory Box ("Baúl de recuerdos", WP-6.0, migration 0010): an admin-created
+ * album that belongs to no edition and no event. Its media are `media_items`
+ * rows with `memory_album_id` set and `storage_prefix = memories/{id}`
+ * (`media_items_memory_prefix_check`). Defined here, not in its own module,
+ * because the two tables reference each other (`cover_media_id`).
+ */
+export const memoryAlbums = pgTable(
+  "memory_albums",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    title: text("title").notNull(),
+    description: text("description"),
+    /** A media item of this box shown on the card; the service checks it belongs to the box. */
+    coverMediaId: uuid("cover_media_id").references((): AnyPgColumn => mediaItems.id, { onDelete: "set null" }),
+    sortOrder: integer("sort_order").notNull().default(0),
+    status: text("status").$type<MemoryAlbumStatus>().notNull().default("draft"),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt()
+  },
+  (table) => [
+    // Member list: published boxes by sort order.
+    index("memory_albums_status_sort_idx").on(table.status, table.sortOrder, table.createdAt),
+    index("memory_albums_cover_media_id_idx").on(table.coverMediaId),
+    index("memory_albums_created_by_user_id_idx").on(table.createdByUserId),
+    check(
+      "memory_albums_title_length_check",
+      sql.raw(`char_length("title") between 1 and ${MEMORY_ALBUM_TITLE_MAX_LENGTH}`)
+    ),
+    check(
+      "memory_albums_description_length_check",
+      sql.raw(`"description" is null or char_length("description") <= ${MEMORY_ALBUM_DESCRIPTION_MAX_LENGTH}`)
+    ),
+    check("memory_albums_sort_order_check", sql.raw(`"sort_order" between 0 and ${MEMORY_ALBUM_SORT_ORDER_MAX}`)),
+    checkIn("memory_albums_status_check", "status", MemoryAlbumStatus)
+  ]
+);
 
 export const mediaItems = pgTable(
   "media_items",
@@ -38,10 +85,16 @@ export const mediaItems = pgTable(
      */
     albumId: uuid("album_id").references(() => eventAlbums.id, { onDelete: "restrict" }),
     /**
-     * WP-5.2: server-generated key prefix (`cuencadas/{year}` or
-     * `events/{eventId}/{albumId}`), so keys survive an edition's year change.
-     * `null` on legacy edition rows, whose prefix is `cuencadas/{year}`;
-     * required for album rows (`media_items_storage_prefix_check`).
+     * WP-6.0 Memory Box scope. ON DELETE RESTRICT for the same reason as
+     * `album_id`: deleting a box needs its media rows (and objects) removed first.
+     */
+    memoryAlbumId: uuid("memory_album_id").references((): AnyPgColumn => memoryAlbums.id, { onDelete: "restrict" }),
+    /**
+     * WP-5.2: server-generated key prefix (`cuencadas/{year}`,
+     * `events/{eventId}/{albumId}` or, WP-6.0, `memories/{memoryAlbumId}`), so
+     * keys survive an edition's year change. `null` on legacy edition rows,
+     * whose prefix is `cuencadas/{year}`; required for album and box rows
+     * (`media_items_storage_prefix_check`, `media_items_memory_prefix_check`).
      */
     storagePrefix: text("storage_prefix"),
     uploadedByUserId: uuid("uploaded_by_user_id").references(() => users.id, { onDelete: "set null" }),
@@ -87,6 +140,10 @@ export const mediaItems = pgTable(
     index("media_items_album_keyset_idx")
       .on(table.albumId, table.createdAt.desc(), table.id.desc())
       .where(sql`album_id is not null`),
+    // WP-6.0: Memory Box keyset pagination; also serves the RESTRICT check on box delete.
+    index("media_items_memory_keyset_idx")
+      .on(table.memoryAlbumId, table.createdAt.desc(), table.id.desc())
+      .where(sql`memory_album_id is not null`),
     index("media_items_uploaded_by_user_id_idx").on(table.uploadedByUserId),
     index("media_items_moderated_by_user_id_idx").on(table.moderatedByUserId),
     index("media_items_deleted_by_user_id_idx").on(table.deletedByUserId),
@@ -104,10 +161,17 @@ export const mediaItems = pgTable(
       "media_items_kind_mime_check",
       sql`("kind" = 'video') = ("mime_type" like 'video/%')`
     ),
-    check("media_items_scope_check", sql`num_nonnulls("cuencada_id", "album_id") = 1`),
+    check("media_items_scope_check", sql`num_nonnulls("cuencada_id", "album_id", "memory_album_id") = 1`),
     check(
       "media_items_storage_prefix_check",
-      sql`("album_id" is null or "storage_prefix" is not null) and ("storage_prefix" is null or "storage_prefix" ~ '^(cuencadas/[0-9]{4}|events/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$')`
+      sql.raw(
+        `(("album_id" is null and "memory_album_id" is null) or "storage_prefix" is not null) and ("storage_prefix" is null or "storage_prefix" ~ '^(cuencadas/[0-9]{4}|events/${UUID_RE}/${UUID_RE}|memories/${UUID_RE})$')`
+      )
+    ),
+    // WP-6.0: a box row's prefix is exactly its own box (keys can never point at another box).
+    check(
+      "media_items_memory_prefix_check",
+      sql`"memory_album_id" is null or "storage_prefix" = ('memories/' || "memory_album_id"::text)`
     )
   ]
 );

@@ -15,7 +15,14 @@ import {
   nullableTextSchema,
   queryBooleanSchema
 } from "./common.js";
-import { type EventRef, type MediaAlbumRef, eventRefSchema, mediaAlbumRefSchema } from "./eventRefs.js";
+import {
+  type EventRef,
+  type MediaAlbumRef,
+  type MemoryAlbumRef,
+  eventRefSchema,
+  mediaAlbumRefSchema,
+  memoryAlbumRefSchema
+} from "./eventRefs.js";
 
 const MB = 1024 * 1024;
 
@@ -190,9 +197,14 @@ export type ConfirmUploadRequest = z.input<typeof confirmUploadInputSchema>;
 /* -------------------------------------------------------------------------- */
 
 /**
- * A gallery item as members see it. Exactly one scope (WP-5.2): an edition
- * (`cuencadaId`/`year` set) or an event album (`album`/`event` set,
- * `cuencadaId`/`year` `null`).
+ * A gallery item as members see it. Exactly one scope: an edition
+ * (`cuencadaId`/`year` set), an event album (WP-5.2: `album`/`event` set) or
+ * a Memory Box (WP-6.0: `memoryAlbum` set); `cuencadaId`/`year` are `null`
+ * outside editions.
+ *
+ * WP-6.0 social fields are optional on the wire (older servers omit them).
+ * They are computed for the caller and only ever describe a photo the caller
+ * can see (ADR 0001 §8): counts of tags, likes and live comments on it.
  */
 export interface MediaItem {
   id: string;
@@ -222,6 +234,16 @@ export interface MediaItem {
   album?: MediaAlbumRef | null;
   /** WP-5.2: the album's event (for links), `null` for edition media. */
   event?: EventRef | null;
+  /** WP-6.0: the Memory Box, `null` outside boxes. */
+  memoryAlbum?: MemoryAlbumRef | null;
+  /** WP-6.0: hearts on this item. */
+  likeCount?: number;
+  /** WP-6.0: the caller gave it a heart. */
+  likedByMe?: boolean;
+  /** WP-6.0: live (not deleted) comments. */
+  commentCount?: number;
+  /** WP-6.0: people tagged in it. */
+  tagCount?: number;
 }
 
 export const mediaItemSchema = z.object({
@@ -244,7 +266,12 @@ export const mediaItemSchema = z.object({
   moderationStatus: moderationStatusSchema,
   createdAt: dateTimeSchema,
   album: mediaAlbumRefSchema.nullable().exactOptional(),
-  event: eventRefSchema.nullable().exactOptional()
+  event: eventRefSchema.nullable().exactOptional(),
+  memoryAlbum: memoryAlbumRefSchema.nullable().exactOptional(),
+  likeCount: z.number().int().min(0).exactOptional(),
+  likedByMe: z.boolean().exactOptional(),
+  commentCount: z.number().int().min(0).exactOptional(),
+  tagCount: z.number().int().min(0).exactOptional()
 }) satisfies z.ZodType<MediaItem>;
 
 /** `GET /api/cuencadas/:year/media` query. */
@@ -315,6 +342,8 @@ export const adminMediaQuerySchema = cursorQuerySchema.extend({
   cuencadaId: idSchema.exactOptional(),
   /** WP-5.2: only media of this event's albums (implemented by WP-5.3). */
   eventId: idSchema.exactOptional(),
+  /** WP-6.0: only media of this Memory Box (implemented by WP-6.3). */
+  memoryAlbumId: idSchema.exactOptional(),
   /** `"true"` → only items with at least one report. */
   reported: queryBooleanSchema.exactOptional()
 });
