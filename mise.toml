@@ -26,8 +26,15 @@ description = "Remove the disposable test Postgres container"
 run = "scripts/test-db.sh status"
 description = "Report whether the test Postgres is up and ready"
 
+# `verify` (and so build-bundle's gate) runs through this task. A task's env
+# does not reach its dependencies in mise, so the worker cap lives here, not on
+# `verify`. Four workers by default: with 8 (the config's 50% on 16 cores) a
+# deploy on the slow NTFS checkout timed out creating apps (WP-7.1). A caller's
+# VITEST_MAX_WORKERS (e.g. 2 on a busy machine) wins. CI runs `pnpm test`
+# directly and keeps the config default.
 [tasks.test]
 depends = ["test:db:up"]
+env = { VITEST_MAX_WORKERS = "{{ get_env(name='VITEST_MAX_WORKERS', default='4') }}" }
 run = "pnpm test"
 description = "Run the Vitest suites (starts the test Postgres first)"
 

@@ -46,9 +46,12 @@ export default defineConfig({
           exclude: ["**/node_modules/**", "**/dist/**"],
           globalSetup: ["./test/globalSetup.ts"],
           setupFiles: ["./test/setup.ts"],
-          // argon2 + real Postgres are slower than pure unit tests.
-          testTimeout: 15_000,
-          hookTimeout: 30_000
+          // argon2 + real Postgres are slower than pure unit tests, and the
+          // first test of each file also boots the whole app (createTestApp).
+          // That boot is ~0.1 s warm, but on the owner's NTFS checkout under
+          // 8 workers it starved past 15 s (WP-7.1); give it headroom.
+          testTimeout: 30_000,
+          hookTimeout: 60_000
         }
       },
       {
