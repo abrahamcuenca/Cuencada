@@ -43,4 +43,7 @@ Based on `origin/main` @ 83dbb88 (WP-6.0 contracts, migration 0010). Implements 
 - e2e: `events.spec.ts` now finds the consent notice through the bell, checks "Salir de …", taps through to the event; `quality.spec.ts` gates `/notificaciones` at 320/375 + axe. Screenshots: `docs/ux/screenshots/notificaciones/notificaciones-{375,1280}.webp`.
 
 ## Verification
-(see the end of this file; filled in after the runs)
+- Merged `origin/main` (already up to date at 83dbb88).
+- `pnpm lint` clean; `pnpm turbo run typecheck --force` 6/6; `pnpm test` 214 files / 2783 tests passed (a first run under load average ~30 timed out 3 unrelated web tests at 5 s; they pass alone and on the rerun); `pnpm build` ok.
+- Bundle: initial JS **181.76 kB** gzip of 190 (was ~180.6: the bell and the unread-count query); `/notificaciones` is its own lazy chunk.
+- `pnpm e2e` on isolated ports and DB (`E2E_API_PORT=4161`, `E2E_STORAGE_PORT=4162`, `E2E_WEB_PORT=5161`, `cuencada_w61_e2e`, 2 workers): **83 passed** (journeys on iphone-13, pixel-7, desktop-1280; the 320/375 + axe gates incl. `/notificaciones`) and **Lighthouse 1 passed**. Screenshots refreshed with `E2E_UPDATE_DOCS=1` for the events journey only.
