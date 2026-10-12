@@ -51,10 +51,11 @@ describe("AccountMenu", () => {
 
     await userEvent.click(button);
     expect(button).toHaveAttribute("aria-expanded", "true");
-    expect(entryNames()).toEqual(["Mi perfil", "Contacto", "Sesiones y seguridad", "Eventos", "Cerrar sesión"]);
+    expect(entryNames()).toEqual(["Mi perfil", "Contacto", "Sesiones y seguridad", "Baúl de recuerdos", "Eventos", "Cerrar sesión"]);
     const menu = document.getElementById(button.getAttribute("aria-controls") ?? "");
     if (menu === null) throw new Error("account menu list not found");
     expect(within(menu).getByRole("link", { name: /Eventos/ })).toHaveAttribute("href", "/eventos");
+    expect(within(menu).getByRole("link", { name: /Baúl de recuerdos/ })).toHaveAttribute("href", "/recuerdos");
     expect(banner().getByRole("link", { name: /Mi perfil/ })).toHaveAttribute("href", "/perfil");
     expect(banner().getByRole("link", { name: /Contacto/ })).toHaveAttribute("href", "/perfil#contacto");
     expect(banner().getByRole("link", { name: /Sesiones y seguridad/ })).toHaveAttribute("href", "/perfil/sesiones");
@@ -147,7 +148,7 @@ describe("AccountMenu", () => {
     );
     renderApp("/", authenticatedState());
     await userEvent.click(await accountButton());
-    expect(entryNames()).toEqual(["Mi perfil", "Contacto", "Sesiones y seguridad", "Cerrar sesión"]);
+    expect(entryNames()).toEqual(["Mi perfil", "Contacto", "Sesiones y seguridad", "Baúl de recuerdos", "Cerrar sesión"]);
     // The TopNav link is there (shown by CSS from 1000px).
     expect(within(screen.getByRole("navigation", { name: "Navegación principal" })).getByRole("link", { name: "Eventos" })).toHaveAttribute("href", "/eventos");
   });
@@ -156,7 +157,7 @@ describe("AccountMenu", () => {
     renderApp("/", authenticatedState(makeUser({ role: "admin" })));
     await userEvent.click(await accountButton());
 
-    expect(entryNames()).toEqual(["Mi perfil", "Contacto", "Sesiones y seguridad", "Eventos", "Panel", "Cerrar sesión"]);
+    expect(entryNames()).toEqual(["Mi perfil", "Contacto", "Sesiones y seguridad", "Baúl de recuerdos", "Eventos", "Panel", "Cerrar sesión"]);
     expect(screen.getAllByRole("link", { name: /Panel/ })).toHaveLength(1);
     expect(banner().getByRole("link", { name: /Panel/ })).toHaveAttribute("href", "/admin");
   });

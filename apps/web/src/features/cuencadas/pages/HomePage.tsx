@@ -76,6 +76,28 @@ function EventsStrip(): ReactNode {
     </Suspense>
   );
 }
+
+// WP-6.3: the "Baúl de recuerdos" strip, members-only and in its own chunk like the events strip.
+const HomeMemoriesStrip = lazy(() =>
+  import("../../memories/components/HomeMemories").then(
+    (module) => ({ default: module.HomeMemories }),
+    (error: unknown) => {
+      reportUnexpected(error);
+      return { default: NoStrip };
+    }
+  )
+);
+
+/** Up to three published Memory Boxes for members; hidden when there is none. */
+function MemoriesStrip(): ReactNode {
+  const audience = useAppSelector(selectSessionAudience);
+  if (audience !== "member" && audience !== "admin") return null;
+  return (
+    <Suspense fallback={null}>
+      <HomeMemoriesStrip />
+    </Suspense>
+  );
+}
 /** Timezone for portal-wide content that belongs to no edition (the family's home base). */
 const PORTAL_TIMEZONE = "America/Merida";
 
@@ -137,6 +159,7 @@ export function HomePage(): ReactNode {
       ) : null}
       <HomeAnnouncements home={home.data} />
       <EventsStrip />
+      <MemoriesStrip />
       {featured === null ? <Memories latestPast={latestPast} /> : null}
       {featured !== null && !hasDates(featured) && latestPast ? (
         <MemoriesPhotosSection latestPast={latestPast} />

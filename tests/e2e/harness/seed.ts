@@ -20,8 +20,11 @@ import {
   FUTURE_YEAR,
   cousinBranchNames,
   familyNames,
+  HIDDEN_MEMORY_BOX_ID,
   invitedPerson,
   MEMBER_PASSWORD,
+  MEMORY_BOX_ID,
+  MEMORY_BOX_TITLE,
   PROJECT_KEYS,
   ProjectKey,
   TEMP_ADMIN_PASSWORD
@@ -190,6 +193,14 @@ export function guardQuery(db: Database): GuardQuery {
   return (sql, params = []) => db.$client.unsafe(sql, [...params]);
 }
 
+/** WP-6.3: one published Memory Box (shared by every project) and one hidden box. Fictional titles. */
+async function seedMemoryBoxes(sql: Sql): Promise<void> {
+  await sql`
+    insert into memory_albums (id, title, description, status, sort_order)
+    values (${MEMORY_BOX_ID}, ${MEMORY_BOX_TITLE}, 'Fotos escaneadas de los álbumes de la Rama Norte. Todo es ficticio.', 'published', 0),
+           (${HIDDEN_MEMORY_BOX_ID}, 'Baúl oculto de prueba', null, 'hidden', 1)`;
+}
+
 /**
  * Reset the e2e database and load the fixtures.
  *
@@ -225,6 +236,7 @@ export async function prepareE2eDatabase(target: E2eDatabaseTarget): Promise<voi
     const hashes = { member: await hashPassword(MEMBER_PASSWORD), temp: await hashPassword(TEMP_ADMIN_PASSWORD) };
     const editionId = await seedFutureEdition(sql);
     await seedAnnouncedEdition(sql);
+    await seedMemoryBoxes(sql);
     for (const project of PROJECT_KEYS) {
       const ids = new Map<CastRole, string>();
       for (const role of Object.values(CastRole)) ids.set(role, await insertUser(sql, project, role, hashes));

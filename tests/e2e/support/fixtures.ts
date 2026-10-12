@@ -111,7 +111,8 @@ export async function login(page: Page, member: Pick<CastMember, "email" | "pass
  * native input visually hidden under their label.
  */
 export async function setControl(control: Locator, checked: boolean): Promise<void> {
-  await control.evaluate((element) => element.scrollIntoView({ block: "center" }));
+  // Instant: a smooth scroll still moving at click time makes the forced click miss (flaky "did not change its state").
+  await control.evaluate((element) => element.scrollIntoView({ block: "center", behavior: "instant" }));
   await control.setChecked(checked, { force: true });
 }
 

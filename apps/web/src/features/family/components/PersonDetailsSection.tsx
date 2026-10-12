@@ -1,5 +1,6 @@
 import type { PersonDetails } from "@cuencada/types";
 import type { ReactNode } from "react";
+import { Tabs } from "../../../shared/ui/Tabs";
 import { ContactList } from "../../directory/components/ContactList";
 import styles from "../family.module.css";
 
@@ -36,6 +37,12 @@ export interface PersonDetailsSectionProps {
   actions?: ReactNode;
   /** WP-4.3: the tree-photo controls (`PersonPhotoEditor`), under the photo slot. */
   photoEditor?: ReactNode;
+  /**
+   * WP-6.2: "Fotos de {persona}" (photos the person is tagged in). When set,
+   * the panel shows "Datos" and "Fotos" tabs; the photos mount (and load)
+   * only once their tab is chosen.
+   */
+  photos?: ReactNode;
 }
 
 /**
@@ -44,32 +51,47 @@ export interface PersonDetailsSectionProps {
  * only when present. The server already applied the privacy rules (living
  * people's dates only for their circle), so missing values simply don't show.
  */
-export function PersonDetailsSection({ person, actions, photoEditor }: PersonDetailsSectionProps): ReactNode {
+export function PersonDetailsSection({ person, actions, photoEditor, photos }: PersonDetailsSectionProps): ReactNode {
   const rows = detailRows(person);
   const hasPhoto = person.photoUrl !== null && person.photoSource === "person";
   const empty = rows.length === 0 && person.bio === null && !hasPhoto && person.contacts.length === 0;
+  const data = (
+    <>
+      {hasPhoto && person.photoUrl !== null ? (
+        <img className={styles.detailsPhoto} src={person.photoUrl} alt={`Foto de ${person.fullName}`} loading="lazy" decoding="async" />
+      ) : null}
+      {photoEditor ?? null}
+      {rows.length > 0 ? (
+        <dl className={styles.detailsList}>
+          {rows.map(([label, value]) => (
+            <div key={label} className={styles.detailsRow}>
+              <dt>{label}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {person.bio !== null ? <p className={styles.detailsBio}>{person.bio}</p> : null}
+      <ContactList contacts={person.contacts} ownerName={person.fullName} />
+      {empty ? <p className={styles.empty}>Aún no hay más datos de {person.fullName}.</p> : null}
+      {actions ? <div className={styles.detailsActions}>{actions}</div> : null}
+    </>
+  );
   return (
     <details className={styles.details}>
       <summary className={styles.detailsSummary}>Detalles</summary>
       <div className={styles.detailsBody}>
-        {hasPhoto && person.photoUrl !== null ? (
-          <img className={styles.detailsPhoto} src={person.photoUrl} alt={`Foto de ${person.fullName}`} loading="lazy" decoding="async" />
-        ) : null}
-        {photoEditor ?? null}
-        {rows.length > 0 ? (
-          <dl className={styles.detailsList}>
-            {rows.map(([label, value]) => (
-              <div key={label} className={styles.detailsRow}>
-                <dt>{label}</dt>
-                <dd>{value}</dd>
-              </div>
-            ))}
-          </dl>
-        ) : null}
-        {person.bio !== null ? <p className={styles.detailsBio}>{person.bio}</p> : null}
-        <ContactList contacts={person.contacts} ownerName={person.fullName} />
-        {empty ? <p className={styles.empty}>Aún no hay más datos de {person.fullName}.</p> : null}
-        {actions ? <div className={styles.detailsActions}>{actions}</div> : null}
+        {photos === undefined ? (
+          data
+        ) : (
+          <Tabs
+            label={`Información de ${person.fullName}`}
+            items={[
+              { id: "datos", label: "Datos", content: data },
+              { id: "fotos", label: "Fotos", content: photos }
+            ]}
+          />
+        )}
       </div>
     </details>
   );

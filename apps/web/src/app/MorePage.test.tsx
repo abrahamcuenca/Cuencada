@@ -24,6 +24,7 @@ describe("MorePage", () => {
     expect(await main.findByRole("heading", { name: "Más" })).toBeInTheDocument();
     expect(main.getByRole("link", { name: /Directorio/ })).toHaveAttribute("href", "/directorio");
     expect(main.getByRole("link", { name: /Árbol familiar/ })).toHaveAttribute("href", "/arbol");
+    expect(main.getByRole("link", { name: /Baúl de recuerdos/ })).toHaveAttribute("href", "/recuerdos");
     expect(main.getByRole("link", { name: /Mi perfil/ })).toHaveAttribute("href", "/perfil");
     expect(main.getByRole("link", { name: /Contacto/ })).toHaveAttribute("href", "/perfil#contacto");
     expect(main.getByRole("link", { name: /Sesiones y seguridad/ })).toHaveAttribute("href", "/perfil/sesiones");

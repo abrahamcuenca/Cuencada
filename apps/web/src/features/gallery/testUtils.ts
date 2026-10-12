@@ -3,7 +3,7 @@
  * for MSW, and a controllable fake `XMLHttpRequest` for the direct bucket PUT.
  * Imported by tests only.
  */
-import type { AdminMediaItem, CuencadaSummary, MediaItem, MediaReport } from "@cuencada/types";
+import type { AdminMediaItem, AdminReportedComment, CuencadaSummary, MediaComment, MediaItem, MediaLiker, MediaReport, MediaTag, TagCandidate } from "@cuencada/types";
 import { HttpResponse, http, type HttpHandler } from "msw";
 import { apiUrl, errorBody } from "../../../test/auth";
 
@@ -114,6 +114,68 @@ export interface FakeGalleryDb {
   holdUploads: Promise<void> | null;
   /** When set, confirm responses wait for it. */
   holdConfirm: Promise<void> | null;
+  /** WP-6.2: social state per media id (see {@link socialOf}). */
+  social: Record<string, FakeSocial>;
+  /** WP-6.2: items reachable only by id (`/detail`), e.g. a deep link to a photo not in the list. */
+  byIdOnly: MediaItem[];
+  /** WP-6.2: the admin comment-report queue. */
+  commentReports: AdminReportedComment[];
+  /** WP-6.2: "Fotos de {persona}" by person id. */
+  personPhotos: Record<string, MediaItem[]>;
+}
+
+/** WP-6.2: what the fake server knows about one item's social side. */
+export interface FakeSocial {
+  tags: MediaTag[];
+  likeCount: number;
+  likedByMe: boolean;
+  likers: MediaLiker[];
+  comments: MediaComment[];
+  canTag: boolean;
+  /** People the tag picker may return (filtered by `q`). */
+  candidates: TagCandidate[];
+  /** Status of the next created tag as the server answers it (the tagger sees `approved`). */
+  nextTagStatus: MediaTag["status"];
+  /** Comment ids already reported by the caller (→ 409). */
+  reported: string[];
+}
+
+/** The social state of `mediaId`, created empty on first use. */
+export function socialOf(db: FakeGalleryDb, mediaId: string): FakeSocial {
+  let state = db.social[mediaId];
+  if (state === undefined) {
+    state = { tags: [], likeCount: 0, likedByMe: false, likers: [], comments: [], canTag: true, candidates: [], nextTagStatus: "approved", reported: [] };
+    db.social[mediaId] = state;
+  }
+  return state;
+}
+
+/** A tag fixture. */
+export function makeTag(n: number, overrides: Partial<MediaTag> = {}): MediaTag {
+  return {
+    id: uuid(7000 + n),
+    person: { id: uuid(8000 + n), name: `Persona ${n}`, avatarUrl: null },
+    status: "approved",
+    isMe: false,
+    canRemove: false,
+    canApprove: false,
+    ...overrides
+  };
+}
+
+/** A live comment fixture. */
+export function makeComment(n: number, mediaId: string, overrides: Partial<MediaComment> = {}): MediaComment {
+  return {
+    id: uuid(6000 + n),
+    mediaId,
+    author: { name: `Autor ${n}`, avatarUrl: null, isMe: false },
+    body: `Comentario ${n}`,
+    deleted: false,
+    createdAt: new Date(Date.UTC(2026, 8, 14, 19, n, 0)).toISOString(),
+    canDelete: false,
+    canModerate: false,
+    ...overrides
+  };
 }
 
 /** A fresh fake database. */
@@ -130,6 +192,10 @@ export function makeDb(overrides: Partial<FakeGalleryDb> = {}): FakeGalleryDb {
     uploadUrl: SIGNED_PUT_URL,
     holdUploads: null,
     holdConfirm: null,
+    social: {},
+    byIdOnly: [],
+    commentReports: [],
+    personPhotos: {},
     ...overrides
   };
 }
@@ -244,6 +310,155 @@ export function galleryHandlers(db: FakeGalleryDb): HttpHandler[] {
       if (body.action === "delete") db.admin = db.admin.filter((m) => m.id !== item.id);
       else item.moderationStatus = body.action === "approve" ? "approved" : "hidden";
       return HttpResponse.json(item);
+    }),
+    ...socialHandlers(db)
+  ];
+}
+
+/** WP-6.2 social endpoints over `db.social` (detail, tags, likes, comments, reports, person photos). */
+function socialHandlers(db: FakeGalleryDb): HttpHandler[] {
+  const findItem = (id: string): MediaItem | undefined => db.media.find((m) => m.id === id) ?? db.byIdOnly.find((m) => m.id === id);
+  const notFound = (): Response => HttpResponse.json(errorBody("NOT_FOUND", "No encontramos esa foto o video."), { status: 404 });
+  const liveCount = (state: FakeSocial): number => state.comments.filter((c) => !c.deleted).length;
+  return [
+    http.get(apiUrl("/media/:id/detail"), ({ request, params }) => {
+      record(db, request);
+      const item = findItem(String(params.id));
+      if (!item) return notFound();
+      const state = socialOf(db, item.id);
+      return HttpResponse.json({
+        item,
+        tags: state.tags,
+        likes: { likeCount: state.likeCount, likedByMe: state.likedByMe },
+        commentCount: liveCount(state),
+        comments: { items: state.comments.slice(0, 20), nextCursor: state.comments.length > 20 ? "20" : null },
+        canTag: state.canTag
+      });
+    }),
+    http.get(apiUrl("/media/:id/tag-candidates"), ({ request, params }) => {
+      const url = record(db, request);
+      const q = (url.searchParams.get("q") ?? "").toLowerCase();
+      const state = socialOf(db, String(params.id));
+      return HttpResponse.json({ items: state.candidates.filter((c) => c.name.toLowerCase().includes(q)) });
+    }),
+    http.post(apiUrl("/media/:id/tags"), async ({ request, params }) => {
+      record(db, request);
+      const body = (await request.json()) as { personId: string; x?: number; y?: number }; // Test fixture: `CreateMediaTagRequest`.
+      db.bodies[`POST tags ${String(params.id)}`] = body;
+      const state = socialOf(db, String(params.id));
+      const existing = state.tags.find((t) => t.person.id === body.personId);
+      if (existing) return HttpResponse.json(existing);
+      const candidate = state.candidates.find((c) => c.id === body.personId);
+      if (!candidate) {
+        return HttpResponse.json(
+          { error: { code: "VALIDATION", message: "No existe.", details: [{ path: "personId", message: "x", code: "TAG_NOT_ALLOWED" }] } },
+          { status: 400 }
+        );
+      }
+      db.nextId += 1;
+      const tag: MediaTag = {
+        id: uuid(db.nextId),
+        person: { id: candidate.id, name: candidate.name, avatarUrl: candidate.avatarUrl },
+        ...(body.x === undefined || body.y === undefined ? {} : { x: body.x, y: body.y }),
+        status: state.nextTagStatus,
+        isMe: candidate.isMe,
+        canRemove: true,
+        canApprove: false
+      };
+      state.tags.push(tag);
+      return HttpResponse.json(tag, { status: 201 });
+    }),
+    http.post(apiUrl("/media/tags/:tagId/approve"), ({ request, params }) => {
+      record(db, request);
+      for (const state of Object.values(db.social)) {
+        const tag = state.tags.find((t) => t.id === params.tagId && t.canApprove);
+        if (tag) {
+          tag.status = "approved";
+          tag.canApprove = false;
+          return HttpResponse.json(tag);
+        }
+      }
+      return notFound();
+    }),
+    http.delete(apiUrl("/media/:id/tags/:tagId"), ({ request, params }) => {
+      record(db, request);
+      const state = socialOf(db, String(params.id));
+      state.tags = state.tags.filter((t) => t.id !== params.tagId);
+      return new HttpResponse(null, { status: 204 });
+    }),
+    http.put(apiUrl("/media/:id/like"), ({ request, params }) => {
+      record(db, request);
+      const state = socialOf(db, String(params.id));
+      if (!state.likedByMe) state.likeCount += 1;
+      state.likedByMe = true;
+      return HttpResponse.json({ likeCount: state.likeCount, likedByMe: true });
+    }),
+    http.delete(apiUrl("/media/:id/like"), ({ request, params }) => {
+      record(db, request);
+      const state = socialOf(db, String(params.id));
+      if (state.likedByMe) state.likeCount -= 1;
+      state.likedByMe = false;
+      return HttpResponse.json({ likeCount: state.likeCount, likedByMe: false });
+    }),
+    http.get(apiUrl("/media/:id/likes"), ({ request, params }) => {
+      const url = record(db, request);
+      return HttpResponse.json(paginate(socialOf(db, String(params.id)).likers, url));
+    }),
+    http.get(apiUrl("/media/:id/comments"), ({ request, params }) => {
+      const url = record(db, request);
+      return HttpResponse.json(paginate(socialOf(db, String(params.id)).comments, url));
+    }),
+    http.post(apiUrl("/media/:id/comments"), async ({ request, params }) => {
+      record(db, request);
+      const body = (await request.json()) as { body: string; clientCommentId: string }; // Test fixture: `CreateMediaCommentRequest`.
+      const mediaId = String(params.id);
+      const state = socialOf(db, mediaId);
+      db.bodies[`POST comment ${body.clientCommentId}`] = body;
+      db.nextId += 1;
+      const comment: MediaComment = makeComment(db.nextId, mediaId, {
+        id: uuid(db.nextId),
+        body: body.body,
+        author: { name: "Prima Morales", avatarUrl: null, isMe: true },
+        canDelete: true
+      });
+      state.comments.push(comment);
+      return HttpResponse.json(comment, { status: 201 });
+    }),
+    http.delete(apiUrl("/media/comments/:commentId"), ({ request, params }) => {
+      record(db, request);
+      for (const state of Object.values(db.social)) {
+        const comment = state.comments.find((c) => c.id === params.commentId && c.canDelete);
+        if (comment) {
+          Object.assign(comment, { deleted: true, body: "", author: null, canDelete: false });
+          return new HttpResponse(null, { status: 204 });
+        }
+      }
+      return HttpResponse.json(errorBody("NOT_FOUND"), { status: 404 });
+    }),
+    http.post(apiUrl("/media/comments/:commentId/report"), async ({ request, params }) => {
+      record(db, request);
+      const id = String(params.commentId);
+      db.bodies[`REPORT comment ${id}`] = await request.json();
+      for (const state of Object.values(db.social)) {
+        if (state.reported.includes(id)) return HttpResponse.json(errorBody("CONFLICT"), { status: 409 });
+        if (state.comments.some((c) => c.id === id)) state.reported.push(id);
+      }
+      return new HttpResponse(null, { status: 204 });
+    }),
+    http.get(apiUrl("/admin/media/comment-reports"), ({ request }) => {
+      const url = record(db, request);
+      const includeDeleted = url.searchParams.get("includeDeleted") === "true";
+      return HttpResponse.json(paginate(db.commentReports.filter((c) => includeDeleted || c.deletedAt === null), url));
+    }),
+    http.delete(apiUrl("/admin/media/comments/:commentId"), ({ request, params }) => {
+      record(db, request);
+      const report = db.commentReports.find((c) => c.id === params.commentId);
+      if (report) Object.assign(report, { deletedAt: new Date().toISOString(), body: "" });
+      return new HttpResponse(null, { status: 204 });
+    }),
+    http.get(apiUrl("/family/people/:personId/photos"), ({ request, params }) => {
+      const url = record(db, request);
+      return HttpResponse.json(paginate(db.personPhotos[String(params.personId)] ?? [], url));
     })
   ];
 }

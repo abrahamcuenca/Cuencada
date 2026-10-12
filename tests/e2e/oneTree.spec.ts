@@ -22,11 +22,11 @@ import { CastRole, expect, login, test } from "./support/fixtures.js";
 
 type SharpFactory = (input: Buffer) => { resize(width: number): { webp(options: { quality: number }): { toFile(path: string): Promise<unknown> } } };
 
-/** `docs/ux/screenshots/wp64/<name>-<width>.webp` at 375 and 1280 px, only with `E2E_UPDATE_DOCS=1`. */
+/** `docs/ux/screenshots/arbol-unido/<name>-<width>.webp` at 375 and 1280 px, only with `E2E_UPDATE_DOCS=1`. */
 async function shots(page: Page, testInfo: TestInfo, name: string, focus?: Locator): Promise<void> {
   if (process.env.E2E_UPDATE_DOCS !== "1" || testInfo.project.name !== ProjectKey.Desktop) return;
   const previous = page.viewportSize();
-  const out = join(REPO_ROOT, "docs/ux/screenshots/wp64");
+  const out = join(REPO_ROOT, "docs/ux/screenshots/arbol-unido");
   mkdirSync(out, { recursive: true });
   const sharp = createRequire(join(REPO_ROOT, "apps/server/package.json"))("sharp") as SharpFactory; // CJS export: a callable factory
   for (const width of [375, 1280]) {

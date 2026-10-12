@@ -124,4 +124,21 @@ describe("Lightbox", () => {
     rerender(<Lightbox items={ITEMS.slice(0, 2)} index={2} onIndexChange={() => {}} onClose={onClose} />);
     expect(onClose).toHaveBeenCalled();
   });
+  it("renders the footer slot, and the overlay only over a measured image (WP-6.2)", () => {
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
+    Object.defineProperty(HTMLElement.prototype, "offsetWidth", { configurable: true, get: () => 400 });
+    try {
+      const { rerender } = render(
+        <Lightbox items={ITEMS} index={0} onIndexChange={() => {}} onClose={() => {}} footer={<p>Pie social</p>} overlay={<span>Marcador</span>} />
+      );
+      expect(screen.getByText("Pie social")).toBeInTheDocument();
+      expect(screen.getByText("Marcador")).toBeInTheDocument();
+      // Videos get no overlay.
+      rerender(<Lightbox items={ITEMS} index={2} onIndexChange={() => {}} onClose={() => {}} footer={<p>Pie social</p>} overlay={<span>Marcador</span>} />);
+      expect(screen.queryByText("Marcador")).not.toBeInTheDocument();
+      expect(screen.getByText("Pie social")).toBeInTheDocument();
+    } finally {
+      if (original) Object.defineProperty(HTMLElement.prototype, "offsetWidth", original);
+    }
+  });
 });

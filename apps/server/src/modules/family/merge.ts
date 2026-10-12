@@ -66,8 +66,8 @@ import { recordAudit, type Transaction } from "../../lib/audit.js";
 import { AppError, isAppError } from "../../lib/errors.js";
 import { invitePendingSql } from "../invites/service.js";
 import { losingPhotoKeys } from "./mergePhoto.js";
-// TODO(WP-6.2): import `moveMediaTagsTx` from "../social/index.js" (WP-6.2) and delete the placeholder; keep the call before the account link moves.
-import { moveMediaTagsTx } from "../social/moveMediaTagsPlaceholder.js";
+// WP-6.2: called before the account link moves (a moved tag re-pends only against keep's own pre-merge link).
+import { moveMediaTagsTx } from "../social/index.js";
 import { repointPendingProposalsTx } from "./proposalCleanup.js";
 import { moveRootTx } from "./settings.js";
 import { MAX_PARENTS, insertRelationship, isAncestorOrSelf, lockFamilyTree } from "./relationships.js";

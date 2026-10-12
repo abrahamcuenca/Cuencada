@@ -365,7 +365,9 @@ export class UploadManager {
     const request =
       scope.kind === "year"
         ? this.store.dispatch(galleryApi.endpoints.createUpload.initiate({ year: scope.year, body }))
-        : this.store.dispatch(galleryApi.endpoints.createAlbumUpload.initiate({ eventId: scope.eventId, albumId: scope.albumId, body }));
+        : scope.kind === "album"
+          ? this.store.dispatch(galleryApi.endpoints.createAlbumUpload.initiate({ eventId: scope.eventId, albumId: scope.albumId, body }))
+          : this.store.dispatch(galleryApi.endpoints.createMemoryUpload.initiate({ memoryAlbumId: scope.memoryAlbumId, body }));
     job.inFlight = request;
     try {
       const created = await request.unwrap();
@@ -437,7 +439,11 @@ export class UploadManager {
     const { scope } = job.entry;
     const request = this.store.dispatch(
       galleryApi.endpoints.deleteMedia.initiate(
-        scope.kind === "year" ? { id: mediaId, year: scope.year } : { id: mediaId, year: null, album: { eventId: scope.eventId, albumId: scope.albumId } }
+        scope.kind === "year"
+          ? { id: mediaId, year: scope.year }
+          : scope.kind === "album"
+            ? { id: mediaId, year: null, album: { eventId: scope.eventId, albumId: scope.albumId } }
+            : { id: mediaId, year: null, memoryAlbumId: scope.memoryAlbumId }
       )
     );
     request
@@ -467,7 +473,9 @@ export class UploadManager {
       const request =
         scope.kind === "year"
           ? this.store.dispatch(galleryApi.endpoints.mediaHead.initiate({ year: scope.year, limit: MEDIA_PAGE_SIZE }, options))
-          : this.store.dispatch(galleryApi.endpoints.albumMediaHead.initiate({ eventId: scope.eventId, albumId: scope.albumId, limit: MEDIA_PAGE_SIZE }, options));
+          : scope.kind === "album"
+            ? this.store.dispatch(galleryApi.endpoints.albumMediaHead.initiate({ eventId: scope.eventId, albumId: scope.albumId, limit: MEDIA_PAGE_SIZE }, options))
+            : this.store.dispatch(galleryApi.endpoints.memoryMediaHead.initiate({ memoryAlbumId: scope.memoryAlbumId, limit: MEDIA_PAGE_SIZE }, options));
       try {
         const page = await request.unwrap();
         if (generation !== this.generation) return;

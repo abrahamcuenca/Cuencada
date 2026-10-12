@@ -26,7 +26,7 @@
 
 .frame {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto 1fr auto auto;
   height: 100%;
   padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
 }
@@ -104,5 +104,22 @@
 
   .bottomBar {
     padding: var(--space-3) var(--space-6);
+  }
+}
+
+/* WP-6.2: laid over the image's own box (measured), so children use percentages of the photo.
+   Transparent to pointers; an interactive child opts in with `pointer-events: auto`. */
+.overlay {
+  position: absolute;
+  pointer-events: none;
+}
+
+.footer {
+  padding: 0 var(--space-3) var(--space-2);
+}
+
+@media (min-width: 900px) {
+  .footer {
+    padding: 0 var(--space-6) var(--space-3);
   }
 }

@@ -1,4 +1,4 @@
-import { useId, useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { useAppSelector } from "../../../app/hooks";
 import { isAbortError } from "../../../shared/api/errors";
@@ -22,6 +22,7 @@ import { LARGE_PHOTO_NOTE } from "../lib/resizeImage";
 import { uploadsConfigured } from "../lib/uploadOrigin";
 import { UPLOAD_LOCATION_NOTE, UPLOAD_RULES_TEXT } from "../lib/validateFile";
 import { useExpiredUrlRefetch } from "../lib/useExpiredUrlRefetch";
+import { usePhotoParam } from "../lib/usePhotoParam";
 import { PROCESSING_POLL_MS } from "../upload/uploadManager";
 import { useUploadManager } from "../upload/useUploadManager";
 
@@ -120,7 +121,8 @@ function GalleryYear({ year }: { year: number }): React.ReactNode {
   const isAdmin = useAppSelector(selectIsAdmin);
   const uploader = useRef<UploaderHandle>(null);
   const { uploads } = useUploadManager();
-  const [openId, setOpenId] = useState<string | null>(null);
+  // WP-6.2: the open photo lives in `?foto=<id>` (deep links from notifications and shared links).
+  const [openId, setOpenId] = usePhotoParam();
 
   const { data, isLoading, isError, error, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } = useListMediaInfiniteQuery(year);
 

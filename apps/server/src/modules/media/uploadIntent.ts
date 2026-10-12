@@ -1,12 +1,13 @@
 /**
  * The gallery upload intent, shared by edition media
- * (`POST /api/cuencadas/:year/media/uploads`) and event-album media
- * (`POST /api/events/:id/albums/:albumId/uploads`, WP-5.3).
+ * (`POST /api/cuencadas/:year/media/uploads`), event-album media
+ * (`POST /api/events/:id/albums/:albumId/uploads`, WP-5.3) and Memory Box
+ * media (`POST /api/memories/:id/uploads`, WP-6.3).
  *
  * [SEC] One locked daily-budget step for both scopes (Security requirement
  * 12): the per-user advisory lock serializes a user's intents, so the open
  * intent cap and the rolling byte budget are exact under concurrency and
- * shared by edition and album uploads. Keys are server-generated from the
+ * shared by edition, album and Memory Box uploads. Keys are server-generated from the
  * scope's stored prefix (never from input).
  */
 import { randomUUID } from "node:crypto";
@@ -22,8 +23,9 @@ import { mediaKeys, sanitizeFileName } from "./files.js";
 
 /** Where the item goes: exactly one scope, plus its server-derived key prefix. */
 export type UploadScope =
-  | { cuencadaId: string; albumId?: never; storagePrefix: string }
-  | { albumId: string; cuencadaId?: never; storagePrefix: string };
+  | { cuencadaId: string; albumId?: never; memoryAlbumId?: never; storagePrefix: string }
+  | { albumId: string; cuencadaId?: never; memoryAlbumId?: never; storagePrefix: string }
+  | { memoryAlbumId: string; cuencadaId?: never; albumId?: never; storagePrefix: string };
 
 /** Headers a browser may set itself; the signature also covers Content-Length, which the browser derives from the File. */
 function browserUploadHeaders(required: Record<string, string>, mimeType: string): Record<string, string> {
@@ -82,6 +84,7 @@ export async function createPendingUpload(
       id: mediaId,
       cuencadaId: scope.cuencadaId ?? null,
       albumId: scope.albumId ?? null,
+      memoryAlbumId: scope.memoryAlbumId ?? null,
       storagePrefix: scope.storagePrefix,
       uploadedByUserId: user.id,
       kind: mediaKindOfMime(body.mimeType),

@@ -1,5 +1,5 @@
 import type { AdminMediaItem, MediaModerationAction, ModerationStatus } from "@cuencada/types";
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { getApiErrorMessage, isAbortError } from "../../../shared/api/errors";
 import { Badge } from "../../../shared/ui/Badge";
@@ -18,11 +18,17 @@ import { formatBytes } from "../lib/validateFile";
 import { formatUploadDate, mediaAlt, uploadedByLine } from "../lib/mediaText";
 import { useExpiredUrlRefetch } from "../lib/useExpiredUrlRefetch";
 
-type QueueId = "pending" | "reported" | "hidden";
+// WP-6.2: the reported-comments queue loads with its tab.
+const AdminCommentReports = lazy(async () => ({ default: (await import("./AdminCommentReports")).AdminCommentReports }));
 
-const QUEUE_IDS: readonly QueueId[] = ["pending", "reported", "hidden"];
+type MediaQueueId = "pending" | "reported" | "hidden";
+type QueueId = MediaQueueId | "comments";
 
-const QUEUES: Record<QueueId, { label: string; filter: AdminMediaFilter; empty: string }> = {
+const QUEUE_IDS: readonly QueueId[] = ["pending", "reported", "hidden", "comments"];
+
+const COMMENTS_LABEL = "Comentarios reportados";
+
+const QUEUES: Record<MediaQueueId, { label: string; filter: AdminMediaFilter; empty: string }> = {
   pending: { label: "Por revisar", filter: { moderationStatus: "pending_review" }, empty: "No hay fotos esperando revisión." },
   reported: { label: "Reportadas", filter: { reported: "true" }, empty: "No hay fotos reportadas." },
   hidden: { label: "Ocultas", filter: { moderationStatus: "hidden" }, empty: "No hay fotos ocultas." }
@@ -77,17 +83,25 @@ export function AdminMediaPage(): React.ReactNode {
           const next = QUEUE_IDS.find((q) => q === id);
           if (next) setQueue(next);
         }}
-        items={QUEUE_IDS.map((id) => ({
-          id,
-          label: QUEUES[id].label,
-          content: <ModerationQueue queue={id} />
-        }))}
+        items={QUEUE_IDS.map((id) =>
+          id === "comments"
+            ? {
+                id,
+                label: COMMENTS_LABEL,
+                content: (
+                  <Suspense fallback={<Skeleton shape="block" height={180} />}>
+                    <AdminCommentReports />
+                  </Suspense>
+                )
+              }
+            : { id, label: QUEUES[id].label, content: <ModerationQueue queue={id} /> }
+        )}
       />
     </div>
   );
 }
 
-function ModerationQueue({ queue }: { queue: QueueId }): React.ReactNode {
+function ModerationQueue({ queue }: { queue: MediaQueueId }): React.ReactNode {
   const { filter, empty } = QUEUES[queue];
   const { data, isLoading, isError, error, refetch, hasNextPage, fetchNextPage, isFetchingNextPage } = useListAdminMediaInfiniteQuery(filter);
   const items = useMemo(() => data?.pages.flatMap((page) => page.items) ?? [], [data]);

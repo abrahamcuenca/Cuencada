@@ -29,6 +29,10 @@ import { PROFILE_CONTACT_PATH } from "../../profile/paths";
 const EditPersonDialog = lazy(async () => ({
   default: (await import("../components/EditPersonDialog")).EditPersonDialog
 }));
+// WP-6.2: "Fotos de {persona}" (grid + lightbox) loads when its tab is opened.
+const PersonPhotos = lazy(async () => ({
+  default: (await import("../components/PersonPhotos")).PersonPhotos
+}));
 const AddRelativeDialog = lazy(async () => ({
   default: (await import("../components/AddRelativeDialog")).AddRelativeDialog
 }));
@@ -296,7 +300,19 @@ function TreeView({ view, busy, trail, expanded, onToggleExpanded, onOpen }: Tre
                 {proposeActions}
               </>
             }
-            details={details === undefined ? null : <PersonDetailsSection person={details} photoEditor={photoEditor} />}
+            details={
+              details === undefined ? null : (
+                <PersonDetailsSection
+                  person={details}
+                  photoEditor={photoEditor}
+                  photos={
+                    <Suspense fallback={<Skeleton shape="block" height="8rem" />}>
+                      <PersonPhotos personId={details.id} personName={details.fullName} />
+                    </Suspense>
+                  }
+                />
+              )
+            }
           />
           <RelativeBand
             title={view.partners.length === 1 ? "Pareja" : "Parejas"}

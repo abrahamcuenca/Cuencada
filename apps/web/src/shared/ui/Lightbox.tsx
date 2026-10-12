@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type PointerEvent, type ReactNode, useCallback, useEffect, useId, useRef } from "react";
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 import { IconButton } from "./IconButton";
 import styles from "./Lightbox.module.css";
 import { useModalDialog } from "./useModalDialog";
@@ -30,6 +30,47 @@ export interface LightboxProps {
   actions?: ReactNode;
   /** Accessible name of the viewer. Defaults to "Visor de fotos". */
   label?: string;
+  /**
+   * WP-6.2: a full-width row under the caption bar (hearts, tags, comments).
+   * Rendered only while an item is open.
+   */
+  footer?: ReactNode;
+  /**
+   * WP-6.2: content laid exactly over the open image's box (tag markers,
+   * tap-to-place). Children position themselves in percentages of the image.
+   * Not rendered for videos.
+   */
+  overlay?: ReactNode;
+}
+
+type Box = { left: number; top: number; width: number; height: number };
+
+/** The image's box inside the stage, kept in sync on load and resize (for {@link LightboxProps.overlay}). */
+function useImageBox(enabled: boolean, key: string | undefined): [React.RefObject<HTMLImageElement | null>, Box | null, () => void] {
+  const ref = useRef<HTMLImageElement>(null);
+  const [box, setBox] = useState<Box | null>(null);
+  const measure = useCallback((): void => {
+    const img = ref.current;
+    if (!img || img.offsetWidth === 0) {
+      setBox(null);
+      return;
+    }
+    setBox({ left: img.offsetLeft, top: img.offsetTop, width: img.offsetWidth, height: img.offsetHeight });
+  }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-measure when the open item changes.
+  useEffect(() => {
+    if (!enabled) return;
+    measure();
+    const img = ref.current;
+    if (typeof ResizeObserver === "undefined" || !img) {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(img);
+    return () => observer.disconnect();
+  }, [enabled, key, measure]);
+  return [ref, box, measure];
 }
 
 /** Horizontal distance (px) a pointer must travel to count as a swipe. */
@@ -47,7 +88,7 @@ function isFromMedia(target: EventTarget | null): boolean {
  * Does not wrap around; the counter ("3 de 12") is announced politely, and focus
  * moves off a nav button that becomes disabled at either end.
  */
-export function Lightbox({ items, index, onIndexChange, onClose, actions, label = "Visor de fotos" }: LightboxProps): React.ReactNode {
+export function Lightbox({ items, index, onIndexChange, onClose, actions, label = "Visor de fotos", footer, overlay }: LightboxProps): React.ReactNode {
   const ref = useRef<HTMLDialogElement>(null);
   const prevRef = useRef<HTMLButtonElement>(null);
   const nextRef = useRef<HTMLButtonElement>(null);
@@ -57,6 +98,8 @@ export function Lightbox({ items, index, onIndexChange, onClose, actions, label 
   const open = index !== null && current !== undefined;
   const bindings = useModalDialog(ref, open, onClose, false);
   const pointer = useRef<{ id: number; x: number; y: number } | null>(null);
+  const showOverlay = overlay !== undefined && overlay !== null && current?.type === "image";
+  const [imageRef, imageBox, measureImage] = useImageBox(open && showOverlay, current?.id);
 
   const hasPrev = index !== null && index > 0;
   const hasNext = index !== null && index < items.length - 1;
@@ -163,9 +206,11 @@ export function Lightbox({ items, index, onIndexChange, onClose, actions, label 
                 alt={current.alt}
                 width={current.width}
                 height={current.height}
+                ref={imageRef}
                 className={styles.media}
                 draggable={false}
                 decoding="async"
+                onLoad={measureImage}
               />
             ) : (
               // biome-ignore lint/a11y/useMediaCaption: family home videos have no caption tracks; the caption text describes them.
@@ -180,6 +225,11 @@ export function Lightbox({ items, index, onIndexChange, onClose, actions, label 
                 preload="metadata"
               />
             )}
+            {showOverlay && imageBox !== null ? (
+              <div className={styles.overlay} style={{ left: imageBox.left, top: imageBox.top, width: imageBox.width, height: imageBox.height } satisfies CSSProperties}>
+                {overlay}
+              </div>
+            ) : null}
           </div>
 
           <div className={styles.bottomBar}>
@@ -187,6 +237,7 @@ export function Lightbox({ items, index, onIndexChange, onClose, actions, label 
             <div className={styles.caption}>{current.caption}</div>
             <IconButton ref={nextRef} label="Siguiente" icon="›" size="lg" variant="inverse" onClick={() => go(1)} disabled={!hasNext} className={styles.nav} />
           </div>
+          {footer ? <div className={styles.footer}>{footer}</div> : null}
         </div>
       ) : null}
     </dialog>

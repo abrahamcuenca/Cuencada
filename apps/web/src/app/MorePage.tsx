@@ -18,6 +18,8 @@ interface MoreLink {
 const MEMBER_LINKS: readonly MoreLink[] = [
   // WP-5.4: the bottom bar has no room for "Eventos".
   { to: "/eventos", label: "Eventos", icon: "🎉" },
+  // WP-6.3: the Memory Box lives here and in the account menu, never in the bars.
+  { to: "/recuerdos", label: "Baúl de recuerdos", icon: "🗃️" },
   { to: "/directorio", label: "Directorio", icon: "🧭" },
   { to: "/arbol", label: "Árbol familiar", icon: "🌳" },
   { to: "/perfil", label: "Mi perfil", icon: "🙂" },
